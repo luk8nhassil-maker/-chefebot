@@ -112,7 +112,7 @@ function tempoDecorrido(desdeIso: string): string {
 }
 
 function identificacaoCliente(c: Pick<Comanda, "cliente" | "mesa">): string {
-  return c.cliente || (c.mesa ? `Mesa ${c.mesa}` : "Cliente")
+  return c.cliente || "Nome pendente"
 }
 
 function identificacaoMesa(c: Pick<Comanda, "mesa" | "complemento">): string {
@@ -322,8 +322,8 @@ type Aba = "pedido" | "abertos"
 
 type Tela =
   | { tipo: "home" }
-  | { tipo: "identificacao"; clientePreenchido?: string; mesaPreenchida?: string }
-  | { tipo: "mesa_ocupada"; cliente: string; mesa: string; comandaExistenteId: string }
+  | { tipo: "identificacao"; mesaPreenchida?: string }
+  | { tipo: "mesa_ocupada"; mesa: string; comandaExistenteId: string }
   | { tipo: "catalogo"; comandaId: string }
   | { tipo: "revisao"; comandaId: string }
   | { tipo: "enviado"; comandaId: string; rotulo: string; pedidoNumero?: number; total: number }
@@ -341,9 +341,6 @@ export default function SalaoPage() {
   const ehDesktop = useEhDesktop()
 
   const marcarStatusOperacionalComoPendente = useCallback(() => {
-    // Se a atualização falha, mantemos comanda/itens/total na tela, mas nunca
-    // deixamos um status antigo parecer atual. Só o estágio operacional do
-    // pedido oficial é invalidado; preço, carrinho e bookkeeping não mudam.
     setComandas((atuais) => atuais.map((comanda) => ({
       ...comanda,
       rodadas: comanda.rodadas?.map((rodada) => rodada.status === "enviada"
@@ -394,9 +391,6 @@ export default function SalaoPage() {
     (async () => { await carregarTudo() })()
   }, [carregarTudo])
 
-  // O status da cozinha muda em outro aparelho. Sem atualização periódica o
-  // garçom continuava vendo "Aguardando cozinha" até recarregar a página.
-  // A leitura é silenciosa, não dispara impressão, WhatsApp nem mutação.
   useEffect(() => {
     const atualizar = () => { void carregarComandas() }
     const intervalo = window.setInterval(atualizar, 4000)
@@ -428,8 +422,6 @@ export default function SalaoPage() {
 
   const comandaAtual = (id: string) => comandas.find((c) => c.id === id) || null
   const abertasParaBadge = comandas.filter((c) => c.status !== "fechada").length
-  // Sessão do Salão não guarda nome individual do responsável (ver Beco 14,
-  // fora de escopo) — cai sempre para a identificação genérica do terminal.
   const identificacaoTerminal = "Terminal do salão"
 
   if (carregando) {
@@ -457,17 +449,13 @@ export default function SalaoPage() {
     )
   }
 
-  // Qualquer sub-fluxo (identificação, catálogo, revisão, enviado, detalhe
-  // da comanda) ocupa a tela inteira, como já acontecia antes — só a tela
-  // "home" mostra o cabeçalho com as duas abas.
   if (tela.tipo === "identificacao") {
     return (
       <AtendimentoForm
-        clienteInicial={tela.clientePreenchido || ""}
         mesaInicial={tela.mesaPreenchida || ""}
         comandas={comandas}
         onVoltar={voltarParaInicio}
-        onMesaOcupada={(cliente, mesa, comandaExistenteId) => setTela({ tipo: "mesa_ocupada", cliente, mesa, comandaExistenteId })}
+        onMesaOcupada={(mesa, comandaExistenteId) => setTela({ tipo: "mesa_ocupada", mesa, comandaExistenteId })}
         onCriada={(comandaId) => { setTela({ tipo: "catalogo", comandaId }); carregarComandas() }}
       />
     )
@@ -476,10 +464,9 @@ export default function SalaoPage() {
   if (tela.tipo === "mesa_ocupada") {
     return (
       <MesaOcupadaResolver
-        cliente={tela.cliente}
         mesa={tela.mesa}
         onAbrirExistente={() => setTela({ tipo: "comanda", comandaId: tela.comandaExistenteId })}
-        onEscolherOutraMesa={() => setTela({ tipo: "identificacao", clientePreenchido: tela.cliente })}
+        onEscolherOutraMesa={() => setTela({ tipo: "identificacao" })}
         onContinuarSemMesa={(comandaId) => { setTela({ tipo: "catalogo", comandaId }); carregarComandas() }}
       />
     )
@@ -488,9 +475,7 @@ export default function SalaoPage() {
   if (tela.tipo === "catalogo" && menu) {
     const comanda = comandaAtual(tela.comandaId)
     const ativa = comanda ? rodadaAtiva(comanda) : undefined
-    if (!comanda || !ativa) {
-      return <TelaSemDados onVoltar={voltarParaInicio} />
-    }
+    if (!comanda || !ativa) return <TelaSemDados onVoltar={voltarParaInicio} />
     return (
       <ProdutoSelector
         comanda={comanda}
@@ -506,9 +491,7 @@ export default function SalaoPage() {
   if (tela.tipo === "revisao") {
     const comanda = comandaAtual(tela.comandaId)
     const ativa = comanda ? rodadaAtiva(comanda) : undefined
-    if (!comanda || !ativa) {
-      return <TelaSemDados onVoltar={voltarParaInicio} />
-    }
+    if (!comanda || !ativa) return <TelaSemDados onVoltar={voltarParaInicio} />
     return (
       <PedidoReview
         comanda={comanda}
@@ -558,18 +541,15 @@ export default function SalaoPage() {
     )
   }
 
-  // tela === "home"
   return (
     <div className="sal-shell">
       <EstiloSalao />
       <SalaoHeader identificacao={identificacaoTerminal} onSair={sair} />
-
       {ehDesktop && (
         <div style={{ padding: "16px 16px 0" }}>
           <NavegacaoPrincipal aba={aba} setAba={setAba} badge={abertasParaBadge} className="sal-topnav" iconSize={18} />
         </div>
       )}
-
       <div className="sal-content" style={{ justifyContent: aba === "pedido" ? "center" : "flex-start", paddingBottom: ehDesktop ? 24 : 84 }}>
         <div className="sal-content-central" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {aba === "pedido" && menu && (
@@ -584,7 +564,6 @@ export default function SalaoPage() {
           )}
         </div>
       </div>
-
       {!ehDesktop && (
         <>
           <div className="sal-bottomnav-spacer" />
@@ -594,9 +573,6 @@ export default function SalaoPage() {
     </div>
   )
 
-  /** Cria (ou recupera, se já existir) a rodada em rascunho da comanda —
-   *  usado por "Adicionar mais itens"/"Adicionar itens", nunca expõe ao
-   *  garçom o conceito de "criar rodada". */
   async function garantirRodadaEmAndamento(comandaId: string): Promise<boolean> {
     const lista = await carregarComandas()
     const comanda = lista?.find((c) => c.id === comandaId)
@@ -625,53 +601,30 @@ function TelaSemDados({ onVoltar }: { onVoltar: () => void }) {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Fluxo 1 — Fazer pedido (estado inicial)
-// ---------------------------------------------------------------------------
-
-function HomeFazerPedido({
-  comandas,
-  onComecarNovoAtendimento,
-  onContinuarPedido,
-}: {
-  comandas: Comanda[]
-  onComecarNovoAtendimento: () => void
-  onContinuarPedido: (comandaId: string) => void
-}) {
-  // "Rascunho em andamento" aqui é só o atendimento que AINDA NÃO virou
-  // pedido nenhum (Pedido inicial em rascunho) — comandas que já enviaram ao
-  // menos um pedido e têm um complemento em andamento aparecem em Pedidos
-  // abertos (Fluxo 6/7), não duplicadas aqui.
+function HomeFazerPedido({ comandas, onComecarNovoAtendimento, onContinuarPedido }: { comandas: Comanda[]; onComecarNovoAtendimento: () => void; onContinuarPedido: (comandaId: string) => void }) {
   const emAndamento = comandas.filter((c) => c.status === "aberta")
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {emAndamento.length === 1 && (
         <div style={{ ...card, display: "grid", gap: 10 }}>
           <p style={rotulo}>Você tem um pedido em andamento</p>
           <p style={{ margin: 0, fontSize: 15, fontWeight: 800, color: "var(--foreground)" }}>
-            {identificacaoCliente(emAndamento[0])} · {identificacaoMesa(emAndamento[0])}
+            {identificacaoCliente(emAndamento[0])} · {identificacaoMesa(emAndamento[0])} · Comanda #{emAndamento[0].numero}
           </p>
           <button onClick={() => onContinuarPedido(emAndamento[0].id)} style={btnPrimario}>Continuar pedido</button>
         </div>
       )}
-
       {emAndamento.length > 1 && (
         <div style={{ ...card, display: "grid", gap: 10 }}>
           <p style={rotulo}>Você tem pedidos em andamento</p>
           {emAndamento.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => onContinuarPedido(c.id)}
-              style={{ ...card, display: "flex", justifyContent: "space-between", alignItems: "center", textAlign: "left", minHeight: 48 }}
-            >
-              <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{identificacaoCliente(c)} · {identificacaoMesa(c)}</span>
+            <button key={c.id} onClick={() => onContinuarPedido(c.id)} style={{ ...card, display: "flex", justifyContent: "space-between", alignItems: "center", textAlign: "left", minHeight: 48 }}>
+              <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{identificacaoCliente(c)} · {identificacaoMesa(c)} · Comanda #{c.numero}</span>
               <span style={{ fontSize: 13, fontWeight: 800, color: "var(--brand-text)" }}>Continuar ›</span>
             </button>
           ))}
         </div>
       )}
-
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, textAlign: "center", padding: "24px 16px" }}>
         <div style={{ width: 58, height: 58, borderRadius: 20, background: "var(--primary-soft)", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Plus size={28} color="var(--brand-text)" aria-hidden="true" />
@@ -681,10 +634,7 @@ function HomeFazerPedido({
         <p style={{ margin: 0, maxWidth: 480, fontSize: 16, lineHeight: 1.5, color: "var(--foreground-secondary)" }}>
           Abra uma nova comanda, envie o pedido à cozinha e mantenha o atendimento aberto para novos produtos.
         </p>
-        <button
-          onClick={onComecarNovoAtendimento}
-          style={{ ...btnPrimario, width: "100%", maxWidth: 300, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
-        >
+        <button onClick={onComecarNovoAtendimento} style={{ ...btnPrimario, width: "100%", maxWidth: 300, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
           <Plus size={18} aria-hidden="true" />
           Começar novo atendimento
         </button>
@@ -693,38 +643,17 @@ function HomeFazerPedido({
   )
 }
 
-// ---------------------------------------------------------------------------
-// Fluxo 2 — Identificação do atendimento
-// ---------------------------------------------------------------------------
-
-function AtendimentoForm({
-  clienteInicial,
-  mesaInicial,
-  comandas,
-  onVoltar,
-  onMesaOcupada,
-  onCriada,
-}: {
-  clienteInicial: string
-  mesaInicial: string
-  comandas: Comanda[]
-  onVoltar: () => void
-  onMesaOcupada: (cliente: string, mesa: string, comandaExistenteId: string) => void
-  onCriada: (comandaId: string) => void
-}) {
-  const [cliente, setCliente] = useState(clienteInicial)
+function AtendimentoForm({ mesaInicial, comandas, onVoltar, onMesaOcupada, onCriada }: { mesaInicial: string; comandas: Comanda[]; onVoltar: () => void; onMesaOcupada: (mesa: string, comandaExistenteId: string) => void; onCriada: (comandaId: string) => void }) {
   const [mesa, setMesa] = useState(mesaInicial)
   const [semMesa, setSemMesa] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
-  const clienteRef = useRef<HTMLInputElement>(null)
+  const mesaRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { clienteRef.current?.focus() }, [])
-
-  const podeAvancar = cliente.trim().length > 0 && !enviando
+  useEffect(() => { mesaRef.current?.focus() }, [])
 
   async function escolherProdutos() {
-    if (!podeAvancar) return
+    if (enviando) return
     setEnviando(true)
     setErro(null)
     try {
@@ -732,13 +661,13 @@ function AtendimentoForm({
       const r = await fetch("/api/salao/comandas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cliente: cliente.trim(), mesa: mesaFinal }),
+        body: JSON.stringify({ ...(mesaFinal ? { mesa: mesaFinal } : {}) }),
       })
       const data = await r.json().catch(() => null)
       if (r.status === 409) {
         const existente = comandas.find((c) => c.mesa === mesaFinal && c.status !== "fechada")
-        if (existente) {
-          onMesaOcupada(cliente.trim(), mesaFinal || "", existente.id)
+        if (existente && mesaFinal) {
+          onMesaOcupada(mesaFinal, existente.id)
           return
         }
         setErro("Esta mesa já possui uma comanda aberta.")
@@ -764,44 +693,18 @@ function AtendimentoForm({
       </div>
       <div className="sal-content" style={{ flex: 1 }}>
         <p style={{ margin: 0, fontSize: 20, fontWeight: 900, color: "var(--foreground)" }}>Novo atendimento</p>
-
-        <div style={{ display: "grid", gap: 6 }}>
-          <label htmlFor="sal-cliente" style={rotulo}>Nome do cliente</label>
-          <input
-            id="sal-cliente"
-            ref={clienteRef}
-            style={input}
-            placeholder="Ex.: Ana"
-            value={cliente}
-            onChange={(e) => setCliente(e.target.value)}
-            aria-describedby="sal-cliente-ajuda"
-          />
-          <p id="sal-cliente-ajuda" style={{ margin: 0, fontSize: 12, color: "var(--foreground-muted)" }}>Obrigatório — usado para identificar a comanda.</p>
-        </div>
-
+        <p style={{ margin: 0, fontSize: 13, color: "var(--foreground-secondary)" }}>Monte o pedido primeiro. O nome do cliente fica para o final.</p>
         <div style={{ display: "grid", gap: 6 }}>
           <label htmlFor="sal-mesa" style={rotulo}>Mesa (opcional)</label>
-          <input
-            id="sal-mesa"
-            style={{ ...input, opacity: semMesa ? 0.5 : 1 }}
-            placeholder="Número da mesa"
-            value={mesa}
-            onChange={(e) => setMesa(e.target.value)}
-            disabled={semMesa}
-          />
-          <button
-            onClick={() => setSemMesa((v) => !v)}
-            aria-pressed={semMesa}
-            style={{ ...btnSecundario, height: 40, width: "fit-content", padding: "0 14px", border: "1px solid " + (semMesa ? "var(--primary)" : "var(--surface-secondary)"), background: semMesa ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent" }}
-          >
+          <input id="sal-mesa" ref={mesaRef} style={{ ...input, opacity: semMesa ? 0.5 : 1 }} placeholder="Número da mesa" value={mesa} onChange={(e) => setMesa(e.target.value)} disabled={semMesa} />
+          <button onClick={() => setSemMesa((v) => !v)} aria-pressed={semMesa} style={{ ...btnSecundario, height: 40, width: "fit-content", padding: "0 14px", border: "1px solid " + (semMesa ? "var(--primary)" : "var(--surface-secondary)"), background: semMesa ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent" }}>
             Sem mesa
           </button>
         </div>
-
         {erro && <p role="alert" style={{ fontSize: 13, fontWeight: 700, color: "var(--danger)", margin: 0 }}>{erro}</p>}
       </div>
       <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0 }}>
-        <button onClick={escolherProdutos} disabled={!podeAvancar} style={{ ...btnPrimario, width: "100%", ...(podeAvancar ? {} : btnDesabilitado) }}>
+        <button onClick={escolherProdutos} disabled={enviando} style={{ ...btnPrimario, width: "100%", ...(enviando ? btnDesabilitado : {}) }}>
           {enviando ? "Abrindo…" : "Escolher produtos"}
         </button>
       </div>
@@ -809,19 +712,7 @@ function AtendimentoForm({
   )
 }
 
-function MesaOcupadaResolver({
-  cliente,
-  mesa,
-  onAbrirExistente,
-  onEscolherOutraMesa,
-  onContinuarSemMesa,
-}: {
-  cliente: string
-  mesa: string
-  onAbrirExistente: () => void
-  onEscolherOutraMesa: () => void
-  onContinuarSemMesa: (comandaId: string) => void
-}) {
+function MesaOcupadaResolver({ mesa, onAbrirExistente, onEscolherOutraMesa, onContinuarSemMesa }: { mesa: string; onAbrirExistente: () => void; onEscolherOutraMesa: () => void; onContinuarSemMesa: (comandaId: string) => void }) {
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
@@ -829,11 +720,7 @@ function MesaOcupadaResolver({
     setEnviando(true)
     setErro(null)
     try {
-      const r = await fetch("/api/salao/comandas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cliente }),
-      })
+      const r = await fetch("/api/salao/comandas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) })
       const data = await r.json().catch(() => null)
       if (!r.ok || !data?.ok) {
         setErro(data?.error || "Não foi possível abrir o atendimento agora.")
@@ -852,21 +739,15 @@ function MesaOcupadaResolver({
       <EstiloSalao />
       <div style={{ ...card, width: "100%", maxWidth: 380, display: "grid", gap: 12 }}>
         <p style={{ margin: 0, fontSize: 17, fontWeight: 900, color: "var(--foreground)" }}>Esta mesa já possui uma comanda aberta.</p>
-        <p style={{ margin: 0, fontSize: 13.5, color: "var(--foreground-secondary)" }}>Mesa {mesa} · {cliente}</p>
+        <p style={{ margin: 0, fontSize: 13.5, color: "var(--foreground-secondary)" }}>Mesa {mesa}</p>
         {erro && <p role="alert" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--danger)", margin: 0 }}>{erro}</p>}
         <button onClick={onAbrirExistente} style={btnPrimario}>Abrir comanda existente</button>
         <button onClick={onEscolherOutraMesa} style={btnSecundario}>Escolher outra mesa</button>
-        <button onClick={continuarSemMesa} disabled={enviando} style={{ ...btnSecundario, ...(enviando ? btnDesabilitado : {}) }}>
-          {enviando ? "Abrindo…" : "Continuar sem mesa"}
-        </button>
+        <button onClick={continuarSemMesa} disabled={enviando} style={{ ...btnSecundario, ...(enviando ? btnDesabilitado : {}) }}>{enviando ? "Abrindo…" : "Continuar sem mesa"}</button>
       </div>
     </div>
   )
 }
-
-// ---------------------------------------------------------------------------
-// Fluxo 3 — Escolher produtos (reaproveita o montador oficial)
-// ---------------------------------------------------------------------------
 
 function ContextoAtendimento({ comanda }: { comanda: Comanda }) {
   return (
@@ -874,34 +755,17 @@ function ContextoAtendimento({ comanda }: { comanda: Comanda }) {
       <span style={{ fontSize: 15, fontWeight: 900, color: "var(--foreground)", display: "flex", alignItems: "center", gap: 6 }}>
         <Users size={16} aria-hidden="true" /> {identificacaoCliente(comanda)}
       </span>
-      <span style={{ fontSize: 12.5, color: "var(--foreground-secondary)" }}>
-        {identificacaoMesa(comanda)} · Comanda #{comanda.numero}
-      </span>
+      <span style={{ fontSize: 12.5, color: "var(--foreground-secondary)" }}>{identificacaoMesa(comanda)} · Comanda #{comanda.numero}</span>
     </div>
   )
 }
 
-function ProdutoSelector({
-  comanda,
-  rodada,
-  menu,
-  onVoltarInicio,
-  onRevisar,
-  onAtualizado,
-}: {
-  comanda: Comanda
-  rodada: Rodada
-  menu: MenuManual
-  onVoltarInicio: () => void
-  onRevisar: () => void
-  onAtualizado: () => void
-}) {
+function ProdutoSelector({ comanda, rodada, menu, onVoltarInicio, onRevisar, onAtualizado }: { comanda: Comanda; rodada: Rodada; menu: MenuManual; onVoltarInicio: () => void; onRevisar: () => void; onAtualizado: () => void }) {
   const produtos = useMemo(() => listarProdutosManuais(menu), [menu])
   const [categoria, setCategoria] = useState<CategoriaManual>("pizza")
   const [termo, setTermo] = useState("")
   const buscando = termo.trim().length > 0
   const resultados = useMemo(() => buscarProdutos(produtos, termo, buscando ? "todas" : categoria), [produtos, termo, buscando, categoria])
-
   const [itens, setItens] = useState<ItemApp[]>(rodada.itens)
   const [confirmacao, setConfirmacao] = useState<string | null>(null)
   const [erroSalvar, setErroSalvar] = useState<string | null>(null)
@@ -914,27 +778,10 @@ function ProdutoSelector({
       const r = await fetch(urlItensRodada(comanda.id, rodada), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        // pizzaSelection (IDs oficiais, Fase 5) e simpleSelection (Fase 6)
-        // preservados quando o item os carrega — mesmo padrão aditivo do
-        // pedido manual e do cardápio público; name/detail/price continuam
-        // enviados, nunca confiados.
-        body: JSON.stringify({
-          itens: novosItens.map((i) => ({
-            kind: i.kind,
-            name: i.name,
-            detail: i.detail,
-            price: i.price,
-            qty: i.qty,
-            ...(i.pizzaSelection ? { pizzaSelection: i.pizzaSelection } : {}),
-            ...(i.simpleSelection ? { simpleSelection: i.simpleSelection } : {}),
-          })),
-        }),
+        body: JSON.stringify({ itens: novosItens.map((i) => ({ kind: i.kind, name: i.name, detail: i.detail, price: i.price, qty: i.qty, ...(i.pizzaSelection ? { pizzaSelection: i.pizzaSelection } : {}), ...(i.simpleSelection ? { simpleSelection: i.simpleSelection } : {}) })) }),
       })
       const data = await r.json().catch(() => null)
-      if (!r.ok || !data?.ok) {
-        setErroSalvar(data?.error || "Não foi possível salvar agora.")
-        return false
-      }
+      if (!r.ok || !data?.ok) { setErroSalvar(data?.error || "Não foi possível salvar agora."); return false }
       onAtualizado()
       return true
     } catch {
@@ -947,68 +794,27 @@ function ProdutoSelector({
   const [selecao, setSelecao] = useState<SelecaoMontagem>(selecaoVazia())
   const [etapaVisivel, setEtapaVisivel] = useState(0)
   const [opcionaisAbertas, setOpcionaisAbertas] = useState<Set<number>>(() => new Set())
-  // ESC/armadilha de foco no construtor guiado (tela cheia, sem página
-  // rolável embaixo — não precisa travar scroll). ESC chama a mesma
-  // voltarEtapa do botão "Voltar": em opcionais já abertos volta primeiro
-  // para a pergunta Sim/Não; nas demais etapas recua normalmente.
   const produtoAbertoRef = useDialogA11y(!!produtoAberto, () => voltarEtapa(), { travarScroll: false })
   const etapas = useMemo(() => (produtoAberto ? montarEtapas(produtoAberto, menu) : []), [produtoAberto, menu])
   const etapaAtual = etapas[etapaVisivel]
   const etapaOpcional = etapaAtual?.tipo === "borda" || etapaAtual?.tipo === "adicionais" || etapaAtual?.tipo === "adicional_opcional"
   const opcionalAberta = !!etapaOpcional && opcionaisAbertas.has(etapaVisivel)
   const mostrarPerguntaOpcional = !!etapaOpcional && !opcionalAberta
-
-  // Busca dentro da etapa de sabor — mesma regra do pedido manual. As opções
-  // sentinela "Sem borda"/"Nenhum" ficam escondidas no Salão: a decisão de
-  // não querer adicional acontece na pergunta simples anterior.
   const [termoEtapa, setTermoEtapa] = useState("")
   const [termoEtapaChave, setTermoEtapaChave] = useState({ etapaVisivel, produtoAberto })
   if (termoEtapaChave.etapaVisivel !== etapaVisivel || termoEtapaChave.produtoAberto !== produtoAberto) {
     setTermoEtapaChave({ etapaVisivel, produtoAberto })
     setTermoEtapa("")
   }
-  const opcoesEtapaVisiveis = etapaAtual
-    ? etapaAtual.opcoes.filter((o) => !((etapaAtual.tipo === "borda" || etapaAtual.tipo === "adicional_opcional") && o.valor === ""))
-    : []
+  const opcoesEtapaVisiveis = etapaAtual ? etapaAtual.opcoes.filter((o) => !((etapaAtual.tipo === "borda" || etapaAtual.tipo === "adicional_opcional") && o.valor === "")) : []
   const etapaTemBusca = !mostrarPerguntaOpcional && (etapaAtual?.tipo === "sabores" || etapaAtual?.tipo === "sabor_unico") && opcoesEtapaVisiveis.length > 6
   const termoEtapaNorm = norm(termoEtapa.trim())
-  const opcoesEtapaFiltradas = termoEtapaNorm
-    ? opcoesEtapaVisiveis.filter((o) => norm(o.label).includes(termoEtapaNorm) || (o.ingredientes ? norm(o.ingredientes).includes(termoEtapaNorm) : false))
-    : opcoesEtapaVisiveis
-
-  // Borda e adicionais são opcionais: depois do “Sim”, a lista aparece,
-  // mas o atendente ainda pode seguir sem marcar nada se mudar de ideia.
-  const opcionalTemSelecao = etapaAtual?.tipo === "borda"
-    ? !!selecao.borda
-    : etapaAtual?.tipo === "adicionais"
-      ? (selecao.adicionais?.length ?? 0) > 0
-      : etapaAtual?.tipo === "adicional_opcional"
-        ? !!selecao.adicionalOpcional
-        : false
+  const opcoesEtapaFiltradas = termoEtapaNorm ? opcoesEtapaVisiveis.filter((o) => norm(o.label).includes(termoEtapaNorm) || (o.ingredientes ? norm(o.ingredientes).includes(termoEtapaNorm) : false)) : opcoesEtapaVisiveis
+  const opcionalTemSelecao = etapaAtual?.tipo === "borda" ? !!selecao.borda : etapaAtual?.tipo === "adicionais" ? (selecao.adicionais?.length ?? 0) > 0 : etapaAtual?.tipo === "adicional_opcional" ? !!selecao.adicionalOpcional : false
   const bloqueio = mostrarPerguntaOpcional || etapaOpcional ? null : motivoBloqueio(etapaAtual, selecao)
-  const rotuloCtaOpcional = etapaAtual?.tipo === "borda"
-    ? (opcionalTemSelecao ? "Continuar" : "Sem borda")
-    : etapaAtual?.tipo === "adicionais"
-      ? (opcionalTemSelecao ? "Continuar" : "Sem adicionais")
-      : etapaAtual?.tipo === "adicional_opcional"
-        ? (opcionalTemSelecao ? "Continuar" : "Sem adicional")
-        : "Continuar"
-  const perguntaOpcional = etapaAtual?.tipo === "borda"
-    ? "Vai querer borda?"
-    : etapaAtual?.tipo === "adicionais"
-      ? "Vai querer adicionais?"
-      : etapaAtual?.tipo === "adicional_opcional"
-        ? "Vai querer adicional?"
-        : null
-  const ajudaEtapa = mostrarPerguntaOpcional
-    ? "Escolha Sim ou Não."
-    : etapaAtual?.tipo === "borda"
-      ? "Escolha uma borda ou continue sem borda."
-      : etapaAtual?.tipo === "adicionais"
-        ? "Escolha os adicionais ou continue sem adicionais."
-        : etapaAtual?.tipo === "adicional_opcional"
-          ? "Escolha 1 adicional ou continue sem adicional."
-          : etapaAtual?.ajuda
+  const rotuloCtaOpcional = etapaAtual?.tipo === "borda" ? (opcionalTemSelecao ? "Continuar" : "Sem borda") : etapaAtual?.tipo === "adicionais" ? (opcionalTemSelecao ? "Continuar" : "Sem adicionais") : etapaAtual?.tipo === "adicional_opcional" ? (opcionalTemSelecao ? "Continuar" : "Sem adicional") : "Continuar"
+  const perguntaOpcional = etapaAtual?.tipo === "borda" ? "Vai querer borda?" : etapaAtual?.tipo === "adicionais" ? "Vai querer adicionais?" : etapaAtual?.tipo === "adicional_opcional" ? "Vai querer adicional?" : null
+  const ajudaEtapa = mostrarPerguntaOpcional ? "Escolha Sim ou Não." : etapaAtual?.tipo === "borda" ? "Escolha uma borda ou continue sem borda." : etapaAtual?.tipo === "adicionais" ? "Escolha os adicionais ou continue sem adicionais." : etapaAtual?.tipo === "adicional_opcional" ? "Escolha 1 adicional ou continue sem adicional." : etapaAtual?.ajuda
 
   async function confirmarAdicao(item: ItemApp): Promise<boolean> {
     if (salvandoItemRef.current) return false
@@ -1022,10 +828,7 @@ function ProdutoSelector({
       setConfirmacao(`${item.name} adicionado`)
       window.setTimeout(() => setConfirmacao(null), 1600)
       return true
-    } finally {
-      salvandoItemRef.current = false
-      setSalvandoItem(false)
-    }
+    } finally { salvandoItemRef.current = false; setSalvandoItem(false) }
   }
 
   function abrirProduto(produto: ProdutoManual) {
@@ -1035,24 +838,16 @@ function ProdutoSelector({
       if (item) void confirmarAdicao(item)
       return
     }
-    setProdutoAberto(produto)
-    setSelecao(selecaoVazia())
-    setEtapaVisivel(0)
-    setOpcionaisAbertas(new Set())
-    setCategoria(produto.categoria)
+    setProdutoAberto(produto); setSelecao(selecaoVazia()); setEtapaVisivel(0); setOpcionaisAbertas(new Set()); setCategoria(produto.categoria)
   }
-
   async function finalizarMontagem(selecaoFinal: SelecaoMontagem) {
     if (!produtoAberto || !montagemCompleta(etapas, selecaoFinal)) return
     const item = construirItemManual(produtoAberto, selecaoFinal, menu)
     if (!item) return
     const persistiu = await confirmarAdicao(item)
     if (!persistiu) return
-    setProdutoAberto(null)
-    setOpcionaisAbertas(new Set())
-    setTermo("")
+    setProdutoAberto(null); setOpcionaisAbertas(new Set()); setTermo("")
   }
-
   function normalizarOpcionalSemEscolha(atual: SelecaoMontagem): SelecaoMontagem {
     if (!etapaAtual || !etapaOpcional) return atual
     if (etapaAtual.tipo === "borda" && !atual.borda) return { ...atual, borda: null }
@@ -1060,73 +855,35 @@ function ProdutoSelector({
     if (etapaAtual.tipo === "adicional_opcional" && !atual.adicionalOpcional) return { ...atual, adicionalOpcional: null }
     return atual
   }
-
   function avancarEtapa() {
     if (!etapaAtual || mostrarPerguntaOpcional || bloqueio || salvandoItemRef.current) return
     if (!etapaOpcional && !etapaSatisfeita(etapaAtual, selecao)) return
     const selecaoFinal = etapaOpcional ? normalizarOpcionalSemEscolha(selecao) : selecao
     if (selecaoFinal !== selecao) setSelecao(selecaoFinal)
-    if (etapaVisivel < etapas.length - 1) {
-      setEtapaVisivel(etapaVisivel + 1)
-      return
-    }
+    if (etapaVisivel < etapas.length - 1) { setEtapaVisivel(etapaVisivel + 1); return }
     void finalizarMontagem(selecaoFinal)
   }
-
   function responderOpcional(quer: boolean) {
     if (!etapaAtual || !etapaOpcional) return
-    if (quer) {
-      setOpcionaisAbertas((atuais) => {
-        const proximas = new Set(atuais)
-        proximas.add(etapaVisivel)
-        return proximas
-      })
-      return
-    }
-
-    const novaSelecao: SelecaoMontagem = etapaAtual.tipo === "borda"
-      ? { ...selecao, borda: null }
-      : etapaAtual.tipo === "adicionais"
-        ? { ...selecao, adicionais: [] }
-        : { ...selecao, adicionalOpcional: null }
+    if (quer) { setOpcionaisAbertas((atuais) => { const proximas = new Set(atuais); proximas.add(etapaVisivel); return proximas }); return }
+    const novaSelecao: SelecaoMontagem = etapaAtual.tipo === "borda" ? { ...selecao, borda: null } : etapaAtual.tipo === "adicionais" ? { ...selecao, adicionais: [] } : { ...selecao, adicionalOpcional: null }
     setSelecao(novaSelecao)
-    if (etapaVisivel < etapas.length - 1) {
-      setEtapaVisivel(etapaVisivel + 1)
-      return
-    }
-    finalizarMontagem(novaSelecao)
+    if (etapaVisivel < etapas.length - 1) { setEtapaVisivel(etapaVisivel + 1); return }
+    void finalizarMontagem(novaSelecao)
   }
-
   function voltarEtapa() {
-    if (etapaOpcional && opcionaisAbertas.has(etapaVisivel)) {
-      setOpcionaisAbertas((atuais) => {
-        const proximas = new Set(atuais)
-        proximas.delete(etapaVisivel)
-        return proximas
-      })
-      return
-    }
-    if (etapaVisivel > 0) setEtapaVisivel(etapaVisivel - 1)
-    else setProdutoAberto(null)
+    if (etapaOpcional && opcionaisAbertas.has(etapaVisivel)) { setOpcionaisAbertas((atuais) => { const proximas = new Set(atuais); proximas.delete(etapaVisivel); return proximas }); return }
+    if (etapaVisivel > 0) setEtapaVisivel(etapaVisivel - 1); else setProdutoAberto(null)
   }
-
   function escolher(valor: string) {
     if (!etapaAtual) return
-    if (etapaAtual.tipo === "sabores" || etapaAtual.tipo === "sabor_unico") {
-      setSelecao((s) => alternarSabor(s, valor, etapaAtual.maxEscolhas))
-    } else if (etapaAtual.tipo === "borda") {
-      setSelecao((s) => ({ ...s, borda: valor || null }))
-    } else if (etapaAtual.tipo === "adicionais") {
-      setSelecao((s) => alternarAdicional(s, valor))
-    } else if (etapaAtual.tipo === "adicional_opcional") {
-      setSelecao((s) => ({ ...s, adicionalOpcional: valor || null }))
-    } else if (etapaAtual.tipo === "tamanho_item") {
-      setSelecao((s) => ({ ...s, tamanhoItem: valor }))
-    } else if (etapaAtual.tipo === "leite") {
-      setSelecao((s) => ({ ...s, leite: valor === "com" ? "com" : "sem" }))
-    }
+    if (etapaAtual.tipo === "sabores" || etapaAtual.tipo === "sabor_unico") setSelecao((s) => alternarSabor(s, valor, etapaAtual.maxEscolhas))
+    else if (etapaAtual.tipo === "borda") setSelecao((s) => ({ ...s, borda: valor || null }))
+    else if (etapaAtual.tipo === "adicionais") setSelecao((s) => alternarAdicional(s, valor))
+    else if (etapaAtual.tipo === "adicional_opcional") setSelecao((s) => ({ ...s, adicionalOpcional: valor || null }))
+    else if (etapaAtual.tipo === "tamanho_item") setSelecao((s) => ({ ...s, tamanhoItem: valor }))
+    else if (etapaAtual.tipo === "leite") setSelecao((s) => ({ ...s, leite: valor === "com" ? "com" : "sem" }))
   }
-
   function estaEscolhida(valor: string): boolean {
     if (!etapaAtual) return false
     switch (etapaAtual.tipo) {
@@ -1139,7 +896,6 @@ function ProdutoSelector({
       default: return false
     }
   }
-
   const total = itens.reduce((s, i) => s + i.price * i.qty, 0)
 
   return (
@@ -1149,7 +905,6 @@ function ProdutoSelector({
         <button onClick={onVoltarInicio} style={{ background: "none", border: "none", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, cursor: "pointer", minHeight: 44 }}>‹ Início</button>
       </div>
       <ContextoAtendimento comanda={comanda} />
-
       <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
         <SalaoItensPedido itens={itens} />
         <div style={{ position: "relative" }}>
@@ -1157,23 +912,12 @@ function ProdutoSelector({
           <input style={{ ...input, paddingLeft: 36 }} placeholder="Buscar produto…" value={termo} onChange={(e) => setTermo(e.target.value)} aria-label="Buscar produto" />
         </div>
         <div style={{ display: "flex", gap: 6, overflowX: "auto" }}>
-          {CATEGORIAS.map((c) => (
-            <button key={c.id} onClick={() => setCategoria(c.id)} style={{ height: 40, padding: "0 14px", flexShrink: 0, borderRadius: 12, fontFamily: FONT, cursor: "pointer", border: "1px solid " + (categoria === c.id && !buscando ? "var(--primary)" : "var(--surface-secondary)"), background: categoria === c.id && !buscando ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: "var(--foreground)", fontSize: 13 }}>
-              {EMOJI_CATEGORIA_PEDIDO[c.id]} {c.label}
-            </button>
-          ))}
+          {CATEGORIAS.map((c) => <button key={c.id} onClick={() => setCategoria(c.id)} style={{ height: 40, padding: "0 14px", flexShrink: 0, borderRadius: 12, fontFamily: FONT, cursor: "pointer", border: "1px solid " + (categoria === c.id && !buscando ? "var(--primary)" : "var(--surface-secondary)"), background: categoria === c.id && !buscando ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: "var(--foreground)", fontSize: 13 }}>{EMOJI_CATEGORIA_PEDIDO[c.id]} {c.label}</button>)}
         </div>
         <div style={{ display: "grid", gap: 8 }}>
           {resultados.map((p) => (
             <button key={p.id} onClick={() => abrirProduto(p)} disabled={p.esgotado || salvandoItem} style={{ ...card, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: p.esgotado || salvandoItem ? "not-allowed" : "pointer", opacity: p.esgotado ? 0.5 : salvandoItem ? 0.7 : 1 }}>
-              <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{EMOJI_CATEGORIA_PEDIDO[p.categoria]} {p.nome}{p.esgotado ? " · esgotado" : ""}</span>
-                {!p.esgotado && p.ingredients ? (
-                  <span style={{ display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden", fontSize: 11.5, color: "var(--foreground-muted)" }}>
-                    {p.ingredients}
-                  </span>
-                ) : null}
-              </span>
+              <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}><span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{EMOJI_CATEGORIA_PEDIDO[p.categoria]} {p.nome}{p.esgotado ? " · esgotado" : ""}</span>{!p.esgotado && p.ingredients ? <span style={{ display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden", fontSize: 11.5, color: "var(--foreground-muted)" }}>{p.ingredients}</span> : null}</span>
               <span style={{ fontSize: 13, fontWeight: 900, color: "var(--brand-text)", flexShrink: 0 }}>{p.precoBase === null ? "" : money(p.precoBase)}</span>
             </button>
           ))}
@@ -1182,17 +926,10 @@ function ProdutoSelector({
         <p role="status" aria-live="polite" style={{ margin: 0, fontSize: 12.5, fontWeight: 700, color: "var(--success)", minHeight: 16 }}>{confirmacao || ""}</p>
         {erroSalvar && !produtoAberto && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0 }}>{erroSalvar}</p>}
       </div>
-
       <div className="sal-action-footer">
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 900 }}>
-          <span style={{ color: "var(--foreground-secondary)" }}>{itens.length} item(ns)</span>
-          <span>{money(total)}</span>
-        </div>
-        <button onClick={onRevisar} disabled={itens.length === 0 || salvandoItem} style={{ ...btnPrimario, ...(itens.length === 0 || salvandoItem ? btnDesabilitado : {}) }}>
-          {salvandoItem ? "Salvando item…" : itens.length === 0 ? "Adicione pelo menos um produto" : "Revisar pedido"}
-        </button>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 900 }}><span style={{ color: "var(--foreground-secondary)" }}>{itens.length} item(ns)</span><span>{money(total)}</span></div>
+        <button onClick={onRevisar} disabled={itens.length === 0 || salvandoItem} style={{ ...btnPrimario, ...(itens.length === 0 || salvandoItem ? btnDesabilitado : {}) }}>{salvandoItem ? "Salvando item…" : itens.length === 0 ? "Adicione pelo menos um produto" : "Revisar pedido"}</button>
       </div>
-
       {produtoAberto && etapaAtual && (
         <div ref={produtoAbertoRef} role="dialog" aria-modal="true" aria-label={`Montar ${produtoAberto.nome}`} style={{ position: "fixed", inset: 0, zIndex: 2900, background: "var(--background)", display: "flex", flexDirection: "column", fontFamily: FONT }}>
           <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--surface)", flexShrink: 0 }}>
@@ -1202,59 +939,23 @@ function ProdutoSelector({
           </div>
           <div style={{ padding: "8px 16px", display: "flex", flexWrap: "wrap", gap: 6, flexShrink: 0 }}>
             {etapas.map((e, i) => {
-              const opcionalAindaNaoDecidida =
-                (e.tipo === "adicionais" && selecao.adicionais === undefined) ||
-                (e.tipo === "adicional_opcional" && selecao.adicionalOpcional === undefined)
+              const opcionalAindaNaoDecidida = (e.tipo === "adicionais" && selecao.adicionais === undefined) || (e.tipo === "adicional_opcional" && selecao.adicionalOpcional === undefined)
               if (opcionalAindaNaoDecidida) return null
               const resumo = resumoEtapa(e, selecao)
               if (!resumo) return null
-              return (
-                <button key={e.tipo} onClick={() => setEtapaVisivel(i)} style={{ height: 32, padding: "0 10px", fontSize: 11.5, borderRadius: 10, fontFamily: FONT, cursor: "pointer", border: "1px solid var(--surface-secondary)", background: "var(--surface)", color: "var(--foreground-secondary)" }}>
-                  {e.titulo}: {resumo} ✎
-                </button>
-              )
+              return <button key={e.tipo} onClick={() => setEtapaVisivel(i)} style={{ height: 32, padding: "0 10px", fontSize: 11.5, borderRadius: 10, fontFamily: FONT, cursor: "pointer", border: "1px solid var(--surface-secondary)", background: "var(--surface)", color: "var(--foreground-secondary)" }}>{e.titulo}: {resumo} ✎</button>
             })}
           </div>
           {mostrarPerguntaOpcional ? (
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-              <div style={{ ...card, width: "100%", maxWidth: 360, display: "grid", gap: 14, textAlign: "center" }}>
-                <p style={{ margin: 0, fontSize: 20, fontWeight: 900, color: "var(--foreground)" }}>{perguntaOpcional}</p>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  <button onClick={() => responderOpcional(true)} disabled={salvandoItem} style={{ ...btnPrimario, ...(salvandoItem ? btnDesabilitado : {}) }}>Sim</button>
-                  <button onClick={() => responderOpcional(false)} disabled={salvandoItem} style={{ ...btnSecundario, ...(salvandoItem ? btnDesabilitado : {}) }}>Não</button>
-                </div>
-              </div>
-            </div>
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}><div style={{ ...card, width: "100%", maxWidth: 360, display: "grid", gap: 14, textAlign: "center" }}><p style={{ margin: 0, fontSize: 20, fontWeight: 900, color: "var(--foreground)" }}>{perguntaOpcional}</p><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}><button onClick={() => responderOpcional(true)} disabled={salvandoItem} style={{ ...btnPrimario, ...(salvandoItem ? btnDesabilitado : {}) }}>Sim</button><button onClick={() => responderOpcional(false)} disabled={salvandoItem} style={{ ...btnSecundario, ...(salvandoItem ? btnDesabilitado : {}) }}>Não</button></div></div></div>
           ) : (
             <>
-              {etapaTemBusca && (
-                <div style={{ position: "relative", padding: "0 16px 4px", flexShrink: 0 }}>
-                  <Search size={16} aria-hidden="true" style={{ position: "absolute", left: 28, top: 16, color: "var(--foreground-muted)" }} />
-                  <input style={{ ...input, paddingLeft: 36 }} placeholder="Buscar sabor…" value={termoEtapa} onChange={(e) => setTermoEtapa(e.target.value)} aria-label="Buscar sabor" />
-                </div>
-              )}
+              {etapaTemBusca && <div style={{ position: "relative", padding: "0 16px 4px", flexShrink: 0 }}><Search size={16} aria-hidden="true" style={{ position: "absolute", left: 28, top: 16, color: "var(--foreground-muted)" }} /><input style={{ ...input, paddingLeft: 36 }} placeholder="Buscar sabor…" value={termoEtapa} onChange={(e) => setTermoEtapa(e.target.value)} aria-label="Buscar sabor" /></div>}
               <div style={{ flex: 1, overflowY: "auto", padding: "4px 16px 16px", display: "grid", gap: 8, alignContent: "start" }}>
-                {etapaTemBusca && opcoesEtapaFiltradas.length === 0 && (
-                  <p style={{ fontSize: 13, color: "var(--foreground-muted)", textAlign: "center" }}>Nenhum sabor encontrado.</p>
-                )}
+                {etapaTemBusca && opcoesEtapaFiltradas.length === 0 && <p style={{ fontSize: 13, color: "var(--foreground-muted)", textAlign: "center" }}>Nenhum sabor encontrado.</p>}
                 {opcoesEtapaFiltradas.map((o) => {
                   const sel = estaEscolhida(o.valor)
-                  return (
-                    <button key={o.valor || "__sem__"} onClick={() => !o.esgotado && escolher(o.valor)} disabled={o.esgotado} style={{ ...card, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: o.esgotado ? "not-allowed" : "pointer", opacity: o.esgotado ? 0.45 : 1, borderColor: sel ? "var(--primary)" : "var(--surface-secondary)", background: sel ? "color-mix(in srgb, var(--primary) 12%, transparent)" : "var(--surface)" }}>
-                      <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                        <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{emojiOpcaoMontagem(etapaAtual.tipo, produtoAberto.categoria)} {o.label}{o.esgotado ? " · esgotado" : ""}</span>
-                        {!o.esgotado && o.ingredientes ? (
-                          <span style={{ fontSize: 11.5, color: "var(--foreground-muted)", lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                            {o.ingredientes}
-                          </span>
-                        ) : null}
-                      </span>
-                      <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                        {o.extra ? <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--brand-text)" }}>+{money(o.extra)}</span> : null}
-                        {sel ? <span style={{ fontSize: 14, color: "var(--primary)" }}>✓</span> : null}
-                      </span>
-                    </button>
-                  )
+                  return <button key={o.valor || "__sem__"} onClick={() => !o.esgotado && escolher(o.valor)} disabled={o.esgotado} style={{ ...card, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: o.esgotado ? "not-allowed" : "pointer", opacity: o.esgotado ? 0.45 : 1, borderColor: sel ? "var(--primary)" : "var(--surface-secondary)", background: sel ? "color-mix(in srgb, var(--primary) 12%, transparent)" : "var(--surface)" }}><span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}><span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{emojiOpcaoMontagem(etapaAtual.tipo, produtoAberto.categoria)} {o.label}{o.esgotado ? " · esgotado" : ""}</span>{!o.esgotado && o.ingredientes ? <span style={{ fontSize: 11.5, color: "var(--foreground-muted)", lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{o.ingredientes}</span> : null}</span><span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>{o.extra ? <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--brand-text)" }}>+{money(o.extra)}</span> : null}{sel ? <span style={{ fontSize: 14, color: "var(--primary)" }}>✓</span> : null}</span></button>
                 })}
               </div>
             </>
@@ -1262,16 +963,7 @@ function ProdutoSelector({
           <div className="sal-action-footer">
             {erroSalvar && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0, textAlign: "center" }}>{erroSalvar}</p>}
             {!mostrarPerguntaOpcional && bloqueio && <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: 0, textAlign: "center" }}>{bloqueio}</p>}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={voltarEtapa} disabled={salvandoItem} style={{ ...btnSecundario, flex: 1, ...(salvandoItem ? btnDesabilitado : {}) }}>
-                {etapaVisivel > 0 ? "Voltar" : "Cancelar item"}
-              </button>
-              {!mostrarPerguntaOpcional && (
-                <button onClick={avancarEtapa} disabled={!!bloqueio || salvandoItem} style={{ ...btnPrimario, flex: 2, ...(bloqueio || salvandoItem ? btnDesabilitado : {}) }}>
-                  {salvandoItem ? "Salvando…" : etapaOpcional ? rotuloCtaOpcional : etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Adicionar"}
-                </button>
-              )}
-            </div>
+            <div style={{ display: "flex", gap: 8 }}><button onClick={voltarEtapa} disabled={salvandoItem} style={{ ...btnSecundario, flex: 1, ...(salvandoItem ? btnDesabilitado : {}) }}>{etapaVisivel > 0 ? "Voltar" : "Cancelar item"}</button>{!mostrarPerguntaOpcional && <button onClick={avancarEtapa} disabled={!!bloqueio || salvandoItem} style={{ ...btnPrimario, flex: 2, ...(bloqueio || salvandoItem ? btnDesabilitado : {}) }}>{salvandoItem ? "Salvando…" : etapaOpcional ? rotuloCtaOpcional : etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Adicionar"}</button>}</div>
           </div>
         </div>
       )}
@@ -1279,476 +971,149 @@ function ProdutoSelector({
   )
 }
 
-// ---------------------------------------------------------------------------
-// Fluxo 4 — Revisar pedido (a própria tela já é a confirmação)
-// ---------------------------------------------------------------------------
-
-function PedidoReview({
-  comanda,
-  rodada,
-  onAdicionarMaisItens,
-  onEnviado,
-}: {
-  comanda: Comanda
-  rodada: Rodada
-  onAdicionarMaisItens: () => void
-  onEnviado: (pedidoNumero: number | undefined, total: number) => void
-}) {
+function PedidoReview({ comanda, rodada, onAdicionarMaisItens, onEnviado }: { comanda: Comanda; rodada: Rodada; onAdicionarMaisItens: () => void; onEnviado: (pedidoNumero: number | undefined, total: number) => void }) {
   const [itens, setItens] = useState<ItemApp[]>(rodada.itens)
   const [erroSalvar, setErroSalvar] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
   const [erroEnviar, setErroEnviar] = useState<string | null>(rodada.erroUltimaTentativa || null)
+  const [cliente, setCliente] = useState(comanda.cliente || "")
+  const [erroCliente, setErroCliente] = useState<string | null>(null)
   const enviandoRef = useRef(false)
   const clientRequestIdRef = useRef<string | null>(null)
 
   const salvar = useCallback(async (novosItens: ItemApp[]) => {
     setErroSalvar(null)
     try {
-      const r = await fetch(urlItensRodada(comanda.id, rodada), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        // pizzaSelection (IDs oficiais, Fase 5) e simpleSelection (Fase 6)
-        // preservados quando o item os carrega — mesmo padrão aditivo do
-        // pedido manual e do cardápio público; name/detail/price continuam
-        // enviados, nunca confiados.
-        body: JSON.stringify({
-          itens: novosItens.map((i) => ({
-            kind: i.kind,
-            name: i.name,
-            detail: i.detail,
-            price: i.price,
-            qty: i.qty,
-            ...(i.pizzaSelection ? { pizzaSelection: i.pizzaSelection } : {}),
-            ...(i.simpleSelection ? { simpleSelection: i.simpleSelection } : {}),
-          })),
-        }),
-      })
+      const r = await fetch(urlItensRodada(comanda.id, rodada), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itens: novosItens.map((i) => ({ kind: i.kind, name: i.name, detail: i.detail, price: i.price, qty: i.qty, ...(i.pizzaSelection ? { pizzaSelection: i.pizzaSelection } : {}), ...(i.simpleSelection ? { simpleSelection: i.simpleSelection } : {}) })) }) })
       const data = await r.json().catch(() => null)
-      if (!r.ok || !data?.ok) {
-        setErroSalvar(data?.error || "Não foi possível salvar agora.")
-      }
-    } catch {
-      setErroSalvar("Não foi possível salvar agora. Verifique a conexão.")
-    }
+      if (!r.ok || !data?.ok) setErroSalvar(data?.error || "Não foi possível salvar agora.")
+    } catch { setErroSalvar("Não foi possível salvar agora. Verifique a conexão.") }
   }, [comanda.id, rodada])
 
-  function mudarQuantidade(i: number, delta: number) {
-    const novos = itens.map((item, idx) => (idx === i ? { ...item, qty: item.qty + delta } : item)).filter((item) => item.qty > 0)
-    setItens(novos)
-    salvar(novos)
-  }
-  function removerItem(i: number) {
-    const novos = itens.filter((_, idx) => idx !== i)
-    setItens(novos)
-    salvar(novos)
-  }
+  function mudarQuantidade(i: number, delta: number) { const novos = itens.map((item, idx) => (idx === i ? { ...item, qty: item.qty + delta } : item)).filter((item) => item.qty > 0); setItens(novos); void salvar(novos) }
+  function removerItem(i: number) { const novos = itens.filter((_, idx) => idx !== i); setItens(novos); void salvar(novos) }
 
   async function enviarParaCozinha() {
     if (enviandoRef.current || itens.length === 0) return
+    const clienteFinal = cliente.trim()
+    if (!clienteFinal) { setErroCliente("Informe o nome do cliente."); return }
     enviandoRef.current = true
     setEnviando(true)
     setErroEnviar(null)
+    setErroCliente(null)
     try {
+      const rCliente = await fetch(`/api/salao/comandas/${comanda.id}/cliente`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cliente: clienteFinal }) })
+      const dataCliente = await rCliente.json().catch(() => null)
+      if (!rCliente.ok || !dataCliente?.ok) { setErroCliente(dataCliente?.error || "Não foi possível salvar o nome agora."); return }
       if (!clientRequestIdRef.current) clientRequestIdRef.current = gerarClientRequestId()
-      const r = await fetch(urlEnviarRodada(comanda.id, rodada), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientRequestId: clientRequestIdRef.current }),
-      })
+      const r = await fetch(urlEnviarRodada(comanda.id, rodada), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientRequestId: clientRequestIdRef.current }) })
       const data = await r.json().catch(() => null)
-      if (!r.ok || !data?.ok) {
-        setErroEnviar(data?.error || "Não foi possível enviar agora.")
-        return
-      }
+      if (!r.ok || !data?.ok) { setErroEnviar(data?.error || "Não foi possível enviar agora."); return }
       onEnviado(data.pedidoNumero, itens.reduce((s, i) => s + i.price * i.qty, 0))
-    } catch {
-      setErroEnviar("Não foi possível enviar agora. Verifique a conexão.")
-    } finally {
-      enviandoRef.current = false
-      setEnviando(false)
-    }
+    } catch { setErroEnviar("Não foi possível enviar agora. Verifique a conexão.") }
+    finally { enviandoRef.current = false; setEnviando(false) }
   }
 
   const total = itens.reduce((s, i) => s + i.price * i.qty, 0)
-
   return (
     <div className="sal-shell">
       <EstiloSalao />
       <div style={{ padding: "14px 16px 0" }}>
         <p style={{ margin: 0, fontSize: 20, fontWeight: 900, color: "var(--foreground)" }}>Revisar pedido</p>
-        <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--foreground-secondary)" }}>
-          {identificacaoCliente(comanda)} · {identificacaoMesa(comanda)} · {rotuloRodada(rodada)}
-        </p>
+        <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--foreground-secondary)" }}>{identificacaoMesa(comanda)} · {rotuloRodada(rodada)}</p>
       </div>
-
       <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
         <div style={{ ...card, display: "grid", gap: 8 }}>
-          {itens.map((item, i) => (
-            <div key={`${item.name}-${item.detail}-${i}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: "block", fontSize: 13.5, fontWeight: 800, color: "var(--foreground)" }}>{item.name}</span>
-                {item.detail && <span style={{ display: "block", fontSize: 11.5, color: "var(--foreground-secondary)" }}>{item.detail}</span>}
-                <span style={{ display: "block", fontSize: 12, fontWeight: 700, color: "var(--brand-text)" }}>{money(item.price * item.qty)}</span>
-              </span>
-              <button onClick={() => mudarQuantidade(i, -1)} aria-label={`Diminuir ${item.name}`} style={{ height: 36, width: 36, borderRadius: 10, cursor: "pointer", border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>−</button>
-              <span style={{ fontSize: 14, fontWeight: 900, minWidth: 20, textAlign: "center" }}>{item.qty}</span>
-              <button onClick={() => mudarQuantidade(i, 1)} aria-label={`Aumentar ${item.name}`} style={{ height: 36, width: 36, borderRadius: 10, cursor: "pointer", border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>+</button>
-              <button onClick={() => removerItem(i)} aria-label={`Remover ${item.name}`} style={{ height: 36, width: 36, borderRadius: 10, cursor: "pointer", border: "none", background: "transparent", color: "var(--danger)" }}>×</button>
-            </div>
-          ))}
+          {itens.map((item, i) => <div key={`${item.name}-${item.detail}-${i}`} style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ flex: 1, minWidth: 0 }}><span style={{ display: "block", fontSize: 13.5, fontWeight: 800, color: "var(--foreground)" }}>{item.name}</span>{item.detail && <span style={{ display: "block", fontSize: 11.5, color: "var(--foreground-secondary)" }}>{item.detail}</span>}<span style={{ display: "block", fontSize: 12, fontWeight: 700, color: "var(--brand-text)" }}>{money(item.price * item.qty)}</span></span><button onClick={() => mudarQuantidade(i, -1)} aria-label={`Diminuir ${item.name}`} style={{ height: 36, width: 36, borderRadius: 10, cursor: "pointer", border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>−</button><span style={{ fontSize: 14, fontWeight: 900, minWidth: 20, textAlign: "center" }}>{item.qty}</span><button onClick={() => mudarQuantidade(i, 1)} aria-label={`Aumentar ${item.name}`} style={{ height: 36, width: 36, borderRadius: 10, cursor: "pointer", border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>+</button><button onClick={() => removerItem(i)} aria-label={`Remover ${item.name}`} style={{ height: 36, width: 36, borderRadius: 10, cursor: "pointer", border: "none", background: "transparent", color: "var(--danger)" }}>×</button></div>)}
         </div>
         {erroSalvar && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0 }}>{erroSalvar}</p>}
-
         <button onClick={onAdicionarMaisItens} style={btnSecundario}>Adicionar mais itens</button>
-      </div>
-
-      <div className="sal-action-footer">
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 900 }}>
-          <span style={{ color: "var(--foreground-secondary)" }}>Total</span>
-          <span>{money(total)}</span>
+        <div style={{ ...card, display: "grid", gap: 6 }}>
+          <label htmlFor="sal-cliente-final" style={rotulo}>Nome do cliente</label>
+          <input id="sal-cliente-final" style={input} placeholder="Ex.: Ana" value={cliente} onChange={(e) => { setCliente(e.target.value); setErroCliente(null) }} autoFocus={!comanda.cliente} />
+          <p style={{ margin: 0, fontSize: 12, color: "var(--foreground-muted)" }}>Obrigatório para enviar o pedido à cozinha.</p>
+          {erroCliente && <p role="alert" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--danger)", margin: 0 }}>{erroCliente}</p>}
         </div>
-        {erroEnviar && (
-          <p role="alert" aria-live="assertive" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--danger)", margin: 0 }}>{erroEnviar}</p>
-        )}
-        <button
-          onClick={enviarParaCozinha}
-          disabled={itens.length === 0 || enviando}
-          style={{ ...btnPrimario, ...(itens.length === 0 || enviando ? btnDesabilitado : {}) }}
-        >
-          {enviando ? "Enviando pedido…" : erroEnviar ? "Tentar novamente" : "Enviar para cozinha"}
-        </button>
+      </div>
+      <div className="sal-action-footer">
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 900 }}><span style={{ color: "var(--foreground-secondary)" }}>Total</span><span>{money(total)}</span></div>
+        {erroEnviar && <p role="alert" aria-live="assertive" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--danger)", margin: 0 }}>{erroEnviar}</p>}
+        <button onClick={enviarParaCozinha} disabled={itens.length === 0 || enviando || cliente.trim().length === 0} style={{ ...btnPrimario, ...(itens.length === 0 || enviando || cliente.trim().length === 0 ? btnDesabilitado : {}) }}>{enviando ? "Enviando pedido…" : erroEnviar ? "Tentar novamente" : "Enviar para cozinha"}</button>
       </div>
     </div>
   )
 }
 
-// ---------------------------------------------------------------------------
-// Fluxo 5 — Pedido enviado
-// ---------------------------------------------------------------------------
-
-function PedidoEnviadoScreen({
-  comanda,
-  rotulo: rotuloEnviado,
-  pedidoNumero,
-  total,
-  onConcluir,
-  onVerPedidosAbertos,
-  onAdicionarMaisItens,
-}: {
-  comanda: Comanda | null
-  rotulo: string
-  pedidoNumero: number | undefined
-  total: number
-  onConcluir: () => void
-  onVerPedidosAbertos: () => void
-  onAdicionarMaisItens: () => void
-}) {
+function PedidoEnviadoScreen({ comanda, rotulo: rotuloEnviado, pedidoNumero, total, onConcluir, onVerPedidosAbertos, onAdicionarMaisItens }: { comanda: Comanda | null; rotulo: string; pedidoNumero: number | undefined; total: number; onConcluir: () => void; onVerPedidosAbertos: () => void; onAdicionarMaisItens: () => void }) {
   const [processando, setProcessando] = useState(false)
-  async function adicionarMaisItens() {
-    if (processando) return
-    setProcessando(true)
-    try {
-      await onAdicionarMaisItens()
-    } finally {
-      setProcessando(false)
-    }
-  }
-
+  async function adicionarMaisItens() { if (processando) return; setProcessando(true); try { await onAdicionarMaisItens() } finally { setProcessando(false) } }
   return (
     <div className="sal-shell" style={{ alignItems: "center", justifyContent: "center", padding: 20 }}>
       <EstiloSalao />
       <div style={{ ...card, width: "100%", maxWidth: 400, display: "grid", gap: 12, textAlign: "center" }}>
-        <div style={{ display: "flex", justifyContent: "center" }}>
-          <CheckCircle2 size={44} color="var(--success)" aria-hidden="true" />
-        </div>
+        <div style={{ display: "flex", justifyContent: "center" }}><CheckCircle2 size={44} color="var(--success)" aria-hidden="true" /></div>
         <p style={{ margin: 0, fontSize: 19, fontWeight: 900, color: "var(--foreground)" }}>Pedido enviado para a cozinha</p>
-        {comanda && (
-          <p style={{ margin: 0, fontSize: 13.5, color: "var(--foreground-secondary)" }}>
-            {identificacaoCliente(comanda)} · {identificacaoMesa(comanda)} · {rotuloEnviado}
-          </p>
-        )}
-        {pedidoNumero !== undefined && (
-          <p style={{ margin: 0, fontSize: 12.5, color: "var(--foreground-muted)" }}>Pedido #{pedidoNumero}</p>
-        )}
+        {comanda && <p style={{ margin: 0, fontSize: 13.5, color: "var(--foreground-secondary)" }}>{identificacaoCliente(comanda)} · {identificacaoMesa(comanda)} · {rotuloEnviado}</p>}
+        {pedidoNumero !== undefined && <p style={{ margin: 0, fontSize: 12.5, color: "var(--foreground-muted)" }}>Pedido #{pedidoNumero}</p>}
         <p style={{ margin: 0, fontSize: 18, fontWeight: 900, color: "var(--foreground)" }}>{money(total)}</p>
         <button onClick={onConcluir} style={btnPrimario}>Concluir</button>
         <button onClick={onVerPedidosAbertos} style={btnSecundario}>Ver pedidos abertos</button>
-        <button onClick={adicionarMaisItens} disabled={processando} style={{ ...btnSecundario, ...(processando ? btnDesabilitado : {}) }}>
-          {processando ? "Abrindo…" : "Adicionar mais itens"}
-        </button>
+        <button onClick={adicionarMaisItens} disabled={processando} style={{ ...btnSecundario, ...(processando ? btnDesabilitado : {}) }}>{processando ? "Abrindo…" : "Adicionar mais itens"}</button>
       </div>
     </div>
   )
 }
 
-// ---------------------------------------------------------------------------
-// Fluxo 6 — Pedidos abertos
-// ---------------------------------------------------------------------------
-
 function PedidosAbertosList({ comandas, onAbrirComanda }: { comandas: Comanda[]; onAbrirComanda: (id: string) => void }) {
-  const abertas = useMemo(
-    () => comandas.filter((c) => c.status !== "fechada").slice().sort((a, b) => {
-      const dif = prioridadeOrdenacao(a) - prioridadeOrdenacao(b)
-      if (dif !== 0) return dif
-      return new Date(a.abertaEm).getTime() - new Date(b.abertaEm).getTime()
-    }),
-    [comandas]
-  )
-
-  if (abertas.length === 0) {
-    return <p style={{ fontSize: 13.5, color: "var(--foreground-muted)", textAlign: "center", marginTop: 24 }}>Nenhum pedido aberto no momento.</p>
-  }
-
-  return (
-    <div style={{ display: "grid", gap: 8 }}>
-      {abertas.map((c) => <ComandaCard key={c.id} comanda={c} onAbrir={() => onAbrirComanda(c.id)} />)}
-    </div>
-  )
+  const abertas = useMemo(() => comandas.filter((c) => c.status !== "fechada").slice().sort((a, b) => { const dif = prioridadeOrdenacao(a) - prioridadeOrdenacao(b); if (dif !== 0) return dif; return new Date(a.abertaEm).getTime() - new Date(b.abertaEm).getTime() }), [comandas])
+  if (abertas.length === 0) return <p style={{ fontSize: 13.5, color: "var(--foreground-muted)", textAlign: "center", marginTop: 24 }}>Nenhum pedido aberto no momento.</p>
+  return <div style={{ display: "grid", gap: 8 }}>{abertas.map((c) => <ComandaCard key={c.id} comanda={c} onAbrir={() => onAbrirComanda(c.id)} />)}</div>
 }
 
 function resumoVisualRodada(r: Rodada): { rotulo: string; orientacao: string | null; cor: string } {
   if (r.status === "falha_envio") return { rotulo: "Falha ao enviar", orientacao: null, cor: "var(--danger)" }
   if (r.status === "enviando") return { rotulo: "Enviando para cozinha", orientacao: null, cor: "var(--foreground-secondary)" }
   if (r.status === "rascunho") return { rotulo: "Montando novo pedido", orientacao: null, cor: "var(--foreground-secondary)" }
-
   const estado = descreverStatusPedidoSalao(r.pedidoStatus)
-  const cor = estado.tom === "perigo"
-    ? "var(--danger)"
-    : estado.tom === "sucesso"
-      ? "var(--success)"
-      : estado.tom === "atencao"
-        ? "var(--attention-text)"
-        : "var(--foreground-secondary)"
+  const cor = estado.tom === "perigo" ? "var(--danger)" : estado.tom === "sucesso" ? "var(--success)" : estado.tom === "atencao" ? "var(--attention-text)" : "var(--foreground-secondary)"
   return { rotulo: estado.rotulo, orientacao: estado.orientacao, cor }
 }
 
 function ComandaCard({ comanda, onAbrir }: { comanda: Comanda; onAbrir: () => void }) {
-  const rodadas = (comanda.rodadas ?? [])
-    .filter((r) => r.status !== "rascunho" || r.itens.length > 0)
-    .slice()
-    .sort((a, b) => a.numero - b.numero)
+  const rodadas = (comanda.rodadas ?? []).filter((r) => r.status !== "rascunho" || r.itens.length > 0).slice().sort((a, b) => a.numero - b.numero)
   const estadoFallback = estadoHumano(comanda)
   const orientacaoFallback = orientacaoHumana(comanda)
   const quantidadePedidos = rodadas.length
-
   return (
     <button onClick={onAbrir} style={{ ...card, minHeight: 48, display: "grid", gap: 10, textAlign: "left", cursor: "pointer", padding: 12 }}>
-      <div style={{ display: "grid", gap: 3 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 16, fontWeight: 950, color: "var(--foreground)", letterSpacing: "-.2px" }}>Comanda #{comanda.numero}</span>
-          <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--foreground-muted)", whiteSpace: "nowrap" }}>{tempoDecorrido(comanda.abertaEm)}</span>
-        </div>
-        <span style={{ fontSize: 14.5, fontWeight: 850, color: "var(--foreground)" }}>{identificacaoCliente(comanda)}</span>
-        <span style={{ fontSize: 12.5, color: "var(--foreground-secondary)" }}>{identificacaoMesa(comanda)}</span>
-      </div>
-
-      {rodadas.length > 0 ? (
-        <div aria-label={`Pedidos da comanda ${comanda.numero}`} style={{ display: "grid", gap: 7 }}>
-          {rodadas.map((r) => {
-            const visual = resumoVisualRodada(r)
-            const horario = r.enviadaEm ? new Date(r.enviadaEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : null
-            return (
-              <div key={r.id} style={{ display: "grid", gap: 5, padding: "9px 10px", borderRadius: 10, background: "var(--background)", border: "1px solid var(--surface-secondary)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 900, color: "var(--foreground)" }}>{rotuloRodada(r)}</span>
-                  <span style={{ fontSize: 10.5, fontWeight: 900, color: visual.cor, textTransform: "uppercase", letterSpacing: ".25px", textAlign: "right" }}>{visual.rotulo}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 11.5, color: "var(--foreground-muted)" }}>
-                    {r.itens.length} item(ns){horario ? ` · ${horario}` : ""}
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: 900, color: "var(--brand-text)", whiteSpace: "nowrap" }}>{money(r.subtotal)}</span>
-                </div>
-                {visual.orientacao && (
-                  <span style={{ fontSize: 11.5, lineHeight: 1.35, color: "var(--foreground-secondary)" }}>{visual.orientacao}</span>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      ) : (
-        <div style={{ padding: "8px 10px", borderRadius: 9, background: "var(--background)", display: "grid", gap: 2 }}>
-          <strong style={{ fontSize: 11.5, color: "var(--foreground-secondary)" }}>{estadoFallback}</strong>
-          {orientacaoFallback && <span style={{ fontSize: 12, lineHeight: 1.4, color: "var(--foreground-secondary)" }}>{orientacaoFallback}</span>}
-        </div>
-      )}
-
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, paddingTop: 2 }}>
-        <span style={{ fontSize: 12, fontWeight: 800, color: "var(--foreground-secondary)" }}>
-          {quantidadePedidos} {quantidadePedidos === 1 ? "pedido" : "pedidos"}
-        </span>
-        <span style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
-          <span style={{ fontSize: 11.5, fontWeight: 750, color: "var(--foreground-muted)" }}>Total da comanda</span>
-          <strong style={{ fontSize: 14, color: "var(--brand-text)" }}>{money(comanda.totalParcial ?? 0)}</strong>
-        </span>
-      </div>
+      <div style={{ display: "grid", gap: 3 }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}><span style={{ fontSize: 16, fontWeight: 950, color: "var(--foreground)", letterSpacing: "-.2px" }}>Comanda #{comanda.numero}</span><span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--foreground-muted)", whiteSpace: "nowrap" }}>{tempoDecorrido(comanda.abertaEm)}</span></div><span style={{ fontSize: 14.5, fontWeight: 850, color: "var(--foreground)" }}>{identificacaoCliente(comanda)}</span><span style={{ fontSize: 12.5, color: "var(--foreground-secondary)" }}>{identificacaoMesa(comanda)}</span></div>
+      {rodadas.length > 0 ? <div aria-label={`Pedidos da comanda ${comanda.numero}`} style={{ display: "grid", gap: 7 }}>{rodadas.map((r) => { const visual = resumoVisualRodada(r); const horario = r.enviadaEm ? new Date(r.enviadaEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : null; return <div key={r.id} style={{ display: "grid", gap: 5, padding: "9px 10px", borderRadius: 10, background: "var(--background)", border: "1px solid var(--surface-secondary)" }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}><span style={{ fontSize: 13.5, fontWeight: 900, color: "var(--foreground)" }}>{rotuloRodada(r)}</span><span style={{ fontSize: 10.5, fontWeight: 900, color: visual.cor, textTransform: "uppercase", letterSpacing: ".25px", textAlign: "right" }}>{visual.rotulo}</span></div><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><span style={{ fontSize: 11.5, color: "var(--foreground-muted)" }}>{r.itens.length} item(ns){horario ? ` · ${horario}` : ""}</span><span style={{ fontSize: 13, fontWeight: 900, color: "var(--brand-text)", whiteSpace: "nowrap" }}>{money(r.subtotal)}</span></div>{visual.orientacao && <span style={{ fontSize: 11.5, lineHeight: 1.35, color: "var(--foreground-secondary)" }}>{visual.orientacao}</span>}</div> })}</div> : <div style={{ padding: "8px 10px", borderRadius: 9, background: "var(--background)", display: "grid", gap: 2 }}><strong style={{ fontSize: 11.5, color: "var(--foreground-secondary)" }}>{estadoFallback}</strong>{orientacaoFallback && <span style={{ fontSize: 12, lineHeight: 1.4, color: "var(--foreground-secondary)" }}>{orientacaoFallback}</span>}</div>}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, paddingTop: 2 }}><span style={{ fontSize: 12, fontWeight: 800, color: "var(--foreground-secondary)" }}>{quantidadePedidos} {quantidadePedidos === 1 ? "pedido" : "pedidos"}</span><span style={{ display: "flex", alignItems: "baseline", gap: 5 }}><span style={{ fontSize: 11.5, fontWeight: 750, color: "var(--foreground-muted)" }}>Total da comanda</span><strong style={{ fontSize: 14, color: "var(--brand-text)" }}>{money(comanda.totalParcial ?? 0)}</strong></span></div>
     </button>
   )
 }
 
-// ---------------------------------------------------------------------------
-// Fluxo 7 — Visão da comanda
-// ---------------------------------------------------------------------------
-
-function ComandaDetail({
-  comanda,
-  onVoltar,
-  onAtualizado,
-  onAdicionarItens,
-  onContinuarPedido,
-  onRevisarETentarNovamente,
-}: {
-  comanda: Comanda
-  onVoltar: () => void
-  onAtualizado: () => void
-  onAdicionarItens: () => void | Promise<void>
-  onContinuarPedido: () => void
-  onRevisarETentarNovamente: () => void
-}) {
+function ComandaDetail({ comanda, onVoltar, onAtualizado, onAdicionarItens, onContinuarPedido, onRevisarETentarNovamente }: { comanda: Comanda; onVoltar: () => void; onAtualizado: () => void; onAdicionarItens: () => void | Promise<void>; onContinuarPedido: () => void; onRevisarETentarNovamente: () => void }) {
   const rodadas = comanda.rodadas || []
-  const [expandidas, setExpandidas] = useState<Set<string>>(() => {
-    const ultima = rodadas[rodadas.length - 1]
-    return new Set(ultima ? [ultima.id] : [])
-  })
+  const [expandidas, setExpandidas] = useState<Set<string>>(() => { const ultima = rodadas[rodadas.length - 1]; return new Set(ultima ? [ultima.id] : []) })
   const [processandoAcao, setProcessandoAcao] = useState(false)
   const [fechando, setFechando] = useState(false)
   const [erroConta, setErroConta] = useState<string | null>(null)
-
-  function alternarExpandido(id: string) {
-    setExpandidas((atual) => {
-      const novo = new Set(atual)
-      if (novo.has(id)) novo.delete(id)
-      else novo.add(id)
-      return novo
-    })
-  }
-
+  function alternarExpandido(id: string) { setExpandidas((atual) => { const novo = new Set(atual); if (novo.has(id)) novo.delete(id); else novo.add(id); return novo }) }
   const ativa = rodadaAtiva(comanda)
-
-  async function acaoPrincipal() {
-    if (processandoAcao) return
-    setProcessandoAcao(true)
-    try {
-      if (!ativa) { await onAdicionarItens(); return }
-      if (ativa.status === "falha_envio") { onRevisarETentarNovamente(); return }
-      if (ativa.status === "rascunho") { onContinuarPedido(); return }
-    } finally {
-      setProcessandoAcao(false)
-    }
-  }
-
-  async function fecharMesa() {
-    if (fechando) return
-    setFechando(true)
-    setErroConta(null)
-    try {
-      const r = await fetch(`/api/salao/comandas/${comanda.id}/fechar`, { method: "POST" })
-      const data = await r.json().catch(() => null)
-      if (!r.ok || !data?.ok) {
-        setErroConta(data?.error || "Não foi possível pedir a conta agora.")
-        return
-      }
-      onAtualizado()
-      window.location.assign(`/salao/receber/${comanda.id}`)
-    } catch {
-      setErroConta("Não foi possível pedir a conta agora. Verifique a conexão.")
-    } finally {
-      setFechando(false)
-    }
-  }
-
-  const rotuloAcao = !ativa
-    ? "Adicionar itens"
-    : ativa.status === "enviando"
-      ? "Enviando para cozinha…"
-      : ativa.status === "falha_envio"
-        ? "Revisar e tentar novamente"
-        : "Continuar pedido"
+  async function acaoPrincipal() { if (processandoAcao) return; setProcessandoAcao(true); try { if (!ativa) { await onAdicionarItens(); return } if (ativa.status === "falha_envio") { onRevisarETentarNovamente(); return } if (ativa.status === "rascunho") { onContinuarPedido(); return } } finally { setProcessandoAcao(false) } }
+  async function fecharMesa() { if (fechando) return; setFechando(true); setErroConta(null); try { const r = await fetch(`/api/salao/comandas/${comanda.id}/fechar`, { method: "POST" }); const data = await r.json().catch(() => null); if (!r.ok || !data?.ok) { setErroConta(data?.error || "Não foi possível pedir a conta agora."); return } onAtualizado(); window.location.assign(`/salao/receber/${comanda.id}`) } catch { setErroConta("Não foi possível pedir a conta agora. Verifique a conexão.") } finally { setFechando(false) } }
+  const rotuloAcao = !ativa ? "Adicionar itens" : ativa.status === "enviando" ? "Enviando para cozinha…" : ativa.status === "falha_envio" ? "Revisar e tentar novamente" : "Continuar pedido"
   const acaoDesabilitada = processandoAcao || ativa?.status === "enviando"
-
   return (
     <div className="sal-shell">
       <EstiloSalao />
-      <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid var(--surface)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <button onClick={onVoltar} style={{ background: "none", border: "none", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, cursor: "pointer", minHeight: 44 }}>‹ Pedidos abertos</button>
-      </div>
-
-      <div style={{ padding: "12px 16px 0" }}>
-        <p style={{ margin: 0, fontSize: 19, fontWeight: 900, color: "var(--foreground)" }}>{identificacaoCliente(comanda)}</p>
-        <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--foreground-secondary)" }}>
-          {identificacaoMesa(comanda)} · Comanda #{comanda.numero} · {tempoDecorrido(comanda.abertaEm)}
-        </p>
-      </div>
-
+      <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid var(--surface)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}><button onClick={onVoltar} style={{ background: "none", border: "none", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, cursor: "pointer", minHeight: 44 }}>‹ Pedidos abertos</button></div>
+      <div style={{ padding: "12px 16px 0" }}><p style={{ margin: 0, fontSize: 19, fontWeight: 900, color: "var(--foreground)" }}>{identificacaoCliente(comanda)}</p><p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--foreground-secondary)" }}>{identificacaoMesa(comanda)} · Comanda #{comanda.numero} · {tempoDecorrido(comanda.abertaEm)}</p></div>
       <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-        {rodadas.map((r) => {
-          const aberta2 = expandidas.has(r.id)
-          const estadoPedido = r.status === "enviada" ? descreverStatusPedidoSalao(r.pedidoStatus) : null
-          const humano = estadoPedido?.rotulo ?? (r.status === "enviando" ? "Enviando…" : r.status === "falha_envio" ? "Falha ao enviar" : "Em rascunho")
-          const corHumano = r.status === "falha_envio" || estadoPedido?.tom === "perigo"
-            ? "var(--danger)"
-            : estadoPedido?.tom === "sucesso"
-              ? "var(--success)"
-              : estadoPedido?.tom === "atencao"
-                ? "var(--attention-text)"
-                : "var(--foreground-secondary)"
-          const horario = r.enviadaEm ? new Date(r.enviadaEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : null
-          return (
-            <div key={r.id} style={{ ...card, display: "grid", gap: 8 }}>
-              <button onClick={() => alternarExpandido(r.id)} aria-expanded={aberta2} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", minHeight: 44 }}>
-                <span style={{ fontSize: 14, fontWeight: 900, color: "var(--foreground)" }}>{rotuloRodada(r)}{horario ? ` · ${horario}` : ""}</span>
-                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ fontSize: 11, fontWeight: 800, color: corHumano, textTransform: "uppercase" }}>{humano}</span>
-                  {aberta2 ? <ChevronUp size={16} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}
-                </span>
-              </button>
-              {estadoPedido && (
-                <div style={{ padding: "8px 10px", borderRadius: 9, background: "var(--background)", display: "grid", gap: 2 }}>
-                  <strong style={{ fontSize: 11.5, color: corHumano }}>O que fazer agora</strong>
-                  <span style={{ fontSize: 12.5, lineHeight: 1.4, color: "var(--foreground-secondary)" }}>{estadoPedido.orientacao}</span>
-                </div>
-              )}
-              {aberta2 && (
-                <div style={{ display: "grid", gap: 6 }}>
-                  {r.itens.map((item, i) => (
-                    <div key={`${item.name}-${i}`} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                      <span style={{ fontSize: 13, color: "var(--foreground)" }}>{item.qty}× {item.name}</span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground-secondary)" }}>{money(item.price * item.qty)}</span>
-                    </div>
-                  ))}
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 900, borderTop: "1px solid var(--surface)", paddingTop: 6 }}>
-                    <span style={{ color: "var(--foreground-secondary)" }}>Subtotal</span>
-                    <span>{money(r.subtotal)}</span>
-                  </div>
-                  {r.pedidoId && (
-                    <a href={`/pedidos/${r.pedidoId}/imprimir`} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 800, color: "var(--brand-text)", display: "flex", alignItems: "center", gap: 4, minHeight: 32 }}>
-                      <Printer size={14} aria-hidden="true" /> Imprimir
-                    </a>
-                  )}
-                </div>
-              )}
-            </div>
-          )
-        })}
+        {rodadas.map((r) => { const aberta2 = expandidas.has(r.id); const estadoPedido = r.status === "enviada" ? descreverStatusPedidoSalao(r.pedidoStatus) : null; const humano = estadoPedido?.rotulo ?? (r.status === "enviando" ? "Enviando…" : r.status === "falha_envio" ? "Falha ao enviar" : "Em rascunho"); const corHumano = r.status === "falha_envio" || estadoPedido?.tom === "perigo" ? "var(--danger)" : estadoPedido?.tom === "sucesso" ? "var(--success)" : estadoPedido?.tom === "atencao" ? "var(--attention-text)" : "var(--foreground-secondary)"; const horario = r.enviadaEm ? new Date(r.enviadaEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : null; return <div key={r.id} style={{ ...card, display: "grid", gap: 8 }}><button onClick={() => alternarExpandido(r.id)} aria-expanded={aberta2} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", minHeight: 44 }}><span style={{ fontSize: 14, fontWeight: 900, color: "var(--foreground)" }}>{rotuloRodada(r)}{horario ? ` · ${horario}` : ""}</span><span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ fontSize: 11, fontWeight: 800, color: corHumano, textTransform: "uppercase" }}>{humano}</span>{aberta2 ? <ChevronUp size={16} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}</span></button>{estadoPedido && <div style={{ padding: "8px 10px", borderRadius: 9, background: "var(--background)", display: "grid", gap: 2 }}><strong style={{ fontSize: 11.5, color: corHumano }}>O que fazer agora</strong><span style={{ fontSize: 12.5, lineHeight: 1.4, color: "var(--foreground-secondary)" }}>{estadoPedido.orientacao}</span></div>}{aberta2 && <div style={{ display: "grid", gap: 6 }}>{r.itens.map((item, i) => <div key={`${item.name}-${i}`} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><span style={{ fontSize: 13, color: "var(--foreground)" }}>{item.qty}× {item.name}</span><span style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground-secondary)" }}>{money(item.price * item.qty)}</span></div>)}<div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 900, borderTop: "1px solid var(--surface)", paddingTop: 6 }}><span style={{ color: "var(--foreground-secondary)" }}>Subtotal</span><span>{money(r.subtotal)}</span></div>{r.pedidoId && <a href={`/pedidos/${r.pedidoId}/imprimir`} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 800, color: "var(--brand-text)", display: "flex", alignItems: "center", gap: 4, minHeight: 32 }}><Printer size={14} aria-hidden="true" /> Imprimir</a>}</div>}</div> })}
       </div>
-
-      <div className="sal-action-footer">
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 900 }}>
-          <span style={{ color: "var(--foreground-secondary)" }}>Total acumulado</span>
-          <span>{money(comanda.totalParcial ?? 0)}</span>
-        </div>
-        <button onClick={acaoPrincipal} disabled={acaoDesabilitada} style={{ ...btnPrimario, ...(acaoDesabilitada ? btnDesabilitado : {}) }}>
-          {rotuloAcao}
-        </button>
-        {erroConta && (
-          <p role="alert" aria-live="assertive" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--danger)", margin: 0, textAlign: "center" }}>{erroConta}</p>
-        )}
-        {comanda.status === "enviada" && (
-          <button onClick={fecharMesa} disabled={fechando} style={{ ...btnSecundario, ...(fechando ? btnDesabilitado : {}) }}>
-            {fechando ? "Pedindo conta…" : "Pedir conta"}
-          </button>
-        )}
-      </div>
+      <div className="sal-action-footer"><div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 900 }}><span style={{ color: "var(--foreground-secondary)" }}>Total acumulado</span><span>{money(comanda.totalParcial ?? 0)}</span></div><button onClick={acaoPrincipal} disabled={acaoDesabilitada} style={{ ...btnPrimario, ...(acaoDesabilitada ? btnDesabilitado : {}) }}>{rotuloAcao}</button>{erroConta && <p role="alert" aria-live="assertive" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--danger)", margin: 0, textAlign: "center" }}>{erroConta}</p>}{comanda.status === "enviada" && <button onClick={fecharMesa} disabled={fechando} style={{ ...btnSecundario, ...(fechando ? btnDesabilitado : {}) }}>{fechando ? "Pedindo conta…" : "Pedir conta"}</button>}</div>
     </div>
   )
 }
