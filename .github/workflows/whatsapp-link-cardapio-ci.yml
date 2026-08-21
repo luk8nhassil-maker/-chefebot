@@ -9,6 +9,8 @@ on:
       - "src/lib/whatsappMensagem.test.ts"
       - "src/lib/evolutionApi.ts"
       - "src/lib/evolutionApi.test.ts"
+      - "src/app/api/whatsapp/reset/route.ts"
+      - "src/app/api/whatsapp/reset/route.test.ts"
       - ".github/workflows/whatsapp-link-cardapio-ci.yml"
   workflow_dispatch:
 
@@ -33,7 +35,7 @@ jobs:
         run: npm ci
 
       - name: Testar link e webhook oficiais do WhatsApp
-        run: npm test -- src/lib/whatsappMensagem.test.ts src/lib/evolutionApi.test.ts
+        run: npm test -- src/lib/whatsappMensagem.test.ts src/lib/evolutionApi.test.ts src/app/api/whatsapp/reset/route.test.ts
 
       - name: Lint dos arquivos alterados
-        run: npm run lint -- src/lib/whatsappMensagem.ts src/lib/whatsappMensagem.test.ts src/lib/evolutionApi.ts src/lib/evolutionApi.test.ts
+        run: npm run lint -- src/lib/whatsappMensagem.ts src/lib/whatsappMensagem.test.ts src/lib/evolutionApi.ts src/lib/evolutionApi.test.ts src/app/api/whatsapp/reset/route.ts src/app/api/whatsapp/reset/route.test.ts
