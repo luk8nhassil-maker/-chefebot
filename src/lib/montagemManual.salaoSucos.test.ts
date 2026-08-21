@@ -68,13 +68,13 @@ describe("montagem manual — Sucos do Salão", () => {
     });
   });
 
-  it("Jarra pergunta P/G antes do sabor e oferece somente os 11 sabores informados para Jarra", () => {
+  it("Jarra pergunta P/G, depois sabor e por último com/sem leite", () => {
     const menu = menuSalao();
     const jarra = listarProdutosManuais(menu).find((p) => p.nome === "Jarra" && p.categoria === "sucos");
     expect(jarra).toBeDefined();
 
     const etapas = montarEtapas(jarra!, menu);
-    expect(etapas.map((e) => e.tipo)).toEqual(["tamanho_item", "sabor_unico"]);
+    expect(etapas.map((e) => e.tipo)).toEqual(["tamanho_item", "sabor_unico", "leite"]);
     expect(etapas[0].opcoes.map((o) => ({ valor: o.valor, label: o.label }))).toEqual([
       { valor: "P", label: "P - Pequena" },
       { valor: "G", label: "G - Grande" },
@@ -92,9 +92,27 @@ describe("montagem manual — Sucos do Salão", () => {
       "Abacate + hortelã",
       "Laranja",
     ]);
+    expect(etapas[2].opcoes.map((o) => ({ valor: o.valor, label: o.label }))).toEqual([
+      { valor: "sem", label: "Sem leite" },
+      { valor: "com", label: "Com leite" },
+    ]);
+    expect(etapas[2].ajuda).toBe("Com leite: P +R$ 2 · G +R$ 4.");
   });
 
-  it("Jarra P/G usa exatamente todos os preços informados, sem alterar o Copo", () => {
+  it("Jarra não finaliza o produto sem escolher com ou sem leite", () => {
+    const menu = menuSalao();
+    const jarra = listarProdutosManuais(menu).find((p) => p.nome === "Jarra" && p.categoria === "sucos")!;
+
+    const incompleta = construirItemManual(
+      jarra,
+      { ...selecaoVazia(), sabores: ["Acerola"], tamanhoItem: "P" },
+      menu,
+    );
+
+    expect(incompleta).toBeNull();
+  });
+
+  it("Jarra P/G mantém todos os preços sem leite e soma R$2/R$4 com leite", () => {
     const menu = menuSalao();
     const jarra = listarProdutosManuais(menu).find((p) => p.nome === "Jarra" && p.categoria === "sucos")!;
     const precos: Record<string, { P: number; G: number }> = {
@@ -112,13 +130,37 @@ describe("montagem manual — Sucos do Salão", () => {
     };
 
     for (const [sabor, esperado] of Object.entries(precos)) {
-      const pequena = construirItemManual(jarra, { ...selecaoVazia(), sabores: [sabor], tamanhoItem: "P" }, menu);
-      expect(pequena?.price, `${sabor} P`).toBe(esperado.P);
-      expect(pequena?.detail, `${sabor} P detail`).toBe("Jarra P - Pequena");
+      const pequenaSem = construirItemManual(
+        jarra,
+        { ...selecaoVazia(), sabores: [sabor], tamanhoItem: "P", leite: "sem" },
+        menu,
+      );
+      expect(pequenaSem?.price, `${sabor} P sem leite`).toBe(esperado.P);
+      expect(pequenaSem?.detail, `${sabor} P sem leite detail`).toBe("Jarra P - Pequena · sem leite");
 
-      const grande = construirItemManual(jarra, { ...selecaoVazia(), sabores: [sabor], tamanhoItem: "G" }, menu);
-      expect(grande?.price, `${sabor} G`).toBe(esperado.G);
-      expect(grande?.detail, `${sabor} G detail`).toBe("Jarra G - Grande");
+      const pequenaCom = construirItemManual(
+        jarra,
+        { ...selecaoVazia(), sabores: [sabor], tamanhoItem: "P", leite: "com" },
+        menu,
+      );
+      expect(pequenaCom?.price, `${sabor} P com leite`).toBe(esperado.P + 2);
+      expect(pequenaCom?.detail, `${sabor} P com leite detail`).toBe("Jarra P - Pequena · com leite");
+
+      const grandeSem = construirItemManual(
+        jarra,
+        { ...selecaoVazia(), sabores: [sabor], tamanhoItem: "G", leite: "sem" },
+        menu,
+      );
+      expect(grandeSem?.price, `${sabor} G sem leite`).toBe(esperado.G);
+      expect(grandeSem?.detail, `${sabor} G sem leite detail`).toBe("Jarra G - Grande · sem leite");
+
+      const grandeCom = construirItemManual(
+        jarra,
+        { ...selecaoVazia(), sabores: [sabor], tamanhoItem: "G", leite: "com" },
+        menu,
+      );
+      expect(grandeCom?.price, `${sabor} G com leite`).toBe(esperado.G + 4);
+      expect(grandeCom?.detail, `${sabor} G com leite detail`).toBe("Jarra G - Grande · com leite");
     }
   });
 });
