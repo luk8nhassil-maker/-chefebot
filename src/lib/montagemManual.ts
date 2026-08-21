@@ -53,6 +53,22 @@ function textoBuscaSuco(modo: ModoSucoSalao, produtos: readonly SimpleCatalogPro
   return norm(["Sucos", modo, tamanho, ...produtos.map((p) => p.name)].join(" "));
 }
 
+function dinheiroDeCentavos(cents: number): string {
+  return `R$ ${(cents / 100).toFixed(2).replace(".", ",")}`;
+}
+
+/**
+ * Só projeta na UI os preços que JÁ vivem no catálogo oficial. Os códigos
+ * "Copo"/"Jarra" são os IDs de compatibilidade publicados para P/G e seguem
+ * sendo os mesmos usados pelo resolver oficial ao finalizar o item.
+ */
+function rotuloSaborJarra(produto: SimpleCatalogProduct): string {
+  const pequena = produto.sizes?.find((s) => s.code === "Copo");
+  const grande = produto.sizes?.find((s) => s.code === "Jarra");
+  if (!pequena || !grande) return produto.name;
+  return `${produto.name} · P ${dinheiroDeCentavos(pequena.priceCents)} · G ${dinheiroDeCentavos(grande.priceCents)}`;
+}
+
 /**
  * No Salão, a categoria Sucos não lista sabores logo de cara. Ela mostra
  * somente Copo e Jarra. O sabor vem depois, no fluxo guiado.
@@ -142,11 +158,11 @@ export function montarEtapas(produto: ProdutoManual, menu: MenuManual): Etapa[] 
       {
         tipo: "sabor_unico",
         titulo: "Sabor",
-        ajuda: "Escolha o sabor da jarra.",
+        ajuda: "Escolha o sabor. Os preços abaixo são sem leite; o acréscimo do leite aparece no próximo passo.",
         maxEscolhas: 1,
         opcoes: sucosJarra(menu).map((p) => ({
           valor: p.name,
-          label: p.name,
+          label: rotuloSaborJarra(p),
           esgotado: !p.available,
         })),
       },

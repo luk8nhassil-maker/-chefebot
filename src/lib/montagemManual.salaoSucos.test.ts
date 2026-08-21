@@ -99,6 +99,31 @@ describe("montagem manual — Sucos do Salão", () => {
     expect(etapas[2].ajuda).toBe("Com leite: P +R$ 2 · G +R$ 4.");
   });
 
+  it("Jarra mostra o preço P/G de todos os sabores antes da escolha", () => {
+    const menu = menuSalao();
+    const jarra = listarProdutosManuais(menu).find((p) => p.nome === "Jarra" && p.categoria === "sucos")!;
+    const etapaSabor = montarEtapas(jarra, menu)[1];
+    const precos: Record<string, { P: number; G: number }> = {
+      "Maracujá": { P: 20, G: 40 },
+      "Acerola": { P: 14, G: 28 },
+      "Goiaba": { P: 14, G: 28 },
+      "Caju": { P: 14, G: 28 },
+      "Cajá": { P: 14, G: 32 },
+      "Bacuri": { P: 20, G: 40 },
+      "Cupuaçu": { P: 19, G: 38 },
+      "Graviola": { P: 20, G: 40 },
+      "Abacaxi": { P: 14, G: 28 },
+      "Abacate + hortelã": { P: 20, G: 40 },
+      "Laranja": { P: 20, G: 40 },
+    };
+
+    expect(etapaSabor.ajuda).toContain("Os preços abaixo são sem leite");
+    for (const [sabor, esperado] of Object.entries(precos)) {
+      const opcao = etapaSabor.opcoes.find((o) => o.valor === sabor);
+      expect(opcao?.label).toBe(`${sabor} · P R$ ${esperado.P.toFixed(2).replace(".", ",")} · G R$ ${esperado.G.toFixed(2).replace(".", ",")}`);
+    }
+  });
+
   it("Jarra não finaliza o produto sem escolher com ou sem leite", () => {
     const menu = menuSalao();
     const jarra = listarProdutosManuais(menu).find((p) => p.nome === "Jarra" && p.categoria === "sucos")!;
