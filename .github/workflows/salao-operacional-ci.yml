@@ -9,11 +9,19 @@ on:
       - "src/app/pedidos/salao/**"
       - "src/app/pedidos/layout.tsx"
       - "src/app/api/salao/**"
+      - "src/app/api/cardapio/route.ts"
+      - "src/app/api/cardapio/route.salaoSucos.test.ts"
+      - "src/app/api/pedido-app/route.ts"
+      - "src/app/api/pedido-app/route.salaoSucos.test.ts"
       - "src/components/SalaoOperacaoNav.tsx"
       - "src/components/PedidosSalaoNav.tsx"
       - "src/components/SalaoItensPedido*.tsx"
+      - "src/lib/catalog/simpleProducts*.ts"
+      - "src/lib/montagemManual*.ts"
+      - "src/lib/pedidoAppSelecaoEstruturada*.ts"
       - "src/lib/comandas.ts"
       - "src/lib/comandas.test.ts"
+      - "src/lib/comandas.salaoSucos.test.ts"
       - "src/lib/salao*.ts"
       - "src/lib/salao*.test.ts"
       - ".github/workflows/salao-operacional-ci.yml"
@@ -43,9 +51,14 @@ jobs:
         run: >-
           npm test --
           src/lib/comandas.test.ts
+          src/lib/comandas.salaoSucos.test.ts
+          src/lib/catalog/simpleProducts.test.ts
+          src/lib/montagemManual.salaoSucos.test.ts
           src/lib/salaoConta.test.ts
           src/lib/salaoPagamento.test.ts
           src/lib/salaoOperacao.test.ts
+          src/app/api/cardapio/route.salaoSucos.test.ts
+          src/app/api/pedido-app/route.salaoSucos.test.ts
           src/app/api/salao/comandas/route.test.ts
           src/app/salao/page.test.tsx
           src/components/SalaoItensPedido.test.tsx
@@ -106,6 +119,16 @@ jobs:
           src/lib/salaoOperacao.test.ts
           src/lib/salaoPagamento.ts
           src/lib/salaoPagamento.test.ts
+          src/lib/catalog/simpleProducts.ts
+          src/lib/catalog/simpleProducts.base.ts
+          src/lib/montagemManual.ts
+          src/lib/montagemManual.base.ts
+          src/lib/montagemManual.salaoSucos.test.ts
+          src/lib/pedidoAppSelecaoEstruturada.ts
+          src/lib/pedidoAppSelecaoEstruturada.base.ts
+          src/lib/comandas.salaoSucos.test.ts
+          src/app/api/cardapio/route.salaoSucos.test.ts
+          src/app/api/pedido-app/route.salaoSucos.test.ts
           src/app/api/salao/comandas/route.ts
           src/app/api/salao/comandas/route.test.ts
           src/app/api/salao/comandas/[id]/route.ts
