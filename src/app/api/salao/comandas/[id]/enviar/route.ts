@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoSalao } from "@/lib/salaoAuth";
-import { buscarComanda, identificacaoClienteComanda, marcarComandaEnviada, PAGAMENTO_COMANDA_EM_ABERTO } from "@/lib/comandas";
+import { buscarComanda, marcarComandaEnviada, PAGAMENTO_COMANDA_EM_ABERTO } from "@/lib/comandas";
 import { gerarClientRequestId, sanitizeClientRequestId } from "@/survival/clientRequestId";
 import { POST as criarPedidoApp } from "@/app/api/pedido-app/route";
 import { executarMutacaoComContaAbertaSalao } from "@/lib/salaoConta.server";
@@ -80,7 +80,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ ok: false, error: "Adicione pelo menos um item antes de enviar" }, { status: 422 });
   }
 
-  const identificacaoCliente = identificacaoClienteComanda(comanda);
+  // Barreira server-side: o nome é o último passo na UI, mas precisa estar
+  // persistido antes de qualquer chamada ao motor oficial de pedidos.
+  const identificacaoCliente = comanda.cliente?.trim();
+  if (!identificacaoCliente) {
+    await liberarEnvioInicialSalao(id, claimToken);
+    return NextResponse.json({ ok: false, error: "Informe o nome do cliente antes de enviar" }, { status: 422 });
+  }
+
   const observacaoComanda = [
     `Comanda #${comanda.numero}`,
     comanda.mesa ? `Mesa ${comanda.mesa}${comanda.complemento ? ` (${comanda.complemento})` : ""}` : "Sem mesa",
