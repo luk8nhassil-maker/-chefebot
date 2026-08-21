@@ -3,10 +3,11 @@
 import { useMemo, useState, useSyncExternalStore } from "react"
 import {
   listarPendencias,
-  calcularAnaliseOperacional,
   acaoPrincipal,
   acaoSecundaria,
   acaoTerciaria,
+  LIMIAR_NOVO_SEM_ACEITE_MIN,
+  LIMIAR_REAVISO_PREPARO_MIN,
   LIMIAR_REAVISO_ENTREGA_MIN,
   type PedidoLimpeza,
   type Pendencia,
@@ -20,8 +21,10 @@ import {
   type MotivoProblemaEntrega,
 } from "@/lib/problemaEntrega"
 
+// Decisão operacional: o gate é obrigatório no painel ativo. A variável antiga
+// de rollout não pode mais desligar a cobrança em produção.
 export function limpezaOperacionalAtiva(): boolean {
-  return process.env.NEXT_PUBLIC_LIMPEZA_OPERACIONAL_ENABLED !== "false"
+  return true
 }
 
 export type ResolverPendencia = (pendencia: Pendencia, opcao: OpcaoResolucao) => Promise<void>
@@ -65,6 +68,35 @@ const lerRelogioNoServidor = () => 0
 
 type BotaoOcupado = "principal" | "secundaria" | "terciaria" | "entrega"
 
+function instrucaoCurta(p: Pendencia): string {
+  if (p.motivo === "pagamento_pix_pendente") return "Confira no Mercado Pago."
+  if (p.status === "novo") return "Decida: fazer, aguardar ou cancelar."
+  if (p.status === "em_preparo") return "Atualize se avançou ou continua fazendo."
+  if (p.modalidade === "retirada") return "Confirme se retirou ou ainda está aguardando."
+  if (p.modalidade === "dine_in") return "Confirme se foi servido ou ainda está aguardando."
+  return "Confirme se entregou ou ainda está a caminho."
+}
+
+function resultadoPrincipal(p: Pendencia): string {
+  if (p.motivo === "pagamento_pix_pendente") return "→ Se pago, sai da pendência; se não, continua aguardando."
+  if (p.status === "novo") return "→ Vai para Fazendo e passa ao próximo."
+  if (p.status === "em_preparo") {
+    if (p.modalidade === "retirada") return "→ Vai para Pronto para retirada e passa ao próximo."
+    if (p.modalidade === "dine_in") return "→ Vai para Pronto para servir e passa ao próximo."
+    return "→ Vai para Na rua e passa ao próximo."
+  }
+  return "→ Finaliza o pedido e passa ao próximo."
+}
+
+function resultadoSecundario(p: Pendencia): string {
+  const minutos = p.status === "novo"
+    ? LIMIAR_NOVO_SEM_ACEITE_MIN
+    : p.status === "em_preparo"
+      ? LIMIAR_REAVISO_PREPARO_MIN
+      : LIMIAR_REAVISO_ENTREGA_MIN
+  return `→ Este pedido sai da vez e volta em ${minutos} min.`
+}
+
 export default function LimpezaOperacionalGate({ pedidos, onResolver, ativo = true }: Props) {
   const agora = useSyncExternalStore(assinarRelogio, lerRelogio, lerRelogioNoServidor)
   const [ocupado, setOcupado] = useState<BotaoOcupado | null>(null)
@@ -73,10 +105,7 @@ export default function LimpezaOperacionalGate({ pedidos, onResolver, ativo = tr
   const [problemaParaId, setProblemaParaId] = useState<string | null>(null)
   const [motivoProblema, setMotivoProblema] = useState<MotivoProblemaEntrega | null>(null)
 
-  const { pendencias, analise } = useMemo(() => ({
-    pendencias: listarPendencias(pedidos, agora),
-    analise: calcularAnaliseOperacional(pedidos, agora),
-  }), [pedidos, agora])
+  const pendencias = useMemo(() => listarPendencias(pedidos, agora), [pedidos, agora])
 
   const pendenciasVisiveis = pendencias.filter((p) => p.pedidoId !== suprimidoId)
   const atual = pendenciasVisiveis[0]
@@ -110,7 +139,7 @@ export default function LimpezaOperacionalGate({ pedidos, onResolver, ativo = tr
       await onResolver(atual, opcao)
       suprimirAteAtualizar()
     } catch {
-      setErro("Não consegui registrar agora. Tente novamente. Esta pendência continuará aberta.")
+      setErro("Não consegui registrar. Tente novamente.")
     } finally {
       setOcupado(null)
     }
@@ -128,7 +157,7 @@ export default function LimpezaOperacionalGate({ pedidos, onResolver, ativo = tr
       })
       const dados = await resposta.json().catch(() => ({})) as { error?: string }
       if (!resposta.ok) {
-        setErro(dados.error || "Não consegui salvar essa ação. Tente novamente.")
+        setErro(dados.error || "Não consegui salvar. Tente novamente.")
         return false
       }
       setProblemaParaId(null)
@@ -136,7 +165,7 @@ export default function LimpezaOperacionalGate({ pedidos, onResolver, ativo = tr
       suprimirAteAtualizar()
       return true
     } catch {
-      setErro("Não consegui falar com o servidor. Tente novamente.")
+      setErro("Sem conexão. Tente novamente.")
       return false
     } finally {
       setOcupado(null)
@@ -178,23 +207,25 @@ export default function LimpezaOperacionalGate({ pedidos, onResolver, ativo = tr
         </div>
 
         <h2 id="limpeza-titulo" style={{ fontSize:21, lineHeight:1.2, fontWeight:900, color:"var(--foreground)", margin:"10px 0 0" }}>
-          {problemaAberto ? (ehRetirada ? "Vamos avisar o cliente" : "Vamos resolver o problema da entrega") : atual.titulo}
+          {problemaAberto ? (ehRetirada ? "Avisar cliente" : "Resolver entrega") : atual.titulo}
         </h2>
         <p style={{ fontSize:13, fontWeight:800, color:"var(--foreground-secondary)", margin:"7px 0 0" }}>Pedido {numero}{atual.cliente ? ` · ${atual.cliente}` : ""} · há {atual.idadeMinutos} min</p>
-        <p id="limpeza-descricao" style={{ fontSize:13.5, fontWeight:600, color:"var(--foreground-secondary)", lineHeight:1.5, margin:"13px 0 0" }}>{problemaAberto ? "O pedido continua aberto até a equipe resolver de verdade." : atual.descricao}</p>
+        <p id="limpeza-descricao" style={{ fontSize:13.5, fontWeight:600, color:"var(--foreground-secondary)", lineHeight:1.45, margin:"10px 0 0" }}>
+          {problemaAberto ? (ehRetirada ? "Avise o cliente e acompanhe." : "Escolha o problema e registre.") : instrucaoCurta(atual)}
+        </p>
 
         {erro && <p role="status" aria-live="polite" style={{ fontSize:12.5, fontWeight:800, color:"var(--danger)", margin:"12px 0 0", lineHeight:1.45 }}>{erro}</p>}
 
         {problemaAberto && atual.motivo === "entrega_longa" ? (
-          <div style={{ display:"flex", flexDirection:"column", gap:10, marginTop:18 }}>
-            <button type="button" disabled={!!ocupado} onClick={() => { setProblemaParaId(null); setMotivoProblema(null); setErro(null) }} style={{ alignSelf:"flex-start", border:0, background:"transparent", color:"var(--foreground-secondary)", fontWeight:800 }}>← Voltar às opções</button>
+          <div style={{ display:"flex", flexDirection:"column", gap:10, marginTop:16 }}>
+            <button type="button" disabled={!!ocupado} onClick={() => { setProblemaParaId(null); setMotivoProblema(null); setErro(null) }} style={{ alignSelf:"flex-start", border:0, background:"transparent", color:"var(--foreground-secondary)", fontWeight:800 }}>← Voltar</button>
             {ehRetirada ? (
               <>
-                <strong>O cliente ainda não veio buscar</strong>
-                <p style={{ margin:0, fontSize:12, color:"var(--foreground-muted)" }}>Depois do contato, o sistema continua acompanhando em ciclos de {LIMIAR_REAVISO_ENTREGA_MIN} min.</p>
+                <strong>Cliente ainda não retirou</strong>
+                <p style={{ margin:0, fontSize:12, color:"var(--foreground-muted)" }}>Depois: revisar em {LIMIAR_REAVISO_ENTREGA_MIN} min.</p>
                 {mensagemPrevista && <div style={{ border:"1px solid var(--surface-secondary)", borderRadius:12, padding:11, fontSize:12, lineHeight:1.45 }}>{mensagemPrevista}</div>}
-                {!contatoJaEnviado && telefoneValido && <button disabled={!!ocupado} onClick={enviarLembreteRetirada} style={estiloPrincipal}>AVISAR CLIENTE DA RETIRADA</button>}
-                {(contatoJaEnviado || !telefoneValido || !!erro) && <button disabled={!!ocupado} onClick={registrarSemContato} style={estiloSecundario}>{contatoJaEnviado ? "AINDA SEM RESPOSTA · REVER EM 5 MIN" : "REGISTRAR SEM CONTATO · REVER EM 5 MIN"}</button>}
+                {!contatoJaEnviado && telefoneValido && <button disabled={!!ocupado} onClick={enviarLembreteRetirada} style={estiloPrincipal}>AVISAR CLIENTE</button>}
+                {(contatoJaEnviado || !telefoneValido || !!erro) && <button disabled={!!ocupado} onClick={registrarSemContato} style={estiloSecundario}>{contatoJaEnviado ? "AINDA SEM RESPOSTA · REVER EM 5 MIN" : "REGISTRAR · REVER EM 5 MIN"}</button>}
               </>
             ) : (
               <>
@@ -203,53 +234,73 @@ export default function LimpezaOperacionalGate({ pedidos, onResolver, ativo = tr
                   {MOTIVOS_PROBLEMA_ENTREGA.map((motivo) => <button key={motivo} disabled={!!ocupado} onClick={() => { setMotivoProblema(motivo); setErro(null) }} style={{ border: motivoProblema === motivo ? "2px solid var(--primary)" : "1px solid var(--surface-secondary)", background:"var(--background)", color:"var(--foreground-secondary)", borderRadius:10, padding:10, textAlign:"left", fontWeight:800 }}>{ROTULOS_PROBLEMA_ENTREGA[motivo]}</button>)}
                 </div>
                 {motivoProblema && <div style={{ border:"1px solid var(--surface-secondary)", borderRadius:12, padding:11, fontSize:12, lineHeight:1.45 }}>{mensagemPrevista}</div>}
-                {motivoProblema && telefoneValido && !contatoJaEnviado && <button disabled={!!ocupado} onClick={enviarProblema} style={estiloPrincipal}>ENVIAR MENSAGEM AO CLIENTE</button>}
-                {motivoProblema && (!telefoneValido || !!erro || contatoJaEnviado) && <button disabled={!!ocupado} onClick={registrarSemContato} style={estiloSecundario}>REGISTRAR PROBLEMA · REVER EM 5 MIN</button>}
+                {motivoProblema && telefoneValido && !contatoJaEnviado && <button disabled={!!ocupado} onClick={enviarProblema} style={estiloPrincipal}>ENVIAR AO CLIENTE</button>}
+                {motivoProblema && (!telefoneValido || !!erro || contatoJaEnviado) && <button disabled={!!ocupado} onClick={registrarSemContato} style={estiloSecundario}>REGISTRAR · REVER EM 5 MIN</button>}
               </>
             )}
-            {telefoneValido && (contatoJaEnviado || !!erro) && <div style={{ display:"flex", gap:8 }}><a href={`https://wa.me/${telefoneWhatsApp}`} target="_blank" rel="noreferrer">Abrir WhatsApp</a><a href={`tel:+${telefoneWhatsApp}`}>Ligar</a></div>}
+            {telefoneValido && (contatoJaEnviado || !!erro) && <div style={{ display:"flex", gap:8 }}><a href={`https://wa.me/${telefoneWhatsApp}`} target="_blank" rel="noreferrer">WhatsApp</a><a href={`tel:+${telefoneWhatsApp}`}>Ligar</a></div>}
           </div>
         ) : atual.motivo === "pagamento_pix_pendente" ? (
-          <div style={{ display:"flex", flexDirection:"column", gap:9, marginTop:18 }}>
-            <button autoFocus disabled={!!ocupado} onClick={() => resolver(principal, "principal")} style={estiloPrincipal}>{ocupado === "principal" ? "CONFERINDO…" : "VERIFICAR PIX AGORA"}</button>
-            <button disabled={!!ocupado} onClick={cancelarPix} style={estiloPerigo}>Cancelar por Pix não pago</button>
-            <small style={estiloSmall}>Se o pagamento tiver entrado, a verificação remove este pedido da cobrança automaticamente.</small>
+          <div style={{ display:"flex", flexDirection:"column", gap:10, marginTop:16 }}>
+            <div style={estiloBlocoAcao}>
+              <button autoFocus disabled={!!ocupado} onClick={() => resolver(principal, "principal")} style={estiloPrincipal}>{ocupado === "principal" ? "CONFERINDO…" : "VERIFICAR PIX AGORA"}</button>
+              <small style={estiloResultado}>{resultadoPrincipal(atual)}</small>
+            </div>
+            <div style={estiloBlocoAcao}>
+              <button disabled={!!ocupado} onClick={cancelarPix} style={estiloPerigo}>Cancelar por Pix não pago</button>
+              <small style={estiloResultado}>→ Cancela o pedido e passa ao próximo.</small>
+            </div>
           </div>
         ) : (
-          <div style={{ display:"flex", flexDirection:"column", gap:9, marginTop:18 }}>
-            <button autoFocus disabled={!!ocupado} onClick={() => resolver(principal, "principal")} style={estiloPrincipal}>{ocupado === "principal" ? "REGISTRANDO…" : principal.label}</button>
+          <div style={{ display:"flex", flexDirection:"column", gap:10, marginTop:16 }}>
+            <div style={estiloBlocoAcao}>
+              <button autoFocus disabled={!!ocupado} onClick={() => resolver(principal, "principal")} style={estiloPrincipal}>{ocupado === "principal" ? "REGISTRANDO…" : principal.label}</button>
+              <small style={estiloResultado}>{resultadoPrincipal(atual)}</small>
+            </div>
 
             {secundaria && atual.motivo === "entrega_longa" ? (
-              <button disabled={!!ocupado} onClick={() => adiarRota(ehRetirada ? "ainda_aguardando_retirada" : ehLocal ? "ainda_aguardando_servir" : "ainda_na_rua")} style={estiloSecundario}>{ocupado === "entrega" ? "REGISTRANDO…" : secundaria.label}</button>
+              <div style={estiloBlocoAcao}>
+                <button disabled={!!ocupado} onClick={() => adiarRota(ehRetirada ? "ainda_aguardando_retirada" : ehLocal ? "ainda_aguardando_servir" : "ainda_na_rua")} style={estiloSecundario}>{ocupado === "entrega" ? "REGISTRANDO…" : secundaria.label}</button>
+                <small style={estiloResultado}>{resultadoSecundario(atual)}</small>
+              </div>
             ) : secundaria ? (
-              <button disabled={!!ocupado} onClick={() => resolver(secundaria, "secundaria")} style={estiloSecundario}>{ocupado === "secundaria" ? "REGISTRANDO…" : secundaria.label}</button>
+              <div style={estiloBlocoAcao}>
+                <button disabled={!!ocupado} onClick={() => resolver(secundaria, "secundaria")} style={estiloSecundario}>{ocupado === "secundaria" ? "REGISTRANDO…" : secundaria.label}</button>
+                <small style={estiloResultado}>{resultadoSecundario(atual)}</small>
+              </div>
             ) : null}
 
             {atual.motivo === "entrega_longa" && contatoJaEnviado && (ehDelivery ? atual.exigirProblema : ehRetirada && atual.tentativasAdiamento >= 2) && (
-              <button disabled={!!ocupado} onClick={() => adiarRota("cliente_respondeu")} style={estiloSecundario}>{ehRetirada ? "CLIENTE ESTÁ A CAMINHO · DAR 5 MIN" : "CLIENTE RESPONDEU · DAR 5 MIN"}</button>
+              <div style={estiloBlocoAcao}>
+                <button disabled={!!ocupado} onClick={() => adiarRota("cliente_respondeu")} style={estiloSecundario}>{ehRetirada ? "CLIENTE ESTÁ A CAMINHO · DAR 5 MIN" : "CLIENTE RESPONDEU · DAR 5 MIN"}</button>
+                <small style={estiloResultado}>→ Este pedido sai da vez e volta em {LIMIAR_REAVISO_ENTREGA_MIN} min.</small>
+              </div>
             )}
 
             {atual.motivo === "entrega_longa" && atual.podeRelatarProblema && (
-              <button disabled={!!ocupado} onClick={() => { setProblemaParaId(atual.pedidoId); setMotivoProblema(atual.entregaProblema?.motivo ?? null); setErro(null) }} style={estiloProblema}>⚠ {contatoJaEnviado ? "AINDA SEM CONTATO · REVISAR PROBLEMA" : "TIVEMOS UM PROBLEMA NA ENTREGA"}</button>
+              <button disabled={!!ocupado} onClick={() => { setProblemaParaId(atual.pedidoId); setMotivoProblema(atual.entregaProblema?.motivo ?? null); setErro(null) }} style={estiloProblema}>⚠ {contatoJaEnviado ? "REVISAR PROBLEMA" : "PROBLEMA NA ENTREGA"}</button>
             )}
 
             {atual.motivo === "entrega_longa" && ehRetirada && atual.tentativasAdiamento >= 1 && (
-              <button disabled={!!ocupado} onClick={() => { setProblemaParaId(atual.pedidoId); setMotivoProblema(null); setErro(null) }} style={estiloProblema}>{contatoJaEnviado ? "REVISAR CONTATO DA RETIRADA" : "AVISAR CLIENTE DA RETIRADA"}</button>
+              <button disabled={!!ocupado} onClick={() => { setProblemaParaId(atual.pedidoId); setMotivoProblema(null); setErro(null) }} style={estiloProblema}>{contatoJaEnviado ? "REVISAR CONTATO" : "AVISAR CLIENTE"}</button>
             )}
 
-            {terciaria && <button disabled={!!ocupado} onClick={() => resolver(terciaria, "terciaria")} style={estiloPerigo}>{ocupado === "terciaria" ? "REGISTRANDO…" : terciaria.label}</button>}
-            <small style={estiloSmall}>O pedido seguinte aparece logo depois. Não existe ignorar ou fechar sem uma ação.</small>
+            {terciaria && (
+              <div style={estiloBlocoAcao}>
+                <button disabled={!!ocupado} onClick={() => resolver(terciaria, "terciaria")} style={estiloPerigo}>{ocupado === "terciaria" ? "REGISTRANDO…" : terciaria.label}</button>
+                <small style={estiloResultado}>→ Cancela o pedido e passa ao próximo.</small>
+              </div>
+            )}
           </div>
         )}
-
-        {analise.resolvidasHoje > 0 && <p style={{ fontSize:11, fontWeight:700, color:"var(--foreground-muted)", margin:"14px 0 0", textAlign:"center" }}>{analise.resolvidasHoje} pendência{analise.resolvidasHoje > 1 ? "s" : ""} resolvida{analise.resolvidasHoje > 1 ? "s" : ""} hoje</p>}
       </div>
     </div>
   )
 }
 
+const estiloBlocoAcao = { display:"flex", flexDirection:"column", gap:4 } as const
 const estiloPrincipal = { minHeight:54, border:"none", borderRadius:13, padding:"12px 14px", background:"var(--primary)", color:"var(--primary-foreground)", fontSize:14, fontWeight:900, cursor:"pointer" } as const
 const estiloSecundario = { minHeight:48, border:"1px solid var(--surface-secondary)", borderRadius:12, padding:"11px 13px", background:"transparent", color:"var(--foreground-secondary)", fontSize:13, fontWeight:800, cursor:"pointer" } as const
 const estiloPerigo = { minHeight:44, border:"1px solid color-mix(in srgb,var(--danger) 45%,var(--surface-secondary))", borderRadius:12, padding:"10px 13px", background:"color-mix(in srgb,var(--danger) 8%,var(--surface))", color:"var(--danger)", fontSize:13, fontWeight:800, cursor:"pointer" } as const
 const estiloProblema = { minHeight:46, border:"1px solid var(--attention-border)", borderRadius:12, padding:"10px 13px", background:"var(--attention-surface)", color:"var(--attention-text)", fontSize:13, fontWeight:800, cursor:"pointer" } as const
-const estiloSmall = { textAlign:"center", color:"var(--foreground-muted)", fontSize:10.5, lineHeight:1.35 } as const
+const estiloResultado = { color:"var(--foreground-muted)", fontSize:10.5, lineHeight:1.3, padding:"0 4px" } as const
