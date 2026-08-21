@@ -7,6 +7,12 @@ on:
     paths:
       - "scripts/apply_salao_nome_final.py"
       - ".github/workflows/apply-salao-nome-final.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "scripts/apply_salao_nome_final.py"
+      - ".github/workflows/apply-salao-nome-final.yml"
 
 permissions:
   contents: write
@@ -17,6 +23,7 @@ concurrency:
 
 jobs:
   apply:
+    if: github.head_ref == 'feat/salao-nome-no-final-20260821' || github.ref_name == 'feat/salao-nome-no-final-20260821'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout da branch isolada
