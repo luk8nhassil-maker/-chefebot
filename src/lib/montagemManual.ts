@@ -1,12 +1,14 @@
 // Fachada do montador oficial com uma única especialização para o módulo
 // Salão: Sucos. Todo o restante continua delegado 1:1 ao arquivo base.
 //
-// Regra aprovada em 2026-08-20:
+// Regras aprovadas:
 // 1) ao entrar em Sucos, escolher primeiro Copo ou Jarra;
 // 2) Copo preserva sabores, preços e regra com/sem leite já existentes;
 // 3) Jarra pergunta P (Pequena) ou G (Grande) antes do sabor;
-// 4) os preços da Jarra continuam vindo dos IDs/tamanhos já validados no
-//    servidor — nunca do navegador e nunca de uma conta paralela aqui.
+// 4) Jarra pergunta com/sem leite antes de finalizar o produto;
+// 5) com leite acrescenta R$2 na P e R$4 na G; sem leite mantém o preço-base;
+// 6) todo preço continua vindo dos IDs/tamanhos validados no servidor — nunca
+//    do navegador e nunca de uma conta paralela na tela.
 
 export * from "./montagemManual.base";
 
@@ -19,7 +21,11 @@ import {
   type ProdutoManual as ProdutoManualBase,
   type SelecaoMontagem,
 } from "./montagemManual.base";
-import { resolverItemComSelecaoSimplesEstruturada } from "./pedidoAppSelecaoEstruturada";
+import {
+  ACRESCIMO_LEITE_JARRA_G_CENTS,
+  ACRESCIMO_LEITE_JARRA_P_CENTS,
+  resolverItemComSelecaoSimplesEstruturada,
+} from "./pedidoAppSelecaoEstruturada";
 import { norm, type ItemApp } from "./pedidoAppItens";
 import type { SimpleCatalogProduct } from "./catalog/simpleProducts";
 
@@ -43,7 +49,7 @@ function temFluxoSalao(menu: MenuManual | null | undefined): menu is MenuManual 
 }
 
 function textoBuscaSuco(modo: ModoSucoSalao, produtos: readonly SimpleCatalogProduct[]): string {
-  const tamanho = modo === "jarra" ? "P pequena G grande jarra" : "copo";
+  const tamanho = modo === "jarra" ? "P pequena G grande jarra leite" : "copo";
   return norm(["Sucos", modo, tamanho, ...produtos.map((p) => p.name)].join(" "));
 }
 
@@ -92,7 +98,7 @@ export function listarProdutosManuais(menu: MenuManual | null | undefined): Prod
 
 /**
  * Copo: sabor -> com/sem leite (mesma regra anterior).
- * Jarra: P/G -> sabor (ordem pedida pelo usuário).
+ * Jarra: P/G -> sabor -> com/sem leite.
  */
 export function montarEtapas(produto: ProdutoManual, menu: MenuManual): Etapa[] {
   if (produto.modoSucoSalao === "copo") {
@@ -144,6 +150,16 @@ export function montarEtapas(produto: ProdutoManual, menu: MenuManual): Etapa[] 
           esgotado: !p.available,
         })),
       },
+      {
+        tipo: "leite",
+        titulo: "Com ou sem leite",
+        ajuda: `Com leite: P +R$ ${ACRESCIMO_LEITE_JARRA_P_CENTS / 100} · G +R$ ${ACRESCIMO_LEITE_JARRA_G_CENTS / 100}.`,
+        maxEscolhas: 1,
+        opcoes: [
+          { valor: "sem", label: "Sem leite", esgotado: false },
+          { valor: "com", label: "Com leite", esgotado: false },
+        ],
+      },
     ];
   }
 
@@ -178,7 +194,13 @@ export function construirItemManual(
     return resolverSelecaoSimples({ productId: sabor.id, milk: selecao.leite }, menu, qty);
   }
 
-  if (selecao.sabores.length !== 1 || (selecao.tamanhoItem !== "P" && selecao.tamanhoItem !== "G")) return null;
+  if (
+    selecao.sabores.length !== 1 ||
+    (selecao.tamanhoItem !== "P" && selecao.tamanhoItem !== "G") ||
+    (selecao.leite !== "com" && selecao.leite !== "sem")
+  ) {
+    return null;
+  }
   const sabor = sucosJarra(menu).find((p) => p.name === selecao.sabores[0]);
   if (!sabor) return null;
 
@@ -190,5 +212,9 @@ export function construirItemManual(
   const tamanho = sabor.sizes?.find((s) => s.code === codigoInterno);
   if (!tamanho) return null;
 
-  return resolverSelecaoSimples({ productId: sabor.id, sizeId: tamanho.id }, menu, qty);
+  return resolverSelecaoSimples(
+    { productId: sabor.id, sizeId: tamanho.id, milk: selecao.leite },
+    menu,
+    qty,
+  );
 }

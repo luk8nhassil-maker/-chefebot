@@ -42,14 +42,18 @@ function postReq(body: unknown, salaoToken?: string) {
   } as never;
 }
 
-function itemJarraMaracuja(sizeId: string) {
+function itemJarraMaracuja(sizeId: string, milk?: "com" | "sem") {
   return {
     kind: "simple",
     name: "Nome adulterado",
     detail: "Preço adulterado",
     price: 0.01,
     qty: 1,
-    simpleSelection: { productId: "salao-suco-maracuja", sizeId },
+    simpleSelection: {
+      productId: "salao-suco-maracuja",
+      sizeId,
+      ...(milk ? { milk } : {}),
+    },
   };
 }
 
@@ -69,34 +73,40 @@ beforeEach(() => {
 });
 
 describe("POST /api/pedido-app — Sucos do Salão", () => {
-  it("Jarra P de Maracujá recalcula R$20 e grava a descrição correta", async () => {
+  it("Jarra P de Maracujá com leite recalcula R$22 e grava a escolha", async () => {
     const token = await criarTokenSalao();
-    const res = await POST(postReq({ ...base, itens: [itemJarraMaracuja("salao-suco-maracuja-copo")] }, token));
+    const res = await POST(postReq({
+      ...base,
+      itens: [itemJarraMaracuja("salao-suco-maracuja-copo", "com")],
+    }, token));
     const data = await res.json();
 
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
-    expect(data.total).toBe(20);
+    expect(data.total).toBe(22);
 
     const pedidos = (store.get("pedidos") ?? []) as Array<{ total: number; itensDetalhados: Array<{ name: string; detail?: string; price: number }> }>;
     expect(pedidos).toHaveLength(1);
     expect(pedidos[0].itensDetalhados[0]).toMatchObject({
       name: "Maracujá",
-      detail: "Jarra P - Pequena",
-      price: 20,
+      detail: "Jarra P - Pequena · com leite",
+      price: 22,
     });
   });
 
-  it("Jarra G de Maracujá usa o preço oficial de R$40", async () => {
+  it("Jarra G de Maracujá sem leite mantém o preço oficial de R$40", async () => {
     const token = await criarTokenSalao();
-    const res = await POST(postReq({ ...base, itens: [itemJarraMaracuja("salao-suco-maracuja-jarra")] }, token));
+    const res = await POST(postReq({
+      ...base,
+      itens: [itemJarraMaracuja("salao-suco-maracuja-jarra", "sem")],
+    }, token));
     const data = await res.json();
 
     expect(res.status).toBe(200);
     expect(data.total).toBe(40);
 
     const pedidos = (store.get("pedidos") ?? []) as Array<{ itensDetalhados: Array<{ detail?: string; price: number }> }>;
-    expect(pedidos[0].itensDetalhados[0]).toMatchObject({ detail: "Jarra G - Grande", price: 40 });
+    expect(pedidos[0].itensDetalhados[0]).toMatchObject({ detail: "Jarra G - Grande · sem leite", price: 40 });
   });
 
   it("Copo continua usando o produto oficial existente: Acerola sem leite = R$7", async () => {
@@ -117,12 +127,24 @@ describe("POST /api/pedido-app — Sucos do Salão", () => {
     expect(data.total).toBe(7);
   });
 
-  it("produto de Jarra continua rejeitado no fluxo público", async () => {
+  it("comanda antiga de Jarra sem milk continua aceitando o preço-base", async () => {
+    const token = await criarTokenSalao();
+    const res = await POST(postReq({
+      ...base,
+      itens: [itemJarraMaracuja("salao-suco-maracuja-copo")],
+    }, token));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.total).toBe(20);
+  });
+
+  it("produto de Jarra continua rejeitado no fluxo público mesmo com leite", async () => {
     const res = await POST(postReq({
       ...base,
       telefone: "85999999999",
       tipoEntrega: "retirada",
-      itens: [itemJarraMaracuja("salao-suco-maracuja-copo")],
+      itens: [itemJarraMaracuja("salao-suco-maracuja-copo", "com")],
     }));
     const data = await res.json();
 

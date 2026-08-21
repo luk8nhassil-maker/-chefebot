@@ -32,7 +32,7 @@ beforeEach(() => {
 });
 
 describe("validarItensComanda — Sucos do Salão", () => {
-  it("Jarra P de Maracujá ignora preço adulterado e recalcula R$20", async () => {
+  it("Jarra P com leite ignora preço adulterado e recalcula R$22", async () => {
     const r = await validarItensComanda([
       {
         kind: "simple",
@@ -40,7 +40,7 @@ describe("validarItensComanda — Sucos do Salão", () => {
         detail: "qualquer coisa",
         price: 0.01,
         qty: 2,
-        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_P },
+        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_P, milk: "com" },
       },
     ]);
 
@@ -49,29 +49,66 @@ describe("validarItensComanda — Sucos do Salão", () => {
     expect(r.itens[0]).toMatchObject({
       kind: "simple",
       name: "Maracujá",
-      detail: "Jarra P - Pequena",
-      price: 20,
+      detail: "Jarra P - Pequena · com leite",
+      price: 22,
       qty: 2,
-      simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_P },
+      simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_P, milk: "com" },
     });
-    expect(r.total).toBe(40);
+    expect(r.total).toBe(44);
   });
 
-  it("Jarra G de Maracujá usa R$40 e descrição correta", async () => {
+  it("Jarra G sem leite mantém R$40 e registra a escolha", async () => {
     const r = await validarItensComanda([
       {
         kind: "simple",
         price: 1,
         qty: 1,
-        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_G },
+        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_G, milk: "sem" },
       },
     ]);
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.itens[0].detail).toBe("Jarra G - Grande");
+    expect(r.itens[0].detail).toBe("Jarra G - Grande · sem leite");
     expect(r.itens[0].price).toBe(40);
     expect(r.total).toBe(40);
+  });
+
+  it("Jarra G com leite soma R$4 no servidor", async () => {
+    const r = await validarItensComanda([
+      {
+        kind: "simple",
+        price: 0.01,
+        qty: 1,
+        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_G, milk: "com" },
+      },
+    ]);
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].detail).toBe("Jarra G - Grande · com leite");
+    expect(r.itens[0].price).toBe(44);
+    expect(r.total).toBe(44);
+  });
+
+  it("comanda antiga de Jarra sem campo milk continua válida no preço-base", async () => {
+    const r = await validarItensComanda([
+      {
+        kind: "simple",
+        price: 0.01,
+        qty: 1,
+        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_P },
+      },
+    ]);
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0]).toMatchObject({
+      name: "Maracujá",
+      detail: "Jarra P - Pequena",
+      price: 20,
+      simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_P },
+    });
   });
 
   it("Copo oficial continua intacto: Acerola sem leite = R$7", async () => {
@@ -90,6 +127,19 @@ describe("validarItensComanda — Sucos do Salão", () => {
     expect(r.total).toBe(7);
   });
 
+  it("milk inválido é rejeitado", async () => {
+    const r = await validarItensComanda([
+      {
+        kind: "simple",
+        price: 22,
+        qty: 1,
+        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_P, milk: "talvez" },
+      },
+    ]);
+
+    expect(r.ok).toBe(false);
+  });
+
   it("sizeId inexistente é rejeitado", async () => {
     const r = await validarItensComanda([
       {
@@ -97,7 +147,11 @@ describe("validarItensComanda — Sucos do Salão", () => {
         name: "Maracujá",
         price: 0.01,
         qty: 1,
-        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: "salao-suco-maracuja-inexistente" },
+        simpleSelection: {
+          productId: PRODUCT_MARACUJA,
+          sizeId: "salao-suco-maracuja-inexistente",
+          milk: "com",
+        },
       },
     ]);
 
@@ -112,9 +166,9 @@ describe("validarItensComanda — Sucos do Salão", () => {
     const r = await validarItensComanda([
       {
         kind: "simple",
-        price: 20,
+        price: 22,
         qty: 1,
-        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_P },
+        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_P, milk: "com" },
       },
     ]);
 
