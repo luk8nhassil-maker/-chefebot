@@ -60,6 +60,8 @@ jobs:
           src/app/api/cardapio/route.salaoSucos.test.ts
           src/app/api/pedido-app/route.salaoSucos.test.ts
           src/app/api/salao/comandas/route.test.ts
+          src/app/api/salao/comandas/[id]/cliente/route.test.ts
+          src/app/api/salao/comandas/[id]/enviar/route.test.ts
           src/app/salao/page.test.tsx
           src/components/SalaoItensPedido.test.tsx
 
@@ -111,6 +113,7 @@ jobs:
         run: >-
           npm run lint --
           src/lib/salaoAmbiente.ts
+          src/lib/salaoCliente.server.ts
           src/lib/salaoConta.ts
           src/lib/salaoConta.server.ts
           src/lib/salaoConta.test.ts
@@ -132,7 +135,10 @@ jobs:
           src/app/api/salao/comandas/route.ts
           src/app/api/salao/comandas/route.test.ts
           src/app/api/salao/comandas/[id]/route.ts
+          src/app/api/salao/comandas/[id]/cliente/route.ts
+          src/app/api/salao/comandas/[id]/cliente/route.test.ts
           src/app/api/salao/comandas/[id]/enviar/route.ts
+          src/app/api/salao/comandas/[id]/enviar/route.test.ts
           src/app/api/salao/comandas/[id]/fechar/route.ts
           src/app/api/salao/comandas/[id]/conta/route.ts
           src/app/api/salao/comandas/[id]/rodadas/route.ts
