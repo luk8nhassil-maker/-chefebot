@@ -132,11 +132,18 @@ describe("POST /api/salao/comandas/[id]/enviar", () => {
     expect((await enviar(reqSalao({}, token), paramsFor("nao_existe"))).status).toBe(404);
   });
 
-  it("409 ao tentar enviar a mesma comanda duas vezes", async () => {
+  it("retry da mesma comanda recupera o mesmo pedido sem duplicar", async () => {
     const token = await criarTokenSalao();
     const id = await abrirEComItens(token);
-    await enviar(reqSalao({}, token), paramsFor(id));
-    expect((await enviar(reqSalao({}, token), paramsFor(id))).status).toBe(409);
+    const primeira = await enviar(reqSalao({}, token), paramsFor(id));
+    const dadosPrimeira = await primeira.json();
+    const segunda = await enviar(reqSalao({}, token), paramsFor(id));
+    const dadosSegunda = await segunda.json();
+    expect(primeira.status).toBe(200);
+    expect(segunda.status).toBe(200);
+    expect(dadosSegunda.pedidoId).toBe(dadosPrimeira.pedidoId);
+    expect(dadosSegunda.recuperado).toBe(true);
+    expect(store.get("pedidos")).toHaveLength(1);
   });
 
   it("retry com mesmo clientRequestId não cria segundo pedido", async () => {
