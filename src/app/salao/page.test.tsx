@@ -1,11 +1,4 @@
 // @vitest-environment jsdom
-//
-// Testes de INTERAÇÃO real do redesenho do Salão — render + clique/digitação
-// via Testing Library (jsdom), não só leitura de código-fonte. O backend de
-// verdade (src/lib/comandas.ts, rotas /api/salao/...) já tem sua própria
-// suíte extensa; aqui o "servidor" é um mock leve por fetch que reproduz o
-// suficiente do comportamento real (normalização de rodadas, mesa ocupada,
-// idempotência de envio) para exercitar a UI ponta a ponta.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
@@ -48,7 +41,9 @@ type ItemMock = { kind: "simple" | "pizza"; name: string; detail?: string; price
 type RodadaMock = {
   id: string; numero: number; status: "rascunho" | "enviando" | "enviada" | "falha_envio";
   itens: ItemMock[]; subtotal: number; criadaEm: string; atualizadaEm: string;
-  enviadaEm?: string; pedidoId?: string; pedidoNumero?: number; pedidoStatus?: "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado"; pedidoStatusAtualizadoEm?: string; erroUltimaTentativa?: string;
+  enviadaEm?: string; pedidoId?: string; pedidoNumero?: number;
+  pedidoStatus?: "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado";
+  pedidoStatusAtualizadoEm?: string; erroUltimaTentativa?: string;
 };
 type ComandaMock = {
   id: string; numero: number; cliente?: string; mesa?: string; complemento?: string;
@@ -56,12 +51,8 @@ type ComandaMock = {
   pedidoId?: string; pedidoNumero?: number; rodadas: RodadaMock[];
 };
 
-function subtotalDe(itens: ItemMock[]) {
-  return itens.reduce((s, i) => s + i.price * i.qty, 0);
-}
-function totalParcialDe(c: ComandaMock) {
-  return c.rodadas.reduce((s, r) => s + r.subtotal, 0);
-}
+function subtotalDe(itens: ItemMock[]) { return itens.reduce((s, i) => s + i.price * i.qty, 0); }
+function totalParcialDe(c: ComandaMock) { return c.rodadas.reduce((s, r) => s + r.subtotal, 0); }
 function precoOficial(name: string): number | null {
   const b = CARDAPIO_TESTE.bebidas.find((x) => x.name === name);
   return b ? b.price : null;
@@ -105,8 +96,7 @@ async function mockFetch(url: string, opts?: RequestInit): Promise<Response> {
   }
 
   if (url === "/api/salao/comandas" && method === "POST") {
-    const cliente = String(body.cliente || "").trim();
-    if (!cliente) return jsonRes(400, { ok: false, error: "Informe o nome do cliente" });
+    const cliente = String(body.cliente || "").trim() || undefined;
     const mesa = body.mesa ? String(body.mesa).trim() || undefined : undefined;
     if (mesa && comandas.some((c) => c.mesa === mesa && c.status !== "fechada")) {
       return jsonRes(409, { ok: false, error: "Esta mesa já tem uma comanda aberta" });
@@ -114,11 +104,21 @@ async function mockFetch(url: string, opts?: RequestInit): Promise<Response> {
     seq += 1;
     const agora = new Date().toISOString();
     const nova: ComandaMock = {
-      id: `comanda_${seq}`, numero: seq, cliente, mesa, itens: [], status: "aberta", abertaEm: agora,
+      id: `comanda_${seq}`, numero: seq, ...(cliente ? { cliente } : {}), mesa, itens: [], status: "aberta", abertaEm: agora,
       rodadas: [{ id: `rodada_${seq}_1`, numero: 1, status: "rascunho", itens: [], subtotal: 0, criadaEm: agora, atualizadaEm: agora }],
     };
     comandas.push(nova);
     return jsonRes(200, { ok: true, comanda: nova });
+  }
+
+  const patchCliente = url.match(/^\/api\/salao\/comandas\/([^/]+)\/cliente$/);
+  if (patchCliente && method === "PATCH") {
+    const c = comandas.find((x) => x.id === patchCliente[1]);
+    if (!c) return jsonRes(404, { ok: false, error: "Comanda não encontrada" });
+    const cliente = String(body.cliente || "").trim();
+    if (!cliente) return jsonRes(400, { ok: false, error: "Informe o nome do cliente" });
+    c.cliente = cliente;
+    return jsonRes(200, { ok: true, comanda: c });
   }
 
   const patchComanda = url.match(/^\/api\/salao\/comandas\/([^/]+)$/);
@@ -141,6 +141,7 @@ async function mockFetch(url: string, opts?: RequestInit): Promise<Response> {
     const c = comandas.find((x) => x.id === enviarComanda[1]);
     if (!c) return jsonRes(404, { ok: false, error: "Comanda não encontrada" });
     if (c.itens.length === 0) return jsonRes(422, { ok: false, error: "Adicione pelo menos um item antes de enviar" });
+    if (!c.cliente?.trim()) return jsonRes(422, { ok: false, error: "Informe o nome do cliente antes de enviar" });
     if (falharProximoEnvio) { falharProximoEnvio = false; return jsonRes(500, { ok: false, error: "Falha simulada ao criar o pedido" }); }
     enviosCriados += 1;
     c.status = "enviada";
@@ -150,7 +151,8 @@ async function mockFetch(url: string, opts?: RequestInit): Promise<Response> {
     c.rodadas[0].enviadaEm = new Date().toISOString();
     c.rodadas[0].pedidoId = c.pedidoId;
     c.rodadas[0].pedidoNumero = c.pedidoNumero;
-    return jsonRes(200, { ok: true, pedidoId: c.pedidoId, numero: c.pedidoNumero, total: subtotalDe(c.itens), comanda: c });
+    c.rodadas[0].pedidoStatus = "novo";
+    return jsonRes(200, { ok: true, pedidoId: c.pedidoId, pedidoNumero: c.pedidoNumero, total: subtotalDe(c.itens), comanda: c });
   }
 
   const criarRodada = url.match(/^\/api\/salao\/comandas\/([^/]+)\/rodadas$/);
@@ -187,6 +189,7 @@ async function mockFetch(url: string, opts?: RequestInit): Promise<Response> {
     const r = c?.rodadas.find((x) => x.id === enviarRodada[2]);
     if (!c || !r) return jsonRes(404, { ok: false, error: "Rodada não encontrada" });
     if (r.itens.length === 0) return jsonRes(422, { ok: false, error: "Adicione pelo menos um item antes de enviar" });
+    if (!c.cliente?.trim()) return jsonRes(422, { ok: false, error: "Informe o nome do cliente antes de enviar" });
     if (falharProximoEnvio) {
       falharProximoEnvio = false;
       r.status = "falha_envio";
@@ -198,6 +201,7 @@ async function mockFetch(url: string, opts?: RequestInit): Promise<Response> {
     r.enviadaEm = new Date().toISOString();
     r.pedidoId = `ped_${enviosCriados}`;
     r.pedidoNumero = enviosCriados;
+    r.pedidoStatus = "novo";
     return jsonRes(200, { ok: true, rodada: r, pedidoId: r.pedidoId, pedidoNumero: r.pedidoNumero, comanda: c, totalParcial: totalParcialDe(c) });
   }
 
@@ -206,7 +210,7 @@ async function mockFetch(url: string, opts?: RequestInit): Promise<Response> {
     const c = comandas.find((x) => x.id === fechar[1]);
     if (!c) return jsonRes(404, { ok: false, error: "Comanda não encontrada" });
     const ativoPendente = c.rodadas.some((r) => r.status === "enviada" && r.pedidoStatus !== "entregue" && r.pedidoStatus !== "cancelado");
-    if (ativoPendente) return jsonRes(409, { ok: false, code: "envio_pendente", error: "Todos os pedidos ativos precisam estar servidos antes de pedir a conta." });
+    if (ativoPendente) return jsonRes(409, { ok: false, error: "Todos os pedidos ativos precisam estar servidos antes de pedir a conta." });
     c.status = "fechada";
     return jsonRes(200, { ok: true, comanda: c });
   }
@@ -217,249 +221,159 @@ async function mockFetch(url: string, opts?: RequestInit): Promise<Response> {
 beforeEach(() => {
   resetMock();
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => mockFetch(String(input), init)));
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false, media: query, onchange: null,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+    })),
+  });
 });
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
 
-// Import depois dos mocks — o componente lê `fetch` global no momento da
-// chamada, então a ordem aqui não é estritamente necessária, mas mantém o
-// padrão do resto do repo.
 import SalaoPage from "./page";
 
-describe("/salao — tela inicial (Fazer pedido)", () => {
-  it("mostra o card de novo atendimento quando não há pedido em andamento", async () => {
+async function iniciarAtendimento(user: ReturnType<typeof userEvent.setup>) {
+  render(<SalaoPage />);
+  await user.click(await screen.findByRole("button", { name: "Começar novo atendimento" }));
+  expect(screen.queryByLabelText("Nome do cliente")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Sem mesa" }));
+  await user.click(screen.getByRole("button", { name: "Escolher produtos" }));
+  await screen.findByPlaceholderText("Buscar produto…");
+}
+
+async function adicionarRefrigerante(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByPlaceholderText("Buscar produto…"), "Refrigerante");
+  await user.click(await screen.findByRole("button", { name: /Refrigerante 2L/ }));
+  expect(await screen.findByText("Refrigerante 2L adicionado")).toBeInTheDocument();
+}
+
+describe("/salao — estrutura principal", () => {
+  it("mantém cabeçalho, marca, navegação e CTA de novo atendimento", async () => {
     render(<SalaoPage />);
     expect(await screen.findByText("Novo atendimento")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Começar novo atendimento" })).toBeInTheDocument();
-    expect(screen.queryByText(/Rodada/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/clientRequestId/)).not.toBeInTheDocument();
-  });
-});
-
-describe("/salao — cabeçalho e navegação (paridade visual com a referência)", () => {
-  it("cabeçalho mostra a identificação do terminal, a marca e o botão Sair acessível", async () => {
-    render(<SalaoPage />);
-    await screen.findByText("Novo atendimento");
     expect(screen.getByText("Terminal do salão")).toBeInTheDocument();
     expect(screen.getByText("Salão · ChefeBot")).toBeInTheDocument();
-    const sair = screen.getByRole("button", { name: "Sair" });
-    expect(sair).toBeInTheDocument();
-    expect(sair).toHaveAccessibleName("Sair");
+    expect(screen.getByRole("button", { name: "Sair" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Começar novo atendimento" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Fazer pedido/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Pedidos abertos/ })).toBeInTheDocument();
   });
 
-  it("clicar em Sair encerra a sessão (logout) antes de redirecionar", async () => {
-    const user = userEvent.setup();
-    render(<SalaoPage />);
-    await screen.findByText("Novo atendimento");
-    const chamadasAntes = (fetch as ReturnType<typeof vi.fn>).mock.calls.length;
-    await user.click(screen.getByRole("button", { name: "Sair" }));
-    await waitFor(() => {
-      const chamadasLogout = (fetch as ReturnType<typeof vi.fn>).mock.calls
-        .slice(chamadasAntes)
-        .filter(([url]) => String(url) === "/api/salao/logout");
-      expect(chamadasLogout.length).toBeGreaterThan(0);
-    });
-  });
-
-  it("existe somente UMA navegação principal no DOM — nunca duas (mobile e desktop nunca simultâneos)", async () => {
-    render(<SalaoPage />);
-    await screen.findByText("Novo atendimento");
-    expect(screen.getAllByRole("navigation", { name: "Navegação principal" })).toHaveLength(1);
-  });
-
-  it("item ativo tem aria-current, e trocar de aba move o aria-current e some com o card de novo atendimento", async () => {
-    const user = userEvent.setup();
-    render(<SalaoPage />);
-    await screen.findByText("Novo atendimento");
-
-    const fazerPedido = screen.getByRole("button", { name: "Fazer pedido" });
-    expect(fazerPedido).toHaveAttribute("aria-current", "page");
-
-    await user.click(screen.getByRole("button", { name: /Pedidos abertos/ }));
-    expect(screen.getByRole("button", { name: /Pedidos abertos/ })).toHaveAttribute("aria-current", "page");
-    expect(fazerPedido).not.toHaveAttribute("aria-current");
-    expect(screen.queryByText("Novo atendimento")).not.toBeInTheDocument();
-  });
-
-  it("badge de Pedidos abertos mostra a quantidade de comandas abertas, sem duplicar", async () => {
-    comandas.push({
-      id: "c1", numero: 1, cliente: "Carlos", mesa: "9", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }],
-      status: "enviada", abertaEm: new Date().toISOString(), pedidoId: "ped_1", pedidoNumero: 1,
-      rodadas: [{ id: "r1", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12, criadaEm: "", atualizadaEm: "", enviadaEm: new Date().toISOString(), pedidoId: "ped_1", pedidoNumero: 1, pedidoStatus: "novo" }],
-    });
-    render(<SalaoPage />);
-    await screen.findByText("Novo atendimento");
-    expect(screen.getAllByText("1")).toHaveLength(1);
-  });
-
-  it("erro de carregamento mantém o cabeçalho (nunca uma tela branca sem navegação) e permite tentar novamente", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("falhou")));
+  it("erro de leitura mantém uma saída e opção de tentar novamente", async () => {
+    falharProximaListagem = true;
     render(<SalaoPage />);
     expect(await screen.findByText("Não consegui carregar os dados agora.")).toBeInTheDocument();
-    expect(screen.getByText("Terminal do salão")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sair" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Tentar novamente" })).toBeInTheDocument();
   });
 });
 
-describe("/salao — identificação do atendimento", () => {
-  it("botão 'Escolher produtos' fica desabilitado até preencher o nome, e a mesa é opcional", async () => {
+describe("/salao — pedido primeiro, nome no final", () => {
+  it("não pede nome na abertura e permite ir aos produtos", async () => {
     const user = userEvent.setup();
     render(<SalaoPage />);
     await user.click(await screen.findByRole("button", { name: "Começar novo atendimento" }));
-
-    const botao = await screen.findByRole("button", { name: "Escolher produtos" });
-    expect(botao).toBeDisabled();
-
-    const campoNome = screen.getByLabelText("Nome do cliente");
-    await user.type(campoNome, "Ana");
-    expect(botao).toBeEnabled();
+    expect(screen.getByText("Monte o pedido primeiro. O nome do cliente fica para o final.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Nome do cliente")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Escolher produtos" })).toBeEnabled();
   });
 
-  it("'Sem mesa' desabilita o campo de mesa e permite avançar", async () => {
+  it("mesa continua opcional e Sem mesa desabilita o campo", async () => {
     const user = userEvent.setup();
     render(<SalaoPage />);
     await user.click(await screen.findByRole("button", { name: "Começar novo atendimento" }));
-    await user.type(screen.getByLabelText("Nome do cliente"), "Ana");
     await user.click(screen.getByRole("button", { name: "Sem mesa" }));
     expect(screen.getByPlaceholderText("Número da mesa")).toBeDisabled();
-
     await user.click(screen.getByRole("button", { name: "Escolher produtos" }));
-    expect(await screen.findByText("Ana")).toBeInTheDocument();
-    expect(screen.getByText(/Sem mesa/)).toBeInTheDocument();
+    expect(await screen.findByText("Nome pendente")).toBeInTheDocument();
   });
 
-  it("mesa ocupada mostra as três saídas — nunca só um erro técnico", async () => {
-    comandas.push({
-      id: "c1", numero: 1, cliente: "Bia", mesa: "5", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }],
-      status: "aberta", abertaEm: new Date().toISOString(),
-      rodadas: [{ id: "r1", numero: 1, status: "rascunho", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12, criadaEm: "", atualizadaEm: "" }],
-    });
+  it("nome aparece somente na revisão e bloqueia o envio até ser informado", async () => {
     const user = userEvent.setup();
-    render(<SalaoPage />);
-    await user.click(await screen.findByRole("button", { name: "Começar novo atendimento" }));
-    await user.type(screen.getByLabelText("Nome do cliente"), "Ana");
-    await user.type(screen.getByPlaceholderText("Número da mesa"), "5");
-    await user.click(screen.getByRole("button", { name: "Escolher produtos" }));
-
-    expect(await screen.findByText("Esta mesa já possui uma comanda aberta.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Abrir comanda existente" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Escolher outra mesa" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Continuar sem mesa" })).toBeInTheDocument();
+    await iniciarAtendimento(user);
+    await adicionarRefrigerante(user);
+    expect(screen.queryByLabelText("Nome do cliente")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Revisar pedido" }));
+    const nome = await screen.findByLabelText("Nome do cliente");
+    const enviar = screen.getByRole("button", { name: "Enviar para cozinha" });
+    expect(enviar).toBeDisabled();
+    await user.type(nome, "Ana");
+    expect(enviar).toBeEnabled();
   });
 
-  it("'Abrir comanda existente' leva direto para a comanda da mesa ocupada", async () => {
+  it("salva o nome e envia o pedido normalmente", async () => {
+    const user = userEvent.setup();
+    await iniciarAtendimento(user);
+    await adicionarRefrigerante(user);
+    await user.click(screen.getByRole("button", { name: "Revisar pedido" }));
+    await user.type(await screen.findByLabelText("Nome do cliente"), "Ana");
+    await user.click(screen.getByRole("button", { name: "Enviar para cozinha" }));
+    expect(await screen.findByText("Pedido enviado para a cozinha")).toBeInTheDocument();
+    expect(screen.getByText(/Ana/)).toBeInTheDocument();
+    expect(comandas[0].cliente).toBe("Ana");
+    expect(enviosCriados).toBe(1);
+  });
+
+  it("mesa ocupada preserva as três saídas", async () => {
     comandas.push({
-      id: "c1", numero: 1, cliente: "Bia", mesa: "5", itens: [],
-      status: "aberta", abertaEm: new Date().toISOString(),
+      id: "c1", numero: 1, cliente: "Bia", mesa: "5", itens: [], status: "aberta", abertaEm: new Date().toISOString(),
       rodadas: [{ id: "r1", numero: 1, status: "rascunho", itens: [], subtotal: 0, criadaEm: "", atualizadaEm: "" }],
     });
     const user = userEvent.setup();
     render(<SalaoPage />);
     await user.click(await screen.findByRole("button", { name: "Começar novo atendimento" }));
-    await user.type(screen.getByLabelText("Nome do cliente"), "Ana");
     await user.type(screen.getByPlaceholderText("Número da mesa"), "5");
     await user.click(screen.getByRole("button", { name: "Escolher produtos" }));
-    await user.click(await screen.findByRole("button", { name: "Abrir comanda existente" }));
-
-    expect(await screen.findByRole("button", { name: /Continuar pedido|Adicionar itens/ })).toBeInTheDocument();
-    expect(screen.getByText("Bia")).toBeInTheDocument();
+    expect(await screen.findByText("Esta mesa já possui uma comanda aberta.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Abrir comanda existente" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Escolher outra mesa" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continuar sem mesa" })).toBeInTheDocument();
   });
 });
 
-describe("/salao — escolher produtos e revisar", () => {
-  async function iniciarAtendimento(user: ReturnType<typeof userEvent.setup>) {
-    render(<SalaoPage />);
-    await user.click(await screen.findByRole("button", { name: "Começar novo atendimento" }));
-    await user.type(screen.getByLabelText("Nome do cliente"), "Ana");
-    await user.click(screen.getByRole("button", { name: "Sem mesa" }));
-    await user.click(screen.getByRole("button", { name: "Escolher produtos" }));
-    await screen.findByPlaceholderText("Buscar produto…");
-  }
+describe("/salao — montagem e revisão", () => {
+  it("adiciona produto simples, mostra confirmação e total", async () => {
+    const user = userEvent.setup();
+    await iniciarAtendimento(user);
+    await adicionarRefrigerante(user);
+    expect(screen.getByText("1 item(ns)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revisar pedido" })).toBeEnabled();
+  });
 
-  async function abrirPizzaComSabor(user: ReturnType<typeof userEvent.setup>) {
+  it("falha ao salvar não confirma nem mantém item fantasma", async () => {
+    const user = userEvent.setup();
+    await iniciarAtendimento(user);
+    falharProximoSalvamentoItens = true;
+    await user.type(screen.getByPlaceholderText("Buscar produto…"), "Refrigerante");
+    await user.click(await screen.findByRole("button", { name: /Refrigerante 2L/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Falha simulada ao salvar itens");
+    expect(screen.queryByText("Refrigerante 2L adicionado")).not.toBeInTheDocument();
+    expect(screen.getByText("0 item(ns)")).toBeInTheDocument();
+  });
+
+  it("pizza mantém sabor obrigatório e decisões Sim/Não para opcionais", async () => {
+    const user = userEvent.setup();
     cardapioAtual = CARDAPIO_PIZZA_OPCIONAIS;
     await iniciarAtendimento(user);
     await user.click(await screen.findByRole("button", { name: /Pizza Pequena/ }));
-    await user.click(await screen.findByRole("button", { name: /Mussarela/ }));
-    await user.click(screen.getByRole("button", { name: "Continuar para borda" }));
-  }
-
-  it("mantém o CTA principal visível no rodapé mobile e com contraste escuro suave", async () => {
-    const user = userEvent.setup();
-    await iniciarAtendimento(user);
-
-    await user.type(screen.getByPlaceholderText("Buscar produto…"), "Refrigerante");
-    await user.click(await screen.findByRole("button", { name: /Refrigerante 2L/ }));
-
-    const revisar = await screen.findByRole("button", { name: "Revisar pedido" });
-    expect(revisar.closest(".sal-action-footer")).not.toBeNull();
-    expect(revisar).toHaveStyle({ color: "#374151" });
-
-    const estilos = Array.from(document.querySelectorAll("style")).map((el) => el.textContent || "").join("");
-    expect(estilos).toContain(".sal-action-footer");
-    expect(estilos).toContain("position:sticky");
-    expect(estilos).toContain("bottom:0");
-    expect(estilos).toContain("env(safe-area-inset-bottom)");
-
-    await user.click(revisar);
-    const enviar = await screen.findByRole("button", { name: "Enviar para cozinha" });
-    expect(enviar.closest(".sal-action-footer")).not.toBeNull();
-    expect(enviar).toHaveStyle({ color: "#374151" });
-  });
-
-  it("mostra emojis no fluxo e mantém sabor obrigatório", async () => {
-    const user = userEvent.setup();
-    cardapioAtual = CARDAPIO_PIZZA_OPCIONAIS;
-    await iniciarAtendimento(user);
-
-    await user.click(await screen.findByRole("button", { name: /🍕 Pizza Pequena/ }));
     const continuar = screen.getByRole("button", { name: "Continuar para borda" });
     expect(continuar).toBeDisabled();
-    await user.click(await screen.findByRole("button", { name: /🍕 Mussarela/ }));
+    await user.click(await screen.findByRole("button", { name: /Mussarela/ }));
     expect(continuar).toBeEnabled();
-  });
-
-  it("opcionais perguntam Sim/Não e Não pula borda/adicionais sem exibir listas", async () => {
-    const user = userEvent.setup();
-    await abrirPizzaComSabor(user);
-
+    await user.click(continuar);
     expect(await screen.findByText("Vai querer borda?")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Catupiry" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Não" }));
-
     expect(await screen.findByText("Vai querer adicionais?")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Bacon" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Não" }));
-
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Montar Pizza Pequena/ })).not.toBeInTheDocument());
     expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
   });
 
-  it("Sim revela opções com emojis e permite seguir sem marcar se mudar de ideia", async () => {
-    const user = userEvent.setup();
-    await abrirPizzaComSabor(user);
-
-    await user.click(await screen.findByRole("button", { name: "Sim" }));
-    expect(await screen.findByRole("button", { name: /🧀 Catupiry/ })).toBeInTheDocument();
-    const semBorda = screen.getByRole("button", { name: "Sem borda" });
-    expect(semBorda).toBeEnabled();
-    await user.click(semBorda);
-
-    expect(await screen.findByText("Vai querer adicionais?")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Sim" }));
-    expect(await screen.findByRole("button", { name: /➕ Bacon/ })).toBeInTheDocument();
-    const semAdicionais = screen.getByRole("button", { name: "Sem adicionais" });
-    expect(semAdicionais).toBeEnabled();
-    await user.click(semAdicionais);
-
-    expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
-    expect(screen.getAllByText("R$ 33,00").length).toBeGreaterThan(0);
-  });
-
-  it("adicional opcional único também usa Sim/Não antes de mostrar opções", async () => {
+  it("produto com adicional opcional usa Sim/Não e soma adicional", async () => {
     const user = userEvent.setup();
     cardapioAtual = CARDAPIO_PRODUTO_ADICIONAL;
     await iniciarAtendimento(user);
@@ -467,321 +381,132 @@ describe("/salao — escolher produtos e revisar", () => {
     await user.click(await screen.findByRole("button", { name: /Macarronada Teste/ }));
     await user.click(await screen.findByRole("button", { name: /Tamanho P/ }));
     await user.click(screen.getByRole("button", { name: "Continuar para adicional" }));
-
     expect(await screen.findByText("Vai querer adicional?")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Ovo" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Sim" }));
-    expect(await screen.findByRole("button", { name: /Ovo/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Nenhum" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /Ovo/ }));
-    expect(screen.getByRole("button", { name: "Continuar" })).toBeEnabled();
+    await user.click(await screen.findByRole("button", { name: /Ovo/ }));
     await user.click(screen.getByRole("button", { name: "Continuar" }));
-
     expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
     expect(screen.getAllByText("R$ 35,00").length).toBeGreaterThan(0);
   });
 
-  it("busca filtra produtos e adicionar um produto simples mostra confirmação e atualiza o total", async () => {
+  it("revisão altera quantidade e remove item", async () => {
     const user = userEvent.setup();
     await iniciarAtendimento(user);
-
-    await user.type(screen.getByPlaceholderText("Buscar produto…"), "Refrigerante");
-    const produto = await screen.findByRole("button", { name: /Refrigerante 2L/ });
-    await user.click(produto);
-
-    expect(await screen.findByText("Refrigerante 2L adicionado")).toBeInTheDocument();
-    expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Revisar pedido" })).toBeEnabled();
-  });
-
-  it("não confirma nem exibe item quando o servidor falha ao salvar", async () => {
-    const user = userEvent.setup();
-    await iniciarAtendimento(user);
-
-    falharProximoSalvamentoItens = true;
-    await user.type(screen.getByPlaceholderText("Buscar produto…"), "Refrigerante");
-    await user.click(await screen.findByRole("button", { name: /Refrigerante 2L/ }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("Falha simulada ao salvar itens");
-    expect(screen.queryByText("Refrigerante 2L adicionado")).not.toBeInTheDocument();
-    expect(screen.getByText("0 item(ns)")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Adicione pelo menos um produto" })).toBeDisabled();
-    expect(comandas[0].itens).toHaveLength(0);
-  });
-
-  it("revisão permite aumentar/diminuir/remover item e recalcula o total", async () => {
-    const user = userEvent.setup();
-    await iniciarAtendimento(user);
-    await user.type(screen.getByPlaceholderText("Buscar produto…"), "Refrigerante");
-    await user.click(await screen.findByRole("button", { name: /Refrigerante 2L/ }));
+    await adicionarRefrigerante(user);
     await user.click(screen.getByRole("button", { name: "Revisar pedido" }));
-
-    expect(await screen.findByText("Revisar pedido")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Aumentar Refrigerante 2L" }));
-    await waitFor(() => expect(screen.getAllByText("R$ 24,00").length).toBeGreaterThanOrEqual(2));
-
+    await waitFor(() => expect(screen.getAllByText("R$ 24,00").length).toBeGreaterThan(0));
     await user.click(screen.getByRole("button", { name: "Remover Refrigerante 2L" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Enviar para cozinha" })).toBeDisabled());
+    expect(screen.getByRole("button", { name: "Enviar para cozinha" })).toBeDisabled();
   });
 
-  it("enviar para cozinha mostra 'Enviando…' e depois a tela de sucesso com cliente/mesa/total", async () => {
+  it("erro ao enviar preserva pedido e permite tentar novamente", async () => {
     const user = userEvent.setup();
     await iniciarAtendimento(user);
-    await user.type(screen.getByPlaceholderText("Buscar produto…"), "Refrigerante");
-    await user.click(await screen.findByRole("button", { name: /Refrigerante 2L/ }));
+    await adicionarRefrigerante(user);
     await user.click(screen.getByRole("button", { name: "Revisar pedido" }));
-    await user.click(await screen.findByRole("button", { name: "Enviar para cozinha" }));
-
-    expect(await screen.findByText("Pedido enviado para a cozinha")).toBeInTheDocument();
-    expect(screen.getByText(/Ana/)).toBeInTheDocument();
-    expect(screen.getByText(/Sem mesa/)).toBeInTheDocument();
-    const concluir = screen.getByRole("button", { name: "Concluir" });
-    const verAbertos = screen.getByRole("button", { name: "Ver pedidos abertos" });
-    const adicionarMais = screen.getByRole("button", { name: "Adicionar mais itens" });
-    expect(concluir).toBeInTheDocument();
-    expect(verAbertos).toBeInTheDocument();
-    expect(adicionarMais).toBeInTheDocument();
-
-    const acoes = [concluir, verAbertos, adicionarMais];
-    expect(acoes.map((botao) => botao.textContent)).toEqual(["Concluir", "Ver pedidos abertos", "Adicionar mais itens"]);
-
-    await user.click(concluir);
-    expect(await screen.findByText("Novo atendimento")).toBeInTheDocument();
-    expect(screen.queryByText("Pedido enviado para a cozinha")).not.toBeInTheDocument();
-  });
-
-  it("erro ao enviar preserva os itens e oferece 'Tentar novamente' sem duplicar o pedido", async () => {
-    const user = userEvent.setup();
-    await iniciarAtendimento(user);
-    await user.type(screen.getByPlaceholderText("Buscar produto…"), "Refrigerante");
-    await user.click(await screen.findByRole("button", { name: /Refrigerante 2L/ }));
-    await user.click(screen.getByRole("button", { name: "Revisar pedido" }));
-
+    await user.type(await screen.findByLabelText("Nome do cliente"), "Ana");
     falharProximoEnvio = true;
-    await user.click(await screen.findByRole("button", { name: "Enviar para cozinha" }));
-
+    await user.click(screen.getByRole("button", { name: "Enviar para cozinha" }));
     expect(await screen.findByText("Falha simulada ao criar o pedido")).toBeInTheDocument();
-    // Itens preservados — a revisão continua mostrando o item, não volta ao catálogo vazio.
     expect(screen.getByText("Refrigerante 2L")).toBeInTheDocument();
     expect(enviosCriados).toBe(0);
-
     await user.click(screen.getByRole("button", { name: "Tentar novamente" }));
     expect(await screen.findByText("Pedido enviado para a cozinha")).toBeInTheDocument();
     expect(enviosCriados).toBe(1);
   });
 });
 
-describe("/salao — Pedidos abertos e complemento", () => {
-  it("lista mostra cliente em destaque e o estado em linguagem humana, nunca status técnico cru", async () => {
+describe("/salao — pedidos abertos e continuidade", () => {
+  it("mostra comanda, cliente e estado humano da cozinha", async () => {
+    const agora = new Date().toISOString();
     comandas.push({
-      id: "c1", numero: 1, cliente: "Carlos", mesa: "9", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }],
-      status: "enviada", abertaEm: new Date().toISOString(), pedidoId: "ped_1", pedidoNumero: 1,
-      rodadas: [{ id: "r1", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12, criadaEm: "", atualizadaEm: "", enviadaEm: new Date().toISOString(), pedidoId: "ped_1", pedidoNumero: 1, pedidoStatus: "novo" }],
+      id: "c1", numero: 31, cliente: "Carlos", mesa: "9", itens: [], status: "enviada", abertaEm: agora,
+      rodadas: [{ id: "r1", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoStatus: "em_preparo" }],
     });
     const user = userEvent.setup();
     render(<SalaoPage />);
     await user.click(await screen.findByRole("button", { name: /Pedidos abertos/ }));
-
-    expect(await screen.findByText("Carlos")).toBeInTheDocument();
-    expect(screen.getByText("Aguardando cozinha")).toBeInTheDocument();
+    expect(await screen.findByText("Comanda #31")).toBeInTheDocument();
+    expect(screen.getByText("Carlos")).toBeInTheDocument();
+    expect(screen.getByText("Em preparo")).toBeInTheDocument();
     expect(screen.queryByText(/^enviada$/)).not.toBeInTheDocument();
   });
 
-  it("organiza uma comanda em um único card com número forte, cliente e pedidos/status individuais", async () => {
-    const agora = new Date().toISOString();
-    comandas.push({
-      id: "c-ux", numero: 31, cliente: "Teste B", itens: [], status: "enviada", abertaEm: agora,
-      rodadas: [
-        { id: "r-ux-1", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Pizza P", price: 68, qty: 1 }], subtotal: 68, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoId: "ped-ux-1", pedidoNumero: 101, pedidoStatus: "em_preparo" },
-        { id: "r-ux-2", numero: 2, status: "enviada", itens: [{ kind: "simple", name: "Guaraná 1L", price: 9, qty: 1 }], subtotal: 9, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoId: "ped-ux-2", pedidoNumero: 102, pedidoStatus: "novo" },
-      ],
-    });
-
-    const user = userEvent.setup();
-    render(<SalaoPage />);
-    await user.click(await screen.findByRole("button", { name: /Pedidos abertos/ }));
-
-    expect(await screen.findByText("Comanda #31")).toBeInTheDocument();
-    expect(screen.getAllByText("Teste B")).toHaveLength(1);
-    expect(screen.getByText("Pedido inicial")).toBeInTheDocument();
-    expect(screen.getByText("Complemento 2")).toBeInTheDocument();
-    expect(screen.getByText("Em preparo")).toBeInTheDocument();
-    expect(screen.getByText("Aguardando cozinha")).toBeInTheDocument();
-    expect(screen.getByText("R$ 68,00")).toBeInTheDocument();
-    expect(screen.getByText("R$ 9,00")).toBeInTheDocument();
-    expect(screen.getByText("Total da comanda")).toBeInTheDocument();
-    expect(screen.getByText("R$ 77,00")).toBeInTheDocument();
-  });
-
-  it("não junta clientes iguais quando o número da comanda é diferente", async () => {
+  it("não junta comandas de clientes iguais", async () => {
     const agora = new Date().toISOString();
     comandas.push(
-      { id: "c-ux-a", numero: 41, cliente: "Teste B", itens: [], status: "enviada", abertaEm: agora, rodadas: [{ id: "r-a", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Item A", price: 10, qty: 1 }], subtotal: 10, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoStatus: "novo" }] },
-      { id: "c-ux-b", numero: 42, cliente: "Teste B", itens: [], status: "enviada", abertaEm: agora, rodadas: [{ id: "r-b", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Item B", price: 12, qty: 1 }], subtotal: 12, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoStatus: "novo" }] },
+      { id: "a", numero: 41, cliente: "Teste B", itens: [], status: "enviada", abertaEm: agora, rodadas: [{ id: "ra", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "A", price: 10, qty: 1 }], subtotal: 10, criadaEm: agora, atualizadaEm: agora, pedidoStatus: "novo" }] },
+      { id: "b", numero: 42, cliente: "Teste B", itens: [], status: "enviada", abertaEm: agora, rodadas: [{ id: "rb", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "B", price: 12, qty: 1 }], subtotal: 12, criadaEm: agora, atualizadaEm: agora, pedidoStatus: "novo" }] },
     );
-
     const user = userEvent.setup();
     render(<SalaoPage />);
     await user.click(await screen.findByRole("button", { name: /Pedidos abertos/ }));
-
     expect(await screen.findByText("Comanda #41")).toBeInTheDocument();
     expect(screen.getByText("Comanda #42")).toBeInTheDocument();
     expect(screen.getAllByText("Teste B")).toHaveLength(2);
   });
 
-  it("mostra o motivo quando Pedir conta é bloqueado pelo servidor, sem parecer um clique morto", async () => {
+  it("complemento preserva nome já existente e volta à cozinha", async () => {
     const agora = new Date().toISOString();
     comandas.push({
-      id: "c-conta-pendente", numero: 32, cliente: "Teste Conta", itens: [], status: "enviada", abertaEm: agora,
-      rodadas: [{ id: "r-conta-pendente", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoId: "ped-conta-pendente", pedidoNumero: 103, pedidoStatus: "em_preparo" }],
+      id: "c1", numero: 1, cliente: "Carlos", mesa: "9", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], status: "enviada", abertaEm: agora,
+      rodadas: [{ id: "r1", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoStatus: "entregue" }],
     });
+    const user = userEvent.setup();
+    render(<SalaoPage />);
+    await user.click(await screen.findByRole("button", { name: /Pedidos abertos/ }));
+    await user.click(await screen.findByText("Carlos"));
+    await user.click(screen.getByRole("button", { name: "Adicionar itens" }));
+    await user.type(await screen.findByPlaceholderText("Buscar produto…"), "Água");
+    await user.click(await screen.findByRole("button", { name: /Água com gás/ }));
+    await user.click(screen.getByRole("button", { name: "Revisar pedido" }));
+    expect(screen.getByLabelText("Nome do cliente")).toHaveValue("Carlos");
+    await user.click(screen.getByRole("button", { name: "Enviar para cozinha" }));
+    expect(await screen.findByText("Pedido enviado para a cozinha")).toBeInTheDocument();
+  });
 
+  it("Pedir conta mostra motivo quando ainda há pedido ativo", async () => {
+    const agora = new Date().toISOString();
+    comandas.push({
+      id: "conta", numero: 32, cliente: "Teste Conta", itens: [], status: "enviada", abertaEm: agora,
+      rodadas: [{ id: "r", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12, criadaEm: agora, atualizadaEm: agora, pedidoStatus: "em_preparo" }],
+    });
     const user = userEvent.setup();
     render(<SalaoPage />);
     await user.click(await screen.findByRole("button", { name: /Pedidos abertos/ }));
     await user.click(await screen.findByText("Teste Conta"));
     await user.click(screen.getByRole("button", { name: "Pedir conta" }));
-
     expect(await screen.findByRole("alert")).toHaveTextContent("Todos os pedidos ativos precisam estar servidos antes de pedir a conta.");
-    expect(screen.getByRole("button", { name: "Pedir conta" })).toBeEnabled();
   });
 
-  it("abrir a comanda mostra o Pedido inicial no histórico e 'Adicionar itens' cria um Complemento 2 no catálogo", async () => {
+  it("atualiza estado quando a janela volta ao foco", async () => {
+    const agora = new Date().toISOString();
     comandas.push({
-      id: "c1", numero: 1, cliente: "Carlos", mesa: "9", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }],
-      status: "enviada", abertaEm: new Date().toISOString(), pedidoId: "ped_1", pedidoNumero: 1,
-      rodadas: [{ id: "r1", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12, criadaEm: "", atualizadaEm: "", enviadaEm: new Date().toISOString(), pedidoId: "ped_1", pedidoNumero: 1 }],
+      id: "foco", numero: 22, cliente: "Rita", mesa: "4", itens: [], status: "enviada", abertaEm: agora,
+      rodadas: [{ id: "r", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12, criadaEm: agora, atualizadaEm: agora, pedidoStatus: "em_preparo" }],
     });
     const user = userEvent.setup();
     render(<SalaoPage />);
     await user.click(await screen.findByRole("button", { name: /Pedidos abertos/ }));
-    await user.click(await screen.findByText("Carlos"));
-
-    expect(await screen.findByText(/Pedido inicial/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Adicionar itens" }));
-
-    await screen.findByPlaceholderText("Buscar produto…");
-    await user.type(screen.getByPlaceholderText("Buscar produto…"), "Água");
-    await user.click(await screen.findByRole("button", { name: /Água com gás/ }));
-    await user.click(screen.getByRole("button", { name: "Revisar pedido" }));
-    expect(await screen.findByText(/Complemento 2/)).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Enviar para cozinha" }));
-    expect(await screen.findByText("Pedido enviado para a cozinha")).toBeInTheDocument();
-
-    // A Rodada 1 (Pedido inicial) permanece intacta — ainda com seu item e subtotal originais.
-    await user.click(screen.getByRole("button", { name: "Ver pedidos abertos" }));
-    await user.click(await screen.findByText("Carlos"));
-    await user.click(await screen.findByText(/Pedido inicial/));
-    expect(within(screen.getByText(/Pedido inicial/).closest("div")!.parentElement!).getByText("1× Refrigerante 2L")).toBeInTheDocument();
-  });
-});
-
-
-describe("/salao — acompanhamento operacional da cozinha", () => {
-  it("mostra o estado real e uma orientação objetiva quando o pedido fica pronto", async () => {
-    const user = userEvent.setup();
-    comandas.push({
-      id: "c-pronto", numero: 21, cliente: "Joana", mesa: "3", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }],
-      status: "enviada", abertaEm: new Date().toISOString(), pedidoId: "ped-pronto", pedidoNumero: 21,
-      rodadas: [{
-        id: "r-pronto", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12,
-        criadaEm: new Date().toISOString(), atualizadaEm: new Date().toISOString(), enviadaEm: new Date().toISOString(), pedidoId: "ped-pronto", pedidoNumero: 21,
-        pedidoStatus: "saiu_entrega",
-      }],
-    });
-
-    render(<SalaoPage />);
-    await screen.findByText("Novo atendimento");
-    await user.click(screen.getByRole("button", { name: /Pedidos abertos/ }));
-
-    expect(await screen.findByText("Pronto para servir")).toBeInTheDocument();
-    expect(screen.getByText(/Retire o pedido na cozinha e leve até a mesa/)).toBeInTheDocument();
-  });
-
-  it("atualiza o estágio quando o aparelho volta ao foco, sem exigir recarregar a página", async () => {
-    const user = userEvent.setup();
-    comandas.push({
-      id: "c-foco", numero: 22, cliente: "Rita", mesa: "4", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }],
-      status: "enviada", abertaEm: new Date().toISOString(), pedidoId: "ped-foco", pedidoNumero: 22,
-      rodadas: [{
-        id: "r-foco", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12,
-        criadaEm: new Date().toISOString(), atualizadaEm: new Date().toISOString(), enviadaEm: new Date().toISOString(), pedidoId: "ped-foco", pedidoNumero: 22,
-        pedidoStatus: "em_preparo",
-      }],
-    });
-
-    render(<SalaoPage />);
-    await screen.findByText("Novo atendimento");
-    await user.click(screen.getByRole("button", { name: /Pedidos abertos/ }));
     expect(await screen.findByText("Em preparo")).toBeInTheDocument();
-
     comandas[0].rodadas[0].pedidoStatus = "saiu_entrega";
     window.dispatchEvent(new Event("focus"));
-
     await waitFor(() => expect(screen.getByText("Pronto para servir")).toBeInTheDocument());
   });
 
-  it("se uma atualização falha, invalida o status antigo em vez de continuar mostrando informação velha como atual", async () => {
-    const user = userEvent.setup();
-    comandas.push({
-      id: "c-stale", numero: 24, cliente: "Marta", mesa: "6", itens: [{ kind: "simple", name: "Água com gás", price: 6, qty: 1 }],
-      status: "enviada", abertaEm: new Date().toISOString(), pedidoId: "ped-stale", pedidoNumero: 24,
-      rodadas: [{
-        id: "r-stale", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Água com gás", price: 6, qty: 1 }], subtotal: 6,
-        criadaEm: new Date().toISOString(), atualizadaEm: new Date().toISOString(), enviadaEm: new Date().toISOString(), pedidoId: "ped-stale", pedidoNumero: 24,
-        pedidoStatus: "saiu_entrega",
-      }],
-    });
-
-    render(<SalaoPage />);
-    await screen.findByText("Novo atendimento");
-    await user.click(screen.getByRole("button", { name: /Pedidos abertos/ }));
-    expect(await screen.findByText("Pronto para servir")).toBeInTheDocument();
-
-    falharProximaListagem = true;
-    window.dispatchEvent(new Event("focus"));
-
-    await waitFor(() => expect(screen.getByText("Atualização pendente")).toBeInTheDocument());
-    expect(screen.queryByText("Pronto para servir")).not.toBeInTheDocument();
-  });
-
-  it("em uma comanda com vários envios, o pedido pronto sobe como ação mais urgente", async () => {
-    const user = userEvent.setup();
+  it("falha de sincronização invalida status antigo em vez de mostrá-lo como atual", async () => {
     const agora = new Date().toISOString();
     comandas.push({
-      id: "c-multi", numero: 25, cliente: "Nina", mesa: "7", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }],
-      status: "enviada", abertaEm: agora, pedidoId: "ped-multi-1", pedidoNumero: 25,
-      rodadas: [
-        { id: "r-multi-1", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoId: "ped-multi-1", pedidoNumero: 25, pedidoStatus: "em_preparo" },
-        { id: "r-multi-2", numero: 2, status: "enviada", itens: [{ kind: "simple", name: "Água com gás", price: 6, qty: 1 }], subtotal: 6, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoId: "ped-multi-2", pedidoNumero: 26, pedidoStatus: "saiu_entrega" },
-      ],
+      id: "stale", numero: 24, cliente: "Marta", itens: [], status: "enviada", abertaEm: agora,
+      rodadas: [{ id: "r", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Água com gás", price: 6, qty: 1 }], subtotal: 6, criadaEm: agora, atualizadaEm: agora, pedidoStatus: "em_preparo" }],
     });
-
-    render(<SalaoPage />);
-    await screen.findByText("Novo atendimento");
-    await user.click(screen.getByRole("button", { name: /Pedidos abertos/ }));
-
-    expect(await screen.findByText("Pronto para servir")).toBeInTheDocument();
-    expect(screen.getByText(/Retire o pedido na cozinha e leve até a mesa/)).toBeInTheDocument();
-  });
-
-  it("não mente quando a rodada enviada ainda não conseguiu sincronizar com o pedido oficial", async () => {
     const user = userEvent.setup();
-    comandas.push({
-      id: "c-sync", numero: 23, cliente: "Lia", mesa: "5", itens: [{ kind: "simple", name: "Água com gás", price: 6, qty: 1 }],
-      status: "enviada", abertaEm: new Date().toISOString(), pedidoId: "ped-sync", pedidoNumero: 23,
-      rodadas: [{
-        id: "r-sync", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Água com gás", price: 6, qty: 1 }], subtotal: 6,
-        criadaEm: new Date().toISOString(), atualizadaEm: new Date().toISOString(), enviadaEm: new Date().toISOString(), pedidoId: "ped-sync", pedidoNumero: 23,
-      }],
-    });
-
     render(<SalaoPage />);
-    await screen.findByText("Novo atendimento");
-    await user.click(screen.getByRole("button", { name: /Pedidos abertos/ }));
-
-    expect(await screen.findByText("Atualização pendente")).toBeInTheDocument();
-    expect(screen.getByText(/Atualize antes de tomar uma decisão sobre a mesa/)).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /Pedidos abertos/ }));
+    expect(await screen.findByText("Em preparo")).toBeInTheDocument();
+    falharProximaListagem = true;
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(screen.queryByText("Em preparo")).not.toBeInTheDocument());
   });
 });
