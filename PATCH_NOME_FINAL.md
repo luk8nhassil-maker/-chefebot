@@ -1,1 +1,0 @@
-Arquivo temporário de apoio da branch. Será removido antes do merge.
