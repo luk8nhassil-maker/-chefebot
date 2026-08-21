@@ -55,8 +55,27 @@ export async function POST(req: NextRequest) {
     console.log("[RESET] etapa: connectionState, status:", stateRes.status, "estado:", estadoAtual ?? "desconhecido");
 
     if (stateRes.ok && estadoAtual === "open") {
+      // Instância conectada NÃO precisa de QR/reset. Apenas regrava o callback
+      // idempotente para corrigir instalações antigas que ainda apontam para o
+      // Vercel legado. Falha de webhook é explícita para não fingir sucesso.
+      const webhookResultado = await garantirWebhookEvolution(config).catch(() => null);
+      console.log("[RESET] etapa: webhook (instancia conectada), status:", webhookResultado?.status ?? "network-error");
+
       await salvarStatusConexao("connected");
-      return NextResponse.json({ ok: true, estado: "connected" });
+
+      if (!webhookResultado?.ok) {
+        return NextResponse.json(
+          {
+            ok: false,
+            estado: "connected",
+            webhook: "sync_failed",
+            error: "WhatsApp conectado, mas não foi possível atualizar o webhook da Evolution.",
+          },
+          { status: 502 },
+        );
+      }
+
+      return NextResponse.json({ ok: true, estado: "connected", webhook: "synced" });
     }
 
     if (stateRes.status === 401 || stateRes.status === 403) {
