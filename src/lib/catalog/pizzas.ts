@@ -7,6 +7,12 @@
 // Redis, a mesma fonte usada pelo bot do WhatsApp, pelo cardápio do
 // cliente e pela montagem manual — ver src/app/api/cardapio/route.ts).
 //
+// Exceção comercial aprovada em 21/08/2026: somente Portuguesa e Carne Seca,
+// ambas da categoria Especial, também podem ser vendidas no tamanho MINI por
+// R$ 20,00. O cardápio impresso original continua preservado em
+// officialMenu2026; esta exceção nova fica explícita por ID estável aqui, na
+// camada de catálogo consumida por UI e precificação server-side.
+//
 // `menu: Menu` continua no parâmetro por estabilidade de assinatura (todos
 // os chamadores existentes passam o Menu já lido) mas não é mais lido para
 // preço/produto/sabor de pizza — só a disponibilidade (`esgotados`) decide
@@ -32,7 +38,8 @@ export interface PizzaCatalogFlavor {
   aliases: string[];
   available: boolean;
   /** Preço por tamanho, em centavos — chave ausente = tamanho não permitido
-   *  para este sabor (Especiais nunca têm MINI). */
+   *  para este sabor. Especiais continuam sem MINI, exceto as exceções
+   *  comerciais explícitas em MINI_ESPECIAIS_APROVADAS_CENTS. */
   pricesBySizeCode: Partial<Record<PizzaSizeCode, number>>;
   description?: string;
 }
@@ -67,8 +74,19 @@ export interface PizzaCatalog {
   addOns: PizzaCatalogAddOn[];
 }
 
+const MINI_ESPECIAIS_APROVADAS_CENTS: Readonly<Record<string, number>> = Object.freeze({
+  "flavor-portuguesa": 2000,
+  "flavor-carne-seca": 2000,
+});
+
 function estaEsgotado(nome: string, esgotadosNorm: string[]): boolean {
   return esgotadosNorm.includes(norm(nome));
+}
+
+function precosComExcecaoMini(flavor: OfficialPizzaFlavor): Partial<Record<PizzaSizeCode, number>> {
+  const miniCents = MINI_ESPECIAIS_APROVADAS_CENTS[flavor.id];
+  if (miniCents === undefined) return flavor.pricesBySizeCode;
+  return { ...flavor.pricesBySizeCode, MINI: miniCents };
 }
 
 function toCatalogFlavor(flavor: OfficialPizzaFlavor, esgotadosNorm: string[], esgotadosIds: Set<string>): PizzaCatalogFlavor {
@@ -79,13 +97,14 @@ function toCatalogFlavor(flavor: OfficialPizzaFlavor, esgotadosNorm: string[], e
     ingredients: flavor.ingredients,
     aliases: flavor.aliases ?? [],
     available: !estaEsgotado(flavor.name, esgotadosNorm) && !esgotadosIds.has(flavor.id),
-    pricesBySizeCode: flavor.pricesBySizeCode,
+    pricesBySizeCode: precosComExcecaoMini(flavor),
   };
 }
 
 /**
  * Constrói o catálogo oficial de pizzas — sabores, preços por tamanho
- * (cardápio 2026, @/lib/catalog/officialMenu2026), bordas, adicionais — com
+ * (cardápio 2026, @/lib/catalog/officialMenu2026 + exceções comerciais
+ * explicitamente versionadas acima), bordas, adicionais — com
  * disponibilidade em tempo real a partir de `esgotados` (Redis, nunca de um
  * valor vindo do cliente). Não faz I/O.
  */
