@@ -9,15 +9,8 @@ const { store, redisMock } = vi.hoisted(() => {
       store.set(key, value);
       return "OK";
     }),
-    del: vi.fn(async (key: string) => {
-      store.delete(key);
-      return 1;
-    }),
-    incr: vi.fn(async (key: string) => {
-      const next = Number(store.get(key) || 0) + 1;
-      store.set(key, next);
-      return next;
-    }),
+    del: vi.fn(async (key: string) => { store.delete(key); return 1; }),
+    incr: vi.fn(async (key: string) => { const next = Number(store.get(key) || 0) + 1; store.set(key, next); return next; }),
     expire: vi.fn(async () => 1),
   };
   return { store, redisMock };
@@ -26,34 +19,20 @@ const { store, redisMock } = vi.hoisted(() => {
 const { verifyTokenMock } = vi.hoisted(() => ({ verifyTokenMock: vi.fn() }));
 
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
-vi.mock("@/lib/auth", async (original) => ({
-  ...(await original<typeof import("@/lib/auth")>()),
-  verifyToken: verifyTokenMock,
-}));
+vi.mock("@/lib/auth", async (original) => ({ ...(await original<typeof import("@/lib/auth")>()), verifyToken: verifyTokenMock }));
 
 import { GET, POST } from "./route";
 import { SALAO_COOKIE, criarTokenSalao } from "@/lib/salaoAuth";
 
 function reqSalao(token: string, query = "") {
-  return {
-    cookies: { get: (n: string) => (n === SALAO_COOKIE ? { value: token } : undefined) },
-    nextUrl: { searchParams: new URLSearchParams(query) },
-  } as never;
+  return { cookies: { get: (n: string) => (n === SALAO_COOKIE ? { value: token } : undefined) }, nextUrl: { searchParams: new URLSearchParams(query) } } as never;
 }
 function reqAdmin(query = "") {
-  return {
-    cookies: { get: (n: string) => (n === "auth-token" ? { value: "tok" } : undefined) },
-    nextUrl: { searchParams: new URLSearchParams(query) },
-  } as never;
+  return { cookies: { get: (n: string) => (n === "auth-token" ? { value: "tok" } : undefined) }, nextUrl: { searchParams: new URLSearchParams(query) } } as never;
 }
-function reqSemSessao() {
-  return { cookies: { get: () => undefined }, nextUrl: { searchParams: new URLSearchParams() } } as never;
-}
+function reqSemSessao() { return { cookies: { get: () => undefined }, nextUrl: { searchParams: new URLSearchParams() } } as never; }
 function postReqSalao(body: unknown, token: string) {
-  return {
-    json: async () => body,
-    cookies: { get: (n: string) => (n === SALAO_COOKIE ? { value: token } : undefined) },
-  } as never;
+  return { json: async () => body, cookies: { get: (n: string) => (n === SALAO_COOKIE ? { value: token } : undefined) } } as never;
 }
 
 beforeEach(() => {
@@ -88,118 +67,68 @@ describe("GET /api/salao/comandas", () => {
     expect((await fechadas.json()).comandas).toHaveLength(0);
   });
 
-  it("cada comanda vem com rodadas normalizadas e totalParcial, mesmo sem nenhuma rodada gravada ainda", async () => {
+  it("cada comanda vem com rodadas normalizadas e totalParcial", async () => {
     const token = await criarTokenSalao();
-    await POST(postReqSalao({ cliente: "Ana", mesa: "5" }, token));
+    await POST(postReqSalao({ mesa: "5" }, token));
     const res = await GET(reqSalao(token));
     const data = await res.json();
     expect(data.comandas[0].rodadas).toHaveLength(1);
     expect(data.comandas[0].rodadas[0].status).toBe("rascunho");
     expect(data.comandas[0].totalParcial).toBe(0);
+    expect(data.comandas[0].cliente).toBeUndefined();
   });
 
   it("anexa à rodada enviada somente o status real do pedido oficial correspondente", async () => {
     const token = await criarTokenSalao();
-    store.set("salao:comandas", [{
-      id: "comanda_1",
-      numero: 1,
-      cliente: "Ana",
-      mesa: "5",
-      itens: [],
-      status: "enviada",
-      abertaEm: "2026-08-16T20:00:00.000Z",
-      rodadas: [{
-        id: "rodada_1",
-        numero: 1,
-        status: "enviada",
-        itens: [],
-        subtotal: 30,
-        criadaEm: "2026-08-16T20:00:00.000Z",
-        atualizadaEm: "2026-08-16T20:02:00.000Z",
-        enviadaEm: "2026-08-16T20:02:00.000Z",
-        pedidoId: "pedido_abc",
-      }],
-    }]);
-    store.set("pedidos", [
-      { id: "pedido_outro", status: "entregue", cliente: "Não deve vazar" },
-      { id: "pedido_abc", status: "saiu_entrega", statusAtualizadoEm: "2026-08-16T20:15:00.000Z", cliente: "Dado privado" },
-    ]);
-
+    store.set("salao:comandas", [{ id: "comanda_1", numero: 1, cliente: "Ana", mesa: "5", itens: [], status: "enviada", abertaEm: "2026-08-16T20:00:00.000Z", rodadas: [{ id: "rodada_1", numero: 1, status: "enviada", itens: [], subtotal: 30, criadaEm: "2026-08-16T20:00:00.000Z", atualizadaEm: "2026-08-16T20:02:00.000Z", enviadaEm: "2026-08-16T20:02:00.000Z", pedidoId: "pedido_abc" }] }]);
+    store.set("pedidos", [{ id: "pedido_outro", status: "entregue" }, { id: "pedido_abc", status: "saiu_entrega", statusAtualizadoEm: "2026-08-16T20:15:00.000Z" }]);
     const res = await GET(reqSalao(token));
     const data = await res.json();
-    expect(data.comandas[0].rodadas[0]).toMatchObject({
-      pedidoId: "pedido_abc",
-      pedidoStatus: "saiu_entrega",
-      pedidoStatusAtualizadoEm: "2026-08-16T20:15:00.000Z",
-    });
-    expect(data.comandas[0].rodadas[0].cliente).toBeUndefined();
+    expect(data.comandas[0].rodadas[0]).toMatchObject({ pedidoId: "pedido_abc", pedidoStatus: "saiu_entrega", pedidoStatusAtualizadoEm: "2026-08-16T20:15:00.000Z" });
   });
 
-  it("status ausente ou desconhecido não é inventado na resposta", async () => {
+  it("status ausente ou desconhecido não é inventado", async () => {
     const token = await criarTokenSalao();
-    store.set("salao:comandas", [{
-      id: "comanda_1",
-      numero: 1,
-      cliente: "Ana",
-      itens: [],
-      status: "enviada",
-      abertaEm: "2026-08-16T20:00:00.000Z",
-      rodadas: [{
-        id: "rodada_1",
-        numero: 1,
-        status: "enviada",
-        itens: [],
-        subtotal: 0,
-        criadaEm: "2026-08-16T20:00:00.000Z",
-        atualizadaEm: "2026-08-16T20:00:00.000Z",
-        pedidoId: "pedido_abc",
-      }],
-    }]);
+    store.set("salao:comandas", [{ id: "comanda_1", numero: 1, cliente: "Ana", itens: [], status: "enviada", abertaEm: "2026-08-16T20:00:00.000Z", rodadas: [{ id: "rodada_1", numero: 1, status: "enviada", itens: [], subtotal: 0, criadaEm: "2026-08-16T20:00:00.000Z", atualizadaEm: "2026-08-16T20:00:00.000Z", pedidoId: "pedido_abc" }] }]);
     store.set("pedidos", [{ id: "pedido_abc", status: "estado_desconhecido" }]);
-
-    const res = await GET(reqSalao(token));
-    const data = await res.json();
+    const data = await (await GET(reqSalao(token))).json();
     expect(data.comandas[0].rodadas[0].pedidoStatus).toBeUndefined();
   });
 });
 
 describe("POST /api/salao/comandas (abrir)", () => {
-  it("bloqueia sem sessão do Salão (sessão administrativa não abre comanda)", async () => {
-    const res = await POST({ json: async () => ({ cliente: "Ana", mesa: "5" }), cookies: { get: () => ({ value: "tok" }) } } as never);
+  it("bloqueia sem sessão do Salão", async () => {
+    const res = await POST({ json: async () => ({ mesa: "5" }), cookies: { get: () => ({ value: "tok" }) } } as never);
     expect(res.status).toBe(401);
   });
 
-  it("abre uma comanda nova com cliente obrigatório e mesa opcional", async () => {
+  it("abre rascunho sem nome para montar o pedido primeiro", async () => {
     const token = await criarTokenSalao();
-    const semCliente = await POST(postReqSalao({ mesa: "5" }, token));
-    expect(semCliente.status).toBe(400);
-
-    const res = await POST(postReqSalao({ cliente: "Ana", mesa: "5", complemento: "Varanda" }, token));
+    const res = await POST(postReqSalao({ mesa: "5", complemento: "Varanda" }, token));
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.comanda.cliente).toBe("Ana");
+    expect(data.comanda.cliente).toBeUndefined();
     expect(data.comanda.mesa).toBe("5");
     expect(data.comanda.complemento).toBe("Varanda");
     expect(data.comanda.status).toBe("aberta");
   });
 
-  it("abre uma comanda 'Sem mesa' quando a mesa não é informada", async () => {
+  it("continua aceitando nome quando já informado por compatibilidade", async () => {
     const token = await criarTokenSalao();
-    const res = await POST(postReqSalao({ cliente: "Bia" }, token));
+    const res = await POST(postReqSalao({ cliente: "Ana" }, token));
     expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.comanda.cliente).toBe("Bia");
+    expect((await res.json()).comanda.cliente).toBe("Ana");
+  });
+
+  it("abre uma comanda Sem mesa", async () => {
+    const token = await criarTokenSalao();
+    const data = await (await POST(postReqSalao({}, token))).json();
     expect(data.comanda.mesa).toBeUndefined();
   });
 
-  it("recusa abrir uma segunda comanda para uma mesa já ocupada (409)", async () => {
+  it("recusa segunda comanda para mesa ocupada", async () => {
     const token = await criarTokenSalao();
-    const primeira = await POST(postReqSalao({ cliente: "Ana", mesa: "8" }, token));
-    expect(primeira.status).toBe(200);
-
-    const segunda = await POST(postReqSalao({ cliente: "Ana", mesa: "8" }, token));
-    expect(segunda.status).toBe(409);
-    const data = await segunda.json();
-    expect(data.ok).toBe(false);
+    expect((await POST(postReqSalao({ mesa: "8" }, token))).status).toBe(200);
+    expect((await POST(postReqSalao({ mesa: "8" }, token))).status).toBe(409);
   });
 });
