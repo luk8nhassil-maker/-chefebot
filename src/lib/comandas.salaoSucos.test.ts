@@ -23,24 +23,24 @@ vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 import { validarItensComanda } from "./comandas";
 
 const PRODUCT_MARACUJA = "salao-suco-maracuja";
-const SIZE_COPO = "salao-suco-maracuja-copo";
-const SIZE_JARRA = "salao-suco-maracuja-jarra";
+const SIZE_JARRA_P = "salao-suco-maracuja-copo";
+const SIZE_JARRA_G = "salao-suco-maracuja-jarra";
 
 beforeEach(() => {
   store.clear();
   vi.clearAllMocks();
 });
 
-describe("validarItensComanda — sucos exclusivos do Salão", () => {
-  it("Copo de Maracujá ignora preço/name/detail adulterados e recalcula R$20 no servidor", async () => {
+describe("validarItensComanda — Sucos do Salão", () => {
+  it("Jarra P de Maracujá ignora preço adulterado e recalcula R$20", async () => {
     const r = await validarItensComanda([
       {
         kind: "simple",
         name: "Produto forjado",
-        detail: "Jarra por um centavo",
+        detail: "qualquer coisa",
         price: 0.01,
         qty: 2,
-        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_COPO },
+        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_P },
       },
     ]);
 
@@ -49,32 +49,48 @@ describe("validarItensComanda — sucos exclusivos do Salão", () => {
     expect(r.itens[0]).toMatchObject({
       kind: "simple",
       name: "Maracujá",
-      detail: "Tamanho Copo",
+      detail: "Jarra P - Pequena",
       price: 20,
       qty: 2,
-      simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_COPO },
+      simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_P },
     });
     expect(r.total).toBe(40);
   });
 
-  it("Jarra de Maracujá usa o preço oficial de R$40", async () => {
+  it("Jarra G de Maracujá usa R$40 e descrição correta", async () => {
     const r = await validarItensComanda([
       {
         kind: "simple",
         price: 1,
         qty: 1,
-        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA },
+        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_G },
       },
     ]);
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.itens[0].detail).toBe("Tamanho Jarra");
+    expect(r.itens[0].detail).toBe("Jarra G - Grande");
     expect(r.itens[0].price).toBe(40);
     expect(r.total).toBe(40);
   });
 
-  it("sizeId inexistente é rejeitado e nunca usa o preço enviado pelo navegador", async () => {
+  it("Copo oficial continua intacto: Acerola sem leite = R$7", async () => {
+    const r = await validarItensComanda([
+      {
+        kind: "simple",
+        price: 99,
+        qty: 1,
+        simpleSelection: { productId: "suco-acerola", milk: "sem" },
+      },
+    ]);
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0]).toMatchObject({ name: "Acerola", detail: "sem leite", price: 7 });
+    expect(r.total).toBe(7);
+  });
+
+  it("sizeId inexistente é rejeitado", async () => {
     const r = await validarItensComanda([
       {
         kind: "simple",
@@ -88,7 +104,7 @@ describe("validarItensComanda — sucos exclusivos do Salão", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("produto exclusivo esgotado por ID é rejeitado no Salão", async () => {
+  it("produto de Jarra esgotado por ID é rejeitado", async () => {
     store.set("estoque:itens", {
       [PRODUCT_MARACUJA]: { id: PRODUCT_MARACUJA, esgotado: true },
     });
@@ -98,7 +114,7 @@ describe("validarItensComanda — sucos exclusivos do Salão", () => {
         kind: "simple",
         price: 20,
         qty: 1,
-        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_COPO },
+        simpleSelection: { productId: PRODUCT_MARACUJA, sizeId: SIZE_JARRA_P },
       },
     ]);
 

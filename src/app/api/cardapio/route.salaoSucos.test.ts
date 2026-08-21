@@ -33,41 +33,49 @@ beforeEach(() => {
   sessao.ativa = false;
 });
 
-describe("GET /api/cardapio — isolamento dos sucos do Salão", () => {
-  it("requisição originada no Salão SEM sessão válida continua recebendo catálogo público", async () => {
+describe("GET /api/cardapio — Sucos do Salão", () => {
+  it("origem /salao sem sessão válida continua recebendo só o catálogo público", async () => {
     const data = await (await GET(req("http://localhost/salao"))).json();
 
     expect(data.catalog.sucos).toHaveLength(11);
     expect(data.catalog.sucos.some((p: { id: string }) => p.id.startsWith("salao-suco-"))).toBe(false);
-    expect(data.catalog.sucos.find((p: { name: string }) => p.name === "Maracujá")?.strategy).toBe("milk");
+    expect(data.catalog.sucos.find((p: { id: string }) => p.id === "suco-acerola")?.priceCents).toBe(700);
   });
 
-  it("sessão válida + origem /salao recebe somente os 11 sucos Copo/Jarra", async () => {
+  it("sessão válida + /salao recebe os 11 sucos de Copo oficiais e os 11 sabores de Jarra", async () => {
     sessao.ativa = true;
     const data = await (await GET(req("http://localhost/salao"))).json();
 
-    expect(data.catalog.sucos).toHaveLength(11);
-    expect(data.catalog.sucos.every((p: { id: string }) => p.id.startsWith("salao-suco-"))).toBe(true);
-    expect(data.catalog.sucos.some((p: { id: string }) => p.id === "suco-maracuja")).toBe(false);
+    const copos = data.catalog.sucos.filter((p: { id: string }) => p.id.startsWith("suco-"));
+    const jarras = data.catalog.sucos.filter((p: { id: string }) => p.id.startsWith("salao-suco-"));
 
-    const maracuja = data.catalog.sucos.find((p: { id: string }) => p.id === "salao-suco-maracuja");
-    expect(maracuja?.strategy).toBe("size");
-    expect(maracuja?.sizes).toEqual([
+    expect(copos).toHaveLength(11);
+    expect(jarras).toHaveLength(11);
+    expect(copos.find((p: { id: string }) => p.id === "suco-acerola")).toMatchObject({
+      name: "Acerola",
+      strategy: "milk",
+      priceCents: 700,
+    });
+
+    // IDs/tamanhos publicados anteriormente permanecem estáveis para não
+    // quebrar comandas abertas. A fachada do Salão interpreta estes dois
+    // sizeIds como Jarra P e Jarra G, respectivamente.
+    expect(jarras.find((p: { id: string }) => p.id === "salao-suco-maracuja")?.sizes).toEqual([
       { id: "salao-suco-maracuja-copo", code: "Copo", priceCents: 2000 },
       { id: "salao-suco-maracuja-jarra", code: "Jarra", priceCents: 4000 },
     ]);
   });
 
-  it("mesmo com sessão do Salão ativa, abrir o link público /cardapio continua recebendo apenas os sucos públicos", async () => {
+  it("mesmo com sessão do Salão ativa, /cardapio continua sem revelar Jarra", async () => {
     sessao.ativa = true;
     const data = await (await GET(req("http://localhost/cardapio"))).json();
 
     expect(data.catalog.sucos).toHaveLength(11);
     expect(data.catalog.sucos.some((p: { id: string }) => p.id.startsWith("salao-suco-"))).toBe(false);
-    expect(data.catalog.sucos.find((p: { name: string }) => p.name === "Maracujá")?.priceCents).toBe(1000);
+    expect(data.catalog.sucos.find((p: { id: string }) => p.id === "suco-maracuja")?.priceCents).toBe(1000);
   });
 
-  it("?scope=salao sem sessão válida não revela os produtos exclusivos", async () => {
+  it("?scope=salao sem sessão válida não revela os produtos de Jarra", async () => {
     const data = await (await GET(req("http://localhost/cardapio", "salao"))).json();
 
     expect(data.catalog.sucos.some((p: { id: string }) => p.id.startsWith("salao-suco-"))).toBe(false);
