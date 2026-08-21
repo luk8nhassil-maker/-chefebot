@@ -1,6 +1,6 @@
 // Configuração central da Evolution API — usada por todas as rotas e
 // funções que enviam, consultam ou reconectam o WhatsApp. Sem fallback
-// hardcoded para nenhum host de PaaS efêmero: sem env var válida, quem
+// hardcoded para nenhum host da Evolution: sem env var válida, quem
 // chamar recebe `null` e deve tratar como `provider_not_configured`.
 
 export type EvolutionConfig = {
@@ -10,7 +10,22 @@ export type EvolutionConfig = {
   webhookUrl: string;
 };
 
-const WEBHOOK_URL_PADRAO = "https://chefebot-pjif.vercel.app/api/whatsapp";
+const WEBHOOK_URL_OFICIAL = "https://chefedapizza.com.br/api/whatsapp";
+const WEBHOOK_URL_LEGADO = /^https?:\/\/chefebot-pjif\.vercel\.app\/api\/whatsapp\/?$/i;
+
+/**
+ * O webhook público da pizzaria deve usar o domínio oficial. Uma env
+ * explicitamente personalizada continua respeitada, mas o endereço legado
+ * conhecido é migrado de forma fail-safe para impedir que a Evolution volte
+ * a entregar mensagens ao deploy antigo.
+ */
+function obterWebhookUrl(): string {
+  const configurado = process.env.EVOLUTION_WEBHOOK_URL?.trim();
+  if (!configurado || WEBHOOK_URL_LEGADO.test(configurado)) {
+    return WEBHOOK_URL_OFICIAL;
+  }
+  return configurado;
+}
 
 /**
  * Valida e normaliza a URL configurada, sem alterar o host/caminho
@@ -48,7 +63,7 @@ export function obterConfigEvolution(): EvolutionConfig | null {
     baseUrl,
     apiKey,
     instanceName: process.env.EVOLUTION_INSTANCE_NAME || "chefebot",
-    webhookUrl: process.env.EVOLUTION_WEBHOOK_URL || WEBHOOK_URL_PADRAO,
+    webhookUrl: obterWebhookUrl(),
   };
 }
 
