@@ -1,0 +1,48 @@
+name: mini-especiais-ci
+
+# Gate hermético da exceção comercial da Mini Pizza. Não recebe segredos,
+# não acessa Redis/WhatsApp/Pix e não cria pedidos reais.
+on:
+  pull_request:
+    paths:
+      - "src/lib/catalog/pizzas.ts"
+      - "src/lib/catalog/miniEspeciais.test.ts"
+      - "src/lib/catalog/officialMenu2026.ts"
+      - "src/lib/catalog/officialMenu2026.test.ts"
+      - "src/lib/pricing/pizzaEngine.ts"
+      - "src/lib/pricing/pizzaEngine.test.ts"
+      - ".github/workflows/mini-especiais-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mini-especiais-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mini-especiais-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do SHA validado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testar catálogo e preço da Mini
+        run: >-
+          npm test --
+          src/lib/catalog/miniEspeciais.test.ts
+          src/lib/catalog/officialMenu2026.test.ts
+          src/lib/pricing/pizzaEngine.test.ts
+
+      - name: Lint do patch
+        run: >-
+          npm run lint --
+          src/lib/catalog/pizzas.ts
+          src/lib/catalog/miniEspeciais.test.ts
