@@ -1,12 +1,14 @@
 name: whatsapp-link-cardapio-ci
 
-# Gate hermético para impedir que links legados do cardápio sejam enviados
-# aos clientes pelo WhatsApp. Não recebe segredos e não chama Evolution real.
+# Gate hermético para impedir que links/webhooks legados do ChefeBot
+# alcancem clientes pelo WhatsApp. Não recebe segredos e não chama Evolution real.
 on:
   pull_request:
     paths:
       - "src/lib/whatsappMensagem.ts"
       - "src/lib/whatsappMensagem.test.ts"
+      - "src/lib/evolutionApi.ts"
+      - "src/lib/evolutionApi.test.ts"
       - ".github/workflows/whatsapp-link-cardapio-ci.yml"
   workflow_dispatch:
 
@@ -30,8 +32,8 @@ jobs:
       - name: Instalar dependências
         run: npm ci
 
-      - name: Testar normalização do link do cardápio
-        run: npm test -- src/lib/whatsappMensagem.test.ts
+      - name: Testar link e webhook oficiais do WhatsApp
+        run: npm test -- src/lib/whatsappMensagem.test.ts src/lib/evolutionApi.test.ts
 
       - name: Lint dos arquivos alterados
-        run: npm run lint -- src/lib/whatsappMensagem.ts src/lib/whatsappMensagem.test.ts
+        run: npm run lint -- src/lib/whatsappMensagem.ts src/lib/whatsappMensagem.test.ts src/lib/evolutionApi.ts src/lib/evolutionApi.test.ts
