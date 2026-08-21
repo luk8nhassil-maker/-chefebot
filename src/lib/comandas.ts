@@ -350,7 +350,10 @@ export async function validarItensComanda(
   async function catalogoSimplesOficial(): Promise<SimpleCatalog> {
     if (!simpleCatalogCache) {
       const disponibilidade = await disponibilidadeFresca();
-      simpleCatalogCache = buildSimpleCatalog(menu, disponibilidade.nomes, disponibilidade.ids);
+      // Esta função só é usada pelas rotas autenticadas de comanda/rodada do
+      // Salão. Por isso a reprecificação oficial precisa usar o MESMO escopo
+      // exclusivo exibido ao garçom, nunca o catálogo público.
+      simpleCatalogCache = buildSimpleCatalog(menu, disponibilidade.nomes, disponibilidade.ids, "salao");
     }
     return simpleCatalogCache;
   }

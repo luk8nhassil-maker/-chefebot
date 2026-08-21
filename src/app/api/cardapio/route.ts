@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
 import { getMENUDinamico } from '@/lib/menu.server'
 import { buildPizzaCatalog } from '@/lib/catalog/pizzas'
-import { buildSimpleCatalog } from '@/lib/catalog/simpleProducts'
+import { buildSimpleCatalog, ehSucoExclusivoSalao } from '@/lib/catalog/simpleProducts'
 import { verifyToken } from '@/lib/auth'
+import { lerSessaoSalao } from '@/lib/salaoAuth'
 import { registrarAuditoriaCardapio } from '@/lib/auditoriaCardapio'
 import {
   obterEsgotadosEfetivos,
@@ -228,7 +229,7 @@ export function validarCardapio(body: unknown): ResultadoValidacao {
   return { ok: true, cardapio: obj }
 }
 
-export async function GET() {
+export async function GET(req?: NextRequest) {
   try {
     const menu = await getMENUDinamico()
     const [esgotados, esgotadosLegado, estoqueItens] = await Promise.all([
@@ -244,6 +245,24 @@ export async function GET() {
       horaFechamento: config.horaFechamento,
       aberto: estaAbertoAgora(config),
     }
+    // O catálogo exclusivo do Salão só é entregue quando DUAS condições são
+    // verdadeiras: a requisição veio da interface `/salao` (ou pediu o escopo
+    // explicitamente para testes internos) E o cookie do Salão foi validado
+    // no servidor. O referer nunca autoriza sozinho. Assim, o cardápio público
+    // continua público mesmo no navegador em que o terminal do Salão está logado.
+    const referer = req?.headers.get('referer')
+    let origemSalao = false
+    if (referer) {
+      try {
+        origemSalao = new URL(referer).pathname.startsWith('/salao')
+      } catch {
+        origemSalao = false
+      }
+    }
+    const solicitouSalao = req?.nextUrl?.searchParams.get('scope') === 'salao' || origemSalao
+    const sessaoSalao = solicitouSalao && req ? await lerSessaoSalao(req) : null
+    const catalogScope = solicitouSalao && sessaoSalao ? 'salao' : 'public'
+
     // Catálogo oficial de pizzas com IDs estáveis (Fase 2) — aditivo, ninguém
     // ainda consome esta chave; a UI do cardápio continua 100% em name/detail
     // (ver docs de entrega da Fase 2 sobre por que a interface não foi
@@ -251,13 +270,14 @@ export async function GET() {
     // reconstruir o catálogo em outro lugar.
     const pizzaCatalog = buildPizzaCatalog(menu, esgotadosLegado, esgotadosIds)
     // Catálogo oficial dos demais produtos configuráveis, com IDs estáveis e
-    // disponibilidade em tempo real (Fase 6) — aditivo, igual pizzaCatalog:
-    // usado para montar `simpleSelection` (Calzone, Mini-Pizza, Macarronada,
-    // sucos). Sabores de Calzone/Mini-Pizza vêm das listas oficiais já
-    // existentes (menu.calzoneFlavors/miniPizzaFlavors), nunca inventadas
-    // aqui. Ausência (resposta antiga em cache) faz esses itens caírem no
-    // comportamento 100% legado (name/detail), nunca bloqueia o carrinho.
-    const catalog = buildSimpleCatalog(menu, esgotadosLegado, esgotadosIds)
+    // disponibilidade em tempo real (Fase 6). No escopo Salão, o catálogo
+    // interno também carrega os IDs públicos antigos só para comandas abertas
+    // antes do deploy; eles são removidos desta resposta e nunca aparecem na
+    // tela nova do garçom.
+    const catalogInterno = buildSimpleCatalog(menu, esgotadosLegado, esgotadosIds, catalogScope)
+    const catalog = catalogScope === 'salao'
+      ? { ...catalogInterno, sucos: catalogInterno.sucos.filter(ehSucoExclusivoSalao) }
+      : catalogInterno
     return NextResponse.json({ ...menu, esgotados, esgotadosIds, esgotadosMetadata, horario, pizzaCatalog, catalog })
   } catch {
     return NextResponse.json(

@@ -3,7 +3,11 @@
 // Fonte comercial principal: @/lib/catalog/officialMenu2026. O bloco de
 // pastéis recebeu uma atualização comercial isolada em
 // @/lib/catalog/pasteisAtualizados para ADICIONAR novos produtos sem remover
-// o Pastel de Forno já existente.
+// o Pastel de Forno já existente. O Salão possui uma extensão comercial
+// própria de sucos (copo/jarra), aprovada em 2026-08-20. No escopo "salao",
+// os novos IDs convivem internamente com os IDs públicos antigos apenas para
+// que comandas abertas antes do deploy continuem validáveis; a rota de
+// cardápio projeta para a UI somente os novos sucos do Salão.
 //
 // Esta camada só ADICIONA disponibilidade EM TEMPO REAL (mesma lista
 // "esgotados" usada pelo bot do WhatsApp, pelo cardápio do cliente e pela
@@ -12,14 +16,14 @@
 // ZERO acoplamento por nome: cada produto tem uma `strategy` explícita,
 // atribuída aqui por CATEGORIA (nunca por nome de produto):
 //   - "fixed"          — preço único, sem tamanho/sabor/leite.
-//   - "size"           — o produto tem `sizes[]` (Macarronada); pode
-//                         carregar `addOnGroup`.
+//   - "size"           — o produto tem `sizes[]` (Macarronada e sucos do
+//                         Salão por Copo/Jarra); pode carregar `addOnGroup`.
 //   - "single_flavor"  — exige exatamente 1 sabor/recheio, preço do
 //                         PRODUTO nunca muda por sabor (Pastel de Forno e
 //                         Pastel de Feira).
 //   - "flavor_priced"  — exige exatamente 1 sabor, e o preço vem do
 //                         PRÓPRIO SABOR (Calzone).
-//   - "milk"           — produto está na seção Sucos; com/sem leite.
+//   - "milk"           — produto está na seção Sucos pública; com/sem leite.
 import type { Menu } from "@/lib/menu";
 import { norm } from "@/lib/pedidoAppItens";
 import {
@@ -36,6 +40,7 @@ import {
 import { PASTEL_CARNE_SECA_ATUAL, PASTEL_FEIRA_ATUAL } from "./pasteisAtualizados";
 
 export type SimpleCatalogStrategy = "fixed" | "size" | "single_flavor" | "flavor_priced" | "milk";
+export type SimpleCatalogScope = "public" | "salao";
 
 export interface SimpleCatalogFlavor {
   id: string;
@@ -64,7 +69,7 @@ export interface SimpleCatalogProduct {
   priceCents: number;
   available: boolean;
   strategy: SimpleCatalogStrategy;
-  /** Presente só quando strategy === "size" (ex.: Macarronada). */
+  /** Presente só quando strategy === "size" (ex.: Macarronada/Suco Salão). */
   sizes?: { id: string; code: string; priceCents: number }[];
   /** Presente só quando strategy === "single_flavor" ou "flavor_priced". */
   flavors?: SimpleCatalogFlavor[];
@@ -85,6 +90,33 @@ export interface SimpleCatalog {
   bebidas: SimpleCatalogProduct[];
 }
 
+type SucoSalao = {
+  id: string;
+  name: string;
+  copoCents: number;
+  jarraCents: number;
+};
+
+// Fonte comercial: decisão explícita do usuário em 2026-08-20.
+// P = Copo; G = Jarra. Estes produtos NUNCA entram no escopo público.
+const SUCOS_SALAO: readonly SucoSalao[] = [
+  { id: "salao-suco-maracuja", name: "Maracujá", copoCents: 2000, jarraCents: 4000 },
+  { id: "salao-suco-acerola", name: "Acerola", copoCents: 1400, jarraCents: 2800 },
+  { id: "salao-suco-goiaba", name: "Goiaba", copoCents: 1400, jarraCents: 2800 },
+  { id: "salao-suco-caju", name: "Caju", copoCents: 1400, jarraCents: 2800 },
+  { id: "salao-suco-caja", name: "Cajá", copoCents: 1400, jarraCents: 3200 },
+  { id: "salao-suco-bacuri", name: "Bacuri", copoCents: 2000, jarraCents: 4000 },
+  { id: "salao-suco-cupuacu", name: "Cupuaçu", copoCents: 1900, jarraCents: 3800 },
+  { id: "salao-suco-graviola", name: "Graviola", copoCents: 2000, jarraCents: 4000 },
+  { id: "salao-suco-abacaxi", name: "Abacaxi", copoCents: 1400, jarraCents: 2800 },
+  { id: "salao-suco-abacate-hortela", name: "Abacate + hortelã", copoCents: 2000, jarraCents: 4000 },
+  { id: "salao-suco-laranja", name: "Laranja", copoCents: 2000, jarraCents: 4000 },
+];
+
+export function ehSucoExclusivoSalao(produto: Pick<SimpleCatalogProduct, "id">): boolean {
+  return produto.id.startsWith("salao-suco-");
+}
+
 function estaEsgotado(nome: string, esgotadosNorm: string[]): boolean {
   return esgotadosNorm.includes(norm(nome));
 }
@@ -92,8 +124,18 @@ function estaEsgotado(nome: string, esgotadosNorm: string[]): boolean {
 /**
  * Constrói o catálogo oficial dos produtos simples configuráveis e aplica a
  * disponibilidade operacional atual. Não faz I/O.
+ *
+ * `scope="public"` é o comportamento histórico e continua sendo o default.
+ * `scope="salao"` adiciona os IDs exclusivos de Copo/Jarra e mantém, somente
+ * para compatibilidade de validação, os IDs públicos antigos. A resposta de
+ * GET /api/cardapio remove esses IDs antigos antes de chegar à UI do Salão.
  */
-export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = [], idsEsgotados: readonly string[] = []): SimpleCatalog {
+export function buildSimpleCatalog(
+  _menu: Menu,
+  esgotados: readonly string[] = [],
+  idsEsgotados: readonly string[] = [],
+  scope: SimpleCatalogScope = "public"
+): SimpleCatalog {
   const esgotadosNorm = esgotados.map(norm);
   const esgotadosIds = new Set(idsEsgotados);
   const disponivel = (nome: string, id: string) => !estaEsgotado(nome, esgotadosNorm) && !esgotadosIds.has(id);
@@ -207,13 +249,28 @@ export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = [
     addOnGroup: macarronadaAddOnGroup,
   }));
 
-  const sucos: SimpleCatalogProduct[] = SUCOS.map((produto) => ({
+  const sucosPublicos: SimpleCatalogProduct[] = SUCOS.map((produto) => ({
     id: produto.id,
     name: produto.name,
     priceCents: produto.priceCents,
     available: disponivel(produto.name, produto.id),
     strategy: "milk",
   }));
+
+  const sucosSalao: SimpleCatalogProduct[] = SUCOS_SALAO.map((produto) => ({
+    id: produto.id,
+    name: produto.name,
+    // Valor de referência para listagem; a cobrança real vem SEMPRE do sizeId.
+    priceCents: Math.min(produto.copoCents, produto.jarraCents),
+    available: disponivel(produto.name, produto.id),
+    strategy: "size",
+    sizes: [
+      { id: `${produto.id}-copo`, code: "Copo", priceCents: produto.copoCents },
+      { id: `${produto.id}-jarra`, code: "Jarra", priceCents: produto.jarraCents },
+    ],
+  }));
+
+  const sucos = scope === "salao" ? [...sucosSalao, ...sucosPublicos] : sucosPublicos;
 
   const vitaminas: SimpleCatalogProduct[] = VITAMINAS.map((produto) => ({
     id: produto.id,
