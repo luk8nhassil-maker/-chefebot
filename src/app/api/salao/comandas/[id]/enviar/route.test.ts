@@ -12,7 +12,16 @@ const { store, redisMock } = vi.hoisted(() => {
     get: vi.fn(defaultGetImpl), set: vi.fn(defaultSetImpl),
     del: vi.fn(async (key: string) => { const existia = store.has(key); store.delete(key); return existia ? 1 : 0; }),
     incr: vi.fn(async (key: string) => { const next = Number(store.get(key) || 0) + 1; store.set(key, next); return next; }),
-    expire: vi.fn(async () => 1), eval: vi.fn(async () => 1),
+    expire: vi.fn(async () => 1),
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      const key = keys?.[0];
+      const token = args?.[0];
+      if (key && store.get(key) === token) {
+        store.delete(key);
+        return 1;
+      }
+      return 0;
+    }),
   };
   return { store, redisMock, defaultSetImpl, defaultGetImpl };
 });
