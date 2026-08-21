@@ -79,12 +79,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Payload inválido" }, { status: 400 });
   }
 
+  // O nome agora é coletado somente no fim da montagem do pedido. A comanda
+  // pode nascer como rascunho sem cliente, mas o envio à cozinha continua
+  // fail-closed e exige um nome persistido.
   const cliente = (body.cliente || "").trim();
-  if (!cliente) {
-    return NextResponse.json({ ok: false, error: "Informe o nome do cliente" }, { status: 400 });
-  }
-
-  const resultado = await abrirComanda({ cliente, mesa: body.mesa, complemento: body.complemento });
+  const resultado = await abrirComanda({
+    ...(cliente ? { cliente } : {}),
+    mesa: body.mesa,
+    complemento: body.complemento,
+  });
   if (resultado === "mesa_ocupada") {
     return NextResponse.json({ ok: false, error: "Esta mesa já tem uma comanda aberta" }, { status: 409 });
   }
