@@ -148,7 +148,8 @@ describe("/pedidos — regras de habilitação do botão final (checklist + senh
     const corpoConfirmar = fonte.slice(fonte.indexOf("const confirmarPixManual = async"), fonte.indexOf("const finalizarPedidoSilencioso"));
     const blocoJaConfirmado = corpoConfirmar.slice(corpoConfirmar.indexOf("r.status === 409"), corpoConfirmar.indexOf("r.status === 401"));
     expect(blocoJaConfirmado).toContain("setPedidos(prev => prev.map(p => p.id === id && data.pedido ? { ...p, ...data.pedido } : p))");
-    expect(blocoJaConfirmado).toContain("setTimeout(fecharVerificacaoPix");
+    expect(blocoJaConfirmado).toContain("setTimeout(resetarVerificacaoPix, 1800)");
+    expect(blocoJaConfirmado).not.toContain("setTimeout(fecharVerificacaoPix");
   });
 
   test("falha de rede mostra mensagem de reconexão sem marcar como pago", () => {
