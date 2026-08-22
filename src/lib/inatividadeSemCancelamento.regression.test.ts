@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { mensagemLembretePorInatividade } from "./bot";
 
 const lib = readFileSync(fileURLToPath(new URL("./inatividadeConversa.ts", import.meta.url)), "utf-8");
 const bot = readFileSync(fileURLToPath(new URL("./bot.ts", import.meta.url)), "utf-8");
@@ -19,6 +20,12 @@ describe("WhatsApp — inatividade não pode assustar nem apagar o atendimento",
     expect(trecho).toContain("nada foi cancelado");
     expect(trecho).toContain("continua por aqui");
     expect(trecho).not.toContain("cancelei esse pedido");
+  });
+
+  test("mensagem enviada preserva pausas para leitura no WhatsApp", () => {
+    const texto = mensagemLembretePorInatividade();
+    expect(texto).toContain("cancelado.\n\nQuando puder");
+    expect(texto).toContain("pressa.\n\nSe preferir");
   });
 
   test("tick vira lembrete não destrutivo e mantém a sessão viva", () => {

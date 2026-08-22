@@ -1144,10 +1144,10 @@ export function mensagemSaudacaoPadrao(nomePizzaria = "Chefe da Pizza"): string 
 // sessão e não encerra atendimento; serve apenas para tranquilizar e mostrar
 // que a conversa continua disponível.
 export function mensagemLembretePorInatividade(): string {
-  return `Oi! 😊 Só passando pra avisar que seu atendimento continua por aqui e nada foi cancelado.\
-\
-Quando puder, me responde e a gente continua de onde parou — sem pressa.\
-\
+  return `Oi! 😊 Só passando pra avisar que seu atendimento continua por aqui e nada foi cancelado.
+
+Quando puder, me responde e a gente continua de onde parou — sem pressa.
+
 Se preferir, você também pode seguir pelo cardápio digital:
 ${LINK_CARDAPIO_DIGITAL}`;
 }

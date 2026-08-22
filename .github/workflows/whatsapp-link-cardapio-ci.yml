@@ -1,5 +1,7 @@
 name: whatsapp-link-cardapio-ci
 
+# Gate hermético para impedir que links/webhooks legados do ChefeBot
+# alcancem clientes pelo WhatsApp. Não recebe segredos e não chama Evolution real.
 on:
   pull_request:
     paths:
@@ -9,114 +11,18 @@ on:
       - "src/lib/evolutionApi.test.ts"
       - "src/app/api/whatsapp/reset/route.ts"
       - "src/app/api/whatsapp/reset/route.test.ts"
-      - "src/lib/inatividadeSemCancelamento.regression.test.ts"
-      - "src/lib/bot.ts"
       - ".github/workflows/whatsapp-link-cardapio-ci.yml"
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: read
+  contents: read
 
 concurrency:
   group: whatsapp-link-cardapio-ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  validar-copy-inatividade:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'fix/whatsapp-inatividade-sem-cancelar-20260821'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout da branch isolada
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Instalar dependências
-        run: npm ci
-
-      - name: Tornar teste sensível ao texto realmente enviado
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path("src/lib/inatividadeSemCancelamento.regression.test.ts")
-          s = p.read_text()
-          if 'mensagemLembretePorInatividade' not in s:
-              raise SystemExit("Teste-base do lembrete não encontrado")
-          if 'import { mensagemLembretePorInatividade } from "./bot";' not in s:
-              s = s.replace(
-                  'import { fileURLToPath } from "node:url";\n',
-                  'import { fileURLToPath } from "node:url";\nimport { mensagemLembretePorInatividade } from "./bot";\n'
-              )
-          marcador = '  test("tick vira lembrete não destrutivo e mantém a sessão viva", () => {'
-          novo = '''  test("mensagem enviada preserva pausas para leitura no WhatsApp", () => {\n    const texto = mensagemLembretePorInatividade();\n    expect(texto).toContain("cancelado.\\n\\nQuando puder");\n    expect(texto).toContain("pressa.\\n\\nSe preferir");\n  });\n\n'''
-          if 'mensagem enviada preserva pausas para leitura no WhatsApp' not in s:
-              if marcador not in s:
-                  raise SystemExit("Ponto de inserção do teste não encontrado")
-              s = s.replace(marcador, novo + marcador, 1)
-          p.write_text(s)
-          PY
-
-      - name: Provar a falha de formatação antes do ajuste
-        shell: bash
-        run: |
-          set +e
-          npm test -- src/lib/inatividadeSemCancelamento.regression.test.ts
-          status=$?
-          set -e
-          if [ "$status" -eq 0 ]; then
-            echo "O teste de formatação já passou; não vou aplicar mudança desnecessária."
-            exit 1
-          fi
-          echo "Falha de formatação reproduzida antes do ajuste."
-
-      - name: Corrigir somente as quebras de linha da mensagem
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import re
-          p = Path("src/lib/bot.ts")
-          s = p.read_text()
-          pattern = re.compile(r'export function mensagemLembretePorInatividade\(\): string \{.*?\n\}', re.S)
-          replacement = r'''export function mensagemLembretePorInatividade(): string {
-            return `Oi! 😊 Só passando pra avisar que seu atendimento continua por aqui e nada foi cancelado.\n\nQuando puder, me responde e a gente continua de onde parou — sem pressa.\n\nSe preferir, você também pode seguir pelo cardápio digital:\n${LINK_CARDAPIO_DIGITAL}`;
-          }'''
-          s2, n = pattern.subn(replacement, s, count=1)
-          if n != 1:
-              raise SystemExit(f"Função do lembrete esperada 1 vez, encontrada {n}")
-          p.write_text(s2)
-          PY
-
-      - name: Rodar suíte focada completa
-        run: >-
-          npm test --
-          src/lib/inatividadeSemCancelamento.regression.test.ts
-          src/lib/inatividadeConversa.test.ts
-          src/app/api/interno/cancelamento-inatividade/route.test.ts
-
-      - name: Verificar whitespace
-        run: git diff --check
-
-      - name: Build de produção
-        run: npm run build
-
-      - name: Restaurar CI original e gravar ajuste validado
-        shell: bash
-        run: |
-          git checkout origin/main -- .github/workflows/whatsapp-link-cardapio-ci.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/bot.ts src/lib/inatividadeSemCancelamento.regression.test.ts .github/workflows/whatsapp-link-cardapio-ci.yml
-          git commit -m "fix(whatsapp): preserva pausas na mensagem de inatividade"
-          git push origin HEAD:fix/whatsapp-inatividade-sem-cancelar-20260821
-
   whatsapp-link-cardapio-ci:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref != 'fix/whatsapp-inatividade-sem-cancelar-20260821'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do SHA validado
