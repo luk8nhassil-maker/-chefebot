@@ -1247,13 +1247,16 @@ export default function PedidosPage() {
   // Declaração de função (hoisted) em vez de const: precisa ser referenciável
   // por useDialogA11y logo acima de confirmPixModal, antes deste ponto do
   // arquivo — ver o comentário junto de pixModalRef.
-  function fecharVerificacaoPix() {
-    if (pixConfirmando) return
+  function resetarVerificacaoPix() {
     setConfirmPixModal(null)
     setPixChecklist({ conferiu: false, valorBate: false, clienteCorreto: false })
     setPixSenha("")
     setPixSenhaVisivel(false)
     setPixErro(null)
+  }
+  function fecharVerificacaoPix() {
+    if (pixConfirmando) return
+    resetarVerificacaoPix()
   }
   const checklistCompleto = pixChecklist.conferiu && pixChecklist.valorBate && pixChecklist.clienteCorreto
   const podeConfirmarPix = checklistCompleto && pixSenha.length > 0 && !pixConfirmando
@@ -1279,7 +1282,7 @@ export default function PedidosPage() {
           ? `⚠️ ${data.avisoOperacional}`
           : `PAGAMENTO CONFIRMADO COM SEGURANÇA — ${formatarValorReais(data.valorConfirmado)} foi registrado como recebido.`)
         setPixConfirmando(false)
-        fecharVerificacaoPix()
+        resetarVerificacaoPix()
         return
       }
       if (r.status === 409) {
@@ -1288,7 +1291,7 @@ export default function PedidosPage() {
         setPedidos(prev => prev.map(p => p.id === id && data.pedido ? { ...p, ...data.pedido } : p))
         setPixErro(data.error || "Este pagamento já foi confirmado.")
         setPixConfirmando(false)
-        setTimeout(fecharVerificacaoPix, 1800)
+        setTimeout(resetarVerificacaoPix, 1800)
         return
       }
       if (r.status === 401) {
