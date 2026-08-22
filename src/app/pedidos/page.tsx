@@ -602,6 +602,7 @@ export default function PedidosPage() {
   }
 
   useEffect(() => {
+    const tituloOriginal = tituloOriginalRef.current
     const user = getUserInfo()
     if (user) { setIsAdmin(user.role === "admin" || user.role === "dev"); setUserName(user.name || "Kellyne") }
     const savedMute = localStorage.getItem("chefebot-mute") === "true"
@@ -639,7 +640,7 @@ export default function PedidosPage() {
     document.addEventListener("visibilitychange", handleVisibility);
     const pararPollingPedidos = iniciarPollingVisivel({ executar: carregarPedidos, intervaloMs: 3000, pausarOculto: false })
     const tick = setInterval(() => setNow(Date.now()), 1000)
-    return () => { if (wakeLock) wakeLock.release(); document.removeEventListener("visibilitychange", handleVisibility); window.removeEventListener("beforeinstallprompt", handleInstall); pararPollingPedidos(); clearInterval(tick); if (piscarRef.current) clearInterval(piscarRef.current); if (somRepetidoRef.current) clearInterval(somRepetidoRef.current); document.title = tituloOriginalRef.current }
+    return () => { if (wakeLock) wakeLock.release(); document.removeEventListener("visibilitychange", handleVisibility); window.removeEventListener("beforeinstallprompt", handleInstall); pararPollingPedidos(); clearInterval(tick); if (piscarRef.current) clearInterval(piscarRef.current); if (somRepetidoRef.current) clearInterval(somRepetidoRef.current); document.title = tituloOriginal }
   }, [router])
 
   useEffect(() => {
@@ -705,6 +706,16 @@ export default function PedidosPage() {
     prevMsgCountRef.current = 0
     setNovasMsgCount(0)
   }, [sessaoAtiva])
+
+  const carregarHistoricoConversa = async (phone: string) => {
+    try {
+      const r = await fetch(`/api/pedido-combinado?phone=${encodeURIComponent(phone)}`)
+      if (r.ok) {
+        const data = await r.json()
+        setHistoricoMsgs(data.conversa ?? [])
+      }
+    } catch {}
+  }
 
   useEffect(() => {
     if (!sessaoAtiva || filtro !== "tempo_real") return
@@ -1018,16 +1029,6 @@ export default function PedidosPage() {
       }
     } catch {}
     setCriandoPedidoCombinado(false)
-  }
-
-  const carregarHistoricoConversa = async (phone: string) => {
-    try {
-      const r = await fetch(`/api/pedido-combinado?phone=${encodeURIComponent(phone)}`)
-      if (r.ok) {
-        const data = await r.json()
-        setHistoricoMsgs(data.conversa ?? [])
-      }
-    } catch {}
   }
 
   const marcarResolvido = async (phone: string, pedidoId: string) => {
