@@ -1,0 +1,151 @@
+name: Temporary fix Pix modal stuck
+
+on:
+  push:
+    branches:
+      - fix/pedidos-pix-modal-stuck-20260821
+
+permissions:
+  contents: write
+
+jobs:
+  prove-fix-and-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Add regression test only
+        shell: bash
+        run: |
+          cat > src/app/pedidos/pixModalFechamento.regression.test.ts <<'EOF'
+          import { describe, test, expect } from "vitest";
+          import { readFileSync } from "node:fs";
+          import { fileURLToPath } from "node:url";
+
+          const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
+          const confirmar = fonte.slice(
+            fonte.indexOf("const confirmarPixManual = async"),
+            fonte.indexOf("const inputStyle:")
+          );
+
+          describe("/pedidos — regressão: modal de Pix manual não pode ficar preso após a resposta", () => {
+            test("sucesso fecha o overlay por reset independente do state assíncrono", () => {
+              const inicioReset = fonte.indexOf("function resetarVerificacaoPix");
+              expect(inicioReset).toBeGreaterThan(-1);
+              const reset = fonte.slice(inicioReset, fonte.indexOf("function fecharVerificacaoPix", inicioReset));
+              expect(reset).toContain("setConfirmPixModal(null)");
+              expect(reset).not.toContain("if (pixConfirmando)");
+
+              const sucesso = confirmar.slice(confirmar.indexOf("if (r.ok)"), confirmar.indexOf("if (r.status === 409)"));
+              expect(sucesso).toContain("setPixConfirmando(false)");
+              expect(sucesso).toContain("resetarVerificacaoPix()");
+              expect(sucesso).not.toContain("fecharVerificacaoPix()");
+            });
+
+            test("fechamento voluntário continua bloqueado durante envio, mas delega ao reset seguro", () => {
+              const inicio = fonte.indexOf("function fecharVerificacaoPix");
+              const fim = fonte.indexOf("const checklistCompleto", inicio);
+              const fechar = fonte.slice(inicio, fim);
+              expect(fechar).toContain("if (pixConfirmando) return");
+              expect(fechar).toContain("resetarVerificacaoPix()");
+            });
+
+            test("corrida 409 também fecha depois do aviso sem capturar a closure travada", () => {
+              const bloco409 = confirmar.slice(confirmar.indexOf("if (r.status === 409)"), confirmar.indexOf("if (r.status === 401)"));
+              expect(bloco409).toContain("setPixConfirmando(false)");
+              expect(bloco409).toContain("setTimeout(resetarVerificacaoPix, 1800)");
+              expect(bloco409).not.toContain("setTimeout(fecharVerificacaoPix");
+            });
+          });
+          EOF
+
+      - name: Prove regression exists on main code
+        shell: bash
+        run: |
+          set +e
+          npm test -- src/app/pedidos/pixModalFechamento.regression.test.ts
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "Regression test unexpectedly passed before the patch. Refusing to continue."
+            exit 1
+          fi
+          echo "Regression reproduced: test failed before patch as expected."
+
+      - name: Apply minimal UI-only patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/app/pedidos/page.tsx")
+          src = path.read_text()
+
+          old_close = '''  function fecharVerificacaoPix() {
+            if (pixConfirmando) return
+            setConfirmPixModal(null)
+            setPixChecklist({ conferiu: false, valorBate: false, clienteCorreto: false })
+            setPixSenha("")
+            setPixSenhaVisivel(false)
+            setPixErro(null)
+          }'''
+          new_close = '''  function resetarVerificacaoPix() {
+            setConfirmPixModal(null)
+            setPixChecklist({ conferiu: false, valorBate: false, clienteCorreto: false })
+            setPixSenha("")
+            setPixSenhaVisivel(false)
+            setPixErro(null)
+          }
+          function fecharVerificacaoPix() {
+            if (pixConfirmando) return
+            resetarVerificacaoPix()
+          }'''
+
+          old_success = '''        setPixConfirmando(false)
+                  fecharVerificacaoPix()
+                  return'''
+          new_success = '''        setPixConfirmando(false)
+                  resetarVerificacaoPix()
+                  return'''
+
+          old_409 = '''        setTimeout(fecharVerificacaoPix, 1800)'''
+          new_409 = '''        setTimeout(resetarVerificacaoPix, 1800)'''
+
+          for label, old in [("close", old_close), ("success", old_success), ("409", old_409)]:
+              count = src.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one {label} target, found {count}")
+
+          src = src.replace(old_close, new_close)
+          src = src.replace(old_success, new_success)
+          src = src.replace(old_409, new_409)
+          path.write_text(src)
+          PY
+
+      - name: Run focused regression tests
+        run: npm test -- src/app/pedidos/pixModalFechamento.regression.test.ts src/app/pedidos/pixSeguranca.page.test.ts src/app/api/orders/confirmar-pix-manual/route.test.ts
+
+      - name: Production build
+        run: npm run build
+
+      - name: Remove temporary workflow and commit validated patch
+        shell: bash
+        run: |
+          rm .github/workflows/tmp-fix-pix-modal-stuck.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/pedidos/page.tsx src/app/pedidos/pixModalFechamento.regression.test.ts .github/workflows/tmp-fix-pix-modal-stuck.yml
+          git commit -m "fix(pedidos): fecha modal Pix após confirmação manual"
+          git push origin HEAD:fix/pedidos-pix-modal-stuck-20260821
