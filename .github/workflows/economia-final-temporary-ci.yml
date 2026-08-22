@@ -1,0 +1,66 @@
+name: economia-final-temporary-ci
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  validar:
+    if: github.head_ref == 'perf/economia-final-20260822'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Testes focados dos dois pacotes
+        run: >-
+          npx vitest run
+          src/app/api/orders/route.economia.test.ts
+          src/app/pedidos/pollingEconomia.page.test.ts
+          src/lib/pollingVisivel.test.ts
+          scripts/ci/check-mcp-observer-cron-workflow.test.mjs
+          scripts/ci/economia-crons.test.mjs
+          src/lib/inatividadeConversa.test.ts
+          src/lib/inatividadeSemCancelamento.regression.test.ts
+          src/lib/pixGuardiaoScheduler.test.ts
+          src/lib/pixPendenteLocal.test.ts
+          src/app/api/orders/confirmar-pix-manual/route.test.ts
+      - name: Typecheck comparado com main
+        shell: bash
+        run: |
+          set +e
+          npx tsc --noEmit --pretty false > /tmp/branch-tsc.txt 2>&1
+          branch_code=$?
+          git worktree add --detach /tmp/main origin/main
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/main/node_modules
+          (cd /tmp/main && ./node_modules/.bin/tsc --noEmit --pretty false) > /tmp/main-tsc.txt 2>&1
+          main_code=$?
+          set -e
+          branch_count=$(grep -c 'error TS' /tmp/branch-tsc.txt || true)
+          main_count=$(grep -c 'error TS' /tmp/main-tsc.txt || true)
+          echo "TypeScript: branch=$branch_count main=$main_count (exit branch=$branch_code main=$main_code)"
+          test "$branch_count" -le "$main_count"
+      - name: Lint dos arquivos novos/isolados
+        run: >-
+          npx eslint
+          src/lib/pollingVisivel.ts
+          src/lib/pollingVisivel.test.ts
+          src/app/api/orders/route.economia.test.ts
+          src/app/pedidos/pollingEconomia.page.test.ts
+          scripts/ci/check-mcp-observer-cron-workflow.mjs
+          scripts/ci/check-mcp-observer-cron-workflow.test.mjs
+          scripts/ci/economia-crons.test.mjs
+      - name: Build de produção
+        run: npm run build
+      - name: Diff sanity
+        run: git diff --check origin/main...HEAD
