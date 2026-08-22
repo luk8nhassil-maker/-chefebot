@@ -1,0 +1,151 @@
+name: Agent Pix timeout panel print validation
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-finalize:
+    if: github.head_ref == 'agent/pix-timeout-panel-print-20260810'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      BASE_SHA: cc2885f6d874bc949dc3f798bbb083255357a7c4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/pix-timeout-panel-print-20260810
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Patch only the audited preparation-status latency path
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path('src/app/api/orders/route.ts')
+          text = p.read_text(encoding='utf-8')
+
+          old_import = "import { NextRequest, NextResponse } from 'next/server'"
+          new_import = old_import + "\nimport { agendarTarefaAposResposta } from '@/lib/afterResponse'"
+          if new_import not in text:
+            if text.count(old_import) != 1:
+              raise SystemExit('import anchor not unique')
+            text = text.replace(old_import, new_import, 1)
+
+          old = """  if (!silent && !(status === 'saiu_entrega' && entregadorCanonico)) {\n    const notificacao = await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente, pedidos[index].tipoEntrega, pedidos[index].endereco, statusAnterior)\n    if (notificacao && !notificacao.ok) {\n      avisosOperacionais.push('Status atualizado, mas a mensagem ao cliente não foi enviada. Tente novamente pelo WhatsApp.')\n    }\n  }"""
+          new = """  if (!silent && !(status === 'saiu_entrega' && entregadorCanonico)) {\n    const enviarNotificacaoStatus = () => notificarCliente(\n      pedidos[index].telefone,\n      status,\n      pedidos[index].cliente,\n      pedidos[index].tipoEntrega,\n      pedidos[index].endereco,\n      statusAnterior\n    )\n\n    // O aceite é o caminho crítico do balcão: o status e a autorização de\n    // auto-print já estão persistidos. Não segura a resposta do painel\n    // esperando a Evolution/WhatsApp. Nos testes diretos, onde `after()` não\n    // tem contexto de request, cai no comportamento síncrono anterior.\n    if (status === 'em_preparo') {\n      const agendada = agendarTarefaAposResposta(async () => {\n        const notificacao = await enviarNotificacaoStatus()\n        if (notificacao && !notificacao.ok) {\n          console.error('[ChefeBot] Status atualizado, mas a notificação de preparo não foi enviada.', {\n            pedidoId: id,\n            motivo: notificacao.motivo,\n          })\n        }\n      })\n      if (!agendada) {\n        const notificacao = await enviarNotificacaoStatus()\n        if (notificacao && !notificacao.ok) {\n          avisosOperacionais.push('Status atualizado, mas a mensagem ao cliente não foi enviada. Tente novamente pelo WhatsApp.')\n        }\n      }\n    } else {\n      const notificacao = await enviarNotificacaoStatus()\n      if (notificacao && !notificacao.ok) {\n        avisosOperacionais.push('Status atualizado, mas a mensagem ao cliente não foi enviada. Tente novamente pelo WhatsApp.')\n      }\n    }\n  }"""
+          if new not in text:
+            if text.count(old) != 1:
+              raise SystemExit(f'notification anchor expected once, found {text.count(old)}')
+            text = text.replace(old, new, 1)
+
+          p.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Targeted regression tests
+        run: >-
+          npx vitest run
+          src/lib/mercadoPagoCancelamento.test.ts
+          src/lib/pixPagamentoTimeout.test.ts
+          src/lib/pixSentinela.test.ts
+          src/lib/pixGuardiaoScheduler.test.ts
+          src/app/api/interno/pix-guardiao/verificar/route.test.ts
+          src/app/api/admin/mercadopago/guardiao-pix/route.test.ts
+          src/app/api/orders/route.impressaoAutomatica.test.ts
+          src/app/api/orders/route.latenciaPreparo.test.ts
+
+      - name: Lint new and modified modules
+        shell: bash
+        run: |
+          npx eslint \
+            src/lib/afterResponse.ts \
+            src/lib/mercadoPagoCancelamento.ts \
+            src/lib/mercadoPagoCancelamento.test.ts \
+            src/lib/pixPagamentoTimeout.ts \
+            src/lib/pixPagamentoTimeout.test.ts \
+            src/lib/pixAutoCheckConfig.ts \
+            src/app/api/interno/pix-guardiao/verificar/route.ts \
+            src/app/api/admin/mercadopago/guardiao-pix/route.ts \
+            src/app/api/admin/mercadopago/guardiao-pix/route.test.ts \
+            src/app/api/orders/route.latenciaPreparo.test.ts
+
+          set +e
+          npx eslint src/app/api/orders/route.ts --format json > /tmp/branch-eslint.json
+          branch_eslint=$?
+          set -e
+
+          git worktree add --detach /tmp/chefebot-main "$BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/chefebot-main/node_modules
+          set +e
+          (cd /tmp/chefebot-main && ./node_modules/.bin/eslint src/app/api/orders/route.ts --format json) > /tmp/base-eslint.json
+          base_eslint=$?
+          set -e
+
+          node <<'NODE'
+          const fs = require('fs')
+          const counts = p => {
+            const rows = JSON.parse(fs.readFileSync(p, 'utf8'))
+            return rows.reduce((a, r) => ({ errors: a.errors + r.errorCount, warnings: a.warnings + r.warningCount }), { errors: 0, warnings: 0 })
+          }
+          const branch = counts('/tmp/branch-eslint.json')
+          const base = counts('/tmp/base-eslint.json')
+          console.log({ branch, base })
+          if (branch.errors > base.errors || branch.warnings > base.warnings) process.exit(1)
+          NODE
+          echo "ESLint route baseline preservada (branch=$branch_eslint base=$base_eslint)"
+
+      - name: Typecheck against main baseline
+        shell: bash
+        run: |
+          set +e
+          npx tsc --noEmit --pretty false > /tmp/branch-tsc.txt 2>&1
+          branch_code=$?
+          (cd /tmp/chefebot-main && ./node_modules/.bin/tsc --noEmit --pretty false) > /tmp/base-tsc.txt 2>&1
+          base_code=$?
+          set -e
+
+          branch_count=$(grep -c 'error TS' /tmp/branch-tsc.txt || true)
+          base_count=$(grep -c 'error TS' /tmp/base-tsc.txt || true)
+          echo "Typecheck errors: branch=$branch_count base=$base_count"
+          if [ "$branch_count" -gt "$base_count" ]; then
+            cat /tmp/branch-tsc.txt
+            exit 1
+          fi
+          if grep -E 'afterResponse|mercadoPagoCancelamento|pixPagamentoTimeout|pixAutoCheckConfig|pix-guardiao/verificar|guardiao-pix/route|route.latenciaPreparo' /tmp/branch-tsc.txt; then
+            echo "Erro TypeScript novo em arquivo tocado"
+            exit 1
+          fi
+          echo "Typecheck baseline preservada (branch=$branch_code base=$base_code)"
+
+      - name: Full test suite
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Diff sanity
+        run: git diff --check
+
+      - name: Commit validated route patch and remove temporary workflow
+        shell: bash
+        run: |
+          git rm .github/workflows/agent-pix-timeout-panel-print.yml
+          git config user.name "openai-agent"
+          git config user.email "openai-agent@users.noreply.github.com"
+          git add src docs
+          git diff --cached --check
+          git commit -m "perf(pedidos): responde aceite antes do WhatsApp e preserva auto-print"
+          git push origin HEAD:agent/pix-timeout-panel-print-20260810
