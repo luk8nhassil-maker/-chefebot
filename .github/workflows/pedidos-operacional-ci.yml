@@ -109,15 +109,15 @@ jobs:
           page = Path("src/app/pedidos/page.tsx")
           src = page.read_text()
 
-          old_close = '''  function fecharVerificacaoPix() {
-            if (pixConfirmando) return
-            setConfirmPixModal(null)
-            setPixChecklist({ conferiu: false, valorBate: false, clienteCorreto: false })
-            setPixSenha("")
-            setPixSenhaVisivel(false)
-            setPixErro(null)
-          }'''
-          new_close = '''  function resetarVerificacaoPix() {
+          inicio = src.find("  function fecharVerificacaoPix() {")
+          fim = src.find("  const checklistCompleto", inicio)
+          if inicio < 0 or fim < 0:
+              raise SystemExit("Bloco fecharVerificacaoPix não encontrado")
+          bloco_atual = src[inicio:fim]
+          if bloco_atual.count("setConfirmPixModal(null)") != 1 or "if (pixConfirmando) return" not in bloco_atual:
+              raise SystemExit("Formato inesperado do fechamento do modal; abortando")
+
+          bloco_novo = '''  function resetarVerificacaoPix() {
             setConfirmPixModal(null)
             setPixChecklist({ conferiu: false, valorBate: false, clienteCorreto: false })
             setPixSenha("")
@@ -127,35 +127,30 @@ jobs:
           function fecharVerificacaoPix() {
             if (pixConfirmando) return
             resetarVerificacaoPix()
-          }'''
+          }
+          '''
+          src = src[:inicio] + bloco_novo + src[fim:]
 
-          old_success = '''        setPixConfirmando(false)
-                  fecharVerificacaoPix()
-                  return'''
-          new_success = '''        setPixConfirmando(false)
-                  resetarVerificacaoPix()
-                  return'''
-          old_409 = '''        setTimeout(fecharVerificacaoPix, 1800)'''
-          new_409 = '''        setTimeout(resetarVerificacaoPix, 1800)'''
+          old_success = "        setPixConfirmando(false)\n        fecharVerificacaoPix()\n        return"
+          new_success = "        setPixConfirmando(false)\n        resetarVerificacaoPix()\n        return"
+          if src.count(old_success) != 1:
+              raise SystemExit(f"Sucesso: esperado 1 alvo, encontrado {src.count(old_success)}")
+          src = src.replace(old_success, new_success, 1)
 
-          for label, old in [("fechamento", old_close), ("sucesso", old_success), ("409", old_409)]:
-              count = src.count(old)
-              if count != 1:
-                  raise SystemExit(f"Alvo {label}: esperado 1 ocorrência, encontrado {count}")
-
-          src = src.replace(old_close, new_close)
-          src = src.replace(old_success, new_success)
-          src = src.replace(old_409, new_409)
+          old_409 = "        setTimeout(fecharVerificacaoPix, 1800)"
+          new_409 = "        setTimeout(resetarVerificacaoPix, 1800)"
+          if src.count(old_409) != 1:
+              raise SystemExit(f"409: esperado 1 alvo, encontrado {src.count(old_409)}")
+          src = src.replace(old_409, new_409, 1)
           page.write_text(src)
 
           teste = Path("src/app/pedidos/pixSeguranca.page.test.ts")
           t = teste.read_text()
           old_expect = 'expect(blocoJaConfirmado).toContain("setTimeout(fecharVerificacaoPix");'
-          new_expect = '''expect(blocoJaConfirmado).toContain("setTimeout(resetarVerificacaoPix, 1800)");
-              expect(blocoJaConfirmado).not.toContain("setTimeout(fecharVerificacaoPix");'''
+          new_expect = 'expect(blocoJaConfirmado).toContain("setTimeout(resetarVerificacaoPix, 1800)");\n    expect(blocoJaConfirmado).not.toContain("setTimeout(fecharVerificacaoPix");'
           if t.count(old_expect) != 1:
-              raise SystemExit("Expectativa antiga do 409 não encontrada exatamente uma vez")
-          teste.write_text(t.replace(old_expect, new_expect))
+              raise SystemExit(f"Teste 409: esperado 1 alvo, encontrado {t.count(old_expect)}")
+          teste.write_text(t.replace(old_expect, new_expect, 1))
           PY
 
       - name: Testes focados do Pix manual e do painel
