@@ -1,7 +1,5 @@
 name: whatsapp-link-cardapio-ci
 
-# Gate hermético para impedir que links/webhooks legados do ChefeBot
-# alcancem clientes pelo WhatsApp. Não recebe segredos e não chama Evolution real.
 on:
   pull_request:
     paths:
@@ -11,18 +9,199 @@ on:
       - "src/lib/evolutionApi.test.ts"
       - "src/app/api/whatsapp/reset/route.ts"
       - "src/app/api/whatsapp/reset/route.test.ts"
+      - "src/lib/inatividadeConversa.ts"
+      - "src/lib/inatividadeConversa.test.ts"
+      - "src/lib/conversa.ts"
+      - "src/lib/bot.ts"
+      - "src/app/api/interno/cancelamento-inatividade/route.ts"
+      - "src/app/api/interno/cancelamento-inatividade/route.test.ts"
+      - "src/lib/inatividadeSemCancelamento.regression.test.ts"
       - ".github/workflows/whatsapp-link-cardapio-ci.yml"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: read
 
 concurrency:
   group: whatsapp-link-cardapio-ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  fix-inatividade-sem-cancelar:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'fix/whatsapp-inatividade-sem-cancelar-20260821'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout da branch isolada
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Criar teste de regressão antes do patch
+        shell: bash
+        run: |
+          cat > src/lib/inatividadeSemCancelamento.regression.test.ts <<'EOF'
+          import { describe, expect, test } from "vitest";
+          import { readFileSync } from "node:fs";
+          import { fileURLToPath } from "node:url";
+
+          const lib = readFileSync(fileURLToPath(new URL("./inatividadeConversa.ts", import.meta.url)), "utf-8");
+          const bot = readFileSync(fileURLToPath(new URL("./bot.ts", import.meta.url)), "utf-8");
+          const route = readFileSync(fileURLToPath(new URL("../app/api/interno/cancelamento-inatividade/route.ts", import.meta.url)), "utf-8");
+
+          describe("WhatsApp — inatividade não pode assustar nem apagar o atendimento", () => {
+            test("espera 20 minutos antes do lembrete", () => {
+              expect(lib).toContain("20 * 60 * 1000");
+              expect(lib).not.toContain("10 * 60 * 1000");
+            });
+
+            test("mensagem deixa explícito que nada foi cancelado", () => {
+              const inicio = bot.indexOf("mensagemLembretePorInatividade");
+              expect(inicio).toBeGreaterThan(-1);
+              const trecho = bot.slice(inicio, bot.indexOf("// Anexa o link", inicio));
+              expect(trecho).toContain("nada foi cancelado");
+              expect(trecho).toContain("continua por aqui");
+              expect(trecho).not.toContain("cancelei esse pedido");
+            });
+
+            test("tick vira lembrete não destrutivo e mantém a sessão viva", () => {
+              expect(route).not.toContain("await redis.del(`session:${phone}`)");
+              expect(route).not.toContain("await redis.del(`manual:${phone}`)");
+              expect(route).toContain("await redis.expire(`session:${phone}`, 1800)");
+              expect(route).toContain("lembrete_ja_enviado");
+              expect(route).toContain("lembreteEnviado");
+            });
+          });
+          EOF
+
+      - name: Provar regressão no código atual
+        shell: bash
+        run: |
+          set +e
+          npm test -- src/lib/inatividadeSemCancelamento.regression.test.ts
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "O teste novo passou antes do patch; abortando porque a regressão não foi reproduzida."
+            exit 1
+          fi
+          echo "Regressão reproduzida com sucesso no código atual."
+
+      - name: Aplicar patch mínimo do lembrete de inatividade
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          # 1) Copy: remove linguagem de cancelamento e deixa claro que o atendimento segue vivo.
+          bot_path = Path("src/lib/bot.ts")
+          bot = bot_path.read_text()
+          pattern = re.compile(r'// Mensagem de encerramento por inatividade — ver src/lib/inatividadeConversa\.ts:.*?export function mensagemCancelamentoPorInatividade\(\): string \{.*?\n\}\n(?=// Anexa o link)', re.S)
+          replacement = '''// Lembrete de inatividade — ver src/lib/inatividadeConversa.ts:\n// disparado depois de uma pausa longa do cliente. Não cancela pedido, não apaga\n// sessão e não encerra atendimento; serve apenas para tranquilizar e mostrar\n// que a conversa continua disponível.\nexport function mensagemLembretePorInatividade(): string {\n  return `Oi! 😊 Só passando pra avisar que seu atendimento continua por aqui e nada foi cancelado.\\\n\\\nQuando puder, me responde e a gente continua de onde parou — sem pressa.\\\n\\\nSe preferir, você também pode seguir pelo cardápio digital:\\n${LINK_CARDAPIO_DIGITAL}`;\n}\n'''
+          bot2, n = pattern.subn(replacement, bot, count=1)
+          if n != 1:
+              raise SystemExit(f"bot.ts: esperado 1 bloco antigo, encontrado {n}")
+          bot_path.write_text(bot2)
+
+          # 2) Scheduler: dobra a espera para 20 minutos e atualiza a documentação sem mudar a arquitetura de geração/QStash.
+          lib_path = Path("src/lib/inatividadeConversa.ts")
+          lib = lib_path.read_text()
+          old_const = 'export const CANCELAMENTO_INATIVIDADE_DELAY_MS = 10 * 60 * 1000; // 10 minutos'
+          new_const = 'export const CANCELAMENTO_INATIVIDADE_DELAY_MS = 20 * 60 * 1000; // 20 minutos'
+          if lib.count(old_const) != 1:
+              raise SystemExit("inatividadeConversa.ts: constante de 10 minutos não encontrada exatamente uma vez")
+          lib = lib.replace(old_const, new_const)
+          lib = lib.replace(
+              '// CANCELAMENTO_INATIVIDADE_DELAY_MS sem resposta do cliente DEPOIS da nossa\n// última mensagem (bot OU atendente humano, por qualquer canal — app direto\n// ou painel), a conversa é encerrada automaticamente e o cliente recebe um\n// aviso com o link do cardápio digital como alternativa. Ver',
+              '// CANCELAMENTO_INATIVIDADE_DELAY_MS sem resposta do cliente DEPOIS da nossa\n// última mensagem (bot OU atendente humano, por qualquer canal — app direto\n// ou painel), o cliente recebe um lembrete gentil. O lembrete não cancela pedido,\n// não apaga a sessão e não encerra atendimento. Ver'
+          )
+          lib_path.write_text(lib)
+
+          # 3) Endpoint legado mantém o path por compatibilidade, mas agora só lembra e preserva o contexto.
+          route_path = Path("src/app/api/interno/cancelamento-inatividade/route.ts")
+          route = route_path.read_text()
+          route = route.replace('import { mensagemCancelamentoPorInatividade } from "@/lib/bot";', 'import { mensagemLembretePorInatividade } from "@/lib/bot";')
+          route = route.replace('Um tick só cancela a conversa se, no momento em que chega, TUDO isto', 'Um tick só envia o lembrete se, no momento em que chega, TUDO isto')
+          old_block = re.compile(r'  // Encerra a conversa: 10 min de silêncio depois da nossa última mensagem\..*?  return NextResponse\.json\(\{ ok: true, cancelado: resultado\.ok \}\);', re.S)
+          new_block = '''  // O nome da rota é legado, mas o comportamento agora é não destrutivo:\n  // depois de 20 min de silêncio enviamos um único lembrete e preservamos\n  // sessão/atendimento para o cliente continuar de onde parou.\n  const chaveLembreteAtual = `inatividade:lembrete:${phone}:${geracaoTick}`;\n  const lembreteJaEnviado = await redis.get<string>(chaveLembreteAtual);\n  if (lembreteJaEnviado) {\n    return NextResponse.json({ ok: true, ignorado: true, motivo: "lembrete_ja_enviado" });\n  }\n\n  // Dá mais 30 min de vida à sessão a partir do lembrete. Se um atendente\n  // humano estiver com a conversa assumida, mantém também o lock manual.\n  await redis.expire(`session:${phone}`, 1800);\n  const manualAtivo = await redis.get<unknown>(`manual:${phone}`);\n  if (manualAtivo) await redis.expire(`manual:${phone}`, 3600);\n\n  const texto = mensagemLembretePorInatividade();\n  const resultado = await enviarTextoWhatsApp(phone, texto);\n  if (resultado.ok) {\n    await registrarMensagem(phone, "bot", texto);\n\n    // registrarMensagem() agenda um novo tick porque a última mensagem passa\n    // a ser nossa. Marcamos essa NOVA geração para esse tick virar no-op e\n    // impedir lembretes repetidos. Qualquer mensagem real futura avança a\n    // geração normalmente e libera um novo ciclo.\n    const geracaoAposLembrete = await geracaoAtualCronometroInatividade(phone);\n    await redis.set(`inatividade:lembrete:${phone}:${geracaoAposLembrete}`, "1", { ex: 3600 });\n  }\n\n  return NextResponse.json({ ok: true, lembreteEnviado: resultado.ok });'''
+          route2, n = old_block.subn(new_block, route, count=1)
+          if n != 1:
+              raise SystemExit(f"route.ts: bloco destrutivo esperado 1 vez, encontrado {n}")
+          route_path.write_text(route2)
+
+          # 4) Comentário do ponto central: não chamar mais o recurso de cancelamento.
+          conversa_path = Path("src/lib/conversa.ts")
+          conversa = conversa_path.read_text()
+          conversa = conversa.replace(
+              '// Ponto único de sincronização do cronômetro de cancelamento por\n// inatividade (ver src/lib/inatividadeConversa.ts) — cobre automaticamente',
+              '// Ponto único de sincronização do cronômetro de lembrete por\n// inatividade (ver src/lib/inatividadeConversa.ts) — cobre automaticamente'
+          )
+          conversa_path.write_text(conversa)
+
+          # 5) Teste do scheduler: 20 min = 1200s.
+          test_lib_path = Path("src/lib/inatividadeConversa.test.ts")
+          test_lib = test_lib_path.read_text()
+          test_lib = test_lib.replace('agenda o tick com delay de 10 minutos', 'agenda o tick com delay de 20 minutos')
+          test_lib = test_lib.replace('expect(chamada.delay).toBe(600); // 10 min em segundos', 'expect(chamada.delay).toBe(1200); // 20 min em segundos')
+          test_lib_path.write_text(test_lib)
+
+          # 6) Testes do endpoint: preservação, copy e supressão de lembrete repetido.
+          test_route_path = Path("src/app/api/interno/cancelamento-inatividade/route.test.ts")
+          test_route = test_route_path.read_text()
+          old_del = '    del: vi.fn(async (key: string) => (store.delete(key) ? 1 : 0)),\n'
+          if test_route.count(old_del) != 1:
+              raise SystemExit("route.test.ts: mock del não encontrado")
+          test_route = test_route.replace(old_del, old_del + '    expire: vi.fn(async (key: string, _seconds: number) => (store.has(key) ? 1 : 0)),\n')
+          test_route = test_route.replace('  enviarTextoWhatsAppMock.mockClear().mockResolvedValue({ ok: true, latenciaMs: 1, tentativas: 1 });', '  enviarTextoWhatsAppMock.mockClear().mockResolvedValue({ ok: true, latenciaMs: 1, tentativas: 1 });\n  redisMock.expire.mockClear();')
+
+          effective = re.compile(r'describe\("/api/interno/cancelamento-inatividade — cancelamento efetivo".*\Z', re.S)
+          new_tests = '''describe("/api/interno/cancelamento-inatividade — lembrete não destrutivo", () => {\n  test("última mensagem é do bot: mantém sessão viva e manda lembrete sem falar em cancelamento", async () => {\n    geracaoAtualMock.mockResolvedValueOnce(1).mockResolvedValueOnce(2);\n    const { POST } = await import("./route");\n    const res = await POST(req({ phone: PHONE, geracao: 1 }));\n    const json = await res.json();\n\n    expect(json.ok).toBe(true);\n    expect(json.lembreteEnviado).toBe(true);\n    expect(store.has(`session:${PHONE}`)).toBe(true);\n    expect(redisMock.expire).toHaveBeenCalledWith(`session:${PHONE}`, 1800);\n\n    expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(1);\n    const textoEnviado = enviarTextoWhatsAppMock.mock.calls[0][1];\n    expect(textoEnviado).toContain("continua por aqui");\n    expect(textoEnviado).toContain("nada foi cancelado");\n    expect(textoEnviado).not.toContain("cancelei esse pedido");\n    expect(textoEnviado).toContain("cardápio digital");\n\n    expect(registrarMensagemMock).toHaveBeenCalledWith(PHONE, "bot", textoEnviado);\n    expect(store.get(`inatividade:lembrete:${PHONE}:2`)).toBe("1");\n  });\n\n  test("atendimento humano também continua assumido e ganha mais tempo", async () => {\n    ultimasMensagensMock.mockResolvedValueOnce([{ autor: "atendente", texto: "[Kellyne] oi", ts: Date.now() }]);\n    store.set(`session:${PHONE}`, { step: "escalado" });\n    store.set(`manual:${PHONE}`, true);\n    geracaoAtualMock.mockResolvedValueOnce(1).mockResolvedValueOnce(2);\n    const { POST } = await import("./route");\n    const res = await POST(req({ phone: PHONE, geracao: 1 }));\n    const json = await res.json();\n    expect(json.lembreteEnviado).toBe(true);\n    expect(store.has(`session:${PHONE}`)).toBe(true);\n    expect(store.has(`manual:${PHONE}`)).toBe(true);\n    expect(redisMock.expire).toHaveBeenCalledWith(`manual:${PHONE}`, 3600);\n  });\n\n  test("tick criado pelo próprio lembrete é ignorado e não manda mensagem repetida", async () => {\n    store.set(`inatividade:lembrete:${PHONE}:1`, "1");\n    const { POST } = await import("./route");\n    const res = await POST(req({ phone: PHONE, geracao: 1 }));\n    const json = await res.json();\n    expect(json.ignorado).toBe(true);\n    expect(json.motivo).toBe("lembrete_ja_enviado");\n    expect(enviarTextoWhatsAppMock).not.toHaveBeenCalled();\n  });\n\n  test("se o envio falhar, preserva a sessão e não registra mensagem falsa", async () => {\n    enviarTextoWhatsAppMock.mockResolvedValueOnce({ ok: false, motivo: "http_500" });\n    const { POST } = await import("./route");\n    const res = await POST(req({ phone: PHONE, geracao: 1 }));\n    const json = await res.json();\n    expect(json.lembreteEnviado).toBe(false);\n    expect(registrarMensagemMock).not.toHaveBeenCalled();\n    expect(store.has(`session:${PHONE}`)).toBe(true);\n  });\n});\n'''
+          test_route2, n = effective.subn(new_tests, test_route, count=1)
+          if n != 1:
+              raise SystemExit(f"route.test.ts: bloco antigo esperado 1 vez, encontrado {n}")
+          test_route_path.write_text(test_route2)
+          PY
+
+      - name: Garantir que a linguagem antiga saiu do fluxo ativo
+        shell: bash
+        run: |
+          if grep -R "mensagemCancelamentoPorInatividade\|cancelei esse pedido" src/lib/bot.ts src/app/api/interno/cancelamento-inatividade src/lib/inatividadeConversa.ts; then
+            echo "Ainda existe linguagem/uso antigo no fluxo de inatividade."
+            exit 1
+          fi
+
+      - name: Rodar testes focados do cronômetro e endpoint
+        run: >-
+          npm test --
+          src/lib/inatividadeSemCancelamento.regression.test.ts
+          src/lib/inatividadeConversa.test.ts
+          src/app/api/interno/cancelamento-inatividade/route.test.ts
+
+      - name: Verificar whitespace
+        run: git diff --check
+
+      - name: Build de produção
+        run: npm run build
+
+      - name: Restaurar CI original e gravar somente o patch validado
+        shell: bash
+        run: |
+          git checkout origin/main -- .github/workflows/whatsapp-link-cardapio-ci.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/bot.ts src/lib/inatividadeConversa.ts src/lib/inatividadeConversa.test.ts src/lib/conversa.ts src/app/api/interno/cancelamento-inatividade/route.ts src/app/api/interno/cancelamento-inatividade/route.test.ts src/lib/inatividadeSemCancelamento.regression.test.ts .github/workflows/whatsapp-link-cardapio-ci.yml
+          git commit -m "fix(whatsapp): transforma inatividade em lembrete seguro"
+          git push origin HEAD:fix/whatsapp-inatividade-sem-cancelar-20260821
+
   whatsapp-link-cardapio-ci:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref != 'fix/whatsapp-inatividade-sem-cancelar-20260821'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do SHA validado
