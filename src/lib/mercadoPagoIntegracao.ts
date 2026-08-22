@@ -192,7 +192,7 @@ export async function resolveActiveMercadoPagoAuth(): Promise<MercadoPagoAuthRes
   }
 
   if (process.env.PIX_PROVIDER === "mercadopago") {
-    const payerEmailFallback = process.env.MERCADOPAGO_PAYER_EMAIL_FALLBACK;
+    const payerEmailFallback = config?.payerEmailFallback || process.env.MERCADOPAGO_PAYER_EMAIL_FALLBACK;
     return {
       active: true,
       source: "env",
