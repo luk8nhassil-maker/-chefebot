@@ -1,28 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { lerWorkflow, validarWorkflow, extrairCrons, CRONS_ESPERADOS } from "./check-mcp-observer-cron-workflow.mjs";
+import { lerWorkflow, validarWorkflow, extrairCrons } from "./check-mcp-observer-cron-workflow.mjs";
 
-describe("workflow mcp-observer-cron.yml", () => {
+describe("workflow mcp-observer-cron.yml — modo econômico", () => {
   const conteudo = lerWorkflow();
 
   it("não tem nenhum problema de validação", () => {
     expect(validarWorkflow(conteudo)).toEqual([]);
   });
 
-  it("contém as 6 janelas de cron esperadas (sex/sáb/dom, a cada 10min, em UTC)", () => {
-    const crons = extrairCrons(conteudo);
-    expect(crons).toEqual(expect.arrayContaining(CRONS_ESPERADOS));
+  it("não possui cron automático enquanto o MCP está inativo", () => {
+    expect(extrairCrons(conteudo)).toEqual([]);
+    expect(conteudo).not.toMatch(/^\s*schedule:\s*$/m);
   });
 
-  it("todas as entradas de cron pedem execução a cada 10 minutos", () => {
-    for (const cron of extrairCrons(conteudo)) {
-      expect(cron.startsWith("*/10 ")).toBe(true);
-    }
+  it("mantém execução manual disponível para diagnóstico/reativação", () => {
+    expect(conteudo).toContain("workflow_dispatch:");
   });
 
   it("detecta workflow_dispatch ausente", () => {
     expect(validarWorkflow(conteudo.replace("workflow_dispatch:", "outra_coisa:"))).toContain(
       "workflow_dispatch ausente (sem gatilho manual)",
     );
+  });
+
+  it("detecta reintrodução de schedule automático", () => {
+    const comSchedule = conteudo.replace(
+      "  workflow_dispatch:",
+      '  workflow_dispatch:\n  schedule:\n    - cron: "*/10 21-23 * * 5"',
+    );
+    expect(validarWorkflow(comSchedule)).toContain("agendamento automático presente com MCP inativo");
   });
 
   it("detecta ausência de mascaramento do segredo", () => {
@@ -36,10 +42,5 @@ describe("workflow mcp-observer-cron.yml", () => {
   it("detecta impressão direta do segredo", () => {
     const comVazamento = `${conteudo}\n          echo "${"$"}{CRON_SECRET}"\n`;
     expect(validarWorkflow(comVazamento)).toContain("imprime CRON_SECRET diretamente");
-  });
-
-  it("detecta cron faltando na janela de pico", () => {
-    const semUmCron = conteudo.replace('- cron: "*/10 21-23 * * 5" # sexta à noite (parte 1)\n', "");
-    expect(validarWorkflow(semUmCron)).toContain("cron ausente: */10 21-23 * * 5");
   });
 });

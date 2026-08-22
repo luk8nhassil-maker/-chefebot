@@ -268,36 +268,38 @@ async function checkAuth(req: NextRequest) {
   return payload
 }
 
+function limparPedidosExpirados(pedidos: Pedido[], agora: number = Date.now()): { pedidos: Pedido[]; mudou: boolean } {
+  let mudou = false
+  const limpos = pedidos.map(p => {
+    const edicao = limparEdicaoExpiradaSeNecessario(p, agora)
+    const escalonamento = limparEscalonamentoExpiradoSeNecessario(edicao.pedido, agora)
+    if (edicao.mudou || escalonamento.mudou) mudou = true
+    return escalonamento.pedido as Pedido
+  })
+  return { pedidos: limpos, mudou }
+}
+
 export async function GET(req: NextRequest) {
   const auth = await checkAuth(req)
   if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
 
-  // Limpeza preguiçosa de locks de edição expirados (mesmo mecanismo de
-  // polling já usado pelo painel — sem infraestrutura nova): se o cliente
-  // fechou a aba ou perdeu a conexão sem descartar, o próximo carregamento
-  // do painel libera o "Aceitar pedido" sozinho, sem precisar de cron.
-  // Mesma limpeza preguiçosa para escalonamento expirado (ver
-  // src/lib/escalonamento.ts): urgência que ninguém assumiu em 10 minutos
-  // volta ao fluxo normal sozinha, silenciosamente.
-  //
-  // Sob o lock GLOBAL de "pedidos" (ver src/lib/pedidosConcorrencia.ts):
-  // este é o escritor de MAIOR frequência prática (todo poll do painel), e
-  // antes da auditoria de lost update conseguia apagar silenciosamente uma
-  // criação/mudança de status concorrente por escrever um snapshot obtido
-  // antes do lock. Só a leitura+eventual escrita fica sob lock — o resto da
-  // resposta é montado fora, sem custo de concorrência extra.
-  const limpos = await mutarPedidos<Pedido, Pedido[]>((pedidosFrescos) => {
-    let mudouAlgum = false
-    const limpos = pedidosFrescos.map(p => {
-      const edicao = limparEdicaoExpiradaSeNecessario(p)
-      const escalonamento = limparEscalonamentoExpiradoSeNecessario(edicao.pedido)
-      if (edicao.mudou || escalonamento.mudou) mudouAlgum = true
-      return escalonamento.pedido as Pedido
+  // Caminho quente do painel: leitura é barata e NÃO disputa o mutex global.
+  // Só promovemos a requisição para leitura-modificação-escrita quando o
+  // snapshot realmente contém edição/escalonamento expirado. Nesse caso,
+  // relê FRESCO dentro de mutarPedidos antes de persistir — a garantia contra
+  // lost update continua exatamente no ponto em que existe escrita.
+  const snapshotPedidos = (await redis.get<Pedido[]>('pedidos')) || []
+  const limpezaInicial = limparPedidosExpirados(snapshotPedidos)
+  let limpos = snapshotPedidos
+
+  if (limpezaInicial.mudou) {
+    limpos = await mutarPedidos<Pedido, Pedido[]>((pedidosFrescos) => {
+      const limpezaAtual = limparPedidosExpirados(pedidosFrescos)
+      return limpezaAtual.mudou
+        ? { persistir: true, pedidos: limpezaAtual.pedidos, resultado: limpezaAtual.pedidos }
+        : { persistir: false, resultado: pedidosFrescos }
     })
-    return mudouAlgum
-      ? { persistir: true, pedidos: limpos, resultado: limpos }
-      : { persistir: false, resultado: limpos }
-  })
+  }
 
   // Enriquecimento SOMENTE de leitura para a apresentação do Salão. A fonte
   // continua sendo o pedidoId oficial de cada rodada da comanda; nada é

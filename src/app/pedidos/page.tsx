@@ -20,6 +20,7 @@ import {
   type RegistroLimpeza,
 } from "@/lib/limpezaOperacionalPedidos"
 import { mapearFamiliasVisiveis, selecionarPedidosPainel, selecionarProximaAcaoFamilia } from "@/lib/pedidoComandaPainel"
+import { iniciarPollingVisivel } from "@/lib/pollingVisivel"
 
 function whatsappLink(telefoneBruto: string, mensagem?: string): string {
   let numero = (telefoneBruto || "").replace(/\D/g, "")
@@ -579,7 +580,7 @@ export default function PedidosPage() {
   }
 
   const carregarPedidos = () => {
-    fetch("/api/orders")
+    return fetch("/api/orders")
       .then(r => { if (r.status === 401) { fetch("/api/auth/logout", { method: "POST" }).finally(() => router.push("/login?callbackUrl=/pedidos")); return null } return r.json() })
       .then(data => {
         if (data) {
@@ -597,10 +598,11 @@ export default function PedidosPage() {
           if (!data.some((p: Pedido) => p.escalonado && p.status === "novo")) { pararPiscar(); pararSomRepetido() }
         }
       })
-      .catch(() => setTimeout(carregarPedidos, 3000))
+      .catch(() => {})
   }
 
   useEffect(() => {
+    const tituloOriginal = tituloOriginalRef.current
     const user = getUserInfo()
     if (user) { setIsAdmin(user.role === "admin" || user.role === "dev"); setUserName(user.name || "Kellyne") }
     const savedMute = localStorage.getItem("chefebot-mute") === "true"
@@ -626,7 +628,7 @@ export default function PedidosPage() {
       } catch {}
     };
     inscreverPush();
-    carregarPedidos(); carregarStatusBot()
+    carregarStatusBot()
     fetch("/api/entregadores").then(r => r.json()).then(d => setEntregadores(Array.isArray(d) ? d.filter((e: any) => e.ativo) : [])).catch(() => {})
     try { if (screen.orientation && (screen.orientation as any).lock) { (screen.orientation as any).lock("portrait").catch(() => {}); } } catch {}
     const handleInstall = (e: any) => { e.preventDefault(); setInstallPrompt(e); const jaInstalou = window.matchMedia("(display-mode: standalone)").matches; if (!jaInstalou) setShowInstallBanner(true); };
@@ -636,9 +638,9 @@ export default function PedidosPage() {
     ativarWakeLock();
     const handleVisibility = () => { if (document.visibilityState === "visible") ativarWakeLock(); };
     document.addEventListener("visibilitychange", handleVisibility);
-    const intervalo = setInterval(carregarPedidos, 3000)
+    const pararPollingPedidos = iniciarPollingVisivel({ executar: carregarPedidos, intervaloMs: 3000, pausarOculto: false })
     const tick = setInterval(() => setNow(Date.now()), 1000)
-    return () => { if (wakeLock) wakeLock.release(); document.removeEventListener("visibilitychange", handleVisibility); window.removeEventListener("beforeinstallprompt", handleInstall); clearInterval(intervalo); clearInterval(tick); if (piscarRef.current) clearInterval(piscarRef.current); if (somRepetidoRef.current) clearInterval(somRepetidoRef.current); document.title = tituloOriginalRef.current }
+    return () => { if (wakeLock) wakeLock.release(); document.removeEventListener("visibilitychange", handleVisibility); window.removeEventListener("beforeinstallprompt", handleInstall); pararPollingPedidos(); clearInterval(tick); if (piscarRef.current) clearInterval(piscarRef.current); if (somRepetidoRef.current) clearInterval(somRepetidoRef.current); document.title = tituloOriginal }
   }, [router])
 
   useEffect(() => {
@@ -653,7 +655,7 @@ export default function PedidosPage() {
   useEffect(() => {
     if (filtro !== "tempo_real") return
     const carregarSessoes = () => {
-      fetch(`/api/sessoes-ativas?t=${Date.now()}`, { cache: "no-store" })
+      return fetch(`/api/sessoes-ativas?t=${Date.now()}`, { cache: "no-store" })
         .then(r => r.ok ? r.json() : [])
         .then(d => {
           if (Array.isArray(d)) {
@@ -664,9 +666,7 @@ export default function PedidosPage() {
         })
         .catch(() => {})
     }
-    carregarSessoes()
-    const iv = setInterval(carregarSessoes, 3000)
-    return () => clearInterval(iv)
+    return iniciarPollingVisivel({ executar: carregarSessoes, intervaloMs: 3000, pausarOculto: true })
   }, [filtro])
 
   // Hidrata o "visto-até" do localStorage no mount, para que após F5 uma
@@ -707,11 +707,19 @@ export default function PedidosPage() {
     setNovasMsgCount(0)
   }, [sessaoAtiva])
 
+  const carregarHistoricoConversa = async (phone: string) => {
+    try {
+      const r = await fetch(`/api/pedido-combinado?phone=${encodeURIComponent(phone)}`)
+      if (r.ok) {
+        const data = await r.json()
+        setHistoricoMsgs(data.conversa ?? [])
+      }
+    } catch {}
+  }
+
   useEffect(() => {
     if (!sessaoAtiva || filtro !== "tempo_real") return
-    carregarHistoricoConversa(sessaoAtiva)
-    const iv = setInterval(() => carregarHistoricoConversa(sessaoAtiva), 3000)
-    return () => clearInterval(iv)
+    return iniciarPollingVisivel({ executar: () => carregarHistoricoConversa(sessaoAtiva), intervaloMs: 3000, pausarOculto: true })
   }, [sessaoAtiva, filtro])
 
   useEffect(() => {
@@ -1021,16 +1029,6 @@ export default function PedidosPage() {
       }
     } catch {}
     setCriandoPedidoCombinado(false)
-  }
-
-  const carregarHistoricoConversa = async (phone: string) => {
-    try {
-      const r = await fetch(`/api/pedido-combinado?phone=${encodeURIComponent(phone)}`)
-      if (r.ok) {
-        const data = await r.json()
-        setHistoricoMsgs(data.conversa ?? [])
-      }
-    } catch {}
   }
 
   const marcarResolvido = async (phone: string, pedidoId: string) => {
