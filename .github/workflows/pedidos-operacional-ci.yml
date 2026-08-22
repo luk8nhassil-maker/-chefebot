@@ -1,7 +1,5 @@
 name: pedidos-operacional-ci
 
-# Gate hermético da regra operacional de pedidos. Não recebe segredos, não
-# acessa Redis/WhatsApp/Pix/impressão e executa apenas regras puras + lint.
 on:
   pull_request:
     paths:
@@ -21,14 +19,167 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: read
 
 concurrency:
   group: pedidos-operacional-ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  fix-pix-modal-stuck:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'fix/pedidos-pix-modal-stuck-20260821'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout da branch isolada
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Criar teste de regressão antes do patch
+        shell: bash
+        run: |
+          cat > src/app/pedidos/pixModalFechamento.regression.test.ts <<'EOF'
+          import { describe, test, expect } from "vitest";
+          import { readFileSync } from "node:fs";
+          import { fileURLToPath } from "node:url";
+
+          const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
+          const confirmar = fonte.slice(
+            fonte.indexOf("const confirmarPixManual = async"),
+            fonte.indexOf("const inputStyle:")
+          );
+
+          describe("/pedidos — regressão do modal de confirmação manual de Pix", () => {
+            test("sucesso fecha o overlay sem depender do state assíncrono pixConfirmando", () => {
+              const inicioReset = fonte.indexOf("function resetarVerificacaoPix");
+              expect(inicioReset).toBeGreaterThan(-1);
+              const reset = fonte.slice(inicioReset, fonte.indexOf("function fecharVerificacaoPix", inicioReset));
+              expect(reset).toContain("setConfirmPixModal(null)");
+              expect(reset).not.toContain("if (pixConfirmando)");
+
+              const sucesso = confirmar.slice(confirmar.indexOf("if (r.ok)"), confirmar.indexOf("if (r.status === 409)"));
+              expect(sucesso).toContain("setPixConfirmando(false)");
+              expect(sucesso).toContain("resetarVerificacaoPix()");
+              expect(sucesso).not.toContain("fecharVerificacaoPix()");
+            });
+
+            test("fechamento voluntário continua bloqueado enquanto a requisição está em andamento", () => {
+              const inicio = fonte.indexOf("function fecharVerificacaoPix");
+              const fim = fonte.indexOf("const checklistCompleto", inicio);
+              const fechar = fonte.slice(inicio, fim);
+              expect(fechar).toContain("if (pixConfirmando) return");
+              expect(fechar).toContain("resetarVerificacaoPix()");
+            });
+
+            test("corrida 409 fecha depois do aviso sem capturar a closure travada", () => {
+              const bloco409 = confirmar.slice(confirmar.indexOf("if (r.status === 409)"), confirmar.indexOf("if (r.status === 401)"));
+              expect(bloco409).toContain("setPixConfirmando(false)");
+              expect(bloco409).toContain("setTimeout(resetarVerificacaoPix, 1800)");
+              expect(bloco409).not.toContain("setTimeout(fecharVerificacaoPix");
+            });
+          });
+          EOF
+
+      - name: Provar que a regressão existe antes da correção
+        shell: bash
+        run: |
+          set +e
+          npm test -- src/app/pedidos/pixModalFechamento.regression.test.ts
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "O teste novo passou antes do patch; abortando para não aplicar correção sem reprodução."
+            exit 1
+          fi
+          echo "Regressão reproduzida: teste falhou no código atual, como esperado."
+
+      - name: Aplicar patch mínimo somente na interface do painel
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          page = Path("src/app/pedidos/page.tsx")
+          src = page.read_text()
+
+          old_close = '''  function fecharVerificacaoPix() {
+            if (pixConfirmando) return
+            setConfirmPixModal(null)
+            setPixChecklist({ conferiu: false, valorBate: false, clienteCorreto: false })
+            setPixSenha("")
+            setPixSenhaVisivel(false)
+            setPixErro(null)
+          }'''
+          new_close = '''  function resetarVerificacaoPix() {
+            setConfirmPixModal(null)
+            setPixChecklist({ conferiu: false, valorBate: false, clienteCorreto: false })
+            setPixSenha("")
+            setPixSenhaVisivel(false)
+            setPixErro(null)
+          }
+          function fecharVerificacaoPix() {
+            if (pixConfirmando) return
+            resetarVerificacaoPix()
+          }'''
+
+          old_success = '''        setPixConfirmando(false)
+                  fecharVerificacaoPix()
+                  return'''
+          new_success = '''        setPixConfirmando(false)
+                  resetarVerificacaoPix()
+                  return'''
+          old_409 = '''        setTimeout(fecharVerificacaoPix, 1800)'''
+          new_409 = '''        setTimeout(resetarVerificacaoPix, 1800)'''
+
+          for label, old in [("fechamento", old_close), ("sucesso", old_success), ("409", old_409)]:
+              count = src.count(old)
+              if count != 1:
+                  raise SystemExit(f"Alvo {label}: esperado 1 ocorrência, encontrado {count}")
+
+          src = src.replace(old_close, new_close)
+          src = src.replace(old_success, new_success)
+          src = src.replace(old_409, new_409)
+          page.write_text(src)
+
+          teste = Path("src/app/pedidos/pixSeguranca.page.test.ts")
+          t = teste.read_text()
+          old_expect = 'expect(blocoJaConfirmado).toContain("setTimeout(fecharVerificacaoPix");'
+          new_expect = '''expect(blocoJaConfirmado).toContain("setTimeout(resetarVerificacaoPix, 1800)");
+              expect(blocoJaConfirmado).not.toContain("setTimeout(fecharVerificacaoPix");'''
+          if t.count(old_expect) != 1:
+              raise SystemExit("Expectativa antiga do 409 não encontrada exatamente uma vez")
+          teste.write_text(t.replace(old_expect, new_expect))
+          PY
+
+      - name: Testes focados do Pix manual e do painel
+        run: >-
+          npm test --
+          src/app/pedidos/pixModalFechamento.regression.test.ts
+          src/app/pedidos/pixSeguranca.page.test.ts
+          src/app/api/orders/confirmar-pix-manual/route.test.ts
+
+      - name: Build de produção
+        run: npm run build
+
+      - name: Restaurar o CI original e gravar somente o patch validado
+        shell: bash
+        run: |
+          git checkout origin/main -- .github/workflows/pedidos-operacional-ci.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/pedidos/page.tsx src/app/pedidos/pixSeguranca.page.test.ts src/app/pedidos/pixModalFechamento.regression.test.ts .github/workflows/pedidos-operacional-ci.yml
+          git commit -m "fix(pedidos): fecha modal Pix após confirmação manual"
+          git push origin HEAD:fix/pedidos-pix-modal-stuck-20260821
+
   pedidos-operacional-ci:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref != 'fix/pedidos-pix-modal-stuck-20260821'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do SHA validado
