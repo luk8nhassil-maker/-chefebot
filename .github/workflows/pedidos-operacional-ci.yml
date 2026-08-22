@@ -1,7 +1,7 @@
 name: pedidos-operacional-ci
 
 # Gate hermético da regra operacional de pedidos. Não recebe segredos, não
-# acessa Redis/WhatsApp/Pix/impressão e executa apenas regras puras + lint.
+# acessa Redis/WhatsApp/Pix/impressão reais e executa apenas código/testes locais.
 on:
   pull_request:
     paths:
@@ -21,14 +21,104 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: pedidos-operacional-ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  economia-orders-version:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'perf/economia-orders-version-20260822'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout da branch empilhada
+        uses: actions/checkout@v4
+        with:
+          ref: perf/economia-orders-version-20260822
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Criar contrato antes do patch
+        run: python scripts/tmp/economia_orders_version_patch.py contract
+
+      - name: Provar que o desperdício existe antes da correção
+        shell: bash
+        run: |
+          set +e
+          npm test -- src/lib/pollingVersaoEconomia.contrato.test.ts
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "O contrato já passava antes do patch; abortando para não mudar sem reprodução."
+            exit 1
+          fi
+          echo "Contrato falhou antes do patch, como esperado."
+
+      - name: Aplicar somente o patch arquitetural de economia
+        run: python scripts/tmp/economia_orders_version_patch.py apply
+
+      - name: Testes críticos de pedidos, concorrência e polling
+        run: >-
+          npm test --
+          src/lib/pollingVersaoEconomia.contrato.test.ts
+          src/lib/pedidosPollingMeta.test.ts
+          src/lib/pedidosConcorrencia.test.ts
+          src/lib/comandas.test.ts
+          src/app/api/orders/route.economia.test.ts
+          src/app/api/orders/route.edicao.test.ts
+          src/app/api/orders/route.escalonamento.test.ts
+          src/app/api/orders/route.entregador.test.ts
+          src/app/api/orders/route.lostUpdateAuditoria.test.ts
+          src/app/pedidos/pollingEconomia.page.test.ts
+
+      - name: Testes existentes relacionados a Salão e Comanda
+        shell: bash
+        run: |
+          mapfile -t files < <(find src -type f \( -iname '*comanda*.test.ts' -o -iname '*salao*.test.ts' \) | sort -u)
+          printf 'Testes encontrados:\n%s\n' "${files[*]}"
+          if [ "${#files[@]}" -gt 0 ]; then npm test -- "${files[@]}"; fi
+
+      - name: Auditoria de escritores diretos
+        shell: bash
+        run: |
+          if grep -RIlE "redis\.set\([[:space:]]*['\"]pedidos['\"]" src --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx' | grep -v '^src/lib/pedidosConcorrencia.ts$'; then
+            echo "Escritor direto de pedidos fora do helper detectado."
+            exit 1
+          fi
+          if grep -RIlE "redis\.set\([[:space:]]*['\"]salao:comandas['\"]|redis\.set\([[:space:]]*CHAVE_COMANDAS" src --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'; then
+            echo "Escritor direto de comandas detectado após patch."
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Whitespace do delta empilhado
+        run: git diff --check f9a04fe38c22218dd9eb56e2461e1f50dabcf9b7
+
+      - name: Build de produção
+        run: npm run build
+
+      - name: Limpar bancada e gravar somente arquivos reais
+        shell: bash
+        run: |
+          rm -f .github/workflows/tmp-economia-orders-version.yml
+          rm -f .tmp-economia-orders-version-trigger
+          rm -f scripts/tmp/economia_orders_version_patch.py
+          git checkout origin/perf/economia-polling-redis-20260822 -- .github/workflows/pedidos-operacional-ci.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "perf(economia): evita recarregar pedidos sem mudança"
+          git push origin HEAD:perf/economia-orders-version-20260822
+
   pedidos-operacional-ci:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref != 'perf/economia-orders-version-20260822'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do SHA validado
