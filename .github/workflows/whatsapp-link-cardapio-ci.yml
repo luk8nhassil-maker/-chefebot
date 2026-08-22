@@ -100,7 +100,6 @@ jobs:
           from pathlib import Path
           import re
 
-          # 1) Copy: remove linguagem de cancelamento e deixa claro que o atendimento segue vivo.
           bot_path = Path("src/lib/bot.ts")
           bot = bot_path.read_text()
           pattern = re.compile(r'// Mensagem de encerramento por inatividade — ver src/lib/inatividadeConversa\.ts:.*?export function mensagemCancelamentoPorInatividade\(\): string \{.*?\n\}\n(?=// Anexa o link)', re.S)
@@ -110,7 +109,6 @@ jobs:
               raise SystemExit(f"bot.ts: esperado 1 bloco antigo, encontrado {n}")
           bot_path.write_text(bot2)
 
-          # 2) Scheduler: dobra a espera para 20 minutos e atualiza a documentação sem mudar a arquitetura de geração/QStash.
           lib_path = Path("src/lib/inatividadeConversa.ts")
           lib = lib_path.read_text()
           old_const = 'export const CANCELAMENTO_INATIVIDADE_DELAY_MS = 10 * 60 * 1000; // 10 minutos'
@@ -124,7 +122,6 @@ jobs:
           )
           lib_path.write_text(lib)
 
-          # 3) Endpoint legado mantém o path por compatibilidade, mas agora só lembra e preserva o contexto.
           route_path = Path("src/app/api/interno/cancelamento-inatividade/route.ts")
           route = route_path.read_text()
           route = route.replace('import { mensagemCancelamentoPorInatividade } from "@/lib/bot";', 'import { mensagemLembretePorInatividade } from "@/lib/bot";')
@@ -136,7 +133,6 @@ jobs:
               raise SystemExit(f"route.ts: bloco destrutivo esperado 1 vez, encontrado {n}")
           route_path.write_text(route2)
 
-          # 4) Comentário do ponto central: não chamar mais o recurso de cancelamento.
           conversa_path = Path("src/lib/conversa.ts")
           conversa = conversa_path.read_text()
           conversa = conversa.replace(
@@ -145,14 +141,12 @@ jobs:
           )
           conversa_path.write_text(conversa)
 
-          # 5) Teste do scheduler: 20 min = 1200s.
           test_lib_path = Path("src/lib/inatividadeConversa.test.ts")
           test_lib = test_lib_path.read_text()
           test_lib = test_lib.replace('agenda o tick com delay de 10 minutos', 'agenda o tick com delay de 20 minutos')
           test_lib = test_lib.replace('expect(chamada.delay).toBe(600); // 10 min em segundos', 'expect(chamada.delay).toBe(1200); // 20 min em segundos')
           test_lib_path.write_text(test_lib)
 
-          # 6) Testes do endpoint: preservação, copy e supressão de lembrete repetido.
           test_route_path = Path("src/app/api/interno/cancelamento-inatividade/route.test.ts")
           test_route = test_route_path.read_text()
           old_del = '    del: vi.fn(async (key: string) => (store.delete(key) ? 1 : 0)),\n'
@@ -172,8 +166,11 @@ jobs:
       - name: Garantir que a linguagem antiga saiu do fluxo ativo
         shell: bash
         run: |
-          if grep -R "mensagemCancelamentoPorInatividade\|cancelei esse pedido" src/lib/bot.ts src/app/api/interno/cancelamento-inatividade src/lib/inatividadeConversa.ts; then
-            echo "Ainda existe linguagem/uso antigo no fluxo de inatividade."
+          if grep -E "mensagemCancelamentoPorInatividade|cancelei esse pedido" \
+            src/lib/bot.ts \
+            src/app/api/interno/cancelamento-inatividade/route.ts \
+            src/lib/inatividadeConversa.ts; then
+            echo "Ainda existe linguagem/uso antigo no código ativo de inatividade."
             exit 1
           fi
 
