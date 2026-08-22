@@ -73,6 +73,26 @@ describe("resolveActiveMercadoPagoAuth", () => {
     });
   });
 
+  test("token da env usa email fallback salvo no painel quando env de email esta ausente", async () => {
+    redisGetMock.mockResolvedValue({
+      provider: "mercadopago",
+      enabled: false,
+      payerEmailFallback: "painel@example.com",
+      updatedAt: "2026-08-21T00:00:00.000Z",
+    });
+    vi.stubEnv("PIX_PROVIDER", "mercadopago");
+    vi.stubEnv("MERCADOPAGO_ACCESS_TOKEN", "token-env");
+
+    const auth = await resolveActiveMercadoPagoAuth();
+
+    expect(auth).toEqual({
+      active: true,
+      source: "env",
+      accessToken: "token-env",
+      payerEmailFallback: "painel@example.com",
+    });
+  });
+
   test("painel com token corrompido cai para PIX_PROVIDER/env em vez de quebrar", async () => {
     redisGetMock.mockResolvedValue({
       provider: "mercadopago",
