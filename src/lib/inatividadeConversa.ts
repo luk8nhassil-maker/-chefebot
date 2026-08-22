@@ -5,8 +5,8 @@ import type { AutorMensagem, BotSession, BotStep } from "./bot";
 // Cronômetro de inatividade da conversa do WhatsApp — depois de
 // CANCELAMENTO_INATIVIDADE_DELAY_MS sem resposta do cliente DEPOIS da nossa
 // última mensagem (bot OU atendente humano, por qualquer canal — app direto
-// ou painel), a conversa é encerrada automaticamente e o cliente recebe um
-// aviso com o link do cardápio digital como alternativa. Ver
+// ou painel), o cliente recebe um lembrete gentil. O lembrete não cancela pedido,
+// não apaga a sessão e não encerra atendimento. Ver
 // /api/interno/cancelamento-inatividade para o lado que recebe o tick.
 //
 // Arquitetura espelha o Guardião Pix (pixGuardiaoScheduler.ts): nunca tenta
@@ -16,7 +16,7 @@ import type { AutorMensagem, BotSession, BotStep } from "./bot";
 // antigo vira no-op quando finalmente chega (comparado no endpoint) — sem
 // precisar rastrear/cancelar messageId nenhum.
 
-export const CANCELAMENTO_INATIVIDADE_DELAY_MS = 10 * 60 * 1000; // 10 minutos
+export const CANCELAMENTO_INATIVIDADE_DELAY_MS = 20 * 60 * 1000; // 20 minutos
 
 // Etapas em que o cronômetro NUNCA se aplica: pedido já concluído (sessão
 // vira "done", nada pra cancelar) e aguardando comprovante de Pix (tem

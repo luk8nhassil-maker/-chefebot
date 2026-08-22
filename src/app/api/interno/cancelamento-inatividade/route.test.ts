@@ -11,6 +11,7 @@ const { store, redisMock } = vi.hoisted(() => {
       return "OK";
     }),
     del: vi.fn(async (key: string) => (store.delete(key) ? 1 : 0)),
+    expire: vi.fn(async (key: string, _seconds: number) => (store.has(key) ? 1 : 0)),
   };
   return { store, redisMock };
 });
@@ -69,6 +70,7 @@ beforeEach(() => {
   registrarMensagemMock.mockClear();
   ultimasMensagensMock.mockClear().mockResolvedValue([{ autor: "bot", texto: "oi", ts: Date.now() }]);
   enviarTextoWhatsAppMock.mockClear().mockResolvedValue({ ok: true, latenciaMs: 1, tentativas: 1 });
+  redisMock.expire.mockClear();
   process.env.QSTASH_CURRENT_SIGNING_KEY = "current-key";
   process.env.QSTASH_NEXT_SIGNING_KEY = "next-key";
   store.set(`session:${PHONE}`, { step: "category" });
@@ -191,49 +193,60 @@ describe("/api/interno/cancelamento-inatividade — travas contra cancelamento i
   });
 });
 
-describe("/api/interno/cancelamento-inatividade — cancelamento efetivo", () => {
-  test("última mensagem é do bot, tudo bate: cancela a sessão e manda a mensagem com o link do cardápio", async () => {
+describe("/api/interno/cancelamento-inatividade — lembrete não destrutivo", () => {
+  test("última mensagem é do bot: mantém sessão viva e manda lembrete sem falar em cancelamento", async () => {
+    geracaoAtualMock.mockResolvedValueOnce(1).mockResolvedValueOnce(2);
     const { POST } = await import("./route");
     const res = await POST(req({ phone: PHONE, geracao: 1 }));
     const json = await res.json();
 
     expect(json.ok).toBe(true);
-    expect(json.cancelado).toBe(true);
-    expect(store.has(`session:${PHONE}`)).toBe(false);
+    expect(json.lembreteEnviado).toBe(true);
+    expect(store.has(`session:${PHONE}`)).toBe(true);
+    expect(redisMock.expire).toHaveBeenCalledWith(`session:${PHONE}`, 1800);
 
     expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(1);
     const textoEnviado = enviarTextoWhatsAppMock.mock.calls[0][1];
+    expect(textoEnviado).toContain("continua por aqui");
+    expect(textoEnviado).toContain("nada foi cancelado");
+    expect(textoEnviado).not.toContain("cancelei esse pedido");
     expect(textoEnviado).toContain("cardápio digital");
-    expect(textoEnviado).toContain("https://chefebot-pjif.vercel.app/cardapio");
 
     expect(registrarMensagemMock).toHaveBeenCalledWith(PHONE, "bot", textoEnviado);
+    expect(store.get(`inatividade:lembrete:${PHONE}:2`)).toBe("1");
   });
 
-  test("última mensagem é do atendente (não do bot): cancela normalmente também", async () => {
+  test("atendimento humano também continua assumido e ganha mais tempo", async () => {
     ultimasMensagensMock.mockResolvedValueOnce([{ autor: "atendente", texto: "[Kellyne] oi", ts: Date.now() }]);
     store.set(`session:${PHONE}`, { step: "escalado" });
+    store.set(`manual:${PHONE}`, true);
+    geracaoAtualMock.mockResolvedValueOnce(1).mockResolvedValueOnce(2);
     const { POST } = await import("./route");
     const res = await POST(req({ phone: PHONE, geracao: 1 }));
     const json = await res.json();
-    expect(json.cancelado).toBe(true);
-    expect(store.has(`session:${PHONE}`)).toBe(false);
+    expect(json.lembreteEnviado).toBe(true);
+    expect(store.has(`session:${PHONE}`)).toBe(true);
+    expect(store.has(`manual:${PHONE}`)).toBe(true);
+    expect(redisMock.expire).toHaveBeenCalledWith(`manual:${PHONE}`, 3600);
   });
 
-  test("também limpa manual:{phone} ao cancelar", async () => {
-    store.set(`manual:${PHONE}`, true);
+  test("tick criado pelo próprio lembrete é ignorado e não manda mensagem repetida", async () => {
+    store.set(`inatividade:lembrete:${PHONE}:1`, "1");
     const { POST } = await import("./route");
-    await POST(req({ phone: PHONE, geracao: 1 }));
-    expect(store.has(`manual:${PHONE}`)).toBe(false);
+    const res = await POST(req({ phone: PHONE, geracao: 1 }));
+    const json = await res.json();
+    expect(json.ignorado).toBe(true);
+    expect(json.motivo).toBe("lembrete_ja_enviado");
+    expect(enviarTextoWhatsAppMock).not.toHaveBeenCalled();
   });
 
-  test("se o envio falhar, não registra mensagem falsa e reporta cancelado:false", async () => {
+  test("se o envio falhar, preserva a sessão e não registra mensagem falsa", async () => {
     enviarTextoWhatsAppMock.mockResolvedValueOnce({ ok: false, motivo: "http_500" });
     const { POST } = await import("./route");
     const res = await POST(req({ phone: PHONE, geracao: 1 }));
     const json = await res.json();
-    expect(json.cancelado).toBe(false);
+    expect(json.lembreteEnviado).toBe(false);
     expect(registrarMensagemMock).not.toHaveBeenCalled();
-    // A sessão já foi encerrada mesmo assim — não fica um estado "cancelamento pela metade".
-    expect(store.has(`session:${PHONE}`)).toBe(false);
+    expect(store.has(`session:${PHONE}`)).toBe(true);
   });
 });
