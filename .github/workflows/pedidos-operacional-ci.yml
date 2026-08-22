@@ -1,5 +1,7 @@
 name: pedidos-operacional-ci
 
+# Gate hermético da regra operacional de pedidos. Não recebe segredos, não
+# acessa Redis/WhatsApp/Pix/impressão e executa apenas regras puras + lint.
 on:
   pull_request:
     paths:
@@ -19,113 +21,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: read
+  contents: read
 
 concurrency:
   group: pedidos-operacional-ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  clean-pix-modal-patch:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'fix/pedidos-pix-modal-stuck-20260821'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout da branch isolada
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Instalar dependências
-        run: npm ci
-
-      - name: Normalizar somente a indentação do helper já validado
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path("src/app/pedidos/page.tsx")
-          src = p.read_text()
-          inicio = src.find("  function resetarVerificacaoPix() {")
-          fim = src.find("  const checklistCompleto", inicio)
-          if inicio < 0 or fim < 0:
-              raise SystemExit("Bloco Pix já corrigido não encontrado")
-          atual = src[inicio:fim]
-          if "resetarVerificacaoPix()" not in atual or "if (pixConfirmando) return" not in atual:
-              raise SystemExit("Bloco Pix não corresponde ao patch validado")
-          limpo = (
-              "  function resetarVerificacaoPix() {\n"
-              "    setConfirmPixModal(null)\n"
-              "    setPixChecklist({ conferiu: false, valorBate: false, clienteCorreto: false })\n"
-              "    setPixSenha(\"\")\n"
-              "    setPixSenhaVisivel(false)\n"
-              "    setPixErro(null)\n"
-              "  }\n"
-              "  function fecharVerificacaoPix() {\n"
-              "    if (pixConfirmando) return\n"
-              "    resetarVerificacaoPix()\n"
-              "  }\n"
-          )
-          p.write_text(src[:inicio] + limpo + src[fim:])
-          PY
-
-      - name: Testes focados do Pix manual e do painel
-        run: >-
-          npm test --
-          src/app/pedidos/pixModalFechamento.regression.test.ts
-          src/app/pedidos/pixSeguranca.page.test.ts
-          src/app/api/orders/confirmar-pix-manual/route.test.ts
-
-      - name: Comparar baseline de lint da main com o patch
-        shell: bash
-        run: |
-          cp src/app/pedidos/page.tsx /tmp/page-patch.tsx
-          git show origin/main:src/app/pedidos/page.tsx > src/app/pedidos/page.tsx
-          set +e
-          npm run lint -- src/app/pedidos/page.tsx > /tmp/lint-main.log 2>&1
-          main_status=$?
-          cp /tmp/page-patch.tsx src/app/pedidos/page.tsx
-          npm run lint -- src/app/pedidos/page.tsx > /tmp/lint-patch.log 2>&1
-          patch_status=$?
-          set -e
-          clean() { sed -r 's/\x1B\[[0-9;]*[mK]//g' "$1"; }
-          main_summary=$(clean /tmp/lint-main.log | grep -E '✖ [0-9]+ problems' | tail -1 || true)
-          patch_summary=$(clean /tmp/lint-patch.log | grep -E '✖ [0-9]+ problems' | tail -1 || true)
-          echo "main:  ${main_summary:-sem resumo} (status $main_status)"
-          echo "patch: ${patch_summary:-sem resumo} (status $patch_status)"
-          if [ -z "$main_summary" ] || [ -z "$patch_summary" ]; then
-            echo "Não consegui comparar o baseline de lint com segurança."
-            exit 1
-          fi
-          main_n=$(echo "$main_summary" | grep -oE '[0-9]+' | head -1)
-          patch_n=$(echo "$patch_summary" | grep -oE '[0-9]+' | head -1)
-          if [ "$patch_n" -gt "$main_n" ]; then
-            echo "O patch aumentou os problemas de lint: $main_n -> $patch_n"
-            exit 1
-          fi
-          echo "Patch não adiciona regressão de lint: $main_n -> $patch_n"
-
-      - name: Verificar whitespace do diff
-        run: git diff --check origin/main -- src/app/pedidos/page.tsx src/app/pedidos/pixSeguranca.page.test.ts src/app/pedidos/pixModalFechamento.regression.test.ts
-
-      - name: Build de produção
-        run: npm run build
-
-      - name: Restaurar CI original e gravar limpeza validada
-        shell: bash
-        run: |
-          git checkout origin/main -- .github/workflows/pedidos-operacional-ci.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/app/pedidos/page.tsx .github/workflows/pedidos-operacional-ci.yml
-          git commit -m "style(pedidos): mantém helper do modal Pix legível"
-          git push origin HEAD:fix/pedidos-pix-modal-stuck-20260821
-
   pedidos-operacional-ci:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref != 'fix/pedidos-pix-modal-stuck-20260821'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do SHA validado

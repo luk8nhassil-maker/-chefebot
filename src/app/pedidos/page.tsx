@@ -1248,16 +1248,16 @@ export default function PedidosPage() {
   // por useDialogA11y logo acima de confirmPixModal, antes deste ponto do
   // arquivo — ver o comentário junto de pixModalRef.
   function resetarVerificacaoPix() {
-  setConfirmPixModal(null)
-  setPixChecklist({ conferiu: false, valorBate: false, clienteCorreto: false })
-  setPixSenha("")
-  setPixSenhaVisivel(false)
-  setPixErro(null)
-}
-function fecharVerificacaoPix() {
-  if (pixConfirmando) return
-  resetarVerificacaoPix()
-}
+    setConfirmPixModal(null)
+    setPixChecklist({ conferiu: false, valorBate: false, clienteCorreto: false })
+    setPixSenha("")
+    setPixSenhaVisivel(false)
+    setPixErro(null)
+  }
+  function fecharVerificacaoPix() {
+    if (pixConfirmando) return
+    resetarVerificacaoPix()
+  }
   const checklistCompleto = pixChecklist.conferiu && pixChecklist.valorBate && pixChecklist.clienteCorreto
   const podeConfirmarPix = checklistCompleto && pixSenha.length > 0 && !pixConfirmando
 
