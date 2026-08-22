@@ -1,0 +1,39 @@
+name: healthcheck-producao-economia
+
+on:
+  push:
+    branches:
+      - healthcheck/producao-economia-20260822
+
+permissions:
+  contents: read
+
+jobs:
+  healthcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Página pública responde saudável
+        run: |
+          set -euo pipefail
+          code=$(curl -L -sS --max-time 20 -o /tmp/home.html -w '%{http_code}' https://chefedapizza.com.br/)
+          echo "home_status=$code"
+          test "$code" -ge 200
+          test "$code" -lt 400
+          test -s /tmp/home.html
+
+      - name: Painel não retorna erro de servidor
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --max-time 20 -o /tmp/pedidos.html -w '%{http_code}' https://chefedapizza.com.br/pedidos)
+          echo "pedidos_status=$code"
+          test "$code" -lt 500
+
+      - name: Cardápio público não retorna erro de servidor
+        run: |
+          set -euo pipefail
+          code=$(curl -L -sS --max-time 20 -o /tmp/cardapio.html -w '%{http_code}' https://chefedapizza.com.br/cardapio)
+          echo "cardapio_status=$code"
+          test "$code" -ge 200
+          test "$code" -lt 400
+          test -s /tmp/cardapio.html
