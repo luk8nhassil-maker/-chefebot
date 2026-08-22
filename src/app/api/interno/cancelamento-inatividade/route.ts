@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Receiver } from "@upstash/qstash";
 import { redis } from "@/lib/redis";
 import type { BotSession } from "@/lib/bot";
-import { mensagemCancelamentoPorInatividade } from "@/lib/bot";
+import { mensagemLembretePorInatividade } from "@/lib/bot";
 import { geracaoAtualCronometroInatividade, STEPS_SEM_CRONOMETRO_INATIVIDADE } from "@/lib/inatividadeConversa";
 import { registrarMensagem, ultimasMensagensRelevantes } from "@/lib/conversa";
 import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
@@ -12,7 +12,7 @@ import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 // Autenticação por ASSINATURA (upstash-signature), não por sessão de admin
 // — ver src/lib/inatividadeConversa.ts para o desenho completo da cadeia.
 //
-// Um tick só cancela a conversa se, no momento em que chega, TUDO isto
+// Um tick só envia o lembrete se, no momento em que chega, TUDO isto
 // ainda for verdade:
 //  1. a geração no corpo bate com a geração atual (ninguém mandou mensagem
 //     depois que este tick foi agendado);
@@ -93,17 +93,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, ignorado: true, motivo: "cliente_ja_respondeu" });
   }
 
-  // Encerra a conversa: 10 min de silêncio depois da nossa última mensagem.
-  // Nunca mexe em pedidos já criados — nas etapas elegíveis ainda não existe
-  // um pedido de verdade (ele só nasce quando a sessão chega em "done").
-  await redis.del(`session:${phone}`);
-  await redis.del(`manual:${phone}`);
+  // O nome da rota é legado, mas o comportamento agora é não destrutivo:
+  // depois de 20 min de silêncio enviamos um único lembrete e preservamos
+  // sessão/atendimento para o cliente continuar de onde parou.
+  const chaveLembreteAtual = `inatividade:lembrete:${phone}:${geracaoTick}`;
+  const lembreteJaEnviado = await redis.get<string>(chaveLembreteAtual);
+  if (lembreteJaEnviado) {
+    return NextResponse.json({ ok: true, ignorado: true, motivo: "lembrete_ja_enviado" });
+  }
 
-  const texto = mensagemCancelamentoPorInatividade();
+  // Dá mais 30 min de vida à sessão a partir do lembrete. Se um atendente
+  // humano estiver com a conversa assumida, mantém também o lock manual.
+  await redis.expire(`session:${phone}`, 1800);
+  const manualAtivo = await redis.get<unknown>(`manual:${phone}`);
+  if (manualAtivo) await redis.expire(`manual:${phone}`, 3600);
+
+  const texto = mensagemLembretePorInatividade();
   const resultado = await enviarTextoWhatsApp(phone, texto);
   if (resultado.ok) {
     await registrarMensagem(phone, "bot", texto);
+
+    // registrarMensagem() agenda um novo tick porque a última mensagem passa
+    // a ser nossa. Marcamos essa NOVA geração para esse tick virar no-op e
+    // impedir lembretes repetidos. Qualquer mensagem real futura avança a
+    // geração normalmente e libera um novo ciclo.
+    const geracaoAposLembrete = await geracaoAtualCronometroInatividade(phone);
+    await redis.set(`inatividade:lembrete:${phone}:${geracaoAposLembrete}`, "1", { ex: 3600 });
   }
 
-  return NextResponse.json({ ok: true, cancelado: resultado.ok });
+  return NextResponse.json({ ok: true, lembreteEnviado: resultado.ok });
 }

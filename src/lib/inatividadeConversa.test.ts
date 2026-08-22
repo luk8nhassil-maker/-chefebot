@@ -63,7 +63,7 @@ describe("sincronizarCronometroInatividade — geração avança sempre, tick s�
     expect(await mod.geracaoAtualCronometroInatividade(PHONE)).toBe(1);
   });
 
-  test("mensagem do bot numa etapa elegível agenda o tick com delay de 10 minutos", async () => {
+  test("mensagem do bot numa etapa elegível agenda o tick com delay de 20 minutos", async () => {
     process.env.QSTASH_TOKEN = "token-teste";
     const mod = await import("./inatividadeConversa");
     store.set(`session:${PHONE}`, { step: "category" });
@@ -72,7 +72,7 @@ describe("sincronizarCronometroInatividade — geração avança sempre, tick s�
     expect(publishJSONMock).toHaveBeenCalledTimes(1);
     const chamada = publishJSONMock.mock.calls[0][0];
     expect(chamada.body).toEqual({ phone: PHONE, geracao: 1 });
-    expect(chamada.delay).toBe(600); // 10 min em segundos
+    expect(chamada.delay).toBe(1200); // 20 min em segundos
     expect(chamada.url).toBe("https://chefebot-pjif.vercel.app/api/interno/cancelamento-inatividade");
     expect(chamada.deduplicationId).toBe(`cancelamento-inatividade-${PHONE}-g1`);
     expect(chamada.retries).toBe(2);
