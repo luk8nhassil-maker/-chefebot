@@ -1,0 +1,40 @@
+name: pix-modal-regression-ci
+
+on:
+  pull_request:
+    paths:
+      - "src/app/pedidos/page.tsx"
+      - "src/app/pedidos/pixSeguranca.page.test.ts"
+      - "src/app/pedidos/pixModalFechamento.regression.test.ts"
+      - ".github/workflows/pix-modal-regression-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pix-modal-regression-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pix-modal-regression-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout do SHA validado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados do modal Pix manual
+        run: >-
+          npm test --
+          src/app/pedidos/pixModalFechamento.regression.test.ts
+          src/app/pedidos/pixSeguranca.page.test.ts
+          src/app/api/orders/confirmar-pix-manual/route.test.ts
+
+      - name: Verificar whitespace
+        run: git diff --check origin/main...HEAD
