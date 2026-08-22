@@ -79,12 +79,37 @@ jobs:
           src/app/pedidos/pixSeguranca.page.test.ts
           src/app/api/orders/confirmar-pix-manual/route.test.ts
 
-      - name: Lint do patch
-        run: >-
-          npm run lint --
-          src/app/pedidos/page.tsx
-          src/app/pedidos/pixSeguranca.page.test.ts
-          src/app/pedidos/pixModalFechamento.regression.test.ts
+      - name: Comparar baseline de lint da main com o patch
+        shell: bash
+        run: |
+          cp src/app/pedidos/page.tsx /tmp/page-patch.tsx
+          git show origin/main:src/app/pedidos/page.tsx > src/app/pedidos/page.tsx
+          set +e
+          npm run lint -- src/app/pedidos/page.tsx > /tmp/lint-main.log 2>&1
+          main_status=$?
+          cp /tmp/page-patch.tsx src/app/pedidos/page.tsx
+          npm run lint -- src/app/pedidos/page.tsx > /tmp/lint-patch.log 2>&1
+          patch_status=$?
+          set -e
+          clean() { sed -r 's/\x1B\[[0-9;]*[mK]//g' "$1"; }
+          main_summary=$(clean /tmp/lint-main.log | grep -E '✖ [0-9]+ problems' | tail -1 || true)
+          patch_summary=$(clean /tmp/lint-patch.log | grep -E '✖ [0-9]+ problems' | tail -1 || true)
+          echo "main:  ${main_summary:-sem resumo} (status $main_status)"
+          echo "patch: ${patch_summary:-sem resumo} (status $patch_status)"
+          if [ -z "$main_summary" ] || [ -z "$patch_summary" ]; then
+            echo "Não consegui comparar o baseline de lint com segurança."
+            exit 1
+          fi
+          main_n=$(echo "$main_summary" | grep -oE '[0-9]+' | head -1)
+          patch_n=$(echo "$patch_summary" | grep -oE '[0-9]+' | head -1)
+          if [ "$patch_n" -gt "$main_n" ]; then
+            echo "O patch aumentou os problemas de lint: $main_n -> $patch_n"
+            exit 1
+          fi
+          echo "Patch não adiciona regressão de lint: $main_n -> $patch_n"
+
+      - name: Verificar whitespace do diff
+        run: git diff --check origin/main -- src/app/pedidos/page.tsx src/app/pedidos/pixSeguranca.page.test.ts src/app/pedidos/pixModalFechamento.regression.test.ts
 
       - name: Build de produção
         run: npm run build
