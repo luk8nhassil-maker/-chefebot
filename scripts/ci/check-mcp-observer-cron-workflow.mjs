@@ -1,7 +1,9 @@
 // check-mcp-observer-cron-workflow.mjs — validações estáticas (sem parser de
-// YAML) do workflow .github/workflows/mcp-observer-cron.yml: garante que a
-// janela de pico sex/sáb/dom a cada 10min está presente, que existe
-// workflow_dispatch para execução manual, e que o segredo nunca é logado.
+// YAML) do workflow .github/workflows/mcp-observer-cron.yml. Enquanto
+// MCP_MODE não estiver em "observador", o workflow deve permanecer somente
+// manual: nenhum schedule automático pode acordar a função Vercel sem trabalho.
+// A execução manual continua disponível como rollback/diagnóstico e mantém as
+// mesmas proteções do CRON_SECRET.
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -14,17 +16,6 @@ export function lerWorkflow(caminho = WORKFLOW_PATH) {
   return readFileSync(caminho, "utf8");
 }
 
-// As 6 janelas UTC que cobrem sex/sáb/dom 18:00–23:59 horário de Brasília
-// (ver comentário no próprio workflow para o raciocínio da conversão).
-export const CRONS_ESPERADOS = [
-  "*/10 21-23 * * 5",
-  "*/10 0-2 * * 6",
-  "*/10 21-23 * * 6",
-  "*/10 0-2 * * 0",
-  "*/10 21-23 * * 0",
-  "*/10 0-2 * * 1",
-];
-
 export function extrairCrons(conteudo) {
   return [...conteudo.matchAll(/- cron:\s*"([^"]+)"/g)].map((m) => m[1]);
 }
@@ -32,9 +23,8 @@ export function extrairCrons(conteudo) {
 export function validarWorkflow(conteudo) {
   const problemas = [];
 
-  const crons = extrairCrons(conteudo);
-  for (const esperado of CRONS_ESPERADOS) {
-    if (!crons.includes(esperado)) problemas.push(`cron ausente: ${esperado}`);
+  if (extrairCrons(conteudo).length > 0 || /^\s*schedule:\s*$/m.test(conteudo)) {
+    problemas.push("agendamento automático presente com MCP inativo");
   }
 
   if (!/workflow_dispatch:/.test(conteudo)) problemas.push("workflow_dispatch ausente (sem gatilho manual)");
@@ -54,5 +44,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     for (const p of problemas) console.error(`- ${p}`);
     process.exit(1);
   }
-  console.log("mcp-observer-cron.yml validado com sucesso.");
+  console.log("mcp-observer-cron.yml validado em modo manual/econômico.");
 }
