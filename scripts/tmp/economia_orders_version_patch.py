@@ -1,0 +1,505 @@
+from pathlib import Path
+import sys
+
+STAGE = sys.argv[1] if len(sys.argv) > 1 else "apply"
+
+CONTRACT = r'''import { describe, expect, test } from "vitest";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const raiz = fileURLToPath(new URL("../", import.meta.url));
+const ler = (rel: string) => readFileSync(join(raiz, rel), "utf-8");
+const concorrencia = ler("lib/pedidosConcorrencia.ts");
+const comandas = ler("lib/comandas.ts");
+const rota = ler("app/api/orders/route.ts");
+const painel = ler("app/pedidos/page.tsx");
+
+function arquivosTs(dir: string): string[] {
+  return readdirSync(dir).flatMap((nome) => {
+    const caminho = join(dir, nome);
+    if (statSync(caminho).isDirectory()) return arquivosTs(caminho);
+    if (!/\.tsx?$/.test(nome) || /\.test\.tsx?$/.test(nome)) return [];
+    return [caminho];
+  });
+}
+
+describe("modo economia — polling por versão sem perder responsividade", () => {
+  test("toda persistência cooperante de pedidos gira uma versão junto com o array", () => {
+    expect(concorrencia).toContain("persistirPedidosComVersao");
+    expect(concorrencia).toContain("CHAVE_META_POLLING_PEDIDOS");
+    expect(concorrencia).toContain("meta.pedidos = ARGV[2]");
+    expect(concorrencia).not.toContain('await redis.set("pedidos", resultado.pedidos)');
+    expect(rota).toContain("persistirPedidosComVersao(pedidos)");
+    expect(rota).not.toContain("await redis.set('pedidos', pedidos)");
+  });
+
+  test("mudanças de comanda também invalidam o ETag do painel", () => {
+    expect(comandas).toContain("CHAVE_META_POLLING_PEDIDOS");
+    expect(comandas).toContain("meta.comandas = ARGV[2]");
+    expect(comandas).not.toContain("await redis.set(CHAVE_COMANDAS, lista)");
+  });
+
+  test("GET condicional usa metadado pequeno, 304 e vencimento embutido no ETag", () => {
+    expect(rota).toContain('req.headers.get("if-none-match")');
+    expect(rota).toContain("obterMetaPollingPedidos");
+    expect(rota).toContain("status: 304");
+    expect(rota).toContain("proximaExpiracao");
+    expect(rota).toContain("ESCALONAMENTO_TTL_MS");
+    expect(rota).toContain("Cache-Control");
+  });
+
+  test("painel continua em 3s, mas não baixa nem processa JSON quando recebe 304", () => {
+    expect(painel).toContain("pedidosEtagRef");
+    expect(painel).toContain('"If-None-Match"');
+    expect(painel).toContain("r.status === 304");
+    expect(painel).toContain("intervaloMs: 3000");
+  });
+
+  test("não sobra escrita direta conhecida da chave pedidos fora do helper/rota Lua auditada", () => {
+    const suspeitos = arquivosTs(raiz)
+      .filter((caminho) => !caminho.endsWith("lib/pedidosConcorrencia.ts"))
+      .map((caminho) => ({ caminho, fonte: readFileSync(caminho, "utf-8") }))
+      .filter(({ fonte }) => /redis\.set\(\s*["']pedidos["']/.test(fonte));
+    expect(suspeitos.map((s) => s.caminho.replace(raiz, ""))).toEqual([]);
+  });
+});
+'''
+
+Path("src/lib/pollingVersaoEconomia.contrato.test.ts").write_text(CONTRACT)
+if STAGE == "contract":
+    raise SystemExit(0)
+
+POLL_META = r'''import { randomUUID } from "crypto";
+import { redis } from "./redis";
+
+export const CHAVE_META_POLLING_PEDIDOS = "pedidos:poll-meta";
+
+export type PedidosPollingMeta = {
+  schema: 1;
+  pedidos: string;
+  comandas: string;
+};
+
+export function criarVersaoPolling(): string {
+  return randomUUID();
+}
+
+export function metaPollingValido(valor: unknown): valor is PedidosPollingMeta {
+  if (!valor || typeof valor !== "object") return false;
+  const meta = valor as Partial<PedidosPollingMeta>;
+  return meta.schema === 1 && typeof meta.pedidos === "string" && meta.pedidos.length > 0 && typeof meta.comandas === "string" && meta.comandas.length > 0;
+}
+
+/**
+ * Metadado minúsculo usado só para o GET condicional do painel.
+ * Nunca é fonte de verdade do pedido/comanda. Se estiver ausente,
+ * inicializa uma base com SET NX; se estiver corrompido ou o Redis
+ * falhar, retorna null e o chamador faz a leitura completa normal.
+ */
+export async function obterMetaPollingPedidos(): Promise<PedidosPollingMeta | null> {
+  try {
+    const atual = await redis.get<PedidosPollingMeta>(CHAVE_META_POLLING_PEDIDOS);
+    if (metaPollingValido(atual)) return atual;
+    if (atual !== null && atual !== undefined) return null;
+
+    const candidato: PedidosPollingMeta = {
+      schema: 1,
+      pedidos: criarVersaoPolling(),
+      comandas: criarVersaoPolling(),
+    };
+    const criado = await redis.set(CHAVE_META_POLLING_PEDIDOS, candidato, { nx: true });
+    if (criado) return candidato;
+    const concorrente = await redis.get<PedidosPollingMeta>(CHAVE_META_POLLING_PEDIDOS);
+    return metaPollingValido(concorrente) ? concorrente : null;
+  } catch {
+    return null;
+  }
+}
+'''
+Path("src/lib/pedidosPollingMeta.ts").write_text(POLL_META)
+
+POLL_META_TEST = r'''import { beforeEach, describe, expect, test, vi } from "vitest";
+
+const { store, redisMock } = vi.hoisted(() => {
+  const store = new Map<string, unknown>();
+  const redisMock = {
+    get: vi.fn(async (key: string) => store.get(key) ?? null),
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (opts?.nx && store.has(key)) return null;
+      store.set(key, value);
+      return "OK";
+    }),
+  };
+  return { store, redisMock };
+});
+
+vi.mock("./redis", () => ({ redis: redisMock }));
+
+import { CHAVE_META_POLLING_PEDIDOS, obterMetaPollingPedidos } from "./pedidosPollingMeta";
+
+beforeEach(() => { store.clear(); vi.clearAllMocks(); });
+
+describe("pedidosPollingMeta", () => {
+  test("inicializa uma única base válida quando ainda não existe", async () => {
+    const meta = await obterMetaPollingPedidos();
+    expect(meta?.schema).toBe(1);
+    expect(meta?.pedidos).toEqual(expect.any(String));
+    expect(meta?.comandas).toEqual(expect.any(String));
+    expect(store.get(CHAVE_META_POLLING_PEDIDOS)).toEqual(meta);
+  });
+
+  test("reutiliza metadado válido sem escrever", async () => {
+    const atual = { schema: 1 as const, pedidos: "p1", comandas: "c1" };
+    store.set(CHAVE_META_POLLING_PEDIDOS, atual);
+    expect(await obterMetaPollingPedidos()).toEqual(atual);
+    expect(redisMock.set).not.toHaveBeenCalled();
+  });
+
+  test("metadado corrompido falha aberto sem sobrescrever", async () => {
+    store.set(CHAVE_META_POLLING_PEDIDOS, { schema: 1, pedidos: "" });
+    expect(await obterMetaPollingPedidos()).toBeNull();
+    expect(redisMock.set).not.toHaveBeenCalled();
+  });
+});
+'''
+Path("src/lib/pedidosPollingMeta.test.ts").write_text(POLL_META_TEST)
+
+
+def replace_once(path: str, old: str, new: str, label: str):
+    p = Path(path)
+    s = p.read_text()
+    n = s.count(old)
+    if n != 1:
+        raise SystemExit(f"{label}: esperado 1 alvo, encontrado {n}")
+    p.write_text(s.replace(old, new, 1))
+
+# pedidosConcorrencia
+p = Path("src/lib/pedidosConcorrencia.ts")
+s = p.read_text()
+old_import = 'import { redis } from "@/lib/redis";\n'
+new_import = old_import + 'import { CHAVE_META_POLLING_PEDIDOS, criarVersaoPolling } from "./pedidosPollingMeta";\n'
+if s.count(old_import) != 1: raise SystemExit("import redis pedidosConcorrencia inesperado")
+s = s.replace(old_import, new_import, 1)
+marker = 'export type ResultadoMutacaoPedidos<TPedido, TResultado> =\n'
+if s.count(marker) != 1: raise SystemExit("marker ResultadoMutacaoPedidos não encontrado")
+helper = '''const PERSISTIR_PEDIDOS_COM_VERSAO_LUA = `
+local raw = redis.call("GET", KEYS[2])
+local meta = {}
+if raw then
+  local ok, decoded = pcall(cjson.decode, raw)
+  if ok and type(decoded) == "table" then meta = decoded end
+end
+meta.schema = 1
+meta.pedidos = ARGV[2]
+if not meta.comandas then meta.comandas = ARGV[3] end
+local metaJson = cjson.encode(meta)
+redis.call("SET", KEYS[2], metaJson)
+redis.call("SET", KEYS[1], ARGV[1])
+return ARGV[2]
+`;
+
+export async function persistirPedidosComVersao<TPedido>(pedidos: TPedido[]): Promise<string> {
+  const versao = criarVersaoPolling();
+  await redis.eval(
+    PERSISTIR_PEDIDOS_COM_VERSAO_LUA,
+    ["pedidos", CHAVE_META_POLLING_PEDIDOS],
+    [JSON.stringify(pedidos), versao, criarVersaoPolling()]
+  );
+  return versao;
+}
+
+'''
+s = s.replace(marker, helper + marker, 1)
+old_write = '      await redis.set("pedidos", resultado.pedidos);'
+if s.count(old_write) != 1: raise SystemExit(f"write mutarPedidos esperado 1, achado {s.count(old_write)}")
+s = s.replace(old_write, '      await persistirPedidosComVersao(resultado.pedidos);', 1)
+p.write_text(s)
+
+# comandas
+p = Path("src/lib/comandas.ts")
+s = p.read_text()
+old_import = 'import { redis } from "./redis";\n'
+new_import = old_import + 'import { CHAVE_META_POLLING_PEDIDOS, criarVersaoPolling } from "./pedidosPollingMeta";\n'
+if s.count(old_import) != 1: raise SystemExit("import redis comandas inesperado")
+s = s.replace(old_import, new_import, 1)
+old = '''async function salvarComandas(lista: Comanda[]): Promise<void> {
+  await redis.set(CHAVE_COMANDAS, lista);
+}'''
+if s.count(old) != 1: raise SystemExit(f"salvarComandas alvo encontrado {s.count(old)} vezes")
+new = '''const SALVAR_COMANDAS_COM_VERSAO_LUA = `
+local raw = redis.call("GET", KEYS[2])
+local meta = {}
+if raw then
+  local ok, decoded = pcall(cjson.decode, raw)
+  if ok and type(decoded) == "table" then meta = decoded end
+end
+meta.schema = 1
+meta.comandas = ARGV[2]
+if not meta.pedidos then meta.pedidos = ARGV[3] end
+local metaJson = cjson.encode(meta)
+redis.call("SET", KEYS[2], metaJson)
+redis.call("SET", KEYS[1], ARGV[1])
+return ARGV[2]
+`;
+
+async function salvarComandas(lista: Comanda[]): Promise<void> {
+  await redis.eval(
+    SALVAR_COMANDAS_COM_VERSAO_LUA,
+    [CHAVE_COMANDAS, CHAVE_META_POLLING_PEDIDOS],
+    [JSON.stringify(lista), criarVersaoPolling(), criarVersaoPolling()]
+  );
+}'''
+s = s.replace(old, new, 1)
+p.write_text(s)
+
+# orders route
+p = Path("src/app/api/orders/route.ts")
+s = p.read_text()
+old = "import { limparEscalonamentoExpiradoSeNecessario } from '@/lib/escalonamento'"
+new = "import { ESCALONAMENTO_TTL_MS, limparEscalonamentoExpiradoSeNecessario } from '@/lib/escalonamento'"
+if s.count(old) != 1: raise SystemExit("import escalonamento inesperado")
+s = s.replace(old, new, 1)
+old = "import { adquirirMutexPedidos, liberarMutexPedidos, mutarPedidos } from '@/lib/pedidosConcorrencia'"
+new = "import { adquirirMutexPedidos, liberarMutexPedidos, mutarPedidos, persistirPedidosComVersao } from '@/lib/pedidosConcorrencia'\nimport { CHAVE_META_POLLING_PEDIDOS, criarVersaoPolling, obterMetaPollingPedidos, type PedidosPollingMeta } from '@/lib/pedidosPollingMeta'"
+if s.count(old) != 1: raise SystemExit("import concorrencia inesperado")
+s = s.replace(old, new, 1)
+
+old = 'redis.call("SET", KEYS[1], ARGV[1])\nredis.call("SET", KEYS[2], encodeArray(filaAtual), "EX", ARGV[5])'
+new = '''local metaRaw = redis.call("GET", KEYS[4])
+local meta = {}
+if metaRaw then
+  local ok, decoded = pcall(cjson.decode, metaRaw)
+  if ok and type(decoded) == "table" then meta = decoded end
+end
+meta.schema = 1
+meta.pedidos = ARGV[6]
+if not meta.comandas then meta.comandas = ARGV[7] end
+redis.call("SET", KEYS[4], cjson.encode(meta))
+redis.call("SET", KEYS[1], ARGV[1])
+redis.call("SET", KEYS[2], encodeArray(filaAtual), "EX", ARGV[5])'''
+if s.count(old) != 1: raise SystemExit(f"Lua entregador alvo {s.count(old)}")
+s = s.replace(old, new, 1)
+old = "    ['pedidos', filaAtualKey, filaAnteriorKey],\n"
+new = "    ['pedidos', filaAtualKey, filaAnteriorKey, CHAVE_META_POLLING_PEDIDOS],\n"
+if s.count(old) != 1: raise SystemExit("keys Lua entregador inesperadas")
+s = s.replace(old, new, 1)
+old = "      String(FILA_ENTREGADOR_TTL_SEGUNDOS),\n"
+new = "      String(FILA_ENTREGADOR_TTL_SEGUNDOS),\n      criarVersaoPolling(),\n      criarVersaoPolling(),\n"
+if s.count(old) != 1: raise SystemExit("args Lua entregador inesperados")
+s = s.replace(old, new, 1)
+
+direct = "await redis.set('pedidos', pedidos)"
+count = s.count(direct)
+if count != 2: raise SystemExit(f"esperadas 2 escritas diretas em orders, achadas {count}")
+s = s.replace(direct, "await persistirPedidosComVersao(pedidos)")
+
+marker = 'export async function GET(req: NextRequest) {\n'
+if s.count(marker) != 1: raise SystemExit("GET marker inesperado")
+helpers = '''type ModoListaPedidos = "ativos" | "arquivados";
+
+function proximaExpiracaoPedidos(pedidos: Pedido[]): number | null {
+  let proxima: number | null = null;
+  for (const pedido of pedidos) {
+    if (pedido.editStatus === "editing" && pedido.editExpiresAt) {
+      const ts = Date.parse(pedido.editExpiresAt);
+      if (Number.isFinite(ts) && (proxima === null || ts < proxima)) proxima = ts;
+    }
+    if (pedido.escalonado && typeof pedido.horarioEscalonado === "number") {
+      const ts = pedido.horarioEscalonado + ESCALONAMENTO_TTL_MS;
+      if (proxima === null || ts < proxima) proxima = ts;
+    }
+  }
+  return proxima;
+}
+
+function montarEtagPedidos(meta: PedidosPollingMeta, modo: ModoListaPedidos, proximaExpiracao: number | null): string {
+  return `"chefe-orders:${meta.pedidos}:${meta.comandas}:${modo}:${proximaExpiracao ?? 0}"`;
+}
+
+function analisarEtagPedidos(valor: string | null): { pedidos: string; comandas: string; modo: ModoListaPedidos; proximaExpiracao: number } | null {
+  if (!valor) return null;
+  const candidato = valor.split(",", 1)[0].trim().replace(/^W\\//, "");
+  if (!candidato.startsWith('"chefe-orders:') || !candidato.endsWith('"')) return null;
+  const partes = candidato.slice(1, -1).split(":");
+  if (partes.length !== 5 || partes[0] !== "chefe-orders") return null;
+  const modo = partes[3] === "ativos" || partes[3] === "arquivados" ? partes[3] : null;
+  const proximaExpiracao = Number(partes[4]);
+  if (!modo || !partes[1] || !partes[2] || !Number.isFinite(proximaExpiracao) || proximaExpiracao < 0) return null;
+  return { pedidos: partes[1], comandas: partes[2], modo, proximaExpiracao };
+}
+
+'''
+s = s.replace(marker, helpers + marker, 1)
+
+old = '''export async function GET(req: NextRequest) {
+  const auth = await checkAuth(req)
+  if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
+
+  // Caminho quente do painel: leitura é barata e NÃO disputa o mutex global.'''
+new = '''export async function GET(req: NextRequest) {
+  const auth = await checkAuth(req)
+  if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
+
+  const url = new URL(req.url)
+  const soArquivados = url.searchParams.get('arquivados') === 'true'
+  const modo: ModoListaPedidos = soArquivados ? "arquivados" : "ativos"
+  const agoraMs = Date.now()
+  const metaPolling = await obterMetaPollingPedidos()
+  const etagRecebido = analisarEtagPedidos(req.headers.get("if-none-match"))
+  if (
+    metaPolling &&
+    etagRecebido &&
+    etagRecebido.pedidos === metaPolling.pedidos &&
+    etagRecebido.comandas === metaPolling.comandas &&
+    etagRecebido.modo === modo &&
+    (etagRecebido.proximaExpiracao === 0 || agoraMs < etagRecebido.proximaExpiracao)
+  ) {
+    return new NextResponse(null, {
+      status: 304,
+      headers: { ETag: montarEtagPedidos(metaPolling, modo, etagRecebido.proximaExpiracao || null), "Cache-Control": "no-store" },
+    })
+  }
+
+  // Caminho quente do painel: leitura é barata e NÃO disputa o mutex global.'''
+if s.count(old) != 1: raise SystemExit("preâmbulo GET não encontrado")
+s = s.replace(old, new, 1)
+
+old = '''  const url = new URL(req.url)
+  const soArquivados = url.searchParams.get('arquivados') === 'true'
+
+  if (soArquivados) {'''
+new = '''  const proximaExpiracao = proximaExpiracaoPedidos(limpos)
+  const etagResposta = metaPolling ? montarEtagPedidos(metaPolling, modo, proximaExpiracao) : null
+  const headersResposta: Record<string, string> = { "Cache-Control": "no-store" }
+  if (etagResposta) headersResposta.ETag = etagResposta
+
+  if (soArquivados) {'''
+if s.count(old) != 1: raise SystemExit(f"bloco URL final encontrado {s.count(old)} vezes")
+s = s.replace(old, new, 1)
+old = 'return NextResponse.json([...arquivados].reverse().map(sanitizarPedidoPixResposta).map(sanitizarPedidoParaPainel))'
+new = 'return NextResponse.json([...arquivados].reverse().map(sanitizarPedidoPixResposta).map(sanitizarPedidoParaPainel), { headers: headersResposta })'
+if s.count(old) != 1: raise SystemExit("return arquivados inesperado")
+s = s.replace(old, new, 1)
+old = 'return NextResponse.json([...ativos].reverse().map(sanitizarPedidoPixResposta).map(sanitizarPedidoParaPainel))'
+new = 'return NextResponse.json([...ativos].reverse().map(sanitizarPedidoPixResposta).map(sanitizarPedidoParaPainel), { headers: headersResposta })'
+if s.count(old) != 1: raise SystemExit("return ativos inesperado")
+s = s.replace(old, new, 1)
+p.write_text(s)
+
+# painel
+p = Path("src/app/pedidos/page.tsx")
+s = p.read_text()
+old = '  const prevIdsRef = useRef<string[]>([])\n'
+new = old + '  const pedidosEtagRef = useRef<string | null>(null)\n'
+if s.count(old) != 1: raise SystemExit("prevIdsRef inesperado")
+s = s.replace(old, new, 1)
+inicio = s.find('  const carregarPedidos = () => {')
+fim = s.find('\n\n  useEffect(() => {', inicio)
+if inicio < 0 or fim < 0: raise SystemExit("carregarPedidos não localizado")
+atual = s[inicio:fim]
+if 'fetch("/api/orders")' not in atual or 'setPedidos(data)' not in atual: raise SystemExit("carregarPedidos mudou de formato")
+novo = '''  const carregarPedidos = () => {
+    const headers: Record<string, string> = {}
+    if (pedidosEtagRef.current) headers["If-None-Match"] = pedidosEtagRef.current
+    return fetch("/api/orders", { cache: "no-store", headers })
+      .then(async r => {
+        if (r.status === 401) {
+          fetch("/api/auth/logout", { method: "POST" }).finally(() => router.push("/login?callbackUrl=/pedidos"))
+          return null
+        }
+        if (r.status === 304) return null
+        if (!r.ok) throw new Error(`orders_http_${r.status}`)
+        pedidosEtagRef.current = r.headers.get("etag")
+        return r.json()
+      })
+      .then(data => {
+        if (data) {
+          const novosIds = data.map((p: Pedido) => p.id)
+          const anteriores = prevIdsRef.current
+          if (anteriores.length > 0) {
+            const chegaram = data.filter((p: Pedido) => !anteriores.includes(p.id))
+            if (chegaram.length > 0) { const temEsc = chegaram.some((p: Pedido) => p.escalonado); if (temEsc) { tocarSomUrgente(); iniciarPiscar(); iniciarSomRepetido() } else { tocarSomNormal() } }
+            data.forEach((p: Pedido) => { if (p.pixConfirmado && prevPixRef.current[p.id] === false) tocarSomPix(); prevPixRef.current[p.id] = !!p.pixConfirmado })
+          } else {
+            data.forEach((p: Pedido) => { prevPixRef.current[p.id] = !!p.pixConfirmado })
+          }
+          prevIdsRef.current = novosIds
+          setPedidos(data); setLoading(false)
+          if (!data.some((p: Pedido) => p.escalonado && p.status === "novo")) { pararPiscar(); pararSomRepetido() }
+        }
+      })
+      .catch(() => {})
+  }'''
+s = s[:inicio] + novo + s[fim:]
+p.write_text(s)
+
+# mock pedidosConcorrencia
+p = Path("src/lib/pedidosConcorrencia.test.ts")
+s = p.read_text()
+old = '''    // Simula o Lua de liberação: GET+DEL condicional numa única "operação".
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (falharProximosEvals > 0) {
+        falharProximosEvals -= 1;
+        throw new Error("Redis indisponível (simulado) — eval");
+      }
+      const [chave] = keys;
+      const [tokenEsperado] = args;
+      if (redisStore.get(chave) === tokenEsperado) {
+        redisStore.delete(chave);
+        return 1;
+      }
+      return 0;
+    }),'''
+new = '''    eval: vi.fn(async (script: string, keys: string[], args: string[]) => {
+      if (falharProximosEvals > 0) {
+        falharProximosEvals -= 1;
+        throw new Error("Redis indisponível (simulado) — eval");
+      }
+      if (script.includes("meta.pedidos = ARGV[2]")) {
+        const [pedidosKey, metaKey] = keys;
+        const [pedidosJson, versao, fallbackComandas] = args;
+        const atual = (redisStore.get(metaKey) as Record<string, unknown> | undefined) ?? {};
+        redisStore.set(metaKey, { ...atual, schema: 1, pedidos: versao, comandas: atual.comandas ?? fallbackComandas });
+        redisStore.set(pedidosKey, JSON.parse(pedidosJson));
+        return versao;
+      }
+      const [chave] = keys;
+      const [tokenEsperado] = args;
+      if (redisStore.get(chave) === tokenEsperado) {
+        redisStore.delete(chave);
+        return 1;
+      }
+      return 0;
+    }),'''
+if s.count(old) != 1: raise SystemExit(f"mock eval concorrencia encontrado {s.count(old)}")
+s = s.replace(old, new, 1)
+old = 'falharProximosSets = 1; // só a escrita final de "pedidos" falha'
+new = 'falharProximosEvals = 1; // a persistência atômica pedidos+versão falha'
+if s.count(old) != 1: raise SystemExit("falha persistencia teste não encontrada")
+s = s.replace(old, new, 1)
+old = 'Redis falha durante a PERSISTÊNCIA (SET final lança): propaga o erro (nunca finge sucesso) e ainda assim libera o lock'
+new = 'Redis falha durante a PERSISTÊNCIA atômica: propaga o erro (nunca finge sucesso) e ainda assim libera o lock'
+if s.count(old) != 1: raise SystemExit("titulo teste persistencia não encontrado")
+s = s.replace(old, new, 1)
+p.write_text(s)
+
+# mock comandas
+p = Path("src/lib/comandas.test.ts")
+s = p.read_text()
+old = '''    expire: vi.fn(async () => 1),
+  };'''
+new = '''    expire: vi.fn(async () => 1),
+    eval: vi.fn(async (script: string, keys: string[], args: string[]) => {
+      if (!script.includes("meta.comandas = ARGV[2]")) throw new Error("Lua inesperado no mock de comandas");
+      const [comandasKey, metaKey] = keys;
+      const [listaJson, versao, fallbackPedidos] = args;
+      const atual = (store.get(metaKey) as Record<string, unknown> | undefined) ?? {};
+      store.set(metaKey, { ...atual, schema: 1, comandas: versao, pedidos: atual.pedidos ?? fallbackPedidos });
+      store.set(comandasKey, JSON.parse(listaJson));
+      return versao;
+    }),
+  };'''
+if s.count(old) != 1: raise SystemExit(f"mock comandas alvo {s.count(old)}")
+s = s.replace(old, new, 1)
+p.write_text(s)
