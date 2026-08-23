@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run src/app/pedidos/pixManualReload.regression.test.ts",
+    "test": "vitest run",
     "e2e:entregador": "node scripts/e2e-entregador-auth.mjs",
     "e2e:cliente-otp": "node scripts/e2e-cliente-otp.mjs"
   },
