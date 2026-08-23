@@ -452,8 +452,10 @@ describe("REGRESSÃO — pizza de 2 sabores de ponta a ponta (montagem → carri
       catalog.flavors.find((f) => f.name === tradicionais[0])!.pricesBySizeCode.G!,
       catalog.flavors.find((f) => f.name === tradicionais[1])!.pricesBySizeCode.G!,
     ));
-    // Sanidade: o par com Especial custava o preço do Especial (mais caro).
-    expect(precoComEspecial).toBe(catalog.flavors.find((f) => f.name === especiais[0])!.pricesBySizeCode.G!);
+    // Mistura de categorias: 50% do preço real da Tradicional + 50% da Especial.
+    const precoTrad = catalog.flavors.find((f) => f.name === tradicionais[0])!.pricesBySizeCode.G!;
+    const precoEsp = catalog.flavors.find((f) => f.name === especiais[0])!.pricesBySizeCode.G!;
+    expect(precoComEspecial).toBe(Math.round((precoTrad + precoEsp) / 2));
   });
 
   test("Caso C3 — o 3º sabor recusado também não muda nada quando a seleção veio de abas diferentes", () => {
@@ -506,12 +508,12 @@ describe("REGRESSÃO — pizza de 2 sabores de ponta a ponta (montagem → carri
     }
   });
 
-  test("Caso H — Tradicional + Especial cobra o MAIOR preço (regra existente), e a prévia da tela bate com o servidor", () => {
+  test("Caso H — Tradicional + Especial cobra metade real de cada categoria, e a prévia bate com o servidor", () => {
     const f1 = tradicionais[0];
     const f2 = especiais[0];
     const preco1 = catalog.flavors.find((f) => f.name === f1)!.pricesBySizeCode.G!;
     const preco2 = catalog.flavors.find((f) => f.name === f2)!.pricesBySizeCode.G!;
-    const esperado = Math.max(preco1, preco2);
+    const esperado = Math.round((preco1 + preco2) / 2);
     expect(precoPizzaLocalCents(catalog, "G", f1, f2, null)).toBe(esperado);
     const servidor = precificarPizzaPorId({ sizeId: sizeIdG, flavorIds: [idPorNome(f1), idPorNome(f2)], quantity: 1 }, catalog);
     expect(servidor.ok).toBe(true);
@@ -745,7 +747,7 @@ describe("precoPizzaLocalCents / precoMinimoPorTamanho — preço local para exi
     expect(precoPizzaLocalCents(catalog, "G", "Calabresa", null, null)).toBe(calabresa.pricesBySizeCode.G);
   });
 
-  test("meio a meio: usa o MAIOR preço entre os 2 sabores no tamanho (nunca média, nunca depende da ordem do clique)", () => {
+  test("meio a meio da mesma categoria: usa o MAIOR preço entre os 2 sabores e não depende da ordem", () => {
     const calabresa = catalog.flavors.find((f) => f.name === "Calabresa")!;
     const baiana = catalog.flavors.find((f) => f.name === "Baiana")!;
     const esperado = Math.max(calabresa.pricesBySizeCode.G!, baiana.pricesBySizeCode.G!);

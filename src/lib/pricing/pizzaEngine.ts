@@ -7,9 +7,10 @@
 // Regras comerciais aprovadas:
 // - Cada sabor tem preço PRÓPRIO por tamanho (não existe mais uma tabela
 //   única por tamanho) — ver @/lib/catalog/officialMenu2026.
-// - Meio a meio cobra o MAIOR preço entre os sabores escolhidos, no tamanho
-//   escolhido — a ordem dos sabores nunca altera o preço (Math.max,
-//   comutativo por construção).
+// - Meio a meio entre CATEGORIAS DIFERENTES cobra metade do preço real de
+//   cada sabor no tamanho escolhido (ex.: Tradicional + Especial).
+// - Meio a meio dentro da MESMA categoria preserva a regra existente de
+//   cobrar o maior preço entre os dois sabores. A ordem nunca altera o total.
 // - MINI é um TAMANHO de pizza Tradicional/Doce (nunca um produto à parte).
 //   Pizzas Especiais NÃO têm tamanho MINI — a ausência da chave MINI em
 //   `flavor.pricesBySizeCode` é o que rejeita a combinação (nenhuma lista
@@ -17,8 +18,8 @@
 // - MINI nunca aceita borda nem adicional (o PDF não define preço de borda
 //   nem de adicional para MINI) — rejeitado explicitamente, nunca com
 //   preço 0 nem herdado de outro tamanho.
-// - Borda e adicionais são somados DEPOIS do preço-base (maior sabor);
-//   quantidade multiplica o total no final, nunca o preço unitário.
+// - Borda e adicionais são somados DEPOIS do preço-base já calculado pela
+//   regra de categorias; quantidade multiplica o total no final.
 import type { PizzaCatalog } from "@/lib/catalog/pizzas";
 
 export type PizzaSelectionById = {
@@ -102,10 +103,14 @@ export function precificarPizzaPorId(selection: PizzaSelectionById, catalog: Piz
     }
   }
 
-  // Meio a meio = maior preço entre os sabores no tamanho escolhido —
-  // Math.max sobre o preço de cada sabor (nunca média, nunca metade de
-  // cada, nunca depende da ordem em que os sabores foram enviados).
-  const unitPriceCents = Math.max(...precosPorSabor) + borderCents + addOnCents;
+  // Categorias diferentes: 50% do preço real de cada sabor. Mesma categoria:
+  // mantém a regra existente do maior preço. O cálculo segue em centavos
+  // e continua vindo somente do catálogo oficial, nunca do navegador.
+  const categoriasDiferentes = flavors.length === 2 && flavors[0].category !== flavors[1].category;
+  const precoSaboresCents = categoriasDiferentes
+    ? Math.round((precosPorSabor[0] + precosPorSabor[1]) / 2)
+    : Math.max(...precosPorSabor);
+  const unitPriceCents = precoSaboresCents + borderCents + addOnCents;
 
   return {
     ok: true,

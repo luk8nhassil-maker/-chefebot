@@ -944,7 +944,7 @@ export function resolverPizzaSelectionIds(
 // partir de pizzaSelection, nunca confia neste valor) de uma pizza normal
 // (1/2 sabores + borda opcional + adicionais opcionais) no tamanho
 // escolhido — mesma regra do motor nativo (@/lib/pricing/pizzaEngine):
-// meio a meio cobra o MAIOR preço entre os sabores, nunca a média; borda e
+// meio a meio entre categorias diferentes cobra 50% de cada sabor; na mesma categoria mantém o maior preço; borda e
 // adicionais são somados depois. Devolve `undefined` quando o catálogo
 // ainda não carregou ou algum nome não bate com um sabor/borda/adicional
 // válido para este tamanho (ex.: sabor Especial + MINI) — o chamador cai
@@ -966,7 +966,9 @@ export function precoPizzaLocalCents(
     const flavor2Entry = pizzaCatalog.flavors.find((f) => f.name === flavor2);
     const preco2 = flavor2Entry?.pricesBySizeCode[sizeCode as "P" | "M" | "G" | "F" | "MINI"];
     if (preco2 === undefined) return undefined;
-    base = Math.max(preco1, preco2);
+    base = flavor1Entry?.category !== flavor2Entry?.category
+      ? Math.round((preco1 + preco2) / 2)
+      : Math.max(preco1, preco2);
   }
   let total = base;
   if (borderLabel) {
