@@ -49,17 +49,16 @@ jobs:
           import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
           import { MENU } from "@/lib/menu";
           import { precificarPizzaPorId } from "./pizzaEngine";
-
           const catalog = buildPizzaCatalog(MENU);
           describe("regressão: meio a meio entre categorias", () => {
-            it("Tradicional + Especial cobra 50% do valor real de cada sabor", () => {
+            it("Tradicional + Especial cobra metade real de cada sabor", () => {
               const size = catalog.sizes.find((s) => s.code === "G")!;
               const tradicional = catalog.flavors.find((f) => f.category === "tradicional" && f.pricesBySizeCode.G !== undefined)!;
               const especial = catalog.flavors.find((f) => f.category === "especial" && f.pricesBySizeCode.G !== undefined)!;
               const esperado = Math.round((tradicional.pricesBySizeCode.G! + especial.pricesBySizeCode.G!) / 2);
-              const resultado = precificarPizzaPorId({ sizeId: size.id, flavorIds: [tradicional.id, especial.id], quantity: 1 }, catalog);
-              expect(resultado.ok).toBe(true);
-              if (resultado.ok) expect(resultado.unitPriceCents).toBe(esperado);
+              const r = precificarPizzaPorId({ sizeId: size.id, flavorIds: [tradicional.id, especial.id], quantity: 1 }, catalog);
+              expect(r.ok).toBe(true);
+              if (r.ok) expect(r.unitPriceCents).toBe(esperado);
             });
           });
           EOF
@@ -72,45 +71,42 @@ jobs:
             echo "A regressão não foi reproduzida; abortando por segurança."
             exit 1
           fi
-          echo "Regressão reproduzida: a main atual promove a metade mais barata ao preço da mais cara."
+          echo "Regressão reproduzida: a regra atual promove a metade mais barata ao preço da mais cara."
 
-      - name: Aplicar patch mínimo em servidor, cliente e testes
+      - name: Aplicar patch mínimo
         shell: python
         run: |
           from pathlib import Path
 
+          def trocar_unico(texto, antigo, novo, nome):
+              qtd = texto.count(antigo)
+              if qtd != 1:
+                  raise SystemExit(f"{nome}: alvo encontrado {qtd} vez(es)")
+              return texto.replace(antigo, novo, 1)
+
           engine = Path("src/lib/pricing/pizzaEngine.ts")
           e = engine.read_text(encoding="utf-8")
-
-          old_rule = """// - Meio a meio cobra o MAIOR preço entre os sabores escolhidos, no tamanho
-          //   escolhido — a ordem dos sabores nunca altera o preço (Math.max,
-          //   comutativo por construção)."""
-          new_rule = """// - Meio a meio entre CATEGORIAS DIFERENTES cobra metade do preço real de
-          //   cada sabor no tamanho escolhido (ex.: Tradicional + Especial).
-          // - Meio a meio dentro da MESMA categoria preserva a regra existente de
-          //   cobrar o maior preço entre os dois sabores. A ordem nunca altera o total."""
-          if e.count(old_rule) != 1:
-              raise SystemExit(f"Regra antiga encontrada {e.count(old_rule)} vez(es) em pizzaEngine.ts")
-          e = e.replace(old_rule, new_rule, 1)
+          e = trocar_unico(
+              e,
+              "// - Meio a meio cobra o MAIOR preço entre os sabores escolhidos, no tamanho\n//   escolhido — a ordem dos sabores nunca altera o preço (Math.max,\n//   comutativo por construção).",
+              "// - Meio a meio entre CATEGORIAS DIFERENTES cobra metade do preço real de\n//   cada sabor no tamanho escolhido (ex.: Tradicional + Especial).\n// - Meio a meio dentro da MESMA categoria preserva a regra existente de\n//   cobrar o maior preço entre os dois sabores. A ordem nunca altera o total.",
+              "regra do motor",
+          )
           e = e.replace(
               "// - Borda e adicionais são somados DEPOIS do preço-base (maior sabor);",
               "// - Borda e adicionais são somados DEPOIS do preço-base dos sabores;",
               1,
           )
-
-          old_line = "  const unitPriceCents = Math.max(...precosPorSabor) + borderCents + addOnCents;"
-          new_calc = """  const categoriasDiferentes = flavors.length === 2 && flavors[0].category !== flavors[1].category;
-          const precoSaboresCents = categoriasDiferentes
-            ? Math.round((precosPorSabor[0] + precosPorSabor[1]) / 2)
-            : Math.max(...precosPorSabor);
-          const unitPriceCents = precoSaboresCents + borderCents + addOnCents;"""
-          if e.count(old_line) != 1:
-              raise SystemExit(f"Cálculo server-side encontrado {e.count(old_line)} vez(es)")
-          e = e.replace(old_line, new_calc, 1)
           e = e.replace(
               "  // Meio a meio = maior preço entre os sabores no tamanho escolhido —\n  // Math.max sobre o preço de cada sabor (nunca média, nunca metade de\n  // cada, nunca depende da ordem em que os sabores foram enviados).",
-              "  // Categorias diferentes: 50% do preço real de cada sabor. Mesma categoria:\n  // mantém a regra existente do maior preço. O cálculo fica em centavos e\n  // continua vindo somente do catálogo oficial, nunca do navegador.",
+              "  // Categorias diferentes: 50% do preço real de cada sabor. Mesma categoria:\n  // mantém a regra existente do maior preço. O cálculo segue em centavos\n  // e continua vindo somente do catálogo oficial, nunca do navegador.",
               1,
+          )
+          e = trocar_unico(
+              e,
+              "  const unitPriceCents = Math.max(...precosPorSabor) + borderCents + addOnCents;",
+              "  const categoriasDiferentes = flavors.length === 2 && flavors[0].category !== flavors[1].category;\n  const precoSaboresCents = categoriasDiferentes\n    ? Math.round((precosPorSabor[0] + precosPorSabor[1]) / 2)\n    : Math.max(...precosPorSabor);\n  const unitPriceCents = precoSaboresCents + borderCents + addOnCents;",
+              "cálculo server-side",
           )
           engine.write_text(e, encoding="utf-8")
 
@@ -121,23 +117,21 @@ jobs:
               "// meio a meio entre categorias diferentes cobra 50% de cada sabor; na mesma categoria mantém o maior preço; borda e",
               1,
           )
-          old_local = "    base = Math.max(preco1, preco2);"
-          new_local = """    base = flavor1Entry?.category !== flavor2Entry?.category
-              ? Math.round((preco1 + preco2) / 2)
-              : Math.max(preco1, preco2);"""
-          if p.count(old_local) != 1:
-              raise SystemExit(f"Cálculo local encontrado {p.count(old_local)} vez(es)")
-          page.write_text(p.replace(old_local, new_local, 1), encoding="utf-8")
+          p = trocar_unico(
+              p,
+              "    base = Math.max(preco1, preco2);",
+              "    base = flavor1Entry?.category !== flavor2Entry?.category\n      ? Math.round((preco1 + preco2) / 2)\n      : Math.max(preco1, preco2);",
+              "cálculo local",
+          )
+          page.write_text(p, encoding="utf-8")
 
           tests = Path("src/lib/pricing/pizzaEngine.test.ts")
           t = tests.read_text(encoding="utf-8")
-          start_marker = 'describe("motor nativo: meio a meio cobra o MAIOR preço entre os sabores'
-          end_marker = 'describe("motor nativo: borda e adicionais somam depois do preço-base'
-          start = t.find(start_marker)
-          end = t.find(end_marker, start + 1)
-          if start < 0 or end < 0 or end <= start:
-              raise SystemExit("Bloco antigo de testes do meio a meio não encontrado")
-          block = '''describe("motor nativo: meio a meio preserva preço real entre categorias", () => {
+          inicio = t.find('describe("motor nativo: meio a meio cobra o MAIOR preço entre os sabores')
+          fim = t.find('describe("motor nativo: borda e adicionais somam depois do preço-base', inicio + 1)
+          if inicio < 0 or fim < 0:
+              raise SystemExit("bloco de testes antigo do motor não encontrado")
+          bloco = '''describe("motor nativo: meio a meio preserva preço real entre categorias", () => {
             it("mesma categoria continua cobrando o MAIOR preço e não depende da ordem", () => {
               const barato = flavorIdByName("Presunto");
               const caro = flavorIdByName("Á Moda da Casa");
@@ -152,7 +146,7 @@ jobs:
               }
             });
 
-            it("Tradicional + Especial = metade do preço real de cada sabor, nas duas ordens", () => {
+            it("Tradicional + Especial cobra metade do preço real de cada sabor nas duas ordens", () => {
               const tradicional = PIZZA_FLAVORS.find((f) => f.category === "tradicional" && f.pricesBySizeCode.G !== undefined)!;
               const especial = PIZZA_FLAVORS.find((f) => f.category === "especial" && f.pricesBySizeCode.G !== undefined)!;
               const esperado = Math.round((tradicional.pricesBySizeCode.G! + especial.pricesBySizeCode.G!) / 2);
@@ -168,22 +162,22 @@ jobs:
               const tradicional = PIZZA_FLAVORS.find((f) => f.category === "tradicional" && f.pricesBySizeCode.G !== undefined)!;
               const doce = PIZZA_FLAVORS.find((f) => f.category === "doce" && f.pricesBySizeCode.G !== undefined)!;
               const esperado = Math.round((tradicional.pricesBySizeCode.G! + doce.pricesBySizeCode.G!) / 2);
-              const resultado = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(tradicional.name), flavorIdByName(doce.name)], quantity: 1 }, catalog);
-              expect(resultado.ok).toBe(true);
-              if (resultado.ok) expect(resultado.unitPriceCents).toBe(esperado);
+              const r = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(tradicional.name), flavorIdByName(doce.name)], quantity: 1 }, catalog);
+              expect(r.ok).toBe(true);
+              if (r.ok) expect(r.unitPriceCents).toBe(esperado);
             });
 
             it("Especial + Especial continua usando Math.max", () => {
               const [a, b] = PIZZA_FLAVORS.filter((f) => f.category === "especial" && f.pricesBySizeCode.G !== undefined);
               const esperado = Math.max(a.pricesBySizeCode.G!, b.pricesBySizeCode.G!);
-              const resultado = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(a.name), flavorIdByName(b.name)], quantity: 1 }, catalog);
-              expect(resultado.ok).toBe(true);
-              if (resultado.ok) expect(resultado.unitPriceCents).toBe(esperado);
+              const r = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(a.name), flavorIdByName(b.name)], quantity: 1 }, catalog);
+              expect(r.ok).toBe(true);
+              if (r.ok) expect(r.unitPriceCents).toBe(esperado);
             });
           });
 
           '''
-          t = t[:start] + block + t[end:]
+          t = t[:inicio] + bloco + t[fim:]
           t = t.replace(
               'it("preço = maior sabor + borda + soma dos adicionais", () => {',
               'it("preço = preço-base dos sabores + borda + soma dos adicionais", () => {',
@@ -193,27 +187,24 @@ jobs:
 
           page_tests = Path("src/app/cardapio/page.test.ts")
           pt = page_tests.read_text(encoding="utf-8")
-          old_c2 = '''    // Sanidade: o par com Especial custava o preço do Especial (mais caro).
-              expect(precoComEspecial).toBe(catalog.flavors.find((f) => f.name === especiais[0])!.pricesBySizeCode.G!);'''
-          if old_c2 not in pt:
-              raise SystemExit("Asserção antiga do Caso C2 não encontrada")
-          new_c2 = '''    // Mistura de categorias: 50% do preço real da Tradicional + 50% da Especial.
-              const precoTrad = catalog.flavors.find((f) => f.name === tradicionais[0])!.pricesBySizeCode.G!;
-              const precoEsp = catalog.flavors.find((f) => f.name === especiais[0])!.pricesBySizeCode.G!;
-              expect(precoComEspecial).toBe(Math.round((precoTrad + precoEsp) / 2));'''
-          pt = pt.replace(old_c2, new_c2, 1)
-
-          mixed_start = pt.find("    const f1 = tradicionais[0];")
-          if mixed_start < 0:
-              raise SystemExit("Caso misto Tradicional + Especial não encontrado")
-          mixed_end = min(len(pt), mixed_start + 1200)
-          segment = pt[mixed_start:mixed_end]
-          old_expected = "    const esperado = Math.max(preco1, preco2);"
-          if old_expected not in segment:
-              raise SystemExit("Expectativa antiga Math.max do caso misto não encontrada")
-          segment = segment.replace(old_expected, "    const esperado = Math.round((preco1 + preco2) / 2);", 1)
-          pt = pt[:mixed_start] + segment + pt[mixed_end:]
-
+          pt = trocar_unico(
+              pt,
+              "    // Sanidade: o par com Especial custava o preço do Especial (mais caro).\n    expect(precoComEspecial).toBe(catalog.flavors.find((f) => f.name === especiais[0])!.pricesBySizeCode.G!);",
+              "    // Mistura de categorias: 50% do preço real da Tradicional + 50% da Especial.\n    const precoTrad = catalog.flavors.find((f) => f.name === tradicionais[0])!.pricesBySizeCode.G!;\n    const precoEsp = catalog.flavors.find((f) => f.name === especiais[0])!.pricesBySizeCode.G!;\n    expect(precoComEspecial).toBe(Math.round((precoTrad + precoEsp) / 2));",
+              "Caso C2",
+          )
+          pt = trocar_unico(
+              pt,
+              'test("Caso H — Tradicional + Especial cobra o MAIOR preço (regra existente), e a prévia da tela bate com o servidor", () => {',
+              'test("Caso H — Tradicional + Especial cobra metade real de cada categoria, e a prévia bate com o servidor", () => {',
+              "título Caso H",
+          )
+          pt = trocar_unico(
+              pt,
+              "    const esperado = Math.max(preco1, preco2);",
+              "    const esperado = Math.round((preco1 + preco2) / 2);",
+              "expectativa Caso H",
+          )
           pt = pt.replace(
               'test("meio a meio: usa o MAIOR preço entre os 2 sabores no tamanho (nunca média, nunca depende da ordem do clique)", () => {',
               'test("meio a meio da mesma categoria: usa o MAIOR preço entre os 2 sabores e não depende da ordem", () => {',
