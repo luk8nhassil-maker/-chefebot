@@ -18,8 +18,8 @@
 // - MINI nunca aceita borda nem adicional (o PDF não define preço de borda
 //   nem de adicional para MINI) — rejeitado explicitamente, nunca com
 //   preço 0 nem herdado de outro tamanho.
-// - Borda e adicionais são somados DEPOIS do preço-base (maior sabor);
-//   quantidade multiplica o total no final, nunca o preço unitário.
+// - Borda e adicionais são somados DEPOIS do preço-base já calculado pela
+//   regra de categorias; quantidade multiplica o total no final.
 import type { PizzaCatalog } from "@/lib/catalog/pizzas";
 
 export type PizzaSelectionById = {
