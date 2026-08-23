@@ -1,0 +1,259 @@
+name: temp-pizza-categoria-real
+
+on:
+  push:
+    branches:
+      - fix/pizza-meio-categoria-real-20260822
+
+permissions:
+  contents: write
+
+concurrency:
+  group: temp-pizza-categoria-real
+  cancel-in-progress: true
+
+jobs:
+  corrigir-e-validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout da branch isolada
+        uses: actions/checkout@v4
+        with:
+          ref: fix/pizza-meio-categoria-real-20260822
+          fetch-depth: 0
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Provar o bug antes do patch
+        shell: bash
+        run: |
+          cat > src/lib/pricing/pizzaCategoriaAtual.regression.test.ts <<'EOF'
+          import { describe, expect, it } from "vitest";
+          import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
+          import { MENU } from "@/lib/menu";
+          import { precificarPizzaPorId } from "./pizzaEngine";
+
+          const catalog = buildPizzaCatalog(MENU);
+
+          describe("regressão: meio a meio entre categorias", () => {
+            it("Tradicional + Especial cobra metade do preço real de cada sabor", () => {
+              const size = catalog.sizes.find((s) => s.code === "G")!;
+              const tradicional = catalog.flavors.find((f) => f.category === "tradicional" && f.pricesBySizeCode.G !== undefined)!;
+              const especial = catalog.flavors.find((f) => f.category === "especial" && f.pricesBySizeCode.G !== undefined)!;
+              const esperado = Math.round((tradicional.pricesBySizeCode.G! + especial.pricesBySizeCode.G!) / 2);
+              const resultado = precificarPizzaPorId({ sizeId: size.id, flavorIds: [tradicional.id, especial.id], quantity: 1 }, catalog);
+              expect(resultado.ok).toBe(true);
+              if (resultado.ok) expect(resultado.unitPriceCents).toBe(esperado);
+            });
+          });
+          EOF
+          set +e
+          npx vitest run src/lib/pricing/pizzaCategoriaAtual.regression.test.ts
+          status=$?
+          set -e
+          rm src/lib/pricing/pizzaCategoriaAtual.regression.test.ts
+          if [ "$status" -eq 0 ]; then
+            echo "A regressão não foi reproduzida; abortando patch por segurança."
+            exit 1
+          fi
+          echo "Bug reproduzido: a main atual usa o maior preço e não metade de cada categoria."
+
+      - name: Aplicar o menor patch seguro
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          engine = Path("src/lib/pricing/pizzaEngine.ts")
+          e = engine.read_text(encoding="utf-8")
+          antigo_regra = '''// - Meio a meio cobra o MAIOR preço entre os sabores escolhidos, no tamanho
+          //   escolhido — a ordem dos sabores nunca altera o preço (Math.max,
+          //   comutativo por construção).'''
+          novo_regra = '''// - Meio a meio entre CATEGORIAS DIFERENTES cobra metade do preço real de
+          //   cada sabor no tamanho escolhido (ex.: Tradicional + Especial).
+          // - Meio a meio dentro da MESMA categoria preserva a regra existente de
+          //   cobrar o maior preço entre os dois sabores. A ordem nunca altera o total.'''
+          if antigo_regra not in e:
+              raise SystemExit("Comentário de regra esperado não encontrado em pizzaEngine.ts")
+          e = e.replace(antigo_regra, novo_regra, 1)
+          e = e.replace(
+              '// - Borda e adicionais são somados DEPOIS do preço-base (maior sabor);',
+              '// - Borda e adicionais são somados DEPOIS do preço-base dos sabores;',
+              1,
+          )
+          antigo_calc = '''  // Meio a meio = maior preço entre os sabores no tamanho escolhido —
+          // Math.max sobre o preço de cada sabor (nunca média, nunca metade de
+          // cada, nunca depende da ordem em que os sabores foram enviados).
+          const unitPriceCents = Math.max(...precosPorSabor) + borderCents + addOnCents;'''
+          novo_calc = '''  // Entre categorias diferentes, cada metade mantém o preço real do próprio
+          // sabor: 50% de um + 50% do outro. Dentro da mesma categoria, a regra
+          // já existente permanece: cobra o maior sabor. Tudo em centavos e a
+          // média é arredondada uma única vez, sem confiar em preço do cliente.
+          const categoriasDiferentes = flavors.length === 2 && flavors[0].category !== flavors[1].category;
+          const precoSaboresCents = categoriasDiferentes
+            ? Math.round((precosPorSabor[0] + precosPorSabor[1]) / 2)
+            : Math.max(...precosPorSabor);
+          const unitPriceCents = precoSaboresCents + borderCents + addOnCents;'''
+          if antigo_calc not in e:
+              raise SystemExit("Bloco de cálculo esperado não encontrado em pizzaEngine.ts")
+          e = e.replace(antigo_calc, novo_calc, 1)
+          engine.write_text(e, encoding="utf-8")
+
+          page = Path("src/app/cardapio/page.tsx")
+          p = page.read_text(encoding="utf-8")
+          p = p.replace(
+              '// meio a meio cobra o MAIOR preço entre os sabores, nunca a média; borda e',
+              '// meio a meio entre categorias diferentes cobra 50% de cada sabor; dentro da mesma categoria mantém o maior preço; borda e',
+              1,
+          )
+          antigo_page = '    base = Math.max(preco1, preco2);'
+          novo_page = '''    base = flavor1Entry?.category !== flavor2Entry?.category
+              ? Math.round((preco1 + preco2) / 2)
+              : Math.max(preco1, preco2);'''
+          if p.count(antigo_page) != 1:
+              raise SystemExit(f"Linha alvo do preço local encontrada {p.count(antigo_page)} vez(es); abortando")
+          p = p.replace(antigo_page, novo_page, 1)
+          page.write_text(p, encoding="utf-8")
+
+          test_engine = Path("src/lib/pricing/pizzaEngine.test.ts")
+          t = test_engine.read_text(encoding="utf-8")
+          inicio = t.index('describe("motor nativo: meio a meio cobra o MAIOR preço entre os sabores')
+          fim = t.index('describe("motor nativo: borda e adicionais somam depois do preço-base', inicio)
+          novo_bloco = r'''describe("motor nativo: meio a meio preserva o preço real de cada categoria", () => {
+            it("mesma categoria continua cobrando o MAIOR preço, nas duas ordens", () => {
+              const barato = flavorIdByName("Presunto");
+              const caro = flavorIdByName("Á Moda da Casa");
+              for (const code of ["F", "G", "M", "P", "MINI"]) {
+                const direto = precificarPizzaPorId({ sizeId: sizeIdByCode(code), flavorIds: [barato, caro], quantity: 1 }, catalog);
+                const invertido = precificarPizzaPorId({ sizeId: sizeIdByCode(code), flavorIds: [caro, barato], quantity: 1 }, catalog);
+                const esperado = PIZZA_FLAVORS.find((f) => f.name === "Á Moda da Casa")!.pricesBySizeCode[code as "F"];
+                expect(direto.ok).toBe(true);
+                expect(invertido.ok).toBe(true);
+                if (direto.ok) expect(direto.unitPriceCents).toBe(esperado);
+                if (invertido.ok) expect(invertido.unitPriceCents).toBe(esperado);
+              }
+            });
+
+            it("Tradicional + Especial = metade do preço real de cada sabor, nas duas ordens", () => {
+              const tradicional = PIZZA_FLAVORS.find((f) => f.category === "tradicional" && f.pricesBySizeCode.G !== undefined)!;
+              const especial = PIZZA_FLAVORS.find((f) => f.category === "especial" && f.pricesBySizeCode.G !== undefined)!;
+              const esperado = Math.round((tradicional.pricesBySizeCode.G! + especial.pricesBySizeCode.G!) / 2);
+              const direto = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(tradicional.name), flavorIdByName(especial.name)], quantity: 1 }, catalog);
+              const invertido = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(especial.name), flavorIdByName(tradicional.name)], quantity: 1 }, catalog);
+              expect(direto.ok).toBe(true);
+              expect(invertido.ok).toBe(true);
+              if (direto.ok) expect(direto.unitPriceCents).toBe(esperado);
+              if (invertido.ok) expect(invertido.unitPriceCents).toBe(esperado);
+            });
+
+            it("a regra de metade também vale para qualquer mistura de categorias; mesma categoria continua Math.max", () => {
+              const tradA = PIZZA_FLAVORS.filter((f) => f.category === "tradicional")[0];
+              const tradB = PIZZA_FLAVORS.filter((f) => f.category === "tradicional")[1];
+              const especialA = PIZZA_FLAVORS.filter((f) => f.category === "especial")[0];
+              const especialB = PIZZA_FLAVORS.filter((f) => f.category === "especial")[1];
+              const doce = PIZZA_FLAVORS.filter((f) => f.category === "doce")[0];
+
+              const casosMesmaCategoria = [[tradA, tradB], [especialA, especialB]] as const;
+              for (const [a, b] of casosMesmaCategoria) {
+                const resultado = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(a.name), flavorIdByName(b.name)], quantity: 1 }, catalog);
+                expect(resultado.ok).toBe(true);
+                if (resultado.ok) expect(resultado.unitPriceCents).toBe(Math.max(a.pricesBySizeCode.G!, b.pricesBySizeCode.G!));
+              }
+
+              for (const [a, b] of [[tradA, especialA], [tradA, doce]] as const) {
+                const resultado = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(a.name), flavorIdByName(b.name)], quantity: 1 }, catalog);
+                expect(resultado.ok).toBe(true);
+                if (resultado.ok) expect(resultado.unitPriceCents).toBe(Math.round((a.pricesBySizeCode.G! + b.pricesBySizeCode.G!) / 2));
+              }
+            });
+          });
+
+          '''
+          t = t[:inicio] + novo_bloco + t[fim:]
+          t = t.replace('it("preço = maior sabor + borda + soma dos adicionais", () => {', 'it("preço = preço-base dos sabores + borda + soma dos adicionais", () => {', 1)
+          test_engine.write_text(t, encoding="utf-8")
+
+          page_test = Path("src/app/cardapio/page.test.ts")
+          pt = page_test.read_text(encoding="utf-8")
+          antigo_c2 = '''    // Sanidade: o par com Especial custava o preço do Especial (mais caro).
+              expect(precoComEspecial).toBe(catalog.flavors.find((f) => f.name === especiais[0])!.pricesBySizeCode.G!);'''
+          novo_c2 = '''    // Mistura de categorias: 50% do preço real da Tradicional + 50% da Especial.
+              const precoTrad = catalog.flavors.find((f) => f.name === tradicionais[0])!.pricesBySizeCode.G!;
+              const precoEsp = catalog.flavors.find((f) => f.name === especiais[0])!.pricesBySizeCode.G!;
+              expect(precoComEspecial).toBe(Math.round((precoTrad + precoEsp) / 2));'''
+          if antigo_c2 not in pt:
+              raise SystemExit("Bloco C2 esperado não encontrado em page.test.ts")
+          pt = pt.replace(antigo_c2, novo_c2, 1)
+
+          padrao_misto = re.compile(r'''(    const f1 = tradicionais\[0\];\n    const f2 = especiais\[0\];\n    const preco1 = .*?\n    const preco2 = .*?\n)    const esperado = Math\.max\(preco1, preco2\);''')
+          pt, n = padrao_misto.subn(r'''\1    const esperado = Math.round((preco1 + preco2) / 2);''', pt, count=1)
+          if n != 1:
+              raise SystemExit(f"Caso misto esperado encontrado {n} vez(es) em page.test.ts")
+
+          # O teste local Calabresa/Baiana é mesma categoria; mantém Math.max,
+          # mas o nome precisa deixar claro que não vale para mistura de categorias.
+          pt = pt.replace(
+              'test("meio a meio: usa o MAIOR preço entre os 2 sabores no tamanho (nunca média, nunca depende da ordem do clique)", () => {',
+              'test("meio a meio da mesma categoria: usa o MAIOR preço entre os 2 sabores (nunca depende da ordem)", () => {',
+              1,
+          )
+          page_test.write_text(pt, encoding="utf-8")
+
+      - name: Testes focados de preço, cliente e servidor
+        run: >-
+          npx vitest run
+          src/lib/pricing/pizzaEngine.test.ts
+          src/app/cardapio/page.test.ts
+          src/app/api/pedido-app/route.test.ts
+
+      - name: Lint dos arquivos de produção alterados
+        run: npx eslint src/lib/pricing/pizzaEngine.ts src/app/cardapio/page.tsx
+
+      - name: Comparar TypeScript com a main base
+        shell: bash
+        run: |
+          set +e
+          npx tsc --noEmit --pretty false > /tmp/branch-tsc.txt 2>&1
+          set -e
+          git worktree add --detach /tmp/chefebot-main 07b20f01f5f66d74deaa12855c3f9f508a4dd124
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/chefebot-main/node_modules
+          cd /tmp/chefebot-main
+          set +e
+          npx tsc --noEmit --pretty false > /tmp/main-tsc.txt 2>&1
+          set -e
+          cd "$GITHUB_WORKSPACE"
+          branch_errors=$(grep -c 'error TS[0-9]' /tmp/branch-tsc.txt || true)
+          main_errors=$(grep -c 'error TS[0-9]' /tmp/main-tsc.txt || true)
+          echo "main erros TS: $main_errors"
+          echo "branch erros TS: $branch_errors"
+          if [ "$branch_errors" -gt "$main_errors" ]; then
+            cat /tmp/branch-tsc.txt
+            exit 1
+          fi
+
+      - name: Build de produção
+        run: npm run build
+
+      - name: Conferir diff e limpar executor temporário
+        shell: bash
+        run: |
+          git diff --check
+          git diff --stat
+          git rm .github/workflows/temp-pizza-categoria-real.yml
+
+      - name: Persistir somente o patch validado
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/pricing/pizzaEngine.ts src/lib/pricing/pizzaEngine.test.ts src/app/cardapio/page.tsx src/app/cardapio/page.test.ts .github/workflows/temp-pizza-categoria-real.yml
+          git commit -m "fix(pizza): calcula metade pelo preço real de cada categoria"
+          git push origin HEAD:fix/pizza-meio-categoria-real-20260822
