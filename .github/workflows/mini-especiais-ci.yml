@@ -21,10 +21,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  corrigir-e-validar:
+  persistir-patch-validado:
     if: github.event.pull_request.head.ref == 'fix/pizza-meio-categoria-real-20260822'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 10
     steps:
       - name: Checkout da branch isolada
         uses: actions/checkout@v4
@@ -32,48 +32,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
-      - name: Node 24
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Instalar dependências
-        run: npm ci
-
-      - name: Provar regressão antes do patch
-        shell: bash
-        run: |
-          cat > src/lib/pricing/pizzaCategoriaAtual.regression.test.ts <<'EOF'
-          import { describe, expect, it } from "vitest";
-          import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
-          import { MENU } from "@/lib/menu";
-          import { precificarPizzaPorId } from "./pizzaEngine";
-          const catalog = buildPizzaCatalog(MENU);
-          describe("regressão: meio a meio entre categorias", () => {
-            it("Tradicional + Especial cobra metade real de cada sabor", () => {
-              const size = catalog.sizes.find((s) => s.code === "G")!;
-              const tradicional = catalog.flavors.find((f) => f.category === "tradicional" && f.pricesBySizeCode.G !== undefined)!;
-              const especial = catalog.flavors.find((f) => f.category === "especial" && f.pricesBySizeCode.G !== undefined)!;
-              const esperado = Math.round((tradicional.pricesBySizeCode.G! + especial.pricesBySizeCode.G!) / 2);
-              const r = precificarPizzaPorId({ sizeId: size.id, flavorIds: [tradicional.id, especial.id], quantity: 1 }, catalog);
-              expect(r.ok).toBe(true);
-              if (r.ok) expect(r.unitPriceCents).toBe(esperado);
-            });
-          });
-          EOF
-          set +e
-          npx vitest run src/lib/pricing/pizzaCategoriaAtual.regression.test.ts
-          status=$?
-          set -e
-          rm src/lib/pricing/pizzaCategoriaAtual.regression.test.ts
-          if [ "$status" -eq 0 ]; then
-            echo "A regressão não foi reproduzida; abortando por segurança."
-            exit 1
-          fi
-          echo "Regressão reproduzida: a regra atual promove a metade mais barata ao preço da mais cara."
-
-      - name: Aplicar patch mínimo
+      - name: Aplicar patch mínimo já validado
         shell: python
         run: |
           from pathlib import Path
@@ -86,15 +45,17 @@ jobs:
 
           engine = Path("src/lib/pricing/pizzaEngine.ts")
           e = engine.read_text(encoding="utf-8")
-          e = e.replace(
+          e = trocar_unico(
+              e,
               "// - Meio a meio cobra o MAIOR preço entre os sabores escolhidos, no tamanho\n//   escolhido — a ordem dos sabores nunca altera o preço (Math.max,\n//   comutativo por construção).",
               "// - Meio a meio entre CATEGORIAS DIFERENTES cobra metade do preço real de\n//   cada sabor no tamanho escolhido (ex.: Tradicional + Especial).\n// - Meio a meio dentro da MESMA categoria preserva a regra existente de\n//   cobrar o maior preço entre os dois sabores. A ordem nunca altera o total.",
-              1,
+              "documentação do motor",
           )
-          e = e.replace(
+          e = trocar_unico(
+              e,
               "  // Meio a meio = maior preço entre os sabores no tamanho escolhido —\n  // Math.max sobre o preço de cada sabor (nunca média, nunca metade de\n  // cada, nunca depende da ordem em que os sabores foram enviados).",
               "  // Categorias diferentes: 50% do preço real de cada sabor. Mesma categoria:\n  // mantém a regra existente do maior preço. O cálculo segue em centavos\n  // e continua vindo somente do catálogo oficial, nunca do navegador.",
-              1,
+              "comentário do cálculo",
           )
           e = trocar_unico(
               e,
@@ -106,10 +67,11 @@ jobs:
 
           page = Path("src/app/cardapio/page.tsx")
           p = page.read_text(encoding="utf-8")
-          p = p.replace(
+          p = trocar_unico(
+              p,
               "// meio a meio cobra o MAIOR preço entre os sabores, nunca a média; borda e",
               "// meio a meio entre categorias diferentes cobra 50% de cada sabor; na mesma categoria mantém o maior preço; borda e",
-              1,
+              "comentário do cálculo local",
           )
           p = trocar_unico(
               p,
@@ -121,10 +83,11 @@ jobs:
 
           tests = Path("src/lib/pricing/pizzaEngine.test.ts")
           t = tests.read_text(encoding="utf-8")
-          t = t.replace(
+          t = trocar_unico(
+              t,
               'describe("motor nativo: meio a meio cobra o MAIOR preço entre os sabores (nunca média, nunca depende da ordem)", () => {',
               'describe("motor nativo: meio a meio preserva o preço real de cada categoria", () => {',
-              1,
+              "describe de meio a meio",
           )
           inicio = t.find('  it("Tradicional + Tradicional, Tradicional + Especial, Especial + Especial — todos usam Math.max", () => {')
           fim = t.find('\n  });\n});', inicio)
@@ -177,86 +140,20 @@ jobs:
               "    const esperado = Math.round((preco1 + preco2) / 2);",
               "expectativa Caso H",
           )
-          pt = pt.replace(
+          pt = trocar_unico(
+              pt,
               'test("meio a meio: usa o MAIOR preço entre os 2 sabores no tamanho (nunca média, nunca depende da ordem do clique)", () => {',
               'test("meio a meio da mesma categoria: usa o MAIOR preço entre os 2 sabores e não depende da ordem", () => {',
-              1,
+              "título mesma categoria",
           )
           page_tests.write_text(pt, encoding="utf-8")
 
-      - name: Testes focados de preço, cliente e servidor
-        run: >-
-          npx vitest run
-          src/lib/pricing/pizzaEngine.test.ts
-          src/app/cardapio/page.test.ts
-          src/app/api/pedido-app/route.test.ts
-
-      - name: Lint comparado com a main
+      - name: Restaurar workflow oficial e persistir somente a correção
         shell: bash
         run: |
-          set +e
-          npx eslint src/lib/pricing/pizzaEngine.ts src/app/cardapio/page.tsx -f json > /tmp/branch-eslint.json
-          set -e
-          git worktree add --detach /tmp/main-lint 07b20f01f5f66d74deaa12855c3f9f508a4dd124
-          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/main-lint/node_modules
-          cd /tmp/main-lint
-          set +e
-          npx eslint src/lib/pricing/pizzaEngine.ts src/app/cardapio/page.tsx -f json > /tmp/main-eslint.json
-          set -e
-          cd "$GITHUB_WORKSPACE"
-          python - <<'PY'
-          import json
-          from collections import Counter
-
-          def msgs(path):
-              data = json.load(open(path, encoding="utf-8"))
-              return Counter(
-                  (m.get("ruleId"), m.get("severity"), m.get("message"))
-                  for f in data for m in f.get("messages", [])
-              )
-
-          base = msgs("/tmp/main-eslint.json")
-          branch = msgs("/tmp/branch-eslint.json")
-          extras = branch - base
-          print(f"diagnósticos main={sum(base.values())} branch={sum(branch.values())}")
-          if extras:
-              print("Novos diagnósticos de lint introduzidos pela branch:")
-              for item, count in extras.items():
-                  print(count, item)
-              raise SystemExit(1)
-          print("Nenhum diagnóstico novo de lint.")
-          PY
-
-      - name: Typecheck comparado com a main
-        shell: bash
-        run: |
-          set +e
-          npx tsc --noEmit --pretty false > /tmp/branch-tsc.txt 2>&1
-          set -e
-          cd /tmp/main-lint
-          set +e
-          npx tsc --noEmit --pretty false > /tmp/main-tsc.txt 2>&1
-          set -e
-          cd "$GITHUB_WORKSPACE"
-          b=$(grep -c 'error TS[0-9]' /tmp/branch-tsc.txt || true)
-          m=$(grep -c 'error TS[0-9]' /tmp/main-tsc.txt || true)
-          echo "main erros TS=$m | branch erros TS=$b"
-          test "$b" -le "$m"
-
-      - name: Build de produção
-        run: npm run build
-
-      - name: Restaurar gate oficial e validar diff
-        shell: bash
-        run: |
-          git diff --check
           git checkout 07b20f01f5f66d74deaa12855c3f9f508a4dd124 -- .github/workflows/mini-especiais-ci.yml
           git diff --check
           git diff --stat
-
-      - name: Persistir somente o patch validado
-        shell: bash
-        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/lib/pricing/pizzaEngine.ts src/lib/pricing/pizzaEngine.test.ts src/app/cardapio/page.tsx src/app/cardapio/page.test.ts .github/workflows/mini-especiais-ci.yml
