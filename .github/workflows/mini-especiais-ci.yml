@@ -86,15 +86,9 @@ jobs:
 
           engine = Path("src/lib/pricing/pizzaEngine.ts")
           e = engine.read_text(encoding="utf-8")
-          e = trocar_unico(
-              e,
+          e = e.replace(
               "// - Meio a meio cobra o MAIOR preço entre os sabores escolhidos, no tamanho\n//   escolhido — a ordem dos sabores nunca altera o preço (Math.max,\n//   comutativo por construção).",
               "// - Meio a meio entre CATEGORIAS DIFERENTES cobra metade do preço real de\n//   cada sabor no tamanho escolhido (ex.: Tradicional + Especial).\n// - Meio a meio dentro da MESMA categoria preserva a regra existente de\n//   cobrar o maior preço entre os dois sabores. A ordem nunca altera o total.",
-              "regra do motor",
-          )
-          e = e.replace(
-              "// - Borda e adicionais são somados DEPOIS do preço-base (maior sabor);",
-              "// - Borda e adicionais são somados DEPOIS do preço-base dos sabores;",
               1,
           )
           e = e.replace(
@@ -127,62 +121,40 @@ jobs:
 
           tests = Path("src/lib/pricing/pizzaEngine.test.ts")
           t = tests.read_text(encoding="utf-8")
-          inicio = t.find('describe("motor nativo: meio a meio cobra o MAIOR preço entre os sabores')
-          fim = t.find('describe("motor nativo: borda e adicionais somam depois do preço-base', inicio + 1)
+          t = t.replace(
+              'describe("motor nativo: meio a meio cobra o MAIOR preço entre os sabores (nunca média, nunca depende da ordem)", () => {',
+              'describe("motor nativo: meio a meio preserva o preço real de cada categoria", () => {',
+              1,
+          )
+          inicio = t.find('  it("Tradicional + Tradicional, Tradicional + Especial, Especial + Especial — todos usam Math.max", () => {')
+          fim = t.find('\n  });\n});', inicio)
           if inicio < 0 or fim < 0:
-              raise SystemExit("bloco de testes antigo do motor não encontrado")
-          bloco = '''describe("motor nativo: meio a meio preserva preço real entre categorias", () => {
-            it("mesma categoria continua cobrando o MAIOR preço e não depende da ordem", () => {
-              const barato = flavorIdByName("Presunto");
-              const caro = flavorIdByName("Á Moda da Casa");
-              for (const code of ["F", "G", "M", "P", "MINI"]) {
-                const direto = precificarPizzaPorId({ sizeId: sizeIdByCode(code), flavorIds: [barato, caro], quantity: 1 }, catalog);
-                const invertido = precificarPizzaPorId({ sizeId: sizeIdByCode(code), flavorIds: [caro, barato], quantity: 1 }, catalog);
-                const esperado = PIZZA_FLAVORS.find((f) => f.name === "Á Moda da Casa")!.pricesBySizeCode[code as "F"];
-                expect(direto.ok).toBe(true);
-                expect(invertido.ok).toBe(true);
-                if (direto.ok) expect(direto.unitPriceCents).toBe(esperado);
-                if (invertido.ok) expect(invertido.unitPriceCents).toBe(esperado);
-              }
-            });
+              raise SystemExit("bloco misto antigo de pizzaEngine.test.ts não encontrado")
+          fim += len('\n  });')
+          novo = '''  it("mesma categoria continua usando Math.max; categorias diferentes usam metade real de cada sabor", () => {
+            const tradA = PIZZA_FLAVORS.filter((f) => f.category === "tradicional")[0];
+            const tradB = PIZZA_FLAVORS.filter((f) => f.category === "tradicional")[1];
+            const especialA = PIZZA_FLAVORS.filter((f) => f.category === "especial")[0];
+            const especialB = PIZZA_FLAVORS.filter((f) => f.category === "especial")[1];
+            const doce = PIZZA_FLAVORS.filter((f) => f.category === "doce")[0];
 
-            it("Tradicional + Especial cobra metade do preço real de cada sabor nas duas ordens", () => {
-              const tradicional = PIZZA_FLAVORS.find((f) => f.category === "tradicional" && f.pricesBySizeCode.G !== undefined)!;
-              const especial = PIZZA_FLAVORS.find((f) => f.category === "especial" && f.pricesBySizeCode.G !== undefined)!;
-              const esperado = Math.round((tradicional.pricesBySizeCode.G! + especial.pricesBySizeCode.G!) / 2);
-              const direto = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(tradicional.name), flavorIdByName(especial.name)], quantity: 1 }, catalog);
-              const invertido = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(especial.name), flavorIdByName(tradicional.name)], quantity: 1 }, catalog);
+            for (const [a, b] of [[tradA, tradB], [especialA, especialB]] as const) {
+              const r = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(a.name), flavorIdByName(b.name)], quantity: 1 }, catalog);
+              expect(r.ok).toBe(true);
+              if (r.ok) expect(r.unitPriceCents).toBe(Math.max(a.pricesBySizeCode.G!, b.pricesBySizeCode.G!));
+            }
+
+            for (const [a, b] of [[tradA, especialA], [tradA, doce]] as const) {
+              const esperado = Math.round((a.pricesBySizeCode.G! + b.pricesBySizeCode.G!) / 2);
+              const direto = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(a.name), flavorIdByName(b.name)], quantity: 1 }, catalog);
+              const invertido = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(b.name), flavorIdByName(a.name)], quantity: 1 }, catalog);
               expect(direto.ok).toBe(true);
               expect(invertido.ok).toBe(true);
               if (direto.ok) expect(direto.unitPriceCents).toBe(esperado);
               if (invertido.ok) expect(invertido.unitPriceCents).toBe(esperado);
-            });
-
-            it("Tradicional + Doce também cobra metade do preço real de cada categoria", () => {
-              const tradicional = PIZZA_FLAVORS.find((f) => f.category === "tradicional" && f.pricesBySizeCode.G !== undefined)!;
-              const doce = PIZZA_FLAVORS.find((f) => f.category === "doce" && f.pricesBySizeCode.G !== undefined)!;
-              const esperado = Math.round((tradicional.pricesBySizeCode.G! + doce.pricesBySizeCode.G!) / 2);
-              const r = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(tradicional.name), flavorIdByName(doce.name)], quantity: 1 }, catalog);
-              expect(r.ok).toBe(true);
-              if (r.ok) expect(r.unitPriceCents).toBe(esperado);
-            });
-
-            it("Especial + Especial continua usando Math.max", () => {
-              const [a, b] = PIZZA_FLAVORS.filter((f) => f.category === "especial" && f.pricesBySizeCode.G !== undefined);
-              const esperado = Math.max(a.pricesBySizeCode.G!, b.pricesBySizeCode.G!);
-              const r = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(a.name), flavorIdByName(b.name)], quantity: 1 }, catalog);
-              expect(r.ok).toBe(true);
-              if (r.ok) expect(r.unitPriceCents).toBe(esperado);
-            });
-          });
-
-          '''
-          t = t[:inicio] + bloco + t[fim:]
-          t = t.replace(
-              'it("preço = maior sabor + borda + soma dos adicionais", () => {',
-              'it("preço = preço-base dos sabores + borda + soma dos adicionais", () => {',
-              1,
-          )
+            }
+          });'''
+          t = t[:inicio] + novo + t[fim:]
           tests.write_text(t, encoding="utf-8")
 
           page_tests = Path("src/app/cardapio/page.test.ts")
@@ -219,8 +191,41 @@ jobs:
           src/app/cardapio/page.test.ts
           src/app/api/pedido-app/route.test.ts
 
-      - name: Lint do patch de produção
-        run: npx eslint src/lib/pricing/pizzaEngine.ts src/app/cardapio/page.tsx
+      - name: Lint comparado com a main
+        shell: bash
+        run: |
+          set +e
+          npx eslint src/lib/pricing/pizzaEngine.ts src/app/cardapio/page.tsx -f json > /tmp/branch-eslint.json
+          set -e
+          git worktree add --detach /tmp/main-lint 07b20f01f5f66d74deaa12855c3f9f508a4dd124
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/main-lint/node_modules
+          cd /tmp/main-lint
+          set +e
+          npx eslint src/lib/pricing/pizzaEngine.ts src/app/cardapio/page.tsx -f json > /tmp/main-eslint.json
+          set -e
+          cd "$GITHUB_WORKSPACE"
+          python - <<'PY'
+          import json
+          from collections import Counter
+
+          def msgs(path):
+              data = json.load(open(path, encoding="utf-8"))
+              return Counter(
+                  (m.get("ruleId"), m.get("severity"), m.get("message"))
+                  for f in data for m in f.get("messages", [])
+              )
+
+          base = msgs("/tmp/main-eslint.json")
+          branch = msgs("/tmp/branch-eslint.json")
+          extras = branch - base
+          print(f"diagnósticos main={sum(base.values())} branch={sum(branch.values())}")
+          if extras:
+              print("Novos diagnósticos de lint introduzidos pela branch:")
+              for item, count in extras.items():
+                  print(count, item)
+              raise SystemExit(1)
+          print("Nenhum diagnóstico novo de lint.")
+          PY
 
       - name: Typecheck comparado com a main
         shell: bash
@@ -228,9 +233,7 @@ jobs:
           set +e
           npx tsc --noEmit --pretty false > /tmp/branch-tsc.txt 2>&1
           set -e
-          git worktree add --detach /tmp/main-base 07b20f01f5f66d74deaa12855c3f9f508a4dd124
-          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/main-base/node_modules
-          cd /tmp/main-base
+          cd /tmp/main-lint
           set +e
           npx tsc --noEmit --pretty false > /tmp/main-tsc.txt 2>&1
           set -e
