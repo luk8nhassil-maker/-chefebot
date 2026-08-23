@@ -137,7 +137,7 @@ describe("motor nativo: MINI nunca aceita borda nem adicional", () => {
   });
 });
 
-describe("motor nativo: meio a meio cobra o MAIOR preço entre os sabores (nunca média, nunca depende da ordem)", () => {
+describe("motor nativo: meio a meio preserva o preço real de cada categoria", () => {
   it("Presunto (mais barato) + Á Moda da Casa (mais caro) = preço do mais caro, nas duas ordens", () => {
     const barato = flavorIdByName("Presunto"); // F47 G43 M38 P33 MINI15
     const caro = flavorIdByName("Á Moda da Casa"); // F55 G50 M40 P35 MINI17
@@ -157,32 +157,29 @@ describe("motor nativo: meio a meio cobra o MAIOR preço entre os sabores (nunca
     }
   });
 
-  it("Tradicional + Tradicional, Tradicional + Especial, Especial + Especial — todos usam Math.max", () => {
-    const tradA = PIZZA_FLAVORS.filter((f) => f.category === "tradicional")[0];
-    const tradB = PIZZA_FLAVORS.filter((f) => f.category === "tradicional")[1];
-    const especialA = PIZZA_FLAVORS.filter((f) => f.category === "especial")[0];
-    const especialB = PIZZA_FLAVORS.filter((f) => f.category === "especial")[1];
-    const doce = PIZZA_FLAVORS.filter((f) => f.category === "doce")[0];
+  it("mesma categoria continua usando Math.max; categorias diferentes usam metade real de cada sabor", () => {
+  const tradA = PIZZA_FLAVORS.filter((f) => f.category === "tradicional")[0];
+  const tradB = PIZZA_FLAVORS.filter((f) => f.category === "tradicional")[1];
+  const especialA = PIZZA_FLAVORS.filter((f) => f.category === "especial")[0];
+  const especialB = PIZZA_FLAVORS.filter((f) => f.category === "especial")[1];
+  const doce = PIZZA_FLAVORS.filter((f) => f.category === "doce")[0];
 
-    const casos: [typeof tradA, typeof tradA][] = [
-      [tradA, tradB],
-      [tradA, especialA],
-      [especialA, especialB],
-      [tradA, doce],
-    ];
-    for (const [a, b] of casos) {
-      const resultado = precificarPizzaPorId(
-        { sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(a.name), flavorIdByName(b.name)], quantity: 1 },
-        catalog
-      );
-      expect(resultado.ok).toBe(true);
-      if (resultado.ok) {
-        const espA = a.pricesBySizeCode.G ?? -Infinity;
-        const espB = b.pricesBySizeCode.G ?? -Infinity;
-        expect(resultado.unitPriceCents).toBe(Math.max(espA, espB));
-      }
-    }
-  });
+  for (const [a, b] of [[tradA, tradB], [especialA, especialB]] as const) {
+    const r = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(a.name), flavorIdByName(b.name)], quantity: 1 }, catalog);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.unitPriceCents).toBe(Math.max(a.pricesBySizeCode.G!, b.pricesBySizeCode.G!));
+  }
+
+  for (const [a, b] of [[tradA, especialA], [tradA, doce]] as const) {
+    const esperado = Math.round((a.pricesBySizeCode.G! + b.pricesBySizeCode.G!) / 2);
+    const direto = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(a.name), flavorIdByName(b.name)], quantity: 1 }, catalog);
+    const invertido = precificarPizzaPorId({ sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName(b.name), flavorIdByName(a.name)], quantity: 1 }, catalog);
+    expect(direto.ok).toBe(true);
+    expect(invertido.ok).toBe(true);
+    if (direto.ok) expect(direto.unitPriceCents).toBe(esperado);
+    if (invertido.ok) expect(invertido.unitPriceCents).toBe(esperado);
+  }
+});
 });
 
 describe("motor nativo: borda e adicionais somam depois do preço-base; quantidade multiplica só o total", () => {
