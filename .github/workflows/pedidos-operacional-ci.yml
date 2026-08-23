@@ -1,16 +1,27 @@
 name: pedidos-operacional-ci
 
+# Gate hermético da regra operacional de pedidos. Não recebe segredos, não
+# acessa Redis/WhatsApp/Pix/impressão e executa apenas regras puras + lint.
 on:
   pull_request:
-    branches: [main]
     paths:
-      - "src/app/pedidos/page.tsx"
-      - "src/app/pedidos/pixManualReload.regression.test.ts"
+      - "src/lib/expedienteOperacional.ts"
+      - "src/lib/expedienteOperacional.test.ts"
+      - "src/lib/pedidosPainelOperacional.ts"
+      - "src/lib/pedidosPainelOperacional.test.ts"
+      - "src/lib/limpezaOperacionalPedidos.ts"
+      - "src/lib/limpezaOperacionalPedidos.test.ts"
+      - "src/components/LimpezaOperacionalPainel.tsx"
+      - "src/components/LimpezaOperacionalPainel.contrato.test.ts"
+      - "src/app/api/orders-painel/route.ts"
+      - "src/app/api/cron/route.ts"
+      - "src/lib/numeracao.ts"
+      - "src/middleware.ts"
       - ".github/workflows/pedidos-operacional-ci.yml"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: pedidos-operacional-ci-${{ github.event.pull_request.number || github.ref }}
@@ -19,100 +30,36 @@ concurrency:
 jobs:
   pedidos-operacional-ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
-      - name: Checkout da branch isolada
+      - name: Checkout do SHA validado
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
-          fetch-depth: 0
-
-      - name: Node 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Instalar dependências
         run: npm ci
 
-      - name: Provar regressão antes do patch
-        shell: bash
-        run: |
-          set +e
-          npx vitest run src/app/pedidos/pixManualReload.regression.test.ts
-          status=$?
-          set -e
-          if [ "$status" -eq 0 ]; then
-            echo "O teste passou antes do patch; abortando para não alterar código sem reproduzir o defeito."
-            exit 1
-          fi
-          echo "Regressão reproduzida: confirmação manual ainda não recarrega o painel."
+      - name: Testes focados do expediente e cobrança operacional
+        run: >-
+          npm test --
+          src/lib/expedienteOperacional.test.ts
+          src/lib/pedidosPainelOperacional.test.ts
+          src/lib/limpezaOperacionalPedidos.test.ts
+          src/components/LimpezaOperacionalPainel.contrato.test.ts
 
-      - name: Aplicar patch mínimo
-        shell: python
-        run: |
-          from pathlib import Path
-          path = Path("src/app/pedidos/page.tsx")
-          fonte = path.read_text(encoding="utf-8")
-          antigo = """        setPixConfirmando(false)
-        resetarVerificacaoPix()
-        return"""
-          if fonte.count(antigo) != 1:
-              raise SystemExit(f"Bloco alvo encontrado {fonte.count(antigo)} vez(es); patch abortado.")
-          novo = """        setPixConfirmando(false)
-        resetarVerificacaoPix()
-        // O pagamento já foi persistido. Recarrega o painel como um F5 para
-        // reidratar a lista canônica sem repetir nem alterar a confirmação Pix.
-        window.location.reload()
-        return"""
-          path.write_text(fonte.replace(antigo, novo, 1), encoding="utf-8")
-
-      - name: Testes focados do painel e Pix manual
-        run: |
-          npx vitest run \
-            src/app/pedidos/pixManualReload.regression.test.ts \
-            src/app/pedidos/pixModalFechamento.regression.test.ts \
-            src/app/pedidos/pixSeguranca.page.test.ts \
-            src/app/pedidos/page.test.ts
-
-      - name: Lint do patch
-        run: npx eslint src/app/pedidos/page.tsx src/app/pedidos/pixManualReload.regression.test.ts
-
-      - name: Comparar TypeScript com a main base
-        shell: bash
-        run: |
-          set +e
-          npx tsc --noEmit --pretty false > /tmp/branch-tsc.txt 2>&1
-          set -e
-          git worktree add --detach /tmp/chefebot-main 13c3079293468460172bd29821b297fe60c3429e
-          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/chefebot-main/node_modules
-          cd /tmp/chefebot-main
-          set +e
-          npx tsc --noEmit --pretty false > /tmp/main-tsc.txt 2>&1
-          set -e
-          cd "$GITHUB_WORKSPACE"
-          branch_errors=$(grep -c 'error TS[0-9]' /tmp/branch-tsc.txt || true)
-          main_errors=$(grep -c 'error TS[0-9]' /tmp/main-tsc.txt || true)
-          echo "main erros TS: $main_errors"
-          echo "branch erros TS: $branch_errors"
-          test "$branch_errors" -le "$main_errors"
-
-      - name: Build de produção
-        run: npm run build
-
-      - name: Restaurar CI oficial e limpar executores temporários
-        shell: bash
-        run: |
-          git diff --check
-          git checkout 13c3079293468460172bd29821b297fe60c3429e -- .github/workflows/pedidos-operacional-ci.yml
-          git rm -f .github/workflows/temp-pix-manual-reload.yml .github/workflows/temp-pix-manual-reload-pr.yml
-
-      - name: Persistir somente o patch validado
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/app/pedidos/page.tsx src/app/pedidos/pixManualReload.regression.test.ts .github/workflows/pedidos-operacional-ci.yml .github/workflows/temp-pix-manual-reload.yml .github/workflows/temp-pix-manual-reload-pr.yml
-          git commit -m "fix(pedidos): recarrega painel após confirmar Pix manual"
-          git push origin HEAD:fix/pedidos-pix-manual-reload-20260822
+      - name: Lint dos arquivos da mudança
+        run: >-
+          npm run lint --
+          src/lib/expedienteOperacional.ts
+          src/lib/expedienteOperacional.test.ts
+          src/lib/pedidosPainelOperacional.ts
+          src/lib/pedidosPainelOperacional.test.ts
+          src/lib/limpezaOperacionalPedidos.ts
+          src/lib/limpezaOperacionalPedidos.test.ts
+          src/components/LimpezaOperacionalPainel.tsx
+          src/components/LimpezaOperacionalPainel.contrato.test.ts
+          src/app/api/orders-painel/route.ts
+          src/app/api/cron/route.ts
+          src/lib/numeracao.ts
+          src/middleware.ts
