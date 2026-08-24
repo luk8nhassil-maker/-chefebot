@@ -1,0 +1,35 @@
+name: Apply pedidos cancelados metrica
+
+on:
+  push:
+    branches:
+      - fix/pedidos-cancelados-metrica-v2
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[pedidos-cancelados-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/pedidos-cancelados-metrica-v2
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Aplicar patch determinístico
+        run: node scripts/apply-pedidos-cancelados-metrica.mjs
+      - name: Commitar somente a correção real
+        run: |
+          if git diff --quiet -- src/app/pedidos/page.tsx src/lib/pedidosMetricas.ts src/lib/pedidosMetricas.test.ts src/app/pedidos/page.metricas.test.ts; then
+            echo "No source changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/pedidos/page.tsx src/lib/pedidosMetricas.ts src/lib/pedidosMetricas.test.ts src/app/pedidos/page.metricas.test.ts
+          git commit -m "fix: ignora cancelados no total de pedidos [pedidos-cancelados-applied]"
+          git push origin HEAD:fix/pedidos-cancelados-metrica-v2
