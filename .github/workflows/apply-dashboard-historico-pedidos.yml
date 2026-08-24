@@ -1,0 +1,35 @@
+name: Apply dashboard history patch
+
+on:
+  push:
+    branches:
+      - fix/dashboard-historico-pedidos
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[dashboard-historico-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/dashboard-historico-pedidos
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Apply deterministic source patch
+        run: node scripts/apply-dashboard-historico-pedidos.mjs
+      - name: Commit source patch
+        run: |
+          if git diff --quiet -- src/app/admin/page.tsx src/app/api/orders/route.ts; then
+            echo "No source changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/admin/page.tsx src/app/api/orders/route.ts
+          git commit -m "fix: restaura histórico do dashboard [dashboard-historico-applied]"
+          git push origin HEAD:fix/dashboard-historico-pedidos
