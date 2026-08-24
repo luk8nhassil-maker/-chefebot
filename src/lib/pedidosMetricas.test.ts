@@ -40,7 +40,7 @@ describe("métricas operacionais de pedidos", () => {
     expect(contarPizzasDoPedido({ itensDetalhados: [{ kind: "pizza", qty: 1.5 }] })).toBe(0)
   })
 
-  test("total de pedidos ignora cancelados e continua contando entregues", () => {
+  test("total de pedidos ignora cancelados e continua contando as quatro etapas oficiais", () => {
     expect(contarPedidosOperacionais([
       { status: "novo" },
       { status: "em_preparo" },
@@ -50,6 +50,14 @@ describe("métricas operacionais de pedidos", () => {
       { status: "cancelado" },
     ])).toBe(4)
     expect(contarPedidosOperacionais([{ status: "cancelado" }, { status: "cancelado" }])).toBe(0)
+  })
+
+  test("total de pedidos falha fechado para estado desconhecido", () => {
+    expect(contarPedidosOperacionais([
+      { status: "novo" },
+      { status: "desconhecido" },
+      {},
+    ])).toBe(1)
   })
 
   test("pizzas vendidas ignora pedidos cancelados", () => {
