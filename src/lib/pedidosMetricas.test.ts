@@ -12,7 +12,17 @@ describe("métricas operacionais de pedidos", () => {
     expect(contarPizzasDoPedido({})).toBe(0)
   })
 
-  test("usa snapshot estruturado quando pizzasCount não existe", () => {
+  test("usa itensDetalhados estruturados e não conta presente como pizza vendida", () => {
+    expect(contarPizzasDoPedido({
+      itensDetalhados: [
+        { kind: "pizza", qty: 2 },
+        { kind: "simple", qty: 4 },
+        { kind: "pizza", qty: 1, recompensaJornadaId: "recompensa_1" },
+      ],
+    })).toBe(2)
+  })
+
+  test("usa snapshot estruturado quando os campos anteriores não existem", () => {
     expect(contarPizzasDoPedido({
       snapshotOficial: {
         itens: [
@@ -22,6 +32,11 @@ describe("métricas operacionais de pedidos", () => {
         ],
       },
     })).toBe(3)
+  })
+
+  test("quantidade malformada falha fechado em vez de truncar ou converter texto", () => {
+    expect(contarPizzasDoPedido({ pizzasCount: 1.8, snapshotOficial: { itens: [] } })).toBe(0)
+    expect(contarPizzasDoPedido({ itensDetalhados: [{ kind: "pizza", qty: 1.5 }] })).toBe(0)
   })
 
   test("pizzas vendidas ignora pedidos cancelados", () => {
