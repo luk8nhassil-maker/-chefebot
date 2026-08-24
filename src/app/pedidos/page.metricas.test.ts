@@ -7,7 +7,8 @@ const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url))
 describe("/pedidos — métricas operacionais", () => {
   test("separa número de pedidos da quantidade real de pizzas", () => {
     expect(fonte).toContain('from "@/lib/pedidosMetricas"')
-    expect(fonte).toContain("const totalPedidos = pedidos.length")
+    expect(fonte).toContain("const totalPedidos = contarPedidosOperacionais(pedidos)")
+    expect(fonte).not.toContain("const totalPedidos = pedidos.length")
     expect(fonte).toContain("const pizzasVendidas = contarPizzasVendidas(pedidos)")
     expect(fonte).toContain(">Pedidos</div>")
     expect(fonte).toContain(">Pizzas</div>")
