@@ -1,6 +1,11 @@
 export type PedidoParaMetricas = {
   status?: string
   pizzasCount?: number
+  itensDetalhados?: Array<{
+    kind?: string
+    qty?: number
+    recompensaJornadaId?: string
+  }>
   snapshotOficial?: {
     itens?: Array<{
       kind?: string
@@ -12,22 +17,39 @@ export type PedidoParaMetricas = {
 }
 
 function inteiroNaoNegativo(valor: unknown): number | null {
-  const numero = Number(valor)
-  if (!Number.isFinite(numero) || numero < 0) return null
-  return Math.trunc(numero)
+  if (typeof valor !== "number" || !Number.isInteger(valor) || valor < 0) return null
+  return valor
+}
+
+function contarPizzasPagasEstruturadas(
+  itens: PedidoParaMetricas["itensDetalhados"]
+): number | null {
+  if (!Array.isArray(itens)) return null
+  return itens.reduce((soma, item) => {
+    if (item?.kind !== "pizza" || item.recompensaJornadaId) return soma
+    return soma + (inteiroNaoNegativo(item.qty) ?? 0)
+  }, 0)
 }
 
 /**
- * Quantidade oficial de pizzas do pedido para apresentação operacional.
+ * Quantidade de pizzas pagas do pedido para apresentação operacional.
  *
  * Prioridade:
- * 1. pizzasCount, já calculado pelo fluxo oficial e usado pela fidelidade;
- * 2. snapshotOficial estruturado, quando o campo legado não estiver presente;
- * 3. zero, sem tentar adivinhar a partir de texto livre de itens antigos.
+ * 1. pizzasCount, já calculado no servidor para a fidelidade antiga;
+ * 2. itensDetalhados estruturados, excluindo presente da Jornada do Chef;
+ * 3. snapshotOficial estruturado para pedidos sem os campos anteriores;
+ * 4. zero, sem tentar adivinhar a partir do texto livre de itens antigos.
+ *
+ * O fallback do snapshot existe só para compatibilidade: ele sabe identificar
+ * `kind === "pizza"`, mas não carrega a marca de recompensa. Pedidos novos
+ * possuem pizzasCount/itensDetalhados e, portanto, não passam por esse caso.
  */
 export function contarPizzasDoPedido(pedido: PedidoParaMetricas): number {
   const declarado = inteiroNaoNegativo(pedido.pizzasCount)
   if (declarado !== null) return declarado
+
+  const detalhadas = contarPizzasPagasEstruturadas(pedido.itensDetalhados)
+  if (detalhadas !== null) return detalhadas
 
   const itens = pedido.snapshotOficial?.itens
   if (!Array.isArray(itens)) return 0
@@ -39,9 +61,9 @@ export function contarPizzasDoPedido(pedido: PedidoParaMetricas): number {
 }
 
 /**
- * Pizzas efetivamente mantidas no expediente atual. Pedido cancelado não
- * entra no total. A janela temporal continua sendo a mesma lista oficial
- * carregada pelo painel; esta função não inventa uma segunda regra de data.
+ * Pizzas pagas mantidas no expediente atual. Pedido cancelado não entra no
+ * total. A janela temporal continua sendo a mesma lista oficial carregada
+ * pelo painel; esta função não inventa uma segunda regra de data.
  */
 export function contarPizzasVendidas(pedidos: PedidoParaMetricas[]): number {
   if (!Array.isArray(pedidos)) return 0
