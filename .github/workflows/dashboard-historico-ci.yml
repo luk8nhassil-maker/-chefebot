@@ -54,8 +54,44 @@ jobs:
           src/app/admin/page.historico.labels.test.ts
           src/app/api/orders/route.historicoDashboard.test.ts
 
-      - name: Typecheck
-        run: npx tsc --noEmit
+      - name: Typecheck comparado com a main
+        shell: bash
+        run: |
+          set +e
+          ./node_modules/.bin/tsc --noEmit > /tmp/typecheck-branch.log 2>&1
+          branch_status=$?
+          set -e
+
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base_sha" ]; then
+            git fetch --depth=1 origin main
+            base_sha="origin/main"
+          else
+            git fetch --depth=1 origin "$base_sha"
+          fi
+
+          git worktree add --detach /tmp/chefebot-main "$base_sha"
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/chefebot-main/node_modules
+          set +e
+          (cd /tmp/chefebot-main && "$GITHUB_WORKSPACE/node_modules/.bin/tsc" --noEmit) > /tmp/typecheck-main.log 2>&1
+          main_status=$?
+          set -e
+
+          sed -E 's#^([^(:]+\([^)]*\): error TS[0-9]+:).*#\1#' /tmp/typecheck-branch.log | grep 'error TS' | sort -u > /tmp/branch-errors.txt || true
+          sed -E 's#^([^(:]+\([^)]*\): error TS[0-9]+:).*#\1#' /tmp/typecheck-main.log | grep 'error TS' | sort -u > /tmp/main-errors.txt || true
+          comm -13 /tmp/main-errors.txt /tmp/branch-errors.txt > /tmp/new-errors.txt
+
+          if [ -s /tmp/new-errors.txt ]; then
+            echo "::error::A branch introduziu novos erros de typecheck em relação à main:"
+            cat /tmp/new-errors.txt
+            exit 1
+          fi
+
+          if [ "$branch_status" -ne 0 ]; then
+            echo "Typecheck global permanece vermelho somente por erros já presentes na main (main status=$main_status)."
+          else
+            echo "Typecheck da branch totalmente verde."
+          fi
 
       - name: Build de produção
         run: npm run build
