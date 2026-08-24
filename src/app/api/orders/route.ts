@@ -70,6 +70,10 @@ type Pedido = PedidoComEdicao & {
   referencia?: string
   observacao?: string
   horarioInicio?: string
+  /** Carimbos ISO exclusivos da etapa de cozinha. Não substituem horarioInicio,
+   * que continua existindo para compatibilidade visual com pedidos antigos. */
+  preparoIniciadoEm?: string
+  preparoConcluidoEm?: string
   clienteId?: string
   pizzasCount?: number
   resgateId?: string
@@ -459,13 +463,23 @@ async function aplicarMudancaDeStatus(
     // checklist de segurança e vive em /api/orders/confirmar-pix-manual, que
     // reaproveita confirmarPixMetadata (mesma idempotência de sempre).
 
-    const agora = new Date(agoraMs).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })
+    const agoraData = new Date(agoraMs)
+    const agoraIso = agoraData.toISOString()
+    const agora = agoraData.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })
+    const iniciouPreparoAgora = status === 'em_preparo' && statusAnterior !== 'em_preparo'
+    const concluiuPreparoAgora = statusAnterior === 'em_preparo' && status !== 'em_preparo'
+    const inicioPreparoAnterior = pedidos[index].preparoIniciadoEm || pedidos[index].statusAtualizadoEm
     pedidos[index] = {
       ...pedidos[index],
       status,
-      statusAtualizadoEm: new Date(agoraMs).toISOString(),
+      statusAtualizadoEm: agoraIso,
       ...(status === 'cancelado' ? { cancelamentoSolicitado: false } : {}),
       ...(status === 'em_preparo' && !pedidos[index].horarioInicio ? { horarioInicio: agora } : {}),
+      ...(iniciouPreparoAgora ? { preparoIniciadoEm: agoraIso, preparoConcluidoEm: undefined } : {}),
+      ...(concluiuPreparoAgora ? {
+        preparoIniciadoEm: inicioPreparoAnterior || agoraIso,
+        preparoConcluidoEm: agoraIso,
+      } : {}),
       ...(limpezaResolvida
         ? {
             limpezaOperacional: registrarResolucao(

@@ -1,0 +1,51 @@
+name: pedidos-metricas-ci
+
+on:
+  pull_request:
+    paths:
+      - "src/app/api/orders/route.ts"
+      - "src/app/api/orders/route.metricasPreparo.test.ts"
+      - "src/app/pedidos/page.tsx"
+      - "src/app/pedidos/page.metricas.test.ts"
+      - "src/lib/pedidosMetricas.ts"
+      - "src/lib/pedidosMetricas.test.ts"
+      - ".github/workflows/pedidos-metricas-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pedidos-metricas-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pedidos-metricas-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do HEAD exato do PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados e anti-regressão
+        run: >-
+          npm test --
+          src/lib/pedidosMetricas.test.ts
+          src/app/pedidos/page.metricas.test.ts
+          src/app/pedidos/page.test.ts
+          src/app/api/orders/route.metricasPreparo.test.ts
+          src/app/api/orders/route.notificacaoStatus.test.ts
+          src/app/api/orders/route.impressaoAutomatica.test.ts
+          src/app/api/orders/route.edicao.test.ts
+
+      - name: Lint do código novo de métricas
+        run: >-
+          npm run lint --
+          src/lib/pedidosMetricas.ts
+          src/lib/pedidosMetricas.test.ts
+          src/app/pedidos/page.metricas.test.ts
+          src/app/api/orders/route.metricasPreparo.test.ts
