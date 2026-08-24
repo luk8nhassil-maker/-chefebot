@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest"
 import {
   calcularMediaPreparoMinutos,
+  contarPedidosOperacionais,
   contarPizzasDoPedido,
   contarPizzasVendidas,
 } from "./pedidosMetricas"
@@ -37,6 +38,18 @@ describe("métricas operacionais de pedidos", () => {
   test("quantidade malformada falha fechado em vez de truncar ou converter texto", () => {
     expect(contarPizzasDoPedido({ pizzasCount: 1.8, snapshotOficial: { itens: [] } })).toBe(0)
     expect(contarPizzasDoPedido({ itensDetalhados: [{ kind: "pizza", qty: 1.5 }] })).toBe(0)
+  })
+
+  test("total de pedidos ignora cancelados e continua contando entregues", () => {
+    expect(contarPedidosOperacionais([
+      { status: "novo" },
+      { status: "em_preparo" },
+      { status: "saiu_entrega" },
+      { status: "entregue" },
+      { status: "cancelado" },
+      { status: "cancelado" },
+    ])).toBe(4)
+    expect(contarPedidosOperacionais([{ status: "cancelado" }, { status: "cancelado" }])).toBe(0)
   })
 
   test("pizzas vendidas ignora pedidos cancelados", () => {

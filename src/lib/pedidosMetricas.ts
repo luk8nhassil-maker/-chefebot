@@ -61,6 +61,18 @@ export function contarPizzasDoPedido(pedido: PedidoParaMetricas): number {
 }
 
 /**
+ * Total exibido no card "Pedidos" do painel operacional.
+ *
+ * O total precisa ser reconciliável com as etapas visíveis (Novo, Fazendo,
+ * Na rua e Entregue). Cancelado continua preservado no histórico, mas não
+ * representa um pedido vendido/operacional e, portanto, não entra no card.
+ */
+export function contarPedidosOperacionais(pedidos: PedidoParaMetricas[]): number {
+  if (!Array.isArray(pedidos)) return 0
+  return pedidos.filter((pedido) => pedido?.status !== "cancelado").length
+}
+
+/**
  * Pizzas pagas mantidas no expediente atual. Pedido cancelado não entra no
  * total. A janela temporal continua sendo a mesma lista oficial carregada
  * pelo painel; esta função não inventa uma segunda regra de data.

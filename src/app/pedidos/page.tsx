@@ -21,7 +21,7 @@ import {
 } from "@/lib/limpezaOperacionalPedidos"
 import { mapearFamiliasVisiveis, selecionarPedidosPainel, selecionarProximaAcaoFamilia } from "@/lib/pedidoComandaPainel"
 import { iniciarPollingVisivel } from "@/lib/pollingVisivel"
-import { calcularMediaPreparoMinutos, contarPizzasVendidas } from "@/lib/pedidosMetricas"
+import { calcularMediaPreparoMinutos, contarPedidosOperacionais, contarPizzasVendidas } from "@/lib/pedidosMetricas"
 
 function whatsappLink(telefoneBruto: string, mensagem?: string): string {
   let numero = (telefoneBruto || "").replace(/\D/g, "")
@@ -1174,7 +1174,7 @@ export default function PedidosPage() {
 
   const escalonados = pedidos.filter(p => p.escalonado && p.status === "novo")
   const emAberto = pedidos.filter(p => !["entregue", "cancelado"].includes(p.status)).length
-  const totalPedidos = pedidos.length
+  const totalPedidos = contarPedidosOperacionais(pedidos)
   const pizzasVendidas = contarPizzasVendidas(pedidos)
   const contagemPorStatus = (s: Status) => pedidos.filter(p => p.status === s).length
 
