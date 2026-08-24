@@ -63,8 +63,13 @@ describe("métricas operacionais de pedidos", () => {
     ])).toBe(30)
   })
 
-  test("ignora cancelado, timestamp incompleto, invertido e outlier", () => {
+  test("ignora ciclo desfeito, cancelado, timestamp incompleto, invertido e outlier", () => {
     expect(calcularMediaPreparoMinutos([
+      {
+        status: "novo",
+        preparoIniciadoEm: "2026-08-23T22:00:00.000Z",
+        preparoConcluidoEm: "2026-08-23T22:15:00.000Z",
+      },
       {
         status: "cancelado",
         preparoIniciadoEm: "2026-08-23T23:00:00.000Z",
