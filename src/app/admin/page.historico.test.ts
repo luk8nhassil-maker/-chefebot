@@ -6,7 +6,7 @@ const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url))
 
 describe("/admin — histórico de pedidos", () => {
   test("dashboard carrega o histórico completo, não apenas pedidos ativos", () => {
-    expect(fonte).toContain("fetch('/api/orders?historico=true')");
+    expect(fonte).toContain("fetch('/api/orders?historico=true', { cache: 'no-store' })");
   });
 
   test("filtro de Ontem/Hoje/Semana usa a regra operacional central", () => {
