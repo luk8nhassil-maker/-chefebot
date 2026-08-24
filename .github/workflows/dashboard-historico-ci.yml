@@ -1,0 +1,58 @@
+name: dashboard-historico-ci
+
+on:
+  pull_request:
+    paths:
+      - "src/app/admin/page.tsx"
+      - "src/app/admin/page.historico.test.ts"
+      - "src/app/api/orders/route.ts"
+      - "src/app/api/orders/route.historicoDashboard.test.ts"
+      - "src/lib/adminDashboardPedidos.ts"
+      - "src/lib/adminDashboardPedidos.test.ts"
+      - ".github/workflows/dashboard-historico-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-historico-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dashboard-historico-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do HEAD exato do PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes do histórico e regressões críticas
+        run: >-
+          npm test --
+          src/lib/adminDashboardPedidos.test.ts
+          src/app/admin/page.historico.test.ts
+          src/app/admin/page.test.ts
+          src/app/api/orders/route.historicoDashboard.test.ts
+          src/app/api/orders/route.edicao.test.ts
+          src/app/api/orders/route.impressaoAutomatica.test.ts
+          src/app/api/orders/route.notificacaoStatus.test.ts
+
+      - name: Lint dos arquivos da correção
+        run: >-
+          npm run lint --
+          src/lib/adminDashboardPedidos.ts
+          src/lib/adminDashboardPedidos.test.ts
+          src/app/admin/page.historico.test.ts
+          src/app/api/orders/route.historicoDashboard.test.ts
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build de produção
+        run: npm run build
