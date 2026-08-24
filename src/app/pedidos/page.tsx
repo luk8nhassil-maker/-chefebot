@@ -21,6 +21,7 @@ import {
 } from "@/lib/limpezaOperacionalPedidos"
 import { mapearFamiliasVisiveis, selecionarPedidosPainel, selecionarProximaAcaoFamilia } from "@/lib/pedidoComandaPainel"
 import { iniciarPollingVisivel } from "@/lib/pollingVisivel"
+import { calcularMediaPreparoMinutos, contarPizzasVendidas } from "@/lib/pedidosMetricas"
 
 function whatsappLink(telefoneBruto: string, mensagem?: string): string {
   let numero = (telefoneBruto || "").replace(/\D/g, "")
@@ -61,6 +62,12 @@ type Pedido = {
   tipoEntrega?: string
   horarioInicio?: string
   horarioEntrega?: string
+  preparoIniciadoEm?: string
+  preparoConcluidoEm?: string
+  pizzasCount?: number
+  snapshotOficial?: {
+    itens?: Array<{ kind?: string; quantidade?: number }>
+  }
   bairro?: string
   taxaEntrega?: number
   referencia?: string
@@ -477,7 +484,6 @@ export default function PedidosPage() {
   const leaveTimerRef = useRef<NodeJS.Timeout | null>(null)
   const muteadoRef = useRef(false)
   const prevPixRef = useRef<Record<string, boolean>>({})
-  const temposEntregaRef = useRef<Record<string, number>>({})
   const simpleToastTimerRef = useRef<any>(null)
   const historicoBottomRef = useRef<HTMLDivElement>(null)
   const sendInFlightRef = useRef(false)
@@ -1073,7 +1079,7 @@ export default function PedidosPage() {
       if (!r.ok) throw new Error("Falha ao atualizar status")
       const data = await r.json().catch(() => null)
       const firstName = pedido.cliente.split(" ")[0]
-      if (novoStatus === "entregue") { tocarSomEntrega(); temposEntregaRef.current[id] = tempoDesde(pedido.horario, undefined, Date.now()) }
+      if (novoStatus === "entregue") tocarSomEntrega()
       setToast({
         text: data?.avisoOperacional ? `⚠️ ${data.avisoOperacional}` : `${firstName} → ${getStatusLabel({ ...pedido, status: novoStatus })}`,
         expires: Date.now() + 5000,
@@ -1168,7 +1174,8 @@ export default function PedidosPage() {
 
   const escalonados = pedidos.filter(p => p.escalonado && p.status === "novo")
   const emAberto = pedidos.filter(p => !["entregue", "cancelado"].includes(p.status)).length
-  const totalHoje = pedidos.length
+  const totalPedidos = pedidos.length
+  const pizzasVendidas = contarPizzasVendidas(pedidos)
   const contagemPorStatus = (s: Status) => pedidos.filter(p => p.status === s).length
 
   // A unidade visual do Salão é a COMANDA. Cada rodada continua sendo um
@@ -1200,21 +1207,7 @@ export default function PedidosPage() {
   const toastSegs = toast ? Math.max(0, Math.ceil((toast.expires - now) / 1000)) : 0
   const toastVisible = !!toast && toast.expires > now
   const avaliacaoMedia = "4,9"
-  const tempoMedioPreparo = (() => {
-    const tempos: number[] = []
-    for (const p of pedidos.filter(q => q.status === "entregue")) {
-      if (p.horarioEntrega) {
-        const [h1, m1] = p.horario.split(":").map(Number)
-        const [h2, m2] = p.horarioEntrega.split(":").map(Number)
-        const diff = (h2 * 60 + m2) - (h1 * 60 + m1)
-        if (diff > 0 && diff < 300) tempos.push(diff)
-      } else if (temposEntregaRef.current[p.id] !== undefined) {
-        const t = temposEntregaRef.current[p.id]
-        if (t > 0 && t < 300) tempos.push(t)
-      }
-    }
-    return tempos.length > 0 ? Math.round(tempos.reduce((a, b) => a + b, 0) / tempos.length) : null
-  })()
+  const tempoMedioPreparo = calcularMediaPreparoMinutos(pedidos)
   const initials = userName.slice(0, 2).toUpperCase()
 
   const steps = [
@@ -1689,6 +1682,7 @@ export default function PedidosPage() {
         @keyframes cbShimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
         @keyframes cbWait { 0%,100%{opacity:1} 50%{opacity:.35} }
         .cb-header { background:var(--background); border-bottom:1px solid var(--surface); padding:calc(env(safe-area-inset-top) + 12px) 16px 12px; position:sticky; top:0; z-index:10; }
+        .cb-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; margin-bottom:10px; }
         .cb-main { padding:12px 16px; display:flex; flex-direction:column; gap:14px; }
         .cbBusca::placeholder { color: var(--border-strong); }
         .cbBusca:focus { border-color: var(--brand-text) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent); }
@@ -1745,6 +1739,7 @@ export default function PedidosPage() {
         .cb-chat-textarea:focus { border-color:var(--brand-text); }
         @media (min-width: 768px) {
           .cb-header { border-bottom:1px solid var(--surface); padding:24px 28px 20px; position:static; }
+          .cb-metrics { grid-template-columns:repeat(5,minmax(0,1fr)); }
           .cb-list-col { padding:16px 24px; }
           .cb-detail-col { display:flex; flex-direction:column; width:420px; min-width:380px; flex-shrink:0; border-left:1px solid var(--surface); background:var(--background); overflow-y:auto; padding:16px 20px 32px; gap:12px; }
           .cb-mob-sheet-wrap { display:none !important; }
@@ -1827,23 +1822,27 @@ export default function PedidosPage() {
             <span style={{ fontSize: 11, fontWeight: 900, color: botAtivo ? "var(--success)" : "var(--brand-text)", background: "var(--background)", padding: "5px 10px", borderRadius: 8, flexShrink: 0 }}>{botAtivo ? "Pausar" : "Ativar"}</span>
           </button>
 
-          {/* Métricas */}
-          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-            <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "10px 10px" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "var(--foreground)" }}>{totalHoje}</div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Hoje</div>
+          {/* Métricas operacionais: pedidos e pizzas são grandezas separadas. */}
+          <div className="cb-metrics">
+            <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "10px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "var(--foreground)" }}>{totalPedidos}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Pedidos</div>
             </div>
-            <div style={{ flex: 1, background: emAberto > 0 ? "var(--background)" : "var(--surface)", border: `1px solid ${emAberto > 0 ? "color-mix(in srgb, var(--primary) 50%, transparent)" : "var(--border)"}`, borderRadius: 12, padding: "10px 10px" }}>
+            <div style={{ background: "color-mix(in srgb, var(--primary) 6%, var(--surface))", border: "1px solid color-mix(in srgb, var(--primary) 28%, transparent)", borderRadius: 12, padding: "10px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "var(--brand-text)" }}>{pizzasVendidas}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--brand-text)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Pizzas</div>
+            </div>
+            <div style={{ background: emAberto > 0 ? "var(--background)" : "var(--surface)", border: `1px solid ${emAberto > 0 ? "color-mix(in srgb, var(--primary) 50%, transparent)" : "var(--border)"}`, borderRadius: 12, padding: "10px 10px" }}>
               <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: emAberto > 0 ? "var(--brand-text)" : "var(--border-strong)" }}>{emAberto}</div>
               <div style={{ fontSize: 9.5, fontWeight: 700, color: emAberto > 0 ? "var(--brand-text)" : "var(--border-strong)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Em aberto</div>
             </div>
-            <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "10px 10px" }}>
+            <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "10px 10px" }}>
               <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "var(--success)" }}>{contagemPorStatus("entregue")}</div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Prontos</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Entregues</div>
             </div>
-            <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "10px 10px" }}>
+            <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "10px 10px" }}>
               <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "var(--info)" }}>{tempoMedioPreparo !== null ? `${tempoMedioPreparo}` : "—"}<span style={{ fontSize: 10, fontWeight: 700, marginLeft: 2 }}>{tempoMedioPreparo !== null ? "m" : ""}</span></div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>⏱ Média</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>⏱ Média preparo</div>
             </div>
           </div>
 
@@ -2893,8 +2892,8 @@ export default function PedidosPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
             <div style={{ background: "var(--surface)", border: "1px solid var(--surface)", borderRadius: 11, padding: "11px 10px" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "var(--foreground)" }}>{totalHoje}</div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--border-strong)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>Hoje</div>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "var(--foreground)" }}>{totalPedidos}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--border-strong)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>Pedidos</div>
             </div>
             <div style={{ background: emAberto > 0 ? "var(--background)" : "var(--surface)", border: `1px solid ${emAberto > 0 ? "color-mix(in srgb, var(--primary) 45%, transparent)" : "var(--surface)"}`, borderRadius: 11, padding: "11px 10px" }}>
               <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: emAberto > 0 ? "var(--brand-text)" : "var(--border-strong)" }}>{emAberto}</div>
