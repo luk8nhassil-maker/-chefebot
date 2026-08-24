@@ -80,14 +80,15 @@ function timestampValido(valor: unknown): number | null {
 
 /**
  * Média REAL de preparo: início oficial da cozinha -> saída oficial da etapa
- * de preparo. Só usa pares completos e válidos; nunca transforma tempo de
- * entrega em tempo de cozinha e nunca estima uma duração ausente.
+ * de preparo. Só usa pares completos e válidos de pedidos que realmente
+ * avançaram para pronto/rua ou entregue. Assim, um status desfeito para
+ * "novo" nunca polui a média mesmo que um carimbo intermediário exista.
  */
 export function calcularMediaPreparoMinutos(pedidos: PedidoParaMetricas[]): number | null {
   if (!Array.isArray(pedidos)) return null
 
   const duracoes = pedidos.flatMap((pedido) => {
-    if (pedido?.status === "cancelado") return []
+    if (pedido?.status !== "saiu_entrega" && pedido?.status !== "entregue") return []
     const inicio = timestampValido(pedido?.preparoIniciadoEm)
     const fim = timestampValido(pedido?.preparoConcluidoEm)
     if (inicio === null || fim === null || fim <= inicio) return []
