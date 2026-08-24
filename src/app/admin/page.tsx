@@ -5,6 +5,7 @@ import Image from 'next/image'
 import TourGuiado from '@/components/TourGuiado'
 import PanelShell from '@/components/PanelShell'
 import { interpretarRespostaReset } from '@/lib/whatsappResetResposta'
+import { filtrarPedidosPorPeriodoDashboard } from '@/lib/adminDashboardPedidos'
 import { LayoutDashboard, Pizza, Settings, Wallet, Wrench, ChefHat, DollarSign, TrendingUp, AlertTriangle, Camera, RefreshCw, Calendar, Star, Banknote } from 'lucide-react'
 
 type Pedido = {
@@ -64,40 +65,8 @@ function getUserInfo(): { name: string; role: string } | null {
 }
 
 function filtraPorPeriodo(pedidos: Pedido[], periodo: Periodo, dataInicio: string, dataFim: string): Pedido[] {
-  const agora = new Date()
-  const hojeStr = agora.toLocaleDateString('pt-BR')
-  const ontem = new Date(agora); ontem.setDate(ontem.getDate() - 1)
-  const ontemStr = ontem.toLocaleDateString('pt-BR')
-  const getDataPedido = (p: Pedido) => {
-    if ((p as any).data) return (p as any).data
-    const [h, m] = p.horario.split(':').map(Number)
-    const d = new Date(); d.setHours(h, m, 0, 0)
-    return d.toLocaleDateString('pt-BR')
-  }
-  if (periodo === 'hoje') return pedidos.filter(p => getDataPedido(p) === hojeStr)
-  if (periodo === 'ontem') return pedidos.filter(p => getDataPedido(p) === ontemStr)
-  if (periodo === 'semana') {
-    const semana = new Date(agora); semana.setDate(semana.getDate() - 7)
-    return pedidos.filter(p => {
-      const parts = getDataPedido(p).split('/')
-      if (parts.length !== 3) return false
-      const d = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]))
-      return d >= semana
-    })
-  }
-  if (periodo === 'personalizado' && dataInicio && dataFim) {
-    const inicio = new Date(dataInicio + 'T00:00:00')
-    const fim = new Date(dataFim + 'T23:59:59')
-    return pedidos.filter(p => {
-      const parts = getDataPedido(p).split('/')
-      if (parts.length !== 3) return false
-      const d = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]))
-      return d >= inicio && d <= fim
-    })
-  }
-  return pedidos
+  return filtrarPedidosPorPeriodoDashboard(pedidos, periodo, dataInicio, dataFim)
 }
-
 function calcularGraficoPico(pedidos: Pedido[]) {
   const contagem: Record<number, number> = {}
   for (const p of pedidos) {
@@ -234,7 +203,7 @@ export default function AdminPage() {
     if (!user || (user.role !== 'admin' && user.role !== 'dev')) { router.push('/login?callbackUrl=/admin'); return }
     setNomeUsuario(user.name)
     Promise.all([
-      fetch('/api/orders').then(r => r.json()).catch(err => { console.error('Falha ao carregar pedidos:', err); return [] }),
+      fetch('/api/orders?historico=true', { cache: 'no-store' }).then(r => r.json()).catch(err => { console.error('Falha ao carregar pedidos:', err); return [] }),
       fetch('/api/configuracoes').then(r => r.json()).catch(err => { console.error('Falha ao carregar configuracoes:', err); return { nomePizzaria: '', horaAbertura: 18, horaFechamento: 23, chavePix: '' } }),
       fetch('/api/funcionarios').then(r => r.json()),
       fetch('/api/cardapio-imagens').then(r => r.json()).catch(() => ({ ativo: true })),
@@ -253,7 +222,8 @@ export default function AdminPage() {
       if (card) setCardapio({ saltyFlavors: card.saltyFlavors || [], sweetFlavors: card.sweetFlavors || [], bebidas: card.bebidas || [], sucos: card.sucos || [], neighborhoods: card.neighborhoods || [], sizes: card.sizes?.length ? card.sizes : [{ code: 'P', label: 'Pequena', price: 35 }, { code: 'M', label: 'Media', price: 40 }, { code: 'G', label: 'Grande', price: 50 }, { code: 'F', label: 'Familia', price: 55 }], borders: card.borders || [] })
       setEntregadores(Array.isArray(entreg) ? entreg : [])
       if (fin?.custos) { setCustos(fin.custos); setMesFechado(fin.status?.fechado || false) }
-      const entreguesMes = Array.isArray(ped) ? ped.filter((p: any) => p.status === 'entregue').reduce((s: number, p: any) => s + (Number(p.total) || 0), 0) : 0
+      const pedidosMes = Array.isArray(ped) ? filtrarPedidosPorPeriodoDashboard(ped, 'personalizado', `${mesAtual}-01`, `${mesAtual}-31`) : []
+      const entreguesMes = pedidosMes.filter((p: Pedido) => p.status === 'entregue').reduce((s: number, p: Pedido) => s + (Number(p.total) || 0), 0)
       setFaturamentoMes(entreguesMes)
       if (Array.isArray(funcs)) {
         setFuncionarios(funcs)
@@ -529,7 +499,14 @@ export default function AdminPage() {
   const graficoPico = calcularGraficoPico(pedidosFiltrados)
   const maxPico = graficoPico.length > 0 ? Math.max(...graficoPico.map(g => g.total)) : 1
   const statusCounts = pedidosFiltrados.reduce((acc: Record<string, number>, p) => { acc[p.status] = (acc[p.status] || 0) + 1; return acc }, {})
-  const emAndamento = (statusCounts['pendente'] || 0) + (statusCounts['em preparo'] || 0) + (statusCounts['saiu para entrega'] || 0)
+  const emAndamento =
+    (statusCounts['novo'] || 0) +
+    (statusCounts['em_preparo'] || 0) +
+    (statusCounts['saiu_entrega'] || 0) +
+    // Compatibilidade com registros realmente antigos que usavam rótulos textuais.
+    (statusCounts['pendente'] || 0) +
+    (statusCounts['em preparo'] || 0) +
+    (statusCounts['saiu para entrega'] || 0)
 
   const salvarConfig = async () => {
     setSalvando(true)
@@ -791,12 +768,12 @@ export default function AdminPage() {
             {/* 4 métricas principais */}
             <div className="cb-admin-metrics">
               <div style={{ ...card, background: 'linear-gradient(135deg, var(--surface), var(--surface))' }}>
-                <p style={{ color: 'var(--foreground-secondary)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Pedidos hoje</p>
+                <p style={{ color: 'var(--foreground-secondary)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Pedidos do período</p>
                 <p style={{ color: 'var(--foreground)', fontSize: 30, fontWeight: 900, margin: 0, letterSpacing: -1, lineHeight: 1 }}>{pedidosFiltrados.length}</p>
                 <p style={{ color: 'var(--border-strong)', fontSize: 10, margin: '6px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{totalEntregues} entregues</p>
               </div>
               <div style={{ ...card, background: 'linear-gradient(135deg, var(--surface), var(--surface))' }}>
-                <p style={{ color: 'var(--foreground-secondary)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Faturamento dia</p>
+                <p style={{ color: 'var(--foreground-secondary)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Faturamento do período</p>
                 <p style={{ color: 'var(--success)', fontSize: faturamento >= 1000 ? 18 : 22, fontWeight: 800, margin: 0, letterSpacing: -0.5, lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>R${faturamento.toFixed(2).replace('.', ',')}</p>
                 <p style={{ color: 'var(--border-strong)', fontSize: 10, margin: '6px 0 0' }}>dos entregues</p>
               </div>
