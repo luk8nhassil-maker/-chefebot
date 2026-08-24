@@ -324,6 +324,14 @@ export async function GET(req: NextRequest) {
 
   const url = new URL(req.url)
   const soArquivados = url.searchParams.get('arquivados') === 'true'
+  const incluirHistorico = url.searchParams.get('historico') === 'true'
+
+  // Dashboard/relatórios precisam enxergar o histórico ainda retido no Redis,
+  // inclusive pedidos arquivados. É somente leitura e passa pelas mesmas
+  // sanitizações da rota normal; não muda a área operacional de /pedidos.
+  if (incluirHistorico) {
+    return NextResponse.json([...pedidosPainel].reverse().map(sanitizarPedidoPixResposta).map(sanitizarPedidoParaPainel))
+  }
 
   if (soArquivados) {
     const arquivados = pedidosPainel.filter(p => p.isArchived)
@@ -871,10 +879,35 @@ export async function DELETE(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
 
-  await mutarPedidos<Pedido, void>((pedidosFrescos) => ({
-    persistir: true,
-    pedidos: id ? pedidosFrescos.filter(p => p.id !== id) : pedidosFrescos.filter(p => p.status !== 'entregue'),
-    resultado: undefined,
-  }))
+  await mutarPedidos<Pedido, void>((pedidosFrescos) => {
+    // Exclusão explícita por id mantém a semântica histórica da rota. O botão
+    // "Limpar histórico", porém, chama DELETE sem id e NUNCA mais pode apagar
+    // vendas concluídas: apenas as tira da área operacional via soft-archive.
+    if (id) {
+      return {
+        persistir: true,
+        pedidos: pedidosFrescos.filter(p => p.id !== id),
+        resultado: undefined,
+      }
+    }
+
+    const agora = new Date().toISOString()
+    let mudou = false
+    const atualizados = pedidosFrescos.map(p => {
+      if (p.status !== 'entregue' || p.isArchived) return p
+      mudou = true
+      return {
+        ...p,
+        isArchived: true,
+        archivedAt: agora,
+        archivedBy: 'manual',
+        archivedReason: 'limpar_historico',
+      }
+    })
+
+    return mudou
+      ? { persistir: true, pedidos: atualizados, resultado: undefined }
+      : { persistir: false, resultado: undefined }
+  })
   return NextResponse.json({ ok: true })
 }
