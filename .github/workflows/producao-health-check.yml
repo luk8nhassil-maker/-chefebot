@@ -1,0 +1,63 @@
+name: producao-health-check
+
+# Sonda SOMENTE-LEITURA de produção (chefedapizza.com.br).
+#
+# Só faz GET em rotas públicas ou que respondem 401 sem cookie. Nunca envia
+# credencial, nunca cria pedido, nunca escreve em Redis/banco, nunca dispara
+# WhatsApp/Pix/impressão. O corpo impresso é truncado e vem de endpoints que
+# não retornam PII (status do bot, erro de autorização, status de assinatura).
+#
+# Serve para responder, com evidência, "qual dependência de /pedidos está
+# falhando em produção" — sem depender de acesso ao painel da Vercel.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/chefebot-pedidos-loading-stuck-rqh19i
+
+permissions:
+  contents: read
+
+concurrency:
+  group: producao-health-check
+  cancel-in-progress: true
+
+jobs:
+  sondar:
+    name: sondar-producao
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: GETs somente-leitura em produção
+        run: |
+          BASE="https://chefedapizza.com.br"
+
+          sondar() {
+            local rota="$1"
+            local descricao="$2"
+            echo "=============================================="
+            echo "ROTA: ${rota}"
+            echo "O QUE MEDE: ${descricao}"
+            local metricas
+            metricas=$(curl -sS -o /tmp/corpo.txt -D /tmp/headers.txt \
+              -w 'status=%{http_code} tempo_total=%{time_total}s tamanho=%{size_download}B' \
+              --max-time 45 \
+              -H 'Accept: application/json' \
+              "${BASE}${rota}" 2>&1) || metricas="FALHA_DE_REDE: $?"
+            echo "${metricas}"
+            echo "--- headers relevantes ---"
+            grep -i -E '^(x-vercel-id|x-vercel-error|x-matched-path|location|content-type|age|x-vercel-cache):' /tmp/headers.txt || true
+            echo "--- corpo (truncado em 500 caracteres) ---"
+            head -c 500 /tmp/corpo.txt || true
+            echo
+          }
+
+          sondar "/api/bot-status" "SAUDE DO REDIS: rota publica que faz redis.get('bot_ativo') sem try/catch. 200 = Redis respondendo; 5xx = Redis/credencial quebrados."
+          sondar "/api/orders" "Rota do painel SEM cookie. 401 JSON = rota viva; 5xx = quebra antes da autenticacao."
+          sondar "/api/assinatura/operacao" "Gate de assinatura (deve responder blocked=false, pausado)."
+          sondar "/pedidos" "Tela do painel sem cookie (esperado redirecionar para /login)."
+          sondar "/" "Raiz do dominio (rewrite para /cardapio)."
+
+          echo "=============================================="
+          echo "Sonda concluida. Nenhuma escrita foi feita em producao."
