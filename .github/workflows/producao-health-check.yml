@@ -19,9 +19,6 @@ on:
         description: "Origem a sondar (padrão: produção). Aceita uma URL de Preview para validar antes do merge."
         required: false
         default: "https://chefedapizza.com.br"
-  push:
-    branches:
-      - claude/chefebot-pedidos-loading-stuck-rqh19i
 
 permissions:
   contents: read
@@ -81,26 +78,3 @@ jobs:
           echo "=============================================="
           echo "Sonda concluida. Somente GET; nenhuma escrita foi feita."
 
-  sondar-preview:
-    name: sondar-preview-do-PR
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: GETs somente-leitura no Preview desta branch
-        env:
-          PREVIEW_URL: https://chefebot-git-claude-chefebot-dd8028-luk8nhassil-makers-projects.vercel.app
-        run: |
-          # Preview NUNCA executa acao operacional: so GET em rota de leitura.
-          for rota in "/api/diagnostico/datastore" "/api/bot-status" "/api/orders" "/pedidos"; do
-            echo "=============================================="
-            echo "PREVIEW ROTA: ${rota}"
-            curl -sS -o /tmp/p.txt -D /tmp/ph.txt \
-              -w 'status=%{http_code} tempo_total=%{time_total}s\n' \
-              --max-time 45 -H 'Accept: application/json' \
-              "${PREVIEW_URL}${rota}" || echo "FALHA_DE_REDE"
-            grep -i -E '^(location|content-type|x-vercel-id):' /tmp/ph.txt || true
-            echo "--- corpo (700 caracteres) ---"
-            head -c 700 /tmp/p.txt || true
-            echo
-          done
