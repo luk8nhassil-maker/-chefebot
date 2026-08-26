@@ -53,11 +53,20 @@ jobs:
             echo
           }
 
-          sondar "/api/bot-status" "SAUDE DO REDIS: rota publica que faz redis.get('bot_ativo') sem try/catch. 200 = Redis respondendo; 5xx = Redis/credencial quebrados."
+          echo "### 1) O datastore responde? (tres tentativas — descarta flake)"
+          sondar "/api/bot-status" "SAUDE DO DATASTORE: rota publica cujo corpo inteiro e um redis.get('bot_ativo'). 200 = datastore respondendo; 5xx = datastore/credencial quebrados."
+          sondar "/api/bot-status" "Repeticao 2 — falha consistente nao e flake."
+          sondar "/api/bot-status" "Repeticao 3 — falha consistente nao e flake."
+
+          echo "### 2) Outras rotas publicas que leem o mesmo datastore"
+          sondar "/api/cardapio" "Cardapio publico (force-dynamic, le cardapio/esgotados do datastore). 200 = leitura funciona; 5xx = datastore fora."
+          sondar "/api/diagnostico/datastore" "Sonda classificada do datastore (existe so depois deste PR chegar em producao)."
+
+          echo "### 3) Rotas do painel e do dominio"
           sondar "/api/orders" "Rota do painel SEM cookie. 401 JSON = rota viva; 5xx = quebra antes da autenticacao."
           sondar "/api/assinatura/operacao" "Gate de assinatura (deve responder blocked=false, pausado)."
           sondar "/pedidos" "Tela do painel sem cookie (esperado redirecionar para /login)."
-          sondar "/" "Raiz do dominio (rewrite para /cardapio)."
+          sondar "/?diag=1" "Raiz do dominio com cache-buster (rewrite para /cardapio)."
 
           echo "=============================================="
           echo "Sonda concluida. Nenhuma escrita foi feita em producao."

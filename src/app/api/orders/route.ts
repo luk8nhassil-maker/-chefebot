@@ -45,6 +45,7 @@ import { reivindicarImpressaoAutomatica } from '@/lib/impressaoAutomatica'
 import { adquirirMutexPedidos, liberarMutexPedidos, mutarPedidos } from '@/lib/pedidosConcorrencia'
 import { listarComandas, PAGAMENTO_COMANDA_EM_ABERTO } from '@/lib/comandas'
 import { enriquecerPedidosComComanda } from '@/lib/pedidoComandaPainel.server'
+import { classificarFalhaDatastore } from '@/lib/datastoreDiagnostico'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 
@@ -286,6 +287,33 @@ function limparPedidosExpirados(pedidos: Pedido[], agora: number = Date.now()): 
 export async function GET(req: NextRequest) {
   const auth = await checkAuth(req)
   if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
+
+  try {
+    return await listarPedidosDoPainel(req)
+  } catch (err) {
+    // Antes desta guarda, qualquer exceção aqui (datastore fora, cota,
+    // credencial recusada) virava um 500 opaco do Next, sem corpo. O painel
+    // engolia esse 500 e ficava eternamente em "Carregando...", e ninguém
+    // conseguia dizer POR QUE sem acesso ao painel da Vercel.
+    //
+    // Agora a rota falha de forma legível: corpo JSON com uma classe de erro
+    // já higienizada (nunca URL/token do datastore) e um log de servidor com
+    // a mesma classificação. O painel distingue isso de "não há pedidos".
+    const falha = classificarFalhaDatastore(err)
+    console.error(
+      '[ChefeBot] GET /api/orders falhou ao ler os pedidos:',
+      falha.classe,
+      falha.statusProvedor ?? 'sem status',
+      falha.mensagem
+    )
+    return NextResponse.json(
+      { error: 'Nao foi possivel ler os pedidos agora.', code: 'DATASTORE_INDISPONIVEL', classe: falha.classe },
+      { status: 503, headers: { 'Retry-After': '10' } }
+    )
+  }
+}
+
+async function listarPedidosDoPainel(req: NextRequest) {
 
   // Caminho quente do painel: leitura é barata e NÃO disputa o mutex global.
   // Só promovemos a requisição para leitura-modificação-escrita quando o

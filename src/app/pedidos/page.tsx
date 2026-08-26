@@ -22,6 +22,11 @@ import {
 import { mapearFamiliasVisiveis, selecionarPedidosPainel, selecionarProximaAcaoFamilia } from "@/lib/pedidoComandaPainel"
 import { iniciarPollingVisivel } from "@/lib/pollingVisivel"
 import { calcularMediaPreparoMinutos, contarPedidosOperacionais, contarPizzasVendidas } from "@/lib/pedidosMetricas"
+import {
+  interpretarRespostaPedidos,
+  MENSAGEM_FALHA_CARGA_PEDIDOS,
+  type ResultadoCargaPedidos,
+} from "@/lib/pedidosPainelCarga"
 
 function whatsappLink(telefoneBruto: string, mensagem?: string): string {
   let numero = (telefoneBruto || "").replace(/\D/g, "")
@@ -375,6 +380,11 @@ export default function PedidosPage() {
   const [enviandoMensagem, setEnviandoMensagem] = useState<string | null>(null)
   const [erroEnvioMensagem, setErroEnvioMensagem] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
+  // Falha EXPLÍCITA da carga de pedidos. Enquanto isto for null a tela se
+  // comporta como sempre; quando é preenchido, o atendente vê que o
+  // problema é de ACESSO aos pedidos — nunca "não há pedidos".
+  const [erroCarga, setErroCarga] = useState<Extract<ResultadoCargaPedidos<never>, { tipo: "erro" }> | null>(null)
+  const [jaCarregouPedidos, setJaCarregouPedidos] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
   const [userName, setUserName] = useState("Kellyne")
   const [botAtivo, setBotAtivo] = useState(true)
@@ -585,26 +595,53 @@ export default function PedidosPage() {
     try { const r = await fetch("/api/bot-status"); if (r.ok) { const d = await r.json(); setBotAtivo(d.ativo) } } catch {}
   }
 
-  const carregarPedidos = () => {
-    return fetch("/api/orders")
-      .then(r => { if (r.status === 401) { fetch("/api/auth/logout", { method: "POST" }).finally(() => router.push("/login?callbackUrl=/pedidos")); return null } return r.json() })
-      .then(data => {
-        if (data) {
-          const novosIds = data.map((p: Pedido) => p.id)
-          const anteriores = prevIdsRef.current
-          if (anteriores.length > 0) {
-            const chegaram = data.filter((p: Pedido) => !anteriores.includes(p.id))
-            if (chegaram.length > 0) { const temEsc = chegaram.some((p: Pedido) => p.escalonado); if (temEsc) { tocarSomUrgente(); iniciarPiscar(); iniciarSomRepetido() } else { tocarSomNormal() } }
-            data.forEach((p: Pedido) => { if (p.pixConfirmado && prevPixRef.current[p.id] === false) tocarSomPix(); prevPixRef.current[p.id] = !!p.pixConfirmado })
-          } else {
-            data.forEach((p: Pedido) => { prevPixRef.current[p.id] = !!p.pixConfirmado })
-          }
-          prevIdsRef.current = novosIds
-          setPedidos(data); setLoading(false)
-          if (!data.some((p: Pedido) => p.escalonado && p.status === "novo")) { pararPiscar(); pararSomRepetido() }
-        }
-      })
-      .catch(() => {})
+  // Carga da lista de pedidos.
+  //
+  // Toda resposta possível vira um desfecho classificado por
+  // interpretarRespostaPedidos (ver src/lib/pedidosPainelCarga.ts). O que este
+  // fluxo NUNCA pode voltar a fazer: engolir a falha num catch vazio e deixar
+  // `loading` em true para sempre — foi exatamente assim que /pedidos ficou
+  // preso em "Carregando..." com o backend fora do ar.
+  const carregarPedidos = async () => {
+    let resultado: ResultadoCargaPedidos<Pedido>
+    try {
+      resultado = await interpretarRespostaPedidos<Pedido>(await fetch("/api/orders"))
+    } catch {
+      resultado = { tipo: "erro", motivo: "sem_resposta", status: null }
+    }
+
+    if (resultado.tipo === "nao_autenticado") {
+      // Sessão expirada: mesmo comportamento de sempre.
+      try { await fetch("/api/auth/logout", { method: "POST" }) } catch {}
+      router.push("/login?callbackUrl=/pedidos")
+      return
+    }
+
+    if (resultado.tipo === "erro") {
+      // Detalhe técnico só no console; a tela mostra linguagem de operação.
+      console.error("[pedidos] falha ao carregar a lista:", resultado.motivo, resultado.status ?? "sem status")
+      setErroCarga(resultado)
+      // A correção central do incidente: o loading SEMPRE termina, mesmo no
+      // pior caminho. Note que `pedidos` NÃO é sobrescrito — uma falha jamais
+      // pode se disfarçar de "nenhum pedido".
+      setLoading(false)
+      return
+    }
+
+    const data = resultado.pedidos
+    setErroCarga(null)
+    const novosIds = data.map((p: Pedido) => p.id)
+    const anteriores = prevIdsRef.current
+    if (anteriores.length > 0) {
+      const chegaram = data.filter((p: Pedido) => !anteriores.includes(p.id))
+      if (chegaram.length > 0) { const temEsc = chegaram.some((p: Pedido) => p.escalonado); if (temEsc) { tocarSomUrgente(); iniciarPiscar(); iniciarSomRepetido() } else { tocarSomNormal() } }
+      data.forEach((p: Pedido) => { if (p.pixConfirmado && prevPixRef.current[p.id] === false) tocarSomPix(); prevPixRef.current[p.id] = !!p.pixConfirmado })
+    } else {
+      data.forEach((p: Pedido) => { prevPixRef.current[p.id] = !!p.pixConfirmado })
+    }
+    prevIdsRef.current = novosIds
+    setPedidos(data); setLoading(false); setJaCarregouPedidos(true)
+    if (!data.some((p: Pedido) => p.escalonado && p.status === "novo")) { pararPiscar(); pararSomRepetido() }
   }
 
   useEffect(() => {
@@ -1223,6 +1260,42 @@ export default function PedidosPage() {
     </div>
   )
 
+  // Falha na PRIMEIRA carga: sem nenhum pedido em tela, mostrar o painel vazio
+  // seria mentir para quem está atendendo. Estado explícito, com recarga
+  // manual — e o polling de 3s continua rodando por baixo, então a tela se
+  // recupera sozinha assim que o backend voltar.
+  if (erroCarga && !jaCarregouPedidos) return (
+    <div style={{ minHeight: "100vh", background: "var(--background)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Archivo', sans-serif" }}>
+      <div style={{ textAlign: "center", maxWidth: 340, padding: "0 24px" }}>
+        <div style={{ fontSize: 36, marginBottom: 12 }}>⚠️</div>
+        <p style={{ color: "var(--danger)", fontSize: 15, fontWeight: 800, margin: "0 0 8px" }}>
+          Painel sem acesso aos pedidos
+        </p>
+        <p style={{ color: "var(--foreground-secondary)", fontSize: 13, fontWeight: 600, margin: "0 0 6px", lineHeight: 1.5 }}>
+          {MENSAGEM_FALHA_CARGA_PEDIDOS}
+        </p>
+        <p style={{ color: "var(--foreground-muted)", fontSize: 12, fontWeight: 700, margin: "0 0 20px" }}>
+          Código: {erroCarga.motivo}{erroCarga.status ? ` · ${erroCarga.status}` : ""}
+        </p>
+        <button
+          onClick={() => { setErroCarga(null); setLoading(true); void carregarPedidos() }}
+          style={{
+            background: "color-mix(in srgb, var(--primary) 15%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--primary) 30%, transparent)",
+            borderRadius: 12,
+            color: "var(--brand-text)",
+            fontSize: 13,
+            fontWeight: 800,
+            padding: "10px 24px",
+            cursor: "pointer",
+          }}
+        >
+          Tentar de novo
+        </button>
+      </div>
+    </div>
+  )
+
   const showSimpleToast = (msg: string) => {
     setSimpleToast(msg); clearTimeout(simpleToastTimerRef.current)
     simpleToastTimerRef.current = setTimeout(() => setSimpleToast(""), 3500)
@@ -1748,6 +1821,24 @@ export default function PedidosPage() {
           .cb-mob-back { display:none !important; }
         }
       `}</style>
+
+      {/* Painel já tem dados em tela, mas a última atualização falhou. Os
+          pedidos mostrados podem estar desatualizados — dizer isso é melhor
+          que deixar a operação confiando numa tela congelada em silêncio. */}
+      {erroCarga && jaCarregouPedidos && (
+        <div role="status" style={{ position: "sticky", top: 0, zIndex: 60, background: "var(--attention-surface)", borderBottom: "1px solid var(--attention-border)", padding: "8px 16px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, fontWeight: 900, color: "var(--attention-text)" }}>⚠️ Lista desatualizada</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground-secondary)", flex: 1, minWidth: 160 }}>
+            {MENSAGEM_FALHA_CARGA_PEDIDOS}
+          </span>
+          <button
+            onClick={() => { setErroCarga(null); void carregarPedidos() }}
+            style={{ background: "transparent", border: "1px solid var(--attention-border)", borderRadius: 8, color: "var(--attention-text)", fontSize: 12, fontWeight: 800, padding: "5px 12px" }}
+          >
+            Tentar de novo
+          </button>
+        </div>
+      )}
 
       {novoPedidoAberto && menuManual && (
         <NovoPedidoManual
