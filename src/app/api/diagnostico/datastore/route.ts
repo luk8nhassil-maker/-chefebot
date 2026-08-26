@@ -27,17 +27,30 @@ import {
 export const dynamic = "force-dynamic";
 
 const JANELA_SONDA_MS = 30_000;
+/**
+ * A falha observada no incidente é INTERMITENTE: leituras seguidas alternam
+ * entre erro e sucesso. Uma única tentativa mentiria metade das vezes, então
+ * a sonda faz algumas e relata TODAS.
+ */
+const TENTATIVAS = 3;
 /** Chave de configuração já lida pelo caminho normal do app — leitura barata e sem PII. */
 const CHAVE_SONDA = "bot_ativo";
 
-type Veredito = {
+type Tentativa = {
   ok: boolean;
-  configurado: boolean;
-  variaveisAusentes: string[];
   latenciaMs: number;
   classe?: string;
   statusProvedor?: number | null;
   mensagem?: string;
+};
+
+type Veredito = {
+  ok: boolean;
+  intermitente: boolean;
+  configurado: boolean;
+  variaveisAusentes: string[];
+  tentativas: Tentativa[];
+  classe?: string;
   acao?: string;
   verificadoEm: string;
 };
@@ -45,35 +58,13 @@ type Veredito = {
 let ultimoVeredito: Veredito | null = null;
 let ultimaSondaEm = 0;
 
-async function sondar(): Promise<Veredito> {
+async function umaTentativa(): Promise<Tentativa> {
   const iniciadoEm = Date.now();
-  const ausentes = variaveisDatastoreAusentes();
-
-  if (!datastoreConfigurado()) {
-    return {
-      ok: false,
-      configurado: false,
-      variaveisAusentes: ausentes,
-      latenciaMs: 0,
-      classe: "configuracao_ausente",
-      statusProvedor: null,
-      mensagem: "Variáveis do datastore ausentes no runtime.",
-      acao: ACAO_SUGERIDA.configuracao_ausente,
-      verificadoEm: new Date().toISOString(),
-    };
-  }
-
   try {
     // Leitura pura: o valor lido é descartado, só interessa se a chamada
     // completou. Nada do conteúdo é devolvido na resposta.
     await redis.get(CHAVE_SONDA);
-    return {
-      ok: true,
-      configurado: true,
-      variaveisAusentes: [],
-      latenciaMs: Date.now() - iniciadoEm,
-      verificadoEm: new Date().toISOString(),
-    };
+    return { ok: true, latenciaMs: Date.now() - iniciadoEm };
   } catch (err) {
     const falha = classificarFalhaDatastore(err);
     console.error(
@@ -84,16 +75,47 @@ async function sondar(): Promise<Veredito> {
     );
     return {
       ok: false,
-      configurado: true,
-      variaveisAusentes: [],
       latenciaMs: Date.now() - iniciadoEm,
       classe: falha.classe,
       statusProvedor: falha.statusProvedor,
       mensagem: falha.mensagem,
-      acao: ACAO_SUGERIDA[falha.classe],
+    };
+  }
+}
+
+async function sondar(): Promise<Veredito> {
+  if (!datastoreConfigurado()) {
+    return {
+      ok: false,
+      intermitente: false,
+      configurado: false,
+      variaveisAusentes: variaveisDatastoreAusentes(),
+      tentativas: [],
+      classe: "configuracao_ausente",
+      acao: ACAO_SUGERIDA.configuracao_ausente,
       verificadoEm: new Date().toISOString(),
     };
   }
+
+  const tentativas: Tentativa[] = [];
+  for (let i = 0; i < TENTATIVAS; i++) tentativas.push(await umaTentativa());
+
+  const falhas = tentativas.filter((t) => !t.ok);
+  const primeiraFalha = falhas[0];
+  const classe = primeiraFalha?.classe as keyof typeof ACAO_SUGERIDA | undefined;
+
+  return {
+    ok: falhas.length === 0,
+    // Falhar às vezes e funcionar outras muda o diagnóstico: não é credencial
+    // errada nem variável ausente (essas falhariam sempre).
+    intermitente: falhas.length > 0 && falhas.length < tentativas.length,
+    configurado: true,
+    variaveisAusentes: [],
+    tentativas,
+    classe,
+    acao: classe ? ACAO_SUGERIDA[classe] : undefined,
+    verificadoEm: new Date().toISOString(),
+  };
 }
 
 export async function GET() {

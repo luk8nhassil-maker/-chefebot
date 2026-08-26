@@ -611,8 +611,16 @@ export default function PedidosPage() {
     }
 
     if (resultado.tipo === "nao_autenticado") {
-      // Sessão expirada: mesmo comportamento de sempre.
-      try { await fetch("/api/auth/logout", { method: "POST" }) } catch {}
+      // Sessão expirada: limpa o cookie e volta ao login, como sempre. O
+      // logout é aguardado só por um instante — se ele travar, a navegação
+      // acontece do mesmo jeito. Esperar sem limite aqui recriaria o
+      // spinner eterno por outro caminho.
+      try {
+        await Promise.race([
+          fetch("/api/auth/logout", { method: "POST" }),
+          new Promise(resolve => setTimeout(resolve, 3000)),
+        ])
+      } catch {}
       router.push("/login?callbackUrl=/pedidos")
       return
     }

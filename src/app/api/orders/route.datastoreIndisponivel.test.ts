@@ -7,19 +7,20 @@
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { redisMock, definirFalhaDeLeitura } = vi.hoisted(() => {
+const { redisMock, definirFalhaDeLeitura, leituraPadrao } = vi.hoisted(() => {
   let falha: Error | null = null;
+  const leituraPadrao = async (): Promise<unknown> => {
+    if (falha) throw falha;
+    return [];
+  };
   const redisMock = {
-    get: vi.fn(async () => {
-      if (falha) throw falha;
-      return [];
-    }),
+    get: vi.fn(leituraPadrao),
     set: vi.fn(async () => "OK"),
     del: vi.fn(async () => 1),
     eval: vi.fn(async () => 0),
     expire: vi.fn(async () => 1),
   };
-  return { redisMock, definirFalhaDeLeitura: (e: Error | null) => { falha = e } };
+  return { redisMock, leituraPadrao, definirFalhaDeLeitura: (e: Error | null) => { falha = e } };
 });
 
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
@@ -40,6 +41,9 @@ function requisicaoDoPainel(comCookie = true) {
 beforeEach(() => {
   definirFalhaDeLeitura(null);
   vi.clearAllMocks();
+  // clearAllMocks não desfaz mockImplementation — sem isto um caso vaza
+  // comportamento para o seguinte.
+  redisMock.get.mockImplementation(leituraPadrao);
 });
 
 describe("GET /api/orders — datastore indisponível", () => {
@@ -89,6 +93,26 @@ describe("GET /api/orders — datastore indisponível", () => {
     const resposta = await GET(requisicaoDoPainel(false));
     expect(resposta.status).toBe(401);
     expect(redisMock.get).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/orders — falha INTERMITENTE do datastore (o caso real medido em produção)", () => {
+  test("erro, erro, sucesso: o painel recebe a lista em vez de um erro", async () => {
+    let chamada = 0;
+    redisMock.get.mockImplementation(async () => {
+      chamada++;
+      if (chamada <= 2) throw new Error("fetch failed");
+      return [];
+    });
+    const resposta = await GET(requisicaoDoPainel());
+    expect(resposta.status).toBe(200);
+    expect(Array.isArray(await resposta.json())).toBe(true);
+  });
+
+  test("falha persistente continua virando 503 — a retentativa não mascara nada", async () => {
+    redisMock.get.mockImplementation(async () => { throw new Error("Unauthorized") });
+    const resposta = await GET(requisicaoDoPainel());
+    expect(resposta.status).toBe(503);
   });
 });
 

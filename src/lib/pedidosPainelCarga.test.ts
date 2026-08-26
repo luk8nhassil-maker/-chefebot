@@ -40,6 +40,14 @@ describe("incidente /pedidos preso em Carregando — toda resposta tem desfecho"
     },
     { nome: "200 com null", resposta: resposta({ ok: true, status: 200, json: async () => null }) },
     { nome: "200 com string", resposta: resposta({ ok: true, status: 200, json: async () => "erro" }) },
+    {
+      nome: "200 com array contendo null (explodiria no primeiro p.id)",
+      resposta: resposta({ ok: true, status: 200, json: async () => [{ id: "1" }, null] }),
+    },
+    {
+      nome: "200 com array de primitivos",
+      resposta: resposta({ ok: true, status: 200, json: async () => ["1", "2"] }),
+    },
     { nome: "sem resposta nenhuma (falha de rede)", resposta: null },
   ];
 

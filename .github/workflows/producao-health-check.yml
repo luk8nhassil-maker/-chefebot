@@ -10,11 +10,10 @@ name: producao-health-check
 # Serve para responder, com evidência, "qual dependência de /pedidos está
 # falhando em produção" — sem depender de acesso ao painel da Vercel.
 
+# Execução sob demanda apenas: é uma ferramenta de plantão, não um cron que
+# acorda função Vercel de graça.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - claude/chefebot-pedidos-loading-stuck-rqh19i
 
 permissions:
   contents: read

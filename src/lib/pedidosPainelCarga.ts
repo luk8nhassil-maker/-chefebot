@@ -70,5 +70,12 @@ export async function interpretarRespostaPedidos<TPedido>(
     return { tipo: "erro", motivo: "formato_inesperado", status: resposta.status };
   }
 
+  // Um item `null` (ou primitivo) dentro do array explodiria no primeiro
+  // `p.id` da tela — mesmo TypeError, mesmo spinner eterno, só que uma
+  // camada adiante. A lista só é aceita se cada item for objeto.
+  if (!corpo.every((item) => typeof item === "object" && item !== null)) {
+    return { tipo: "erro", motivo: "formato_inesperado", status: resposta.status };
+  }
+
   return { tipo: "ok", pedidos: corpo as TPedido[] };
 }

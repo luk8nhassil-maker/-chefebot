@@ -46,6 +46,7 @@ import { adquirirMutexPedidos, liberarMutexPedidos, mutarPedidos } from '@/lib/p
 import { listarComandas, PAGAMENTO_COMANDA_EM_ABERTO } from '@/lib/comandas'
 import { enriquecerPedidosComComanda } from '@/lib/pedidoComandaPainel.server'
 import { classificarFalhaDatastore } from '@/lib/datastoreDiagnostico'
+import { lerComRetry } from '@/lib/datastoreRetry'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 
@@ -320,7 +321,16 @@ async function listarPedidosDoPainel(req: NextRequest) {
   // snapshot realmente contém edição/escalonamento expirado. Nesse caso,
   // relê FRESCO dentro de mutarPedidos antes de persistir — a garantia contra
   // lost update continua exatamente no ponto em que existe escrita.
-  const snapshotPedidos = (await redis.get<Pedido[]>('pedidos')) || []
+  // Leitura (idempotente) com retentativa curta: em produção o datastore
+  // falhava de forma INTERMITENTE — chamadas seguidas davam erro, erro,
+  // sucesso. Sem isto, uma falha transitória deixava o painel sem pedidos.
+  // Só a LEITURA é repetida; nenhuma escrita passa por aqui.
+  const snapshotPedidos = (await lerComRetry(() => redis.get<Pedido[]>('pedidos'), {
+    aoFalhar: (err, tentativa) => {
+      const falha = classificarFalhaDatastore(err)
+      console.warn(`[ChefeBot] Leitura de "pedidos" falhou (tentativa ${tentativa}):`, falha.classe, falha.mensagem)
+    },
+  })) || []
   const limpezaInicial = limparPedidosExpirados(snapshotPedidos)
   let limpos = snapshotPedidos
 
