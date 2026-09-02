@@ -31,6 +31,7 @@ import { norm, type ItemApp } from "@/lib/pedidoAppItens";
 import type { Menu } from "@/lib/menu";
 import type { BotStep } from "@/lib/bot";
 import { ehEventoQrAtualizado, extrairQrBase64, obterConfigEvolution } from "@/lib/evolutionApi";
+import { extrairTelefoneIndividualDaChave } from "@/lib/whatsappJid";
 import { limparQrAtual, persistirQrAtual } from "@/lib/whatsappQrCache";
 import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 import { ehEcoPainel, validarMessageId } from "@/lib/conversaEcoPainel";
@@ -648,21 +649,6 @@ function obterCampo(valor: unknown, chave: string): unknown {
   return ehObjeto(valor) ? valor[chave] : undefined;
 }
 
-const SUFIXO_JID_INDIVIDUAL = "@s.whatsapp.net";
-
-// Extrai o telefone só quando o remoteJid é uma conversa individual válida
-// (`{numero}@s.whatsapp.net`). Ignora grupos (`@g.us`), broadcasts
-// (`status@broadcast`, qualquer `@broadcast`), `@lid` e qualquer outro
-// formato ainda não suportado, além de remoteJid vazio ou não-string — nunca
-// cria histórico/sessão/chave de conversa para esses casos. `endsWith` aqui
-// só valida o domínio exato do JID (nunca aproxima números de telefone).
-function extrairTelefoneIndividual(remoteJid: unknown): string | undefined {
-  if (typeof remoteJid !== "string" || !remoteJid) return undefined;
-  if (!remoteJid.endsWith(SUFIXO_JID_INDIVIDUAL)) return undefined;
-  const numero = remoteJid.slice(0, -SUFIXO_JID_INDIVIDUAL.length);
-  return numero ? numero : undefined;
-}
-
 export function montarMarcadorImagem(data: unknown): string {
   const imageMessage = obterCampo(obterCampo(data, "message"), "imageMessage");
   const legenda = extrairTextoSeguro(obterCampo(imageMessage, "caption"));
@@ -1093,11 +1079,12 @@ export async function POST(req: NextRequest) {
       // de novo aqui: o webhook só consulta a marca (nunca apaga), para que
       // reentregas repetidas do mesmo webhook continuem suprimidas até o TTL
       // expirar. Só processa
-      // conversa individual (`@s.whatsapp.net`) — grupos, broadcasts, `@lid`
-      // e outros formatos são ignorados sem criar histórico/sessão. Bot
-      // nunca responde — always early-return.
+      // conversa individual (`@s.whatsapp.net`) — `@lid` só é aceito quando
+      // a Evolution fornece o telefone real em `remoteJidAlt`; grupos,
+      // broadcasts e LID sem mapeamento são ignorados sem criar histórico/
+      // sessão. Bot nunca responde — always early-return.
       try {
-        const fromPhone = extrairTelefoneIndividual(data?.key?.remoteJid);
+        const fromPhone = extrairTelefoneIndividualDaChave(data?.key);
         if (fromPhone) {
           const msgIdFrom = validarMessageId(data?.key?.id);
           const ecoDoPainel = msgIdFrom ? await ehEcoPainel(msgIdFrom) : false;
@@ -1111,7 +1098,7 @@ export async function POST(req: NextRequest) {
       } catch {}
       return NextResponse.json({ ok: true });
     }
-    const phone = data?.key?.remoteJid?.replace("@s.whatsapp.net", "");
+    const phone = extrairTelefoneIndividualDaChave(data?.key);
     if (!phone) return NextResponse.json({ ok: true });
 
     const msgId = data?.key?.id as string | undefined;

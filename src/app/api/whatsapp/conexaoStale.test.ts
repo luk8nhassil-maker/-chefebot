@@ -235,3 +235,42 @@ describe("8. fromMe", () => {
     expect(chamadasSendText()).toHaveLength(0);
   });
 });
+
+describe("11. Identidade LID da Evolution/Baileys", () => {
+  it("responde ao telefone real de remoteJidAlt, nunca ao identificador @lid", async () => {
+    const res = await POST(
+      webhookMensagem("Oi, quero uma pizza", {
+        key: {
+          remoteJid: "154417159582282@lid",
+          remoteJidAlt: `${PHONE}@s.whatsapp.net`,
+          id: `id-${Math.random()}`,
+          fromMe: false,
+        },
+      })
+    );
+
+    expect(res.status ?? 200).toBe(200);
+    expect(chamadasPorAutor("cliente")[0]?.[0]).toBe(PHONE);
+    expect(chamadasSendText().length).toBeGreaterThan(0);
+
+    const [, init] = chamadasSendText()[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({ number: PHONE });
+    expect(String(init.body)).not.toContain("@lid");
+  });
+
+  it("sem remoteJidAlt falha fechado e não tenta enviar para o LID", async () => {
+    const res = await POST(
+      webhookMensagem("Oi, quero uma pizza", {
+        key: {
+          remoteJid: "154417159582282@lid",
+          id: `id-${Math.random()}`,
+          fromMe: false,
+        },
+      })
+    );
+
+    expect(res.status ?? 200).toBe(200);
+    expect(registrarMensagemMock).not.toHaveBeenCalled();
+    expect(chamadasSendText()).toHaveLength(0);
+  });
+});
