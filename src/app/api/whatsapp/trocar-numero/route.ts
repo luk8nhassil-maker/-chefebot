@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { salvarStatusConexao } from "@/lib/conexaoWhatsapp";
-import { obterConfigEvolution, extrairQrBase64 } from "@/lib/evolutionApi";
+import { obterConfigEvolution } from "@/lib/evolutionApi";
 import { garantirWebhookEvolution } from "@/lib/evolutionWebhook";
-import { limparQrAtual, persistirQrAtual } from "@/lib/whatsappQrCache";
+import { limparQrAtual } from "@/lib/whatsappQrCache";
 
 async function checkAuth(req: NextRequest): Promise<{ status: 401 | 403 } | { status: 200 }> {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -24,15 +24,32 @@ async function lerEstado(baseUrl: string, instanceName: string, apiKey: string):
   return (data as { instance?: { state?: string } })?.instance?.state ?? null;
 }
 
-async function aguardarFechar(baseUrl: string, instanceName: string, apiKey: string): Promise<string | null> {
+async function aguardarFechar(
+  baseUrl: string,
+  instanceName: string,
+  apiKey: string,
+  tentativas = 12,
+  intervaloMs = 500,
+): Promise<string | null> {
   let estado = await lerEstado(baseUrl, instanceName, apiKey);
   if (estado !== "open") return estado;
-  for (let tentativa = 0; tentativa < 3; tentativa++) {
-    await new Promise(resolve => setTimeout(resolve, 250));
+
+  for (let tentativa = 0; tentativa < tentativas; tentativa++) {
+    await new Promise(resolve => setTimeout(resolve, intervaloMs));
     estado = await lerEstado(baseUrl, instanceName, apiKey);
     if (estado !== "open") return estado;
   }
+
   return estado;
+}
+
+async function solicitarLogout(baseUrl: string, instanceName: string, apiKey: string): Promise<Response> {
+  return fetch(`${baseUrl}/instance/logout/${instanceName}`, {
+    method: "DELETE",
+    headers: { apikey: apiKey, "Content-Type": "application/json" },
+    body: "{}",
+    cache: "no-store",
+  });
 }
 
 /**
@@ -60,22 +77,32 @@ export async function POST(req: NextRequest) {
   try {
     await limparQrAtual(config.instanceName);
 
-    const logoutRes = await fetch(`${config.baseUrl}/instance/logout/${config.instanceName}`, {
-      method: "DELETE",
-      headers: { apikey: config.apiKey },
-      cache: "no-store",
-    });
+    let logoutRes = await solicitarLogout(config.baseUrl, config.instanceName, config.apiKey);
 
     if (logoutRes.status === 401 || logoutRes.status === 403) {
       return NextResponse.json({ ok: false, error: "Credencial da Evolution API inválida." }, { status: 502 });
     }
 
-    // Algumas versões da Evolution podem devolver erro mesmo depois de fechar
-    // a sessão. A fonte de verdade aqui é o estado observado após o logout:
-    // só seguimos se a instância realmente não estiver mais "open".
-    const estadoAposLogout = await aguardarFechar(config.baseUrl, config.instanceName, config.apiKey);
+    // O logout da Evolution/Baileys é assíncrono em algumas versões: o HTTP
+    // pode responder antes de connectionState sair de "open" e há versões
+    // conhecidas que chegam a devolver 500 mesmo quando a sessão fecha logo
+    // depois. Por isso a fonte de verdade é o estado observado, com uma janela
+    // realista de convergência — nunca apenas os primeiros 750 ms.
+    let estadoAposLogout = await aguardarFechar(config.baseUrl, config.instanceName, config.apiKey, 8, 500);
+
+    // Se o primeiro logout foi aceito mas o estado ainda não convergiu, faz
+    // UMA repetição idempotente da mesma ação e aguarda de novo. Não apaga nem
+    // recria a instância.
     if (estadoAposLogout === "open") {
-      console.error("[WA_TROCA_NUMERO] logout não fechou a instância");
+      logoutRes = await solicitarLogout(config.baseUrl, config.instanceName, config.apiKey);
+      if (logoutRes.status === 401 || logoutRes.status === 403) {
+        return NextResponse.json({ ok: false, error: "Credencial da Evolution API inválida." }, { status: 502 });
+      }
+      estadoAposLogout = await aguardarFechar(config.baseUrl, config.instanceName, config.apiKey, 8, 500);
+    }
+
+    if (estadoAposLogout === "open") {
+      console.error("[WA_TROCA_NUMERO] logout permaneceu open após duas tentativas");
       return NextResponse.json(
         { ok: false, estado: "still_connected", error: "Não foi possível desconectar o WhatsApp atual." },
         { status: 502 },
@@ -84,46 +111,23 @@ export async function POST(req: NextRequest) {
 
     await salvarStatusConexao("disconnected");
 
+    // Webhook é confirmado em melhor esforço aqui e também na rota de QR.
+    // Uma falha momentânea de webhook não deve transformar um logout já
+    // concluído em "falha de desconexão" nem reconectar o número errado.
     const webhookResultado = await garantirWebhookEvolution(config).catch(() => null);
     if (!webhookResultado?.ok) {
-      console.error("[WA_TROCA_NUMERO] falha ao sincronizar webhook");
-      return NextResponse.json(
-        { ok: false, estado: "disconnected", error: "WhatsApp desconectado, mas o webhook não pôde ser confirmado." },
-        { status: 502 },
-      );
+      console.error("[WA_TROCA_NUMERO] webhook pendente após logout");
     }
 
-    const connectRes = await fetch(`${config.baseUrl}/instance/connect/${config.instanceName}`, {
-      headers: { apikey: config.apiKey },
-      cache: "no-store",
-    });
-    const connectData = await connectRes.json().catch(() => ({}));
-    const base64 = extrairQrBase64(connectData);
-
-    if (connectRes.status === 401 || connectRes.status === 403) {
-      return NextResponse.json({ ok: false, estado: "disconnected", error: "Credencial da Evolution API inválida." }, { status: 502 });
-    }
-
-    if (!connectRes.ok || !base64) {
-      console.error("[WA_TROCA_NUMERO] novo QR não gerado, status:", connectRes.status);
-      return NextResponse.json(
-        { ok: false, estado: "disconnected", error: "WhatsApp foi desconectado, mas o novo QR ainda não ficou disponível." },
-        { status: 502 },
-      );
-    }
-
-    const registro = await persistirQrAtual(config.instanceName, base64);
-    await salvarStatusConexao("connecting");
-
+    // Não chama /instance/connect na mesma requisição do logout. Em versões
+    // recentes da Evolution há uma janela de estabilização após logout; o
+    // painel solicita o QR em seguida pela rota dedicada, que já possui lock,
+    // cache e retry próprios.
     return NextResponse.json({
       ok: true,
-      estado: "qr_required",
-      qrcode: {
-        base64,
-        generatedAt: registro.generatedAt,
-        expiresAt: registro.expiresAt,
-        generationId: registro.generationId,
-      },
+      estado: "disconnected",
+      qr: "pending",
+      webhook: webhookResultado?.ok ? "synced" : "pending",
     });
   } catch (e) {
     console.error("[WA_TROCA_NUMERO] erro inesperado:", e instanceof Error ? e.name : "erro desconhecido");

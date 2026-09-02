@@ -1,4 +1,4 @@
-import { vi, describe, test, expect, beforeEach } from "vitest";
+import { vi, describe, test, expect, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 vi.mock("@/lib/auth", async () => {
@@ -49,6 +49,15 @@ beforeEach(() => {
   process.env.EVOLUTION_API_KEY = "chave-de-teste";
   process.env.EVOLUTION_INSTANCE_NAME = "chefebot";
   delete process.env.EVOLUTION_WEBHOOK_URL;
+
+  vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: (...args: unknown[]) => void) => {
+    callback();
+    return 0 as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("POST /api/whatsapp/trocar-numero — seguranca", () => {
@@ -73,56 +82,76 @@ describe("POST /api/whatsapp/trocar-numero — seguranca", () => {
   });
 });
 
-describe("POST /api/whatsapp/trocar-numero — troca controlada", () => {
-  test("faz logout da sessão, preserva instância e devolve novo QR", async () => {
+describe("POST /api/whatsapp/trocar-numero — logout assíncrono", () => {
+  test("logout concluído preserva a instância e deixa o QR para a rota dedicada", async () => {
     vi.mocked(fetch)
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ status: "SUCCESS" }) } as Response) // logout
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "close" } }) } as Response) // state
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response) // webhook
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ base64: "data:image/png;base64,NOVOQR" }) } as Response); // connect
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ status: "SUCCESS" }) } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "close" } }) } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response); // webhook
 
     const res = await POST(req("token-admin"));
     const data = await res.json();
 
     expect(res.status).toBe(200);
-    expect(data).toMatchObject({ ok: true, estado: "qr_required" });
-    expect(data.qrcode.base64).toContain("NOVOQR");
+    expect(data).toMatchObject({ ok: true, estado: "disconnected", qr: "pending" });
 
     const calls = vi.mocked(fetch).mock.calls;
     expect(String(calls[0][0])).toContain("/instance/logout/chefebot");
     expect((calls[0][1] as RequestInit).method).toBe("DELETE");
+    expect((calls[0][1] as RequestInit).body).toBe("{}");
+    expect((calls[0][1] as RequestInit).headers).toMatchObject({
+      apikey: "chave-de-teste",
+      "Content-Type": "application/json",
+    });
     expect(calls.some(c => String(c[0]).includes("/instance/delete/"))).toBe(false);
     expect(calls.some(c => String(c[0]).includes("/instance/create"))).toBe(false);
-    expect(calls.some(c => String(c[0]).includes("/instance/connect/chefebot"))).toBe(true);
-    expect(salvarStatusConexao).toHaveBeenNthCalledWith(1, "disconnected");
-    expect(salvarStatusConexao).toHaveBeenNthCalledWith(2, "connecting");
+    expect(calls.some(c => String(c[0]).includes("/instance/connect/"))).toBe(false);
+    expect(salvarStatusConexao).toHaveBeenCalledTimes(1);
+    expect(salvarStatusConexao).toHaveBeenCalledWith("disconnected");
   });
 
-  test("erro 500 no logout não bloqueia se o estado real já fechou", async () => {
+  test("não falha prematuramente quando Evolution demora mais que 750 ms para sair de open", async () => {
     vi.mocked(fetch)
-      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ message: "erro interno" }) } as Response) // logout
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "close" } }) } as Response) // state confirma logout real
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response) // webhook
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ qrcode: { base64: "data:image/png;base64,QR2" } }) } as Response); // connect
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ message: "erro interno" }) } as Response) // logout pode falhar e ainda fechar
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "open" } }) } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "open" } }) } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "open" } }) } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "open" } }) } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "close" } }) } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response); // webhook
 
     const res = await POST(req("token-dev"));
     const data = await res.json();
+
     expect(res.status).toBe(200);
-    expect(data.qrcode.base64).toContain("QR2");
+    expect(data.estado).toBe("disconnected");
+    expect(salvarStatusConexao).toHaveBeenCalledWith("disconnected");
+    expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/connect/"))).toBe(false);
   });
 
-  test("não tenta gerar QR se a instância continuar aberta depois do logout", async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) } as Response) // logout
-      .mockResolvedValue({ ok: true, status: 200, json: async () => ({ instance: { state: "open" } }) } as Response); // 4 checks
+  test("se continuar open, repete logout uma única vez e falha sem delete/create", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/instance/logout/")) {
+        return { ok: false, status: 500, json: async () => ({}) } as Response;
+      }
+      if (url.includes("/instance/connectionState/")) {
+        return { ok: true, status: 200, json: async () => ({ instance: { state: "open" } }) } as Response;
+      }
+      throw new Error(`fetch inesperado: ${url}`);
+    });
 
     const res = await POST(req("token-admin"));
     const data = await res.json();
 
     expect(res.status).toBe(502);
     expect(data.estado).toBe("still_connected");
-    expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/connect/"))).toBe(false);
-    expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/delete/"))).toBe(false);
+
+    const calls = vi.mocked(fetch).mock.calls.map(c => String(c[0]));
+    expect(calls.filter(url => url.includes("/instance/logout/")).length).toBe(2);
+    expect(calls.some(url => url.includes("/instance/connect/"))).toBe(false);
+    expect(calls.some(url => url.includes("/instance/delete/"))).toBe(false);
+    expect(calls.some(url => url.includes("/instance/create"))).toBe(false);
     expect(salvarStatusConexao).not.toHaveBeenCalled();
   });
 

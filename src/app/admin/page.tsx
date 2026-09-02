@@ -398,11 +398,23 @@ export default function AdminPage() {
       const res = await fetch('/api/whatsapp/trocar-numero', { method: 'POST' })
       const d = await res.json().catch(() => ({}))
       const base64 = d?.qrcode?.base64 || null
+
       if (res.ok && base64) {
         setWaStatus('disconnected')
         aplicarQr(base64, d?.qrcode?.expiresAt, d?.qrcode?.generationId)
         return
       }
+
+      if (res.ok && d?.estado === 'disconnected') {
+        // Logout concluído. Dá uma pequena janela para a Evolution estabilizar
+        // a sessão antes de pedir o novo QR pela rota dedicada.
+        setWaStatus('disconnected')
+        garantirPollingAtivo()
+        await new Promise(resolve => setTimeout(resolve, 1200))
+        await fetchQrCode()
+        return
+      }
+
       if (d?.estado === 'disconnected') {
         setWaStatus('disconnected')
         garantirPollingAtivo()
