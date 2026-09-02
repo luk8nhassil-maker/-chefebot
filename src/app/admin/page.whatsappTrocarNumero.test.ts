@@ -12,8 +12,14 @@ describe("/admin — troca de número do WhatsApp", () => {
     expect(fonte).toContain("getUserInfo()?.role === 'admin' || getUserInfo()?.role === 'dev'")
   })
 
-  test("ao receber QR novo, sai do estado conectado e exibe a geração do servidor", () => {
+  test("ao desconectar, aguarda estabilização e pede o QR pela rota dedicada", () => {
+    expect(fonte).toContain("if (res.ok && d?.estado === 'disconnected')")
     expect(fonte).toContain("setWaStatus('disconnected')")
+    expect(fonte).toContain("setTimeout(resolve, 1200)")
+    expect(fonte).toContain("await fetchQrCode()")
+  })
+
+  test("continua aceitando QR direto se o backend já o entregar", () => {
     expect(fonte).toContain("aplicarQr(base64, d?.qrcode?.expiresAt, d?.qrcode?.generationId)")
   })
 
