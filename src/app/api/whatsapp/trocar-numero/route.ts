@@ -1,9 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { salvarStatusConexao } from "@/lib/conexaoWhatsapp";
-import { obterConfigEvolution } from "@/lib/evolutionApi";
+import { extrairQrBase64, obterConfigEvolution, type EvolutionConfig } from "@/lib/evolutionApi";
 import { garantirWebhookEvolution } from "@/lib/evolutionWebhook";
-import { limparQrAtual } from "@/lib/whatsappQrCache";
+import { redis } from "@/lib/redis";
+import { limparQrAtual, persistirQrAtual } from "@/lib/whatsappQrCache";
+
+export const maxDuration = 30;
+
+type EstadoProvider = {
+  ok: boolean;
+  status: number;
+  state: string | null;
+};
+
+type SettingsPreservaveis = {
+  rejectCall?: boolean;
+  msgCall?: string;
+  groupsIgnore?: boolean;
+  alwaysOnline?: boolean;
+  readMessages?: boolean;
+  readStatus?: boolean;
+  syncFullHistory?: boolean;
+};
+
+type RecoveryPhase = "captured" | "deleted" | "created";
+
+type RecoveryRecord = {
+  version: 1;
+  instanceName: string;
+  integration: "WHATSAPP-BAILEYS";
+  settings: SettingsPreservaveis;
+  phase: RecoveryPhase;
+  capturedAt: string;
+};
+
+type InstanceInfo = Record<string, unknown>;
+
+const RECOVERY_TTL_SECONDS = 30 * 60;
+const LOCK_TTL_SECONDS = 35;
 
 async function checkAuth(req: NextRequest): Promise<{ status: 401 | 403 } | { status: 200 }> {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -14,52 +49,418 @@ async function checkAuth(req: NextRequest): Promise<{ status: 401 | 403 } | { st
   return { status: 200 };
 }
 
-async function lerEstado(baseUrl: string, instanceName: string, apiKey: string): Promise<string | null> {
-  const res = await fetch(`${baseUrl}/instance/connectionState/${instanceName}`, {
-    headers: { apikey: apiKey },
-    cache: "no-store",
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) return null;
-  return (data as { instance?: { state?: string } })?.instance?.state ?? null;
+function recoveryKey(instanceName: string): string {
+  return `whatsapp:trocar-numero:recovery:${instanceName}`;
 }
 
-async function aguardarFechar(
-  baseUrl: string,
-  instanceName: string,
-  apiKey: string,
-  tentativas = 12,
-  intervaloMs = 500,
-): Promise<string | null> {
-  let estado = await lerEstado(baseUrl, instanceName, apiKey);
-  if (estado !== "open") return estado;
+function lockKey(instanceName: string): string {
+  return `whatsapp:trocar-numero:lock:${instanceName}`;
+}
+
+async function adquirirLock(instanceName: string): Promise<string | null> {
+  const token = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  try {
+    const ok = await redis.set(lockKey(instanceName), token, { nx: true, ex: LOCK_TTL_SECONDS });
+    return ok ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+async function liberarLock(instanceName: string, token: string): Promise<void> {
+  try {
+    const atual = await redis.get<string>(lockKey(instanceName));
+    if (atual === token) await redis.del(lockKey(instanceName));
+  } catch {
+    // TTL curto garante liberação mesmo se o Redis falhar no finally.
+  }
+}
+
+async function salvarRecovery(record: RecoveryRecord): Promise<boolean> {
+  try {
+    await redis.set(recoveryKey(record.instanceName), record, { ex: RECOVERY_TTL_SECONDS });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function lerRecovery(instanceName: string): Promise<RecoveryRecord | null> {
+  try {
+    const record = await redis.get<RecoveryRecord>(recoveryKey(instanceName));
+    if (!record || record.version !== 1 || record.instanceName !== instanceName) return null;
+    return record;
+  } catch {
+    return null;
+  }
+}
+
+async function limparRecovery(instanceName: string): Promise<void> {
+  try {
+    await redis.del(recoveryKey(instanceName));
+  } catch {
+    // Best-effort. O TTL encerra o estado sozinho.
+  }
+}
+
+async function lerEstado(config: EvolutionConfig): Promise<EstadoProvider> {
+  try {
+    const res = await fetch(`${config.baseUrl}/instance/connectionState/${encodeURIComponent(config.instanceName)}`, {
+      headers: { apikey: config.apiKey },
+      cache: "no-store",
+    });
+    const data = await res.json().catch(() => ({}));
+    const state = res.ok
+      ? ((data as { instance?: { state?: unknown } })?.instance?.state ?? null)
+      : null;
+    return {
+      ok: res.ok,
+      status: res.status,
+      state: typeof state === "string" ? state : null,
+    };
+  } catch {
+    return { ok: false, status: 0, state: null };
+  }
+}
+
+async function aguardarSairDeOpen(config: EvolutionConfig, tentativas = 6, intervaloMs = 500): Promise<EstadoProvider> {
+  let atual = await lerEstado(config);
+  if (!atual.ok || atual.state !== "open") return atual;
 
   for (let tentativa = 0; tentativa < tentativas; tentativa++) {
     await new Promise(resolve => setTimeout(resolve, intervaloMs));
-    estado = await lerEstado(baseUrl, instanceName, apiKey);
-    if (estado !== "open") return estado;
+    atual = await lerEstado(config);
+    if (!atual.ok || atual.state !== "open") return atual;
   }
 
-  return estado;
+  return atual;
 }
 
-async function solicitarLogout(baseUrl: string, instanceName: string, apiKey: string): Promise<Response> {
-  return fetch(`${baseUrl}/instance/logout/${instanceName}`, {
+async function solicitarLogout(config: EvolutionConfig): Promise<Response> {
+  return fetch(`${config.baseUrl}/instance/logout/${encodeURIComponent(config.instanceName)}`, {
     method: "DELETE",
-    headers: { apikey: apiKey, "Content-Type": "application/json" },
+    headers: { apikey: config.apiKey, "Content-Type": "application/json" },
     body: "{}",
     cache: "no-store",
   });
 }
 
+function listaInstancias(data: unknown): InstanceInfo[] {
+  if (Array.isArray(data)) return data.filter((item): item is InstanceInfo => !!item && typeof item === "object");
+  const obj = data as { instances?: unknown } | null;
+  return Array.isArray(obj?.instances)
+    ? obj.instances.filter((item): item is InstanceInfo => !!item && typeof item === "object")
+    : [];
+}
+
+function nomeInstancia(item: InstanceInfo): string | null {
+  const nome =
+    item.instanceName ??
+    item.name ??
+    (item.instance && typeof item.instance === "object"
+      ? (item.instance as Record<string, unknown>).instanceName
+      : null);
+  return typeof nome === "string" ? nome : null;
+}
+
+function integracaoInstancia(item: InstanceInfo): string | null {
+  const integration =
+    item.integration ??
+    (item.instance && typeof item.instance === "object"
+      ? (item.instance as Record<string, unknown>).integration
+      : null);
+  return typeof integration === "string" ? integration : null;
+}
+
+async function buscarInstanciaExata(
+  config: EvolutionConfig,
+): Promise<{ ok: true; instance: InstanceInfo | null } | { ok: false; status: number }> {
+  try {
+    const res = await fetch(
+      `${config.baseUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(config.instanceName)}`,
+      { headers: { apikey: config.apiKey }, cache: "no-store" },
+    );
+    if (!res.ok) return { ok: false, status: res.status };
+    const data = await res.json().catch(() => []);
+    const exata = listaInstancias(data).find(item => nomeInstancia(item) === config.instanceName) ?? null;
+    return { ok: true, instance: exata };
+  } catch {
+    return { ok: false, status: 0 };
+  }
+}
+
+function settingsPreservaveis(data: unknown): { ok: true; settings: SettingsPreservaveis } | { ok: false } {
+  if (data == null) return { ok: true, settings: {} };
+  if (typeof data !== "object" || Array.isArray(data)) return { ok: false };
+
+  const d = data as Record<string, unknown>;
+
+  // wavoipToken é credencial sensível. Se existir, o reset automático falha
+  // fechado em vez de copiar/armazenar segredo por um caminho novo.
+  if (typeof d.wavoipToken === "string" && d.wavoipToken.trim()) return { ok: false };
+
+  const settings: SettingsPreservaveis = {};
+  if (typeof d.rejectCall === "boolean") settings.rejectCall = d.rejectCall;
+  if (typeof d.msgCall === "string") settings.msgCall = d.msgCall;
+  if (typeof d.groupsIgnore === "boolean") settings.groupsIgnore = d.groupsIgnore;
+  if (typeof d.alwaysOnline === "boolean") settings.alwaysOnline = d.alwaysOnline;
+  if (typeof d.readMessages === "boolean") settings.readMessages = d.readMessages;
+  if (typeof d.readStatus === "boolean") settings.readStatus = d.readStatus;
+  if (typeof d.syncFullHistory === "boolean") settings.syncFullHistory = d.syncFullHistory;
+  return { ok: true, settings };
+}
+
+async function capturarSettings(
+  config: EvolutionConfig,
+): Promise<{ ok: true; settings: SettingsPreservaveis } | { ok: false; status: number; sensitive?: boolean }> {
+  try {
+    const res = await fetch(`${config.baseUrl}/settings/find/${encodeURIComponent(config.instanceName)}`, {
+      headers: { apikey: config.apiKey },
+      cache: "no-store",
+    });
+    if (!res.ok) return { ok: false, status: res.status };
+    const data = await res.json().catch(() => null);
+    const filtrado = settingsPreservaveis(data);
+    if (!filtrado.ok) return { ok: false, status: 422, sensitive: true };
+    return filtrado;
+  } catch {
+    return { ok: false, status: 0 };
+  }
+}
+
+async function restaurarSettings(config: EvolutionConfig, settings: SettingsPreservaveis): Promise<boolean> {
+  if (Object.keys(settings).length === 0) return true;
+  try {
+    const res = await fetch(`${config.baseUrl}/settings/set/${encodeURIComponent(config.instanceName)}`, {
+      method: "POST",
+      headers: { apikey: config.apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify(settings),
+      cache: "no-store",
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function deletarInstancia(config: EvolutionConfig): Promise<boolean> {
+  try {
+    const res = await fetch(`${config.baseUrl}/instance/delete/${encodeURIComponent(config.instanceName)}`, {
+      method: "DELETE",
+      headers: { apikey: config.apiKey },
+      cache: "no-store",
+    });
+
+    // Em versões afetadas da Evolution, delete/logout podem responder erro
+    // depois de já terem removido a sessão. A confirmação é feita pela lista
+    // de instâncias abaixo, nunca só pelo status HTTP.
+    if (res.status === 401 || res.status === 403) return false;
+  } catch {
+    // Ainda verificamos se o provider removeu a instância antes da falha de rede.
+  }
+
+  for (let tentativa = 0; tentativa < 8; tentativa++) {
+    const lookup = await buscarInstanciaExata(config);
+    if (!lookup.ok) return false;
+    if (!lookup.instance) return true;
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
+async function criarInstancia(
+  config: EvolutionConfig,
+  integration: "WHATSAPP-BAILEYS",
+): Promise<{ ok: boolean; status: number; base64: string | null }> {
+  try {
+    const res = await fetch(`${config.baseUrl}/instance/create`, {
+      method: "POST",
+      headers: { apikey: config.apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        instanceName: config.instanceName,
+        qrcode: true,
+        integration,
+      }),
+      cache: "no-store",
+    });
+    const data = await res.json().catch(() => ({}));
+    const jaExiste = res.status === 409;
+    return {
+      ok: res.ok || jaExiste,
+      status: res.status,
+      base64: extrairQrBase64(data),
+    };
+  } catch {
+    return { ok: false, status: 0, base64: null };
+  }
+}
+
+async function obterQr(config: EvolutionConfig, base64Inicial: string | null) {
+  let base64 = base64Inicial;
+  if (!base64) {
+    const res = await fetch(`${config.baseUrl}/instance/connect/${encodeURIComponent(config.instanceName)}`, {
+      headers: { apikey: config.apiKey },
+      cache: "no-store",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return null;
+    base64 = extrairQrBase64(data);
+  }
+  if (!base64) return null;
+
+  const registro = await persistirQrAtual(config.instanceName, base64);
+  return {
+    base64,
+    generatedAt: registro.generatedAt,
+    expiresAt: registro.expiresAt,
+    generationId: registro.generationId,
+  };
+}
+
+async function completarRecovery(
+  config: EvolutionConfig,
+  record: RecoveryRecord,
+): Promise<
+  | { ok: true; qrcode: { base64: string; generatedAt: number; expiresAt: number; generationId: number } }
+  | { ok: false; estado: string; error: string }
+> {
+  let atual = record;
+  let base64Criacao: string | null = null;
+
+  if (atual.phase === "captured") {
+    const removida = await deletarInstancia(config);
+    if (!removida) {
+      return {
+        ok: false,
+        estado: "provider_delete_failed",
+        error: "A Evolution não conseguiu remover a sessão travada. Nenhum pedido ou dado do ChefeBot foi alterado.",
+      };
+    }
+    atual = { ...atual, phase: "deleted" };
+    if (!(await salvarRecovery(atual))) {
+      return {
+        ok: false,
+        estado: "recovery_state_unavailable",
+        error: "Sessão removida, mas não foi possível registrar o estado seguro de recuperação.",
+      };
+    }
+  }
+
+  if (atual.phase === "deleted") {
+    const criada = await criarInstancia(config, atual.integration);
+    if (!criada.ok) {
+      return {
+        ok: false,
+        estado: "instance_recreate_failed",
+        error: "Sessão antiga removida, mas a Evolution ainda não conseguiu recriar a instância.",
+      };
+    }
+    base64Criacao = criada.base64;
+    atual = { ...atual, phase: "created" };
+    if (!(await salvarRecovery(atual))) {
+      return {
+        ok: false,
+        estado: "recovery_state_unavailable",
+        error: "Instância recriada, mas não foi possível registrar o estado seguro de recuperação.",
+      };
+    }
+  }
+
+  const settingsOk = await restaurarSettings(config, atual.settings);
+  const webhookResultado = await garantirWebhookEvolution(config).catch(() => null);
+  if (!settingsOk || !webhookResultado?.ok) {
+    return {
+      ok: false,
+      estado: "instance_recreated_config_pending",
+      error: "A instância foi recriada, mas a configuração ainda não foi restaurada por completo. Tente novamente.",
+    };
+  }
+
+  const qr = await obterQr(config, base64Criacao);
+  if (!qr) {
+    return {
+      ok: false,
+      estado: "qr_pending",
+      error: "A sessão antiga foi removida e a instância recriada, mas o QR ainda não ficou disponível.",
+    };
+  }
+
+  await salvarStatusConexao("connecting");
+  await limparRecovery(config.instanceName);
+  return { ok: true, qrcode: qr };
+}
+
+async function iniciarHardReset(
+  config: EvolutionConfig,
+): Promise<
+  | { ok: true; qrcode: { base64: string; generatedAt: number; expiresAt: number; generationId: number } }
+  | { ok: false; estado: string; error: string }
+> {
+  const lookup = await buscarInstanciaExata(config);
+  if (!lookup.ok) {
+    return {
+      ok: false,
+      estado: "provider_inventory_unavailable",
+      error: "Não foi possível confirmar a instância exata na Evolution. Nada foi removido.",
+    };
+  }
+  if (!lookup.instance) {
+    return {
+      ok: false,
+      estado: "provider_instance_inconsistent",
+      error: "A Evolution informa conexão ativa, mas a instância não aparece no inventário. Nada foi removido.",
+    };
+  }
+
+  const integrationRaw = integracaoInstancia(lookup.instance);
+  if (integrationRaw && integrationRaw.toUpperCase() !== "WHATSAPP-BAILEYS") {
+    return {
+      ok: false,
+      estado: "unsupported_integration",
+      error: "A instância conectada não é Baileys. O reset automático foi bloqueado para proteger a integração atual.",
+    };
+  }
+
+  const settings = await capturarSettings(config);
+  if (!settings.ok) {
+    return {
+      ok: false,
+      estado: settings.sensitive ? "sensitive_settings_present" : "settings_snapshot_failed",
+      error: settings.sensitive
+        ? "A instância possui uma configuração sensível que impede reset automático seguro."
+        : "Não foi possível preservar as configurações da instância. Nada foi removido.",
+    };
+  }
+
+  const record: RecoveryRecord = {
+    version: 1,
+    instanceName: config.instanceName,
+    integration: "WHATSAPP-BAILEYS",
+    settings: settings.settings,
+    phase: "captured",
+    capturedAt: new Date().toISOString(),
+  };
+
+  if (!(await salvarRecovery(record))) {
+    return {
+      ok: false,
+      estado: "recovery_state_unavailable",
+      error: "Não foi possível preparar um rollback seguro. Nada foi removido.",
+    };
+  }
+
+  return completarRecovery(config, record);
+}
+
 /**
  * Troca intencional do número conectado.
  *
- * Faz logout da sessão WhatsApp na instância EXISTENTE, preservando a
- * configuração da instância e o histórico da Evolution. Em seguida solicita
- * um novo QR para parear o número correto. Nunca chama /instance/delete.
- *
- * Restrito a admin/dev porque esta ação derruba o WhatsApp operacional.
+ * Caminho normal: tenta logout e confirma o estado real.
+ * Fallback de recuperação: se a Evolution permanecer comprovadamente "open",
+ * trata o defeito conhecido de sessão Baileys travada removendo SOMENTE a
+ * instância do provider e recriando-a com o mesmo nome/configuração antes de
+ * gerar o QR. Pedidos, Pix, conversas, catálogo e Redis de negócio não são
+ * apagados.
  */
 export async function POST(req: NextRequest) {
   const auth = await checkAuth(req);
@@ -74,63 +475,78 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const lockToken = await adquirirLock(config.instanceName);
+  if (!lockToken) {
+    return NextResponse.json(
+      { ok: false, estado: "busy", error: "Já existe uma troca de número em andamento. Aguarde alguns segundos." },
+      { status: 409 },
+    );
+  }
+
   try {
     await limparQrAtual(config.instanceName);
 
-    let logoutRes = await solicitarLogout(config.baseUrl, config.instanceName, config.apiKey);
-
-    if (logoutRes.status === 401 || logoutRes.status === 403) {
-      return NextResponse.json({ ok: false, error: "Credencial da Evolution API inválida." }, { status: 502 });
+    const pendente = await lerRecovery(config.instanceName);
+    if (pendente) {
+      const retomada = await completarRecovery(config, pendente);
+      return NextResponse.json(retomada, { status: retomada.ok ? 200 : 502 });
     }
 
-    // O logout da Evolution/Baileys é assíncrono em algumas versões: o HTTP
-    // pode responder antes de connectionState sair de "open" e há versões
-    // conhecidas que chegam a devolver 500 mesmo quando a sessão fecha logo
-    // depois. Por isso a fonte de verdade é o estado observado, com uma janela
-    // realista de convergência — nunca apenas os primeiros 750 ms.
-    let estadoAposLogout = await aguardarFechar(config.baseUrl, config.instanceName, config.apiKey, 8, 500);
-
-    // Se o primeiro logout foi aceito mas o estado ainda não convergiu, faz
-    // UMA repetição idempotente da mesma ação e aguarda de novo. Não apaga nem
-    // recria a instância.
-    if (estadoAposLogout === "open") {
-      logoutRes = await solicitarLogout(config.baseUrl, config.instanceName, config.apiKey);
-      if (logoutRes.status === 401 || logoutRes.status === 403) {
-        return NextResponse.json({ ok: false, error: "Credencial da Evolution API inválida." }, { status: 502 });
-      }
-      estadoAposLogout = await aguardarFechar(config.baseUrl, config.instanceName, config.apiKey, 8, 500);
-    }
-
-    if (estadoAposLogout === "open") {
-      console.error("[WA_TROCA_NUMERO] logout permaneceu open após duas tentativas");
+    let logoutRes: Response;
+    try {
+      logoutRes = await solicitarLogout(config);
+    } catch {
       return NextResponse.json(
-        { ok: false, estado: "still_connected", error: "Não foi possível desconectar o WhatsApp atual." },
+        { ok: false, estado: "provider_unreachable", error: "Não foi possível alcançar a Evolution API." },
         { status: 502 },
       );
     }
 
-    await salvarStatusConexao("disconnected");
-
-    // Webhook é confirmado em melhor esforço aqui e também na rota de QR.
-    // Uma falha momentânea de webhook não deve transformar um logout já
-    // concluído em "falha de desconexão" nem reconectar o número errado.
-    const webhookResultado = await garantirWebhookEvolution(config).catch(() => null);
-    if (!webhookResultado?.ok) {
-      console.error("[WA_TROCA_NUMERO] webhook pendente após logout");
+    if (logoutRes.status === 401 || logoutRes.status === 403) {
+      return NextResponse.json(
+        { ok: false, estado: "provider_auth_failed", error: "Credencial da Evolution API inválida." },
+        { status: 502 },
+      );
     }
 
-    // Não chama /instance/connect na mesma requisição do logout. Em versões
-    // recentes da Evolution há uma janela de estabilização após logout; o
-    // painel solicita o QR em seguida pela rota dedicada, que já possui lock,
-    // cache e retry próprios.
+    const estadoAposLogout = await aguardarSairDeOpen(config, 6, 500);
+
+    if (!estadoAposLogout.ok) {
+      return NextResponse.json(
+        { ok: false, estado: "provider_state_unavailable", error: "A Evolution não confirmou o estado da conexão. Nada foi removido." },
+        { status: 502 },
+      );
+    }
+
+    if (estadoAposLogout.state !== "open") {
+      await salvarStatusConexao("disconnected");
+      const webhookResultado = await garantirWebhookEvolution(config).catch(() => null);
+      return NextResponse.json({
+        ok: true,
+        estado: "disconnected",
+        qr: "pending",
+        webhook: webhookResultado?.ok ? "synced" : "pending",
+        recovery: "logout",
+      });
+    }
+
+    console.warn("[WA_TROCA_NUMERO] logout permaneceu open; iniciando recuperação controlada da instância");
+    const recovery = await iniciarHardReset(config);
+    if (!recovery.ok) {
+      console.error("[WA_TROCA_NUMERO] recuperação controlada falhou:", recovery.estado);
+      return NextResponse.json(recovery, { status: 502 });
+    }
+
     return NextResponse.json({
       ok: true,
-      estado: "disconnected",
-      qr: "pending",
-      webhook: webhookResultado?.ok ? "synced" : "pending",
+      estado: "qr_required",
+      qrcode: recovery.qrcode,
+      recovery: "recreated",
     });
   } catch (e) {
     console.error("[WA_TROCA_NUMERO] erro inesperado:", e instanceof Error ? e.name : "erro desconhecido");
     return NextResponse.json({ ok: false, error: "Falha ao trocar a conexão do WhatsApp." }, { status: 502 });
+  } finally {
+    await liberarLock(config.instanceName, lockToken);
   }
 }

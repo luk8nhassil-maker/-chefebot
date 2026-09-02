@@ -1,4 +1,4 @@
-import { vi, describe, test, expect, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 vi.mock("@/lib/auth", async () => {
@@ -14,19 +14,25 @@ vi.mock("@/lib/auth", async () => {
   };
 });
 
-const { salvarStatusConexao } = vi.hoisted(() => ({
+const { salvarStatusConexao, garantirWebhookEvolution } = vi.hoisted(() => ({
   salvarStatusConexao: vi.fn(async () => {}),
+  garantirWebhookEvolution: vi.fn(async () => ({ ok: true, status: 201 })),
 }));
 vi.mock("@/lib/conexaoWhatsapp", () => ({ salvarStatusConexao }));
+vi.mock("@/lib/evolutionWebhook", () => ({ garantirWebhookEvolution }));
 
-const { qrStore, redisMock } = vi.hoisted(() => {
-  const qrStore = new Map<string, unknown>();
+const { store, redisMock } = vi.hoisted(() => {
+  const store = new Map<string, unknown>();
   const redisMock = {
-    get: vi.fn(async (key: string) => (qrStore.has(key) ? qrStore.get(key) : null)),
-    set: vi.fn(async (key: string, value: unknown) => { qrStore.set(key, value); return "OK"; }),
-    del: vi.fn(async (key: string) => (qrStore.delete(key) ? 1 : 0)),
+    get: vi.fn(async (key: string) => (store.has(key) ? store.get(key) : null)),
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (opts?.nx && store.has(key)) return null;
+      store.set(key, value);
+      return "OK";
+    }),
+    del: vi.fn(async (key: string) => (store.delete(key) ? 1 : 0)),
   };
-  return { qrStore, redisMock };
+  return { store, redisMock };
 });
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 
@@ -41,10 +47,23 @@ function req(token?: string) {
   });
 }
 
+function response(status: number, data: unknown = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => data,
+  } as Response;
+}
+
 beforeEach(() => {
   vi.mocked(fetch).mockReset();
   salvarStatusConexao.mockClear();
-  qrStore.clear();
+  garantirWebhookEvolution.mockClear();
+  redisMock.get.mockClear();
+  redisMock.set.mockClear();
+  redisMock.del.mockClear();
+  store.clear();
+
   process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
   process.env.EVOLUTION_API_KEY = "chave-de-teste";
   process.env.EVOLUTION_INSTANCE_NAME = "chefebot";
@@ -60,7 +79,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("POST /api/whatsapp/trocar-numero — seguranca", () => {
+describe("POST /api/whatsapp/trocar-numero — autenticação e fail-closed", () => {
   test("sem autenticação retorna 401 e não toca Evolution", async () => {
     const res = await POST(req());
     expect(res.status).toBe(401);
@@ -73,70 +92,191 @@ describe("POST /api/whatsapp/trocar-numero — seguranca", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  test("sem provider configurado falha explicitamente", async () => {
+  test("sem provider configurado falha sem chamada externa", async () => {
     delete process.env.EVOLUTION_API_URL;
     delete process.env.EVOLUTION_API_KEY;
     const res = await POST(req("token-admin"));
     expect(res.status).toBe(503);
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  test("lock concorrente bloqueia segundo reset antes de tocar Evolution", async () => {
+    store.set("whatsapp:trocar-numero:lock:chefebot", "outro-token");
+    const res = await POST(req("token-admin"));
+    const data = await res.json();
+    expect(res.status).toBe(409);
+    expect(data.estado).toBe("busy");
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });
 
-describe("POST /api/whatsapp/trocar-numero — logout assíncrono", () => {
-  test("logout concluído preserva a instância e deixa o QR para a rota dedicada", async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ status: "SUCCESS" }) } as Response)
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "close" } }) } as Response)
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response); // webhook
+describe("POST /api/whatsapp/trocar-numero — caminho normal não destrutivo", () => {
+  test("logout que fecha a sessão não apaga nem recria instância", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/instance/logout/chefebot")) return response(200, { status: "SUCCESS" });
+      if (url.includes("/instance/connectionState/chefebot")) return response(200, { instance: { state: "close" } });
+      throw new Error(`fetch inesperado: ${url}`);
+    });
 
     const res = await POST(req("token-admin"));
     const data = await res.json();
 
     expect(res.status).toBe(200);
-    expect(data).toMatchObject({ ok: true, estado: "disconnected", qr: "pending" });
-
-    const calls = vi.mocked(fetch).mock.calls;
-    expect(String(calls[0][0])).toContain("/instance/logout/chefebot");
-    expect((calls[0][1] as RequestInit).method).toBe("DELETE");
-    expect((calls[0][1] as RequestInit).body).toBe("{}");
-    expect((calls[0][1] as RequestInit).headers).toMatchObject({
-      apikey: "chave-de-teste",
-      "Content-Type": "application/json",
-    });
-    expect(calls.some(c => String(c[0]).includes("/instance/delete/"))).toBe(false);
-    expect(calls.some(c => String(c[0]).includes("/instance/create"))).toBe(false);
-    expect(calls.some(c => String(c[0]).includes("/instance/connect/"))).toBe(false);
-    expect(salvarStatusConexao).toHaveBeenCalledTimes(1);
+    expect(data).toMatchObject({ ok: true, estado: "disconnected", recovery: "logout" });
+    const urls = vi.mocked(fetch).mock.calls.map(c => String(c[0]));
+    expect(urls.some(url => url.includes("/instance/delete/"))).toBe(false);
+    expect(urls.some(url => url.includes("/instance/create"))).toBe(false);
     expect(salvarStatusConexao).toHaveBeenCalledWith("disconnected");
   });
 
-  test("não falha prematuramente quando Evolution demora mais que 750 ms para sair de open", async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ message: "erro interno" }) } as Response) // logout pode falhar e ainda fechar
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "open" } }) } as Response)
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "open" } }) } as Response)
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "open" } }) } as Response)
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "open" } }) } as Response)
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "close" } }) } as Response)
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response); // webhook
+  test("HTTP 500 no logout ainda é sucesso quando estado real fechou", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/instance/logout/chefebot")) return response(500, { error: "provider bug" });
+      if (url.includes("/instance/connectionState/chefebot")) return response(200, { instance: { state: "close" } });
+      throw new Error(`fetch inesperado: ${url}`);
+    });
 
     const res = await POST(req("token-dev"));
     const data = await res.json();
 
     expect(res.status).toBe(200);
-    expect(data.estado).toBe("disconnected");
-    expect(salvarStatusConexao).toHaveBeenCalledWith("disconnected");
-    expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/connect/"))).toBe(false);
+    expect(data.recovery).toBe("logout");
   });
 
-  test("se continuar open, repete logout uma única vez e falha sem delete/create", async () => {
+  test("não executa hard reset se connectionState ficar indisponível", async () => {
     vi.mocked(fetch).mockImplementation(async (input) => {
       const url = String(input);
-      if (url.includes("/instance/logout/")) {
-        return { ok: false, status: 500, json: async () => ({}) } as Response;
+      if (url.includes("/instance/logout/chefebot")) return response(500);
+      if (url.includes("/instance/connectionState/chefebot")) return response(502);
+      throw new Error(`fetch inesperado: ${url}`);
+    });
+
+    const res = await POST(req("token-admin"));
+    const data = await res.json();
+
+    expect(res.status).toBe(502);
+    expect(data.estado).toBe("provider_state_unavailable");
+    const urls = vi.mocked(fetch).mock.calls.map(c => String(c[0]));
+    expect(urls.some(url => url.includes("/instance/delete/"))).toBe(false);
+  });
+});
+
+describe("POST /api/whatsapp/trocar-numero — recuperação da raiz do provider", () => {
+  test("sessão que permanece open é removida e recriada com settings preservados", async () => {
+    let deleted = false;
+    let created = false;
+    let settingsBody: unknown = null;
+
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+
+      if (url.includes("/instance/logout/chefebot")) return response(500, { error: "logout travado" });
+      if (url.includes("/instance/connectionState/chefebot")) return response(200, { instance: { state: "open" } });
+
+      if (url.includes("/instance/fetchInstances")) {
+        if (deleted && !created) return response(200, []);
+        return response(200, [{
+          name: "chefebot",
+          integration: "WHATSAPP-BAILEYS",
+          connectionStatus: "open",
+          number: "5599999999999",
+        }]);
       }
-      if (url.includes("/instance/connectionState/")) {
-        return { ok: true, status: 200, json: async () => ({ instance: { state: "open" } }) } as Response;
+
+      if (url.includes("/settings/find/chefebot")) {
+        return response(200, {
+          rejectCall: true,
+          msgCall: "Não atendemos ligação por aqui.",
+          groupsIgnore: true,
+          alwaysOnline: false,
+          readMessages: true,
+          readStatus: false,
+          syncFullHistory: false,
+        });
+      }
+
+      if (url.includes("/instance/delete/chefebot")) {
+        deleted = true;
+        return response(500, { error: "resposta enganosa do provider" });
+      }
+
+      if (url.endsWith("/instance/create")) {
+        created = true;
+        return response(201, { base64: "data:image/png;base64,NOVOQR" });
+      }
+
+      if (url.includes("/settings/set/chefebot")) {
+        settingsBody = JSON.parse(String((init as RequestInit)?.body));
+        return response(201, { ok: true });
+      }
+
+      throw new Error(`fetch inesperado: ${url}`);
+    });
+
+    const res = await POST(req("token-admin"));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data).toMatchObject({
+      ok: true,
+      estado: "qr_required",
+      recovery: "recreated",
+    });
+    expect(data.qrcode.base64).toContain("NOVOQR");
+
+    expect(settingsBody).toEqual({
+      rejectCall: true,
+      msgCall: "Não atendemos ligação por aqui.",
+      groupsIgnore: true,
+      alwaysOnline: false,
+      readMessages: true,
+      readStatus: false,
+      syncFullHistory: false,
+    });
+    expect(garantirWebhookEvolution).toHaveBeenCalledTimes(1);
+    expect(salvarStatusConexao).toHaveBeenCalledWith("connecting");
+
+    const urls = vi.mocked(fetch).mock.calls.map(c => String(c[0]));
+    expect(urls.filter(url => url.includes("/instance/delete/chefebot"))).toHaveLength(1);
+    expect(urls.filter(url => url.endsWith("/instance/create"))).toHaveLength(1);
+    expect(urls.some(url => url.includes("/api/orders"))).toBe(false);
+    expect(urls.some(url => url.includes("/pix"))).toBe(false);
+  });
+
+  test("não apaga nada se não conseguir preservar settings", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/instance/logout/chefebot")) return response(500);
+      if (url.includes("/instance/connectionState/chefebot")) return response(200, { instance: { state: "open" } });
+      if (url.includes("/instance/fetchInstances")) {
+        return response(200, [{ name: "chefebot", integration: "WHATSAPP-BAILEYS" }]);
+      }
+      if (url.includes("/settings/find/chefebot")) return response(500);
+      throw new Error(`fetch inesperado: ${url}`);
+    });
+
+    const res = await POST(req("token-admin"));
+    const data = await res.json();
+
+    expect(res.status).toBe(502);
+    expect(data.estado).toBe("settings_snapshot_failed");
+    const urls = vi.mocked(fetch).mock.calls.map(c => String(c[0]));
+    expect(urls.some(url => url.includes("/instance/delete/"))).toBe(false);
+    expect(urls.some(url => url.endsWith("/instance/create"))).toBe(false);
+  });
+
+  test("configuração sensível bloqueia reset destrutivo antes do delete", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/instance/logout/chefebot")) return response(500);
+      if (url.includes("/instance/connectionState/chefebot")) return response(200, { instance: { state: "open" } });
+      if (url.includes("/instance/fetchInstances")) {
+        return response(200, [{ name: "chefebot", integration: "WHATSAPP-BAILEYS" }]);
+      }
+      if (url.includes("/settings/find/chefebot")) {
+        return response(200, { alwaysOnline: true, wavoipToken: "segredo-que-nao-pode-ser-copiado" });
       }
       throw new Error(`fetch inesperado: ${url}`);
     });
@@ -145,21 +285,94 @@ describe("POST /api/whatsapp/trocar-numero — logout assíncrono", () => {
     const data = await res.json();
 
     expect(res.status).toBe(502);
-    expect(data.estado).toBe("still_connected");
-
-    const calls = vi.mocked(fetch).mock.calls.map(c => String(c[0]));
-    expect(calls.filter(url => url.includes("/instance/logout/")).length).toBe(2);
-    expect(calls.some(url => url.includes("/instance/connect/"))).toBe(false);
-    expect(calls.some(url => url.includes("/instance/delete/"))).toBe(false);
-    expect(calls.some(url => url.includes("/instance/create"))).toBe(false);
-    expect(salvarStatusConexao).not.toHaveBeenCalled();
+    expect(data.estado).toBe("sensitive_settings_present");
+    const urls = vi.mocked(fetch).mock.calls.map(c => String(c[0]));
+    expect(urls.some(url => url.includes("/instance/delete/"))).toBe(false);
+    expect(JSON.stringify(data)).not.toContain("segredo-que-nao-pode-ser-copiado");
   });
 
-  test("credencial inválida no logout falha sem tentar delete/create/connect", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) } as Response);
+  test("integração diferente de Baileys é bloqueada antes do delete", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/instance/logout/chefebot")) return response(500);
+      if (url.includes("/instance/connectionState/chefebot")) return response(200, { instance: { state: "open" } });
+      if (url.includes("/instance/fetchInstances")) {
+        return response(200, [{ name: "chefebot", integration: "WHATSAPP-BUSINESS" }]);
+      }
+      throw new Error(`fetch inesperado: ${url}`);
+    });
+
     const res = await POST(req("token-admin"));
+    const data = await res.json();
     expect(res.status).toBe(502);
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(fetch).mock.calls.some(c => /\/instance\/(delete|create|connect)\//.test(String(c[0])))).toBe(false);
+    expect(data.estado).toBe("unsupported_integration");
+    expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/delete/"))).toBe(false);
+  });
+
+  test("delete que não remove a instância falha sem criar duplicata", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/instance/logout/chefebot")) return response(500);
+      if (url.includes("/instance/connectionState/chefebot")) return response(200, { instance: { state: "open" } });
+      if (url.includes("/instance/fetchInstances")) {
+        return response(200, [{ name: "chefebot", integration: "WHATSAPP-BAILEYS" }]);
+      }
+      if (url.includes("/settings/find/chefebot")) return response(200, { alwaysOnline: true });
+      if (url.includes("/instance/delete/chefebot")) return response(500);
+      throw new Error(`fetch inesperado: ${url}`);
+    });
+
+    const res = await POST(req("token-admin"));
+    const data = await res.json();
+
+    expect(res.status).toBe(502);
+    expect(data.estado).toBe("provider_delete_failed");
+    const urls = vi.mocked(fetch).mock.calls.map(c => String(c[0]));
+    expect(urls.some(url => url.endsWith("/instance/create"))).toBe(false);
+  });
+
+  test("se create falhar após delete, segundo clique retoma sem deletar novamente", async () => {
+    let deleted = false;
+    let createAttempts = 0;
+    let deleteCalls = 0;
+
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+
+      if (url.includes("/instance/logout/chefebot")) return response(500);
+      if (url.includes("/instance/connectionState/chefebot")) return response(200, { instance: { state: "open" } });
+
+      if (url.includes("/instance/fetchInstances")) {
+        return response(200, deleted ? [] : [{ name: "chefebot", integration: "WHATSAPP-BAILEYS" }]);
+      }
+      if (url.includes("/settings/find/chefebot")) return response(200, { readMessages: true });
+      if (url.includes("/instance/delete/chefebot")) {
+        deleteCalls += 1;
+        deleted = true;
+        return response(200);
+      }
+      if (url.endsWith("/instance/create")) {
+        createAttempts += 1;
+        if (createAttempts === 1) return response(500);
+        return response(201, { base64: "data:image/png;base64,QR-RETOMADO" });
+      }
+      if (url.includes("/settings/set/chefebot")) {
+        expect(JSON.parse(String((init as RequestInit).body))).toEqual({ readMessages: true });
+        return response(201);
+      }
+      throw new Error(`fetch inesperado: ${url}`);
+    });
+
+    const first = await POST(req("token-admin"));
+    const firstData = await first.json();
+    expect(first.status).toBe(502);
+    expect(firstData.estado).toBe("instance_recreate_failed");
+
+    const second = await POST(req("token-admin"));
+    const secondData = await second.json();
+    expect(second.status).toBe(200);
+    expect(secondData.qrcode.base64).toContain("QR-RETOMADO");
+    expect(deleteCalls).toBe(1);
+    expect(createAttempts).toBe(2);
   });
 });
