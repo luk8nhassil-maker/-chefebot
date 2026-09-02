@@ -388,6 +388,33 @@ export default function AdminPage() {
     }
   }
 
+  // Troca intencional do número pareado. Diferente de reset/reconnect:
+  // faz logout somente da sessão WhatsApp na instância existente e pede um
+  // novo QR. A instância/configuração não é apagada.
+  const trocarNumeroWhatsapp = async () => {
+    setWaResetting(true)
+    setWaQrError(null)
+    try {
+      const res = await fetch('/api/whatsapp/trocar-numero', { method: 'POST' })
+      const d = await res.json().catch(() => ({}))
+      const base64 = d?.qrcode?.base64 || null
+      if (res.ok && base64) {
+        setWaStatus('disconnected')
+        aplicarQr(base64, d?.qrcode?.expiresAt, d?.qrcode?.generationId)
+        return
+      }
+      if (d?.estado === 'disconnected') {
+        setWaStatus('disconnected')
+        garantirPollingAtivo()
+      }
+      setWaQrError(d?.error || 'Não foi possível gerar o novo QR agora.')
+    } catch {
+      setWaQrError('Erro de rede ao trocar o número do WhatsApp.')
+    } finally {
+      setWaResetting(false)
+    }
+  }
+
   const msg = (m: string) => { setMensagem(m); setTimeout(() => setMensagem(''), 3000) }
 
   const carregarMercadoPago = async () => {
@@ -662,11 +689,23 @@ export default function AdminPage() {
               <div style={{ ...card, marginBottom: 16, border: '1px solid color-mix(in srgb, var(--whatsapp) 35%, transparent)', background: 'color-mix(in srgb, var(--whatsapp) 7%, transparent)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--whatsapp)', boxShadow: '0 0 8px color-mix(in srgb, var(--whatsapp) 38%, transparent)', flexShrink: 0 }} />
-                  <div>
+                  <div style={{ flex: 1 }}>
                     <p style={{ color: 'var(--success)', fontSize: 14, fontWeight: 700, margin: 0 }}>WhatsApp conectado</p>
                     <p style={{ color: 'var(--foreground-secondary)', fontSize: 11, margin: '2px 0 0' }}>Bot ativo — atendimento automático ligado</p>
                   </div>
+                  {(getUserInfo()?.role === 'admin' || getUserInfo()?.role === 'dev') && (
+                    <button
+                      onClick={() => {
+                        if (confirm('O WhatsApp atual será desconectado e um novo QR Code será gerado para conectar o número correto. Continuar?')) trocarNumeroWhatsapp()
+                      }}
+                      disabled={waResetting}
+                      style={{ background: 'transparent', border: '1px solid color-mix(in srgb, var(--danger) 65%, transparent)', borderRadius: 9, padding: '8px 10px', color: 'var(--danger)', fontSize: 11.5, fontWeight: 700, cursor: waResetting ? 'not-allowed' : 'pointer', opacity: waResetting ? 0.65 : 1, whiteSpace: 'nowrap' }}
+                    >
+                      {waResetting ? 'Desconectando...' : 'Trocar número'}
+                    </button>
+                  )}
                 </div>
+                {waQrError && <p style={{ color: 'var(--danger)', fontSize: 11.5, margin: '10px 0 0' }}>{waQrError}</p>}
               </div>
             )}
 
