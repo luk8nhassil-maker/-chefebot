@@ -12,17 +12,12 @@ const USERS: Record<string, { password: string; name: string; role: Role }> = {
   kellyne: {
     password: process.env.KELLYNE_PASSWORD!,
     name: "Kellyne",
-    role: "atendente",
+    role: "admin",
   },
   salao: {
     password: process.env.SALAO_PASSWORD!,
     name: "Atendente Salão",
     role: "atendente",
-  },
-  brito: {
-    password: process.env.ADMIN_PASSWORD!,
-    name: "Brito",
-    role: "admin",
   },
   ominix: {
     password: process.env.OMINIX_PASSWORD!,

@@ -92,7 +92,7 @@ jobs:
         run: echo "AUTH_SECRET=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')" >> "$GITHUB_ENV"
 
       - name: Gerar credencial de teste da equipe (não impressa, só para este job)
-        run: echo "ADMIN_PASSWORD=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')" >> "$GITHUB_ENV"
+        run: echo "KELLYNE_PASSWORD=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')" >> "$GITHUB_ENV"
 
       - name: Testes focados da autenticação do entregador
         run: >-
