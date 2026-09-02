@@ -1,0 +1,52 @@
+name: whatsapp-trocar-numero-ci
+
+on:
+  pull_request:
+    paths:
+      - "src/app/api/whatsapp/trocar-numero/**"
+      - "src/app/admin/page.tsx"
+      - "src/app/admin/page.whatsappTrocarNumero.test.ts"
+      - ".github/workflows/whatsapp-trocar-numero-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-trocar-numero-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do HEAD exato do PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados e regressão WhatsApp
+        run: >-
+          npm test --
+          src/app/api/whatsapp/trocar-numero/route.test.ts
+          src/app/api/whatsapp/reset/route.test.ts
+          src/app/api/whatsapp/qrcode/route.test.ts
+          src/app/api/whatsapp/state/route.test.ts
+          src/app/api/whatsapp/conexaoStale.test.ts
+          src/app/admin/page.whatsappTrocarNumero.test.ts
+
+      - name: Lint dos arquivos alterados
+        run: >-
+          npm run lint --
+          src/app/api/whatsapp/trocar-numero/route.ts
+          src/app/api/whatsapp/trocar-numero/route.test.ts
+          src/app/admin/page.whatsappTrocarNumero.test.ts
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build de produção
+        run: npm run build
