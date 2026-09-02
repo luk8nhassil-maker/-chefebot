@@ -91,6 +91,26 @@ describe("middleware - rotas administrativas protegidas", () => {
     expect(location).toContain("callbackUrl=%2Fadmin");
   });
 
+  it("admin acessa somente o diagnóstico de WhatsApp dentro de /dev", async () => {
+    const host = "chefedapizza.com.br";
+    const diagnosticoReq = await requestComRole(
+      `https://${host}/dev/whatsapp`,
+      host,
+      "admin"
+    );
+    const diagnosticoRes = await middleware(diagnosticoReq);
+    expect(diagnosticoRes.headers.get("location")).toBeNull();
+
+    const devReq = await requestComRole(
+      `https://${host}/dev`,
+      host,
+      "admin"
+    );
+    const devRes = await middleware(devReq);
+    expect(devRes.status).toBe(307);
+    expect(devRes.headers.get("location")).toContain("/login");
+  });
+
   it("redireciona /pedidos para /login sem token", async () => {
     const req = requestFor("https://chefebot-pjif.vercel.app/pedidos", "chefebot-pjif.vercel.app");
     const res = await middleware(req);
