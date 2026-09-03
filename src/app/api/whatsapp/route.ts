@@ -1007,6 +1007,10 @@ async function atualizarRascunhoVivo(phone: string, messageText: string) {
 }
 
 export async function POST(req: NextRequest) {
+  // Hoisted para fora do try: o catch abaixo precisa dele para reverter o
+  // claim de idempotência quando o processamento falha depois da gravação
+  // (ver comentário na chave `msg_processed:` mais abaixo).
+  let msgId: string | undefined;
   try {
     const body = await req.json();
 
@@ -1101,7 +1105,7 @@ export async function POST(req: NextRequest) {
     const phone = extrairTelefoneIndividualDaChave(data?.key);
     if (!phone) return NextResponse.json({ ok: true });
 
-    const msgId = data?.key?.id as string | undefined;
+    msgId = data?.key?.id as string | undefined;
 
     // Sinal de saúde best-effort (nunca gate), inclusive para o inbound do
     // canário que retorna antes do fluxo comercial normal.
@@ -1133,6 +1137,16 @@ export async function POST(req: NextRequest) {
     // MESMO messageId (retry do provedor correndo em paralelo com a 1a tentativa)
     // não podem mais passar as duas pelo mesmo `get` antes de qualquer `set` ter
     // efeito — só uma delas ganha a chave, a outra é tratada como duplicata.
+    //
+    // O claim acontece AQUI, antes de qualquer processamento real (criação de
+    // sessão/pedido, envio da resposta). Se o processamento falhar depois
+    // disso (exceção não tratada — Redis instável, bug, etc.), o catch global
+    // no fim desta função (`catch (error)`) reverte este claim (`redis.del`)
+    // antes de responder. Sem essa reversão, uma falha real DEPOIS do claim
+    // deixava o evento marcado como "processado" por 24h mesmo sem ter gerado
+    // nenhuma resposta ao cliente — e uma reentrega genuína do mesmo
+    // messageId pela Evolution (retry ou resync de reconexão) era descartada
+    // em silêncio pelo resto desse período, sem qualquer nova tentativa.
     if (msgId) {
       const idempotencyKey = `msg_processed:${msgId}`;
       const claimouProcessamento = await redis.set(idempotencyKey, 1, { ex: 86400, nx: true }); // 24h TTL
@@ -1898,6 +1912,13 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("Webhook error:", error);
     await log('erro', 'Erro no webhook WhatsApp', String(error));
+    // Reverte o claim de idempotência (ver comentário em `msg_processed:`
+    // acima): sem isso, esta mensagem ficaria marcada como "processada" por
+    // 24h mesmo sem ter recebido resposta nenhuma. Best-effort — se o próprio
+    // Redis estiver indisponível aqui, o TTL de 24h ainda expira sozinho.
+    if (msgId) {
+      await redis.del(`msg_processed:${msgId}`).catch(() => {});
+    }
     return NextResponse.json({ ok: true });
   }
 }
