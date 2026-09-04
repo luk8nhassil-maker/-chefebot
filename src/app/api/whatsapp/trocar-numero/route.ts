@@ -361,19 +361,28 @@ async function completarRecovery(
   let base64Criacao: string | null = null;
 
   if (atual.phase === "captured") {
+    // Ordem deliberada: a tentativa NÃO destrutiva vem primeiro. Só se chega
+    // aqui quando o logout já falhou em tirar a instância de "open", ou seja,
+    // a sessão já está num estado que a própria Evolution não resolveu. Se
+    // pedir o QR direto já resolve, remover e recriar a instância seria
+    // destruir histórico e configuração sem necessidade nenhuma.
+    //
+    // Uma sessão de fato viva não devolve QR aqui (responde só o estado), e aí
+    // o caminho segue exatamente como antes: remoção controlada e recriação.
+    const qrDireto = await tentarQrSemRemocao(config);
+    if (qrDireto) {
+      // Nada foi removido: settings, histórico e webhook da instância seguem
+      // intactos. O webhook é confirmado em melhor esforço (mesma política do
+      // caminho de logout) e a recuperação pendente é encerrada, porque não
+      // há mais etapa destrutiva a retomar num próximo clique.
+      await garantirWebhookEvolution(config).catch(() => null);
+      await salvarStatusConexao("connecting");
+      await limparRecovery(config.instanceName);
+      return { ok: true, qrcode: qrDireto, via: "qr_sem_remocao" };
+    }
+
     const remocao = await deletarInstancia(config);
     if (!remocao.removida) {
-      const qrDireto = await tentarQrSemRemocao(config);
-      if (qrDireto) {
-        // Nada foi removido: settings, histórico e webhook da instância seguem
-        // intactos. O webhook é confirmado em melhor esforço (mesma política do
-        // caminho de logout) e a recuperação pendente é encerrada, porque não
-        // há mais etapa destrutiva a retomar num próximo clique.
-        await garantirWebhookEvolution(config).catch(() => null);
-        await salvarStatusConexao("connecting");
-        await limparRecovery(config.instanceName);
-        return { ok: true, qrcode: qrDireto, via: "qr_sem_remocao" };
-      }
       return {
         ok: false,
         estado: "provider_delete_failed",
