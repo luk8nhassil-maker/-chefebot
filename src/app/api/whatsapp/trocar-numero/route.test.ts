@@ -319,6 +319,12 @@ describe("POST /api/whatsapp/trocar-numero — recuperação da raiz do provider
       }
       if (url.includes("/settings/find/chefebot")) return response(200, { alwaysOnline: true });
       if (url.includes("/instance/delete/chefebot")) return response(500);
+      // Sessão de fato viva: /instance/connect devolve o estado, sem QR — o
+      // último recurso não destrutivo não tem o que entregar e o erro
+      // original é preservado.
+      if (url.includes("/instance/connect/chefebot")) {
+        return response(200, { instance: { instanceName: "chefebot", state: "open" } });
+      }
       throw new Error(`fetch inesperado: ${url}`);
     });
 
@@ -327,6 +333,9 @@ describe("POST /api/whatsapp/trocar-numero — recuperação da raiz do provider
 
     expect(res.status).toBe(502);
     expect(data.estado).toBe("provider_delete_failed");
+    // O status observado no delete precisa sobreviver até o admin — sem ele o
+    // diagnóstico morre numa mensagem genérica.
+    expect(data.error).toContain("500");
     const urls = vi.mocked(fetch).mock.calls.map(c => String(c[0]));
     expect(urls.some(url => url.endsWith("/instance/create"))).toBe(false);
   });
@@ -374,5 +383,104 @@ describe("POST /api/whatsapp/trocar-numero — recuperação da raiz do provider
     expect(secondData.qrcode.base64).toContain("QR-RETOMADO");
     expect(deleteCalls).toBe(1);
     expect(createAttempts).toBe(2);
+  });
+
+  // Incidente real (03/09): o painel mostrava "WhatsApp conectado / Bot ativo",
+  // a Evolution respondia connectionState "open" e webhook correto, mas nenhuma
+  // mensagem chegava havia 3 dias — sessão fantasma. Ao clicar em "Trocar
+  // número", o logout não tirava do "open" e a Evolution RECUSAVA o
+  // /instance/delete (versões que exigem a instância desconectada para apagar),
+  // então o fluxo morria em "A Evolution não conseguiu remover a sessão
+  // travada" e NENHUM QR aparecia — deixando o admin sem saída pelo painel.
+  test("delete recusado pela Evolution ainda entrega QR novo sem remover a instância", async () => {
+    let createChamado = false;
+    let deleteChamado = false;
+
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.includes("/instance/logout/chefebot")) return response(200);
+      // Sessão fantasma: continua "open" para a API mesmo depois do logout.
+      if (url.includes("/instance/connectionState/chefebot")) return response(200, { instance: { state: "open" } });
+      if (url.includes("/instance/fetchInstances")) {
+        return response(200, [{ name: "chefebot", integration: "WHATSAPP-BAILEYS" }]);
+      }
+      if (url.includes("/settings/find/chefebot")) return response(200, { alwaysOnline: true });
+      if (url.includes("/instance/delete/chefebot")) {
+        deleteChamado = true;
+        // A Evolution recusa remover enquanto a instância estiver "open".
+        return response(400, { message: "The instance needs to be disconnected" });
+      }
+      // A sessão não tem vínculo real com o WhatsApp: o connect devolve QR novo.
+      if (url.includes("/instance/connect/chefebot")) {
+        return response(200, { base64: "data:image/png;base64,QR-SEM-REMOCAO" });
+      }
+      if (url.endsWith("/instance/create")) {
+        createChamado = true;
+        return response(201, {});
+      }
+      throw new Error(`fetch inesperado: ${url}`);
+    });
+
+    const res = await POST(req("token-admin"));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(data.qrcode.base64).toContain("QR-SEM-REMOCAO");
+    expect(data.recovery).toBe("qr_sem_remocao");
+
+    // A instância NUNCA pode ser recriada por este caminho: nada foi removido,
+    // então recriar duplicaria/derrubaria a instância real.
+    expect(deleteChamado).toBe(true);
+    expect(createChamado).toBe(false);
+
+    // Sem etapa destrutiva pendente, a recuperação é encerrada — um segundo
+    // clique não pode retomar um delete que nunca aconteceu.
+    expect(await redisMock.get("whatsapp:trocar-numero:recovery:chefebot")).toBeNull();
+    expect(salvarStatusConexao).toHaveBeenCalledWith("connecting");
+  });
+
+  test("QR entregue sem remoção mantém o webhook garantido", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/instance/logout/chefebot")) return response(200);
+      if (url.includes("/instance/connectionState/chefebot")) return response(200, { instance: { state: "open" } });
+      if (url.includes("/instance/fetchInstances")) {
+        return response(200, [{ name: "chefebot", integration: "WHATSAPP-BAILEYS" }]);
+      }
+      if (url.includes("/settings/find/chefebot")) return response(200, {});
+      if (url.includes("/instance/delete/chefebot")) return response(400);
+      if (url.includes("/instance/connect/chefebot")) {
+        return response(200, { base64: "data:image/png;base64,QR-WEBHOOK" });
+      }
+      throw new Error(`fetch inesperado: ${url}`);
+    });
+
+    const res = await POST(req("token-admin"));
+    expect(res.status).toBe(200);
+    expect(garantirWebhookEvolution).toHaveBeenCalled();
+  });
+
+  test("falha de rede no connect preserva o erro original de remoção", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/instance/logout/chefebot")) return response(200);
+      if (url.includes("/instance/connectionState/chefebot")) return response(200, { instance: { state: "open" } });
+      if (url.includes("/instance/fetchInstances")) {
+        return response(200, [{ name: "chefebot", integration: "WHATSAPP-BAILEYS" }]);
+      }
+      if (url.includes("/settings/find/chefebot")) return response(200, {});
+      if (url.includes("/instance/delete/chefebot")) return response(400);
+      if (url.includes("/instance/connect/chefebot")) throw new Error("rede caiu");
+      throw new Error(`fetch inesperado: ${url}`);
+    });
+
+    const res = await POST(req("token-admin"));
+    const data = await res.json();
+
+    expect(res.status).toBe(502);
+    expect(data.estado).toBe("provider_delete_failed");
+    expect(data.error).toContain("400");
   });
 });
