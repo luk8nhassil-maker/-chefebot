@@ -55,8 +55,8 @@ jobs:
             echo "${metricas}"
             echo "--- headers relevantes ---"
             grep -i -E '^(x-vercel-id|x-vercel-error|x-matched-path|location|content-type|age|x-vercel-cache):' /tmp/headers.txt || true
-            echo "--- corpo (truncado em 500 caracteres) ---"
-            head -c 500 /tmp/corpo.txt || true
+            echo "--- corpo (truncado em 1500 caracteres) ---"
+            head -c 1500 /tmp/corpo.txt || true
             echo
           }
 
