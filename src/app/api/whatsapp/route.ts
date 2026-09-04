@@ -40,7 +40,7 @@ import {
   ehEcoOutboundCanario,
   processarPossivelInboundCanario,
 } from "@/lib/whatsappCanary";
-import { marcarInboundRecebido, marcarOutboundConfirmado } from "@/lib/whatsappDiag";
+import { marcarInboundRecebido, marcarOutboundConfirmado, marcarUpsertDescartado, marcarWebhookRecebido } from "@/lib/whatsappDiag";
 import { sanitizeErrorMessage } from "@/lib/sanitizeLog";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 
@@ -1014,6 +1014,13 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
+    // Telemetria de transporte (best-effort, nunca gate): registra que a
+    // Evolution ENTREGOU um evento aqui, antes de qualquer filtro. É o que
+    // separa "a Evolution parou de entregar" de "o evento chega e é
+    // descartado" — `inboundLastSeenAt` sozinho não distingue os dois, porque
+    // só é gravado depois do filtro de JID individual.
+    marcarWebhookRecebido(body?.event).catch(() => {});
+
     // Evento de mudança de status da conexão do WhatsApp (Evolution API).
     // A Evolution envia "connection.update" com data.state podendo ser "open" (conectado),
     // "connecting" (conectando/QR pendente) ou "close" (desconectado).
@@ -1103,7 +1110,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
     const phone = extrairTelefoneIndividualDaChave(data?.key);
-    if (!phone) return NextResponse.json({ ok: true });
+    if (!phone) {
+      // Descarte legítimo (grupo, broadcast ou LID sem `remoteJidAlt`), mas
+      // silencioso até aqui: nenhum log, nenhum marcador. Registra só o
+      // SUFIXO do JID e os NOMES dos campos da chave — schema, nunca valor —
+      // para o diagnóstico conseguir dizer se as mensagens estão sendo
+      // engolidas por este filtro em vez de não chegarem.
+      marcarUpsertDescartado(data?.key).catch(() => {});
+      return NextResponse.json({ ok: true });
+    }
 
     msgId = data?.key?.id as string | undefined;
 
