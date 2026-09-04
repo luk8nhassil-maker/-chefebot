@@ -40,7 +40,7 @@ type InstanceInfo = Record<string, unknown>;
 type QrcodeAtual = { base64: string; generatedAt: number; expiresAt: number; generationId: number };
 
 type ResultadoRecuperacao =
-  | { ok: true; qrcode: QrcodeAtual; via: "recreated" | "qr_sem_remocao" }
+  | { ok: true; qrcode: QrcodeAtual; via: "recreated" | "qr_sem_remocao" | "qr_apos_restart" }
   | { ok: false; estado: string; error: string };
 
 const RECOVERY_TTL_SECONDS = 30 * 60;
@@ -353,6 +353,33 @@ async function tentarQrSemRemocao(config: EvolutionConfig): Promise<QrcodeAtual 
   }
 }
 
+/**
+ * Reinicia SOMENTE a conexão desta instância na Evolution.
+ *
+ * Não apaga instância, settings, webhook nem histórico — é o equivalente a
+ * desligar e ligar o cabo daquela sessão. Existe porque a Evolution pode ficar
+ * com o `connectionStatus` DEFASADO em "open" depois que o WhatsApp derruba o
+ * aparelho (motivo 401 = loggedOut): nesse estado ela bloqueia os dois
+ * caminhos de conserto ao mesmo tempo — recusa devolver QR ("já estou
+ * conectada") e recusa o delete com 400 ("precisa estar desconectada").
+ *
+ * O restart é o que faz a Evolution largar esse status fantasma: com a
+ * credencial já invalidada pelo WhatsApp, a reconexão falha, o estado cai para
+ * close/connecting e o QR volta a ser emitido.
+ */
+async function reiniciarInstancia(config: EvolutionConfig): Promise<{ ok: boolean; status: number | null }> {
+  try {
+    const res = await fetch(`${config.baseUrl}/instance/restart/${encodeURIComponent(config.instanceName)}`, {
+      method: "PUT",
+      headers: { apikey: config.apiKey },
+      cache: "no-store",
+    });
+    return { ok: res.ok, status: res.status };
+  } catch {
+    return { ok: false, status: null };
+  }
+}
+
 async function completarRecovery(
   config: EvolutionConfig,
   record: RecoveryRecord,
@@ -381,14 +408,30 @@ async function completarRecovery(
       return { ok: true, qrcode: qrDireto, via: "qr_sem_remocao" };
     }
 
+    // Segunda tentativa NÃO destrutiva: reinicia só a conexão e pede o QR de
+    // novo. Cobre o impasse do status defasado em "open", em que a Evolution
+    // recusa o QR ("já conectada") E recusa o delete com 400 ("precisa estar
+    // desconectada") — sem o restart não há saída sem destruir a instância.
+    const restart = await reiniciarInstancia(config);
+    if (restart.ok) {
+      await aguardarSairDeOpen(config, 6, 500);
+      const qrPosRestart = await tentarQrSemRemocao(config);
+      if (qrPosRestart) {
+        await garantirWebhookEvolution(config).catch(() => null);
+        await salvarStatusConexao("connecting");
+        await limparRecovery(config.instanceName);
+        return { ok: true, qrcode: qrPosRestart, via: "qr_apos_restart" };
+      }
+    }
+
     const remocao = await deletarInstancia(config);
     if (!remocao.removida) {
       return {
         ok: false,
         estado: "provider_delete_failed",
-        error: `A Evolution não conseguiu remover a sessão travada nem liberar um QR novo${
-          remocao.status ? ` (status ${remocao.status})` : ""
-        }. Nenhum pedido ou dado do ChefeBot foi alterado.`,
+        error: `A Evolution não conseguiu liberar um QR novo nem remover a sessão travada (delete ${
+          remocao.status ?? "sem resposta"
+        }, restart ${restart.status ?? "sem resposta"}). Nenhum pedido ou dado do ChefeBot foi alterado.`,
       };
     }
     atual = { ...atual, phase: "deleted" };
