@@ -37,6 +37,12 @@ type RecoveryRecord = {
 
 type InstanceInfo = Record<string, unknown>;
 
+type QrcodeAtual = { base64: string; generatedAt: number; expiresAt: number; generationId: number };
+
+type ResultadoRecuperacao =
+  | { ok: true; qrcode: QrcodeAtual; via: "recreated" | "qr_sem_remocao" }
+  | { ok: false; estado: string; error: string };
+
 const RECOVERY_TTL_SECONDS = 30 * 60;
 const LOCK_TTL_SECONDS = 35;
 
@@ -243,29 +249,34 @@ async function restaurarSettings(config: EvolutionConfig, settings: SettingsPres
   }
 }
 
-async function deletarInstancia(config: EvolutionConfig): Promise<boolean> {
+async function deletarInstancia(config: EvolutionConfig): Promise<{ removida: boolean; status: number | null }> {
+  // O status observado é preservado (nunca descartado) porque é ele que
+  // diferencia "a Evolution recusou remover" de "a rede caiu no meio" — sem
+  // isso o admin só via uma mensagem genérica e o diagnóstico morria aqui.
+  let status: number | null = null;
   try {
     const res = await fetch(`${config.baseUrl}/instance/delete/${encodeURIComponent(config.instanceName)}`, {
       method: "DELETE",
       headers: { apikey: config.apiKey },
       cache: "no-store",
     });
+    status = res.status;
 
     // Em versões afetadas da Evolution, delete/logout podem responder erro
     // depois de já terem removido a sessão. A confirmação é feita pela lista
     // de instâncias abaixo, nunca só pelo status HTTP.
-    if (res.status === 401 || res.status === 403) return false;
+    if (res.status === 401 || res.status === 403) return { removida: false, status };
   } catch {
     // Ainda verificamos se o provider removeu a instância antes da falha de rede.
   }
 
   for (let tentativa = 0; tentativa < 8; tentativa++) {
     const lookup = await buscarInstanciaExata(config);
-    if (!lookup.ok) return false;
-    if (!lookup.instance) return true;
+    if (!lookup.ok) return { removida: false, status };
+    if (!lookup.instance) return { removida: true, status };
     await new Promise(resolve => setTimeout(resolve, 500));
   }
-  return false;
+  return { removida: false, status };
 }
 
 async function criarInstancia(
@@ -317,23 +328,58 @@ async function obterQr(config: EvolutionConfig, base64Inicial: string | null) {
   };
 }
 
+/**
+ * Último recurso NÃO destrutivo quando a Evolution recusa remover a instância.
+ *
+ * O objetivo real desta rota nunca foi apagar a instância — é entregar um QR
+ * novo para parear outro número; remover/recriar é só um meio. Então, antes de
+ * desistir, pedimos o QR direto (`/instance/connect`, que nunca apaga nem
+ * desconecta nada):
+ *
+ * - sessão realmente viva → a Evolution responde estado, sem QR: devolvemos
+ *   `null` e o erro original é mantido, sem mudar nada;
+ * - sessão fantasma ("open" para a API, mas sem vínculo real com o WhatsApp,
+ *   que é justamente o caso em que o delete é recusado) → a Evolution devolve
+ *   um QR novo, exatamente o resultado desejado, sem apagar coisa alguma.
+ *
+ * Mesma lógica das correções anteriores deste fluxo: a fonte de verdade é o
+ * efeito real observado, nunca o status HTTP da operação intermediária.
+ */
+async function tentarQrSemRemocao(config: EvolutionConfig): Promise<QrcodeAtual | null> {
+  try {
+    return await obterQr(config, null);
+  } catch {
+    return null;
+  }
+}
+
 async function completarRecovery(
   config: EvolutionConfig,
   record: RecoveryRecord,
-): Promise<
-  | { ok: true; qrcode: { base64: string; generatedAt: number; expiresAt: number; generationId: number } }
-  | { ok: false; estado: string; error: string }
-> {
+): Promise<ResultadoRecuperacao> {
   let atual = record;
   let base64Criacao: string | null = null;
 
   if (atual.phase === "captured") {
-    const removida = await deletarInstancia(config);
-    if (!removida) {
+    const remocao = await deletarInstancia(config);
+    if (!remocao.removida) {
+      const qrDireto = await tentarQrSemRemocao(config);
+      if (qrDireto) {
+        // Nada foi removido: settings, histórico e webhook da instância seguem
+        // intactos. O webhook é confirmado em melhor esforço (mesma política do
+        // caminho de logout) e a recuperação pendente é encerrada, porque não
+        // há mais etapa destrutiva a retomar num próximo clique.
+        await garantirWebhookEvolution(config).catch(() => null);
+        await salvarStatusConexao("connecting");
+        await limparRecovery(config.instanceName);
+        return { ok: true, qrcode: qrDireto, via: "qr_sem_remocao" };
+      }
       return {
         ok: false,
         estado: "provider_delete_failed",
-        error: "A Evolution não conseguiu remover a sessão travada. Nenhum pedido ou dado do ChefeBot foi alterado.",
+        error: `A Evolution não conseguiu remover a sessão travada nem liberar um QR novo${
+          remocao.status ? ` (status ${remocao.status})` : ""
+        }. Nenhum pedido ou dado do ChefeBot foi alterado.`,
       };
     }
     atual = { ...atual, phase: "deleted" };
@@ -387,15 +433,10 @@ async function completarRecovery(
 
   await salvarStatusConexao("connecting");
   await limparRecovery(config.instanceName);
-  return { ok: true, qrcode: qr };
+  return { ok: true, qrcode: qr, via: "recreated" };
 }
 
-async function iniciarHardReset(
-  config: EvolutionConfig,
-): Promise<
-  | { ok: true; qrcode: { base64: string; generatedAt: number; expiresAt: number; generationId: number } }
-  | { ok: false; estado: string; error: string }
-> {
+async function iniciarHardReset(config: EvolutionConfig): Promise<ResultadoRecuperacao> {
   const lookup = await buscarInstanciaExata(config);
   if (!lookup.ok) {
     return {
@@ -541,7 +582,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       estado: "qr_required",
       qrcode: recovery.qrcode,
-      recovery: "recreated",
+      recovery: recovery.via,
     });
   } catch (e) {
     console.error("[WA_TROCA_NUMERO] erro inesperado:", e instanceof Error ? e.name : "erro desconhecido");
