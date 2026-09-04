@@ -441,6 +441,94 @@ describe("POST /api/whatsapp/trocar-numero — recuperação da raiz do provider
     expect(salvarStatusConexao).toHaveBeenCalledWith("connecting");
   });
 
+  // Impasse real observado em produção (T6, 04/09), com a Evolution 2.3.7:
+  // o WhatsApp deslogou o aparelho em 31/08 (motivo 401 = loggedOut) e a
+  // Evolution ficou com connectionStatus DEFASADO em "open". Nesse estado ela
+  // bloqueia os dois caminhos ao mesmo tempo:
+  //   - /instance/connect não devolve QR (ela acha que já está conectada);
+  //   - /instance/delete responde 400 ("precisa estar desconectada").
+  // Sem o restart não havia saída sem destruir a instância — e nem destruir
+  // era possível.
+  test("status 'open' defasado: restart destrava e entrega QR sem remover nada", async () => {
+    let reiniciou = false;
+    let deleteChamado = false;
+    let createChamado = false;
+
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      const metodo = (init as RequestInit | undefined)?.method;
+
+      if (url.includes("/instance/logout/chefebot")) return response(200);
+      if (url.includes("/instance/connectionState/chefebot")) {
+        // Continua "open" enquanto não reiniciar — é o status fantasma.
+        return response(200, { instance: { state: reiniciou ? "close" : "open" } });
+      }
+      if (url.includes("/instance/fetchInstances")) {
+        return response(200, [{ name: "chefebot", integration: "WHATSAPP-BAILEYS" }]);
+      }
+      if (url.includes("/settings/find/chefebot")) return response(200, { alwaysOnline: true });
+
+      if (url.includes("/instance/restart/chefebot")) {
+        expect(metodo).toBe("PUT");
+        reiniciou = true;
+        return response(200, { status: "SUCCESS" });
+      }
+
+      if (url.includes("/instance/connect/chefebot")) {
+        // Antes do restart a Evolution devolve só o estado, sem QR.
+        if (!reiniciou) return response(200, { instance: { state: "open" } });
+        return response(200, { base64: "data:image/png;base64,QR-POS-RESTART" });
+      }
+
+      if (url.includes("/instance/delete/chefebot")) {
+        deleteChamado = true;
+        return response(400, { message: "The instance needs to be disconnected" });
+      }
+      if (url.endsWith("/instance/create")) {
+        createChamado = true;
+        return response(201, {});
+      }
+      throw new Error(`fetch inesperado: ${url}`);
+    });
+
+    const res = await POST(req("token-admin"));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.qrcode.base64).toContain("QR-POS-RESTART");
+    expect(data.recovery).toBe("qr_apos_restart");
+
+    // O restart precisa ter acontecido, e nada destrutivo pode ter sido usado.
+    expect(reiniciou).toBe(true);
+    expect(deleteChamado).toBe(false);
+    expect(createChamado).toBe(false);
+    expect(await redisMock.get("whatsapp:trocar-numero:recovery:chefebot")).toBeNull();
+  });
+
+  test("se nem o restart destravar, o erro mostra os dois status para diagnóstico", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/instance/logout/chefebot")) return response(200);
+      if (url.includes("/instance/connectionState/chefebot")) return response(200, { instance: { state: "open" } });
+      if (url.includes("/instance/fetchInstances")) {
+        return response(200, [{ name: "chefebot", integration: "WHATSAPP-BAILEYS" }]);
+      }
+      if (url.includes("/settings/find/chefebot")) return response(200, {});
+      if (url.includes("/instance/restart/chefebot")) return response(500);
+      if (url.includes("/instance/connect/chefebot")) return response(200, { instance: { state: "open" } });
+      if (url.includes("/instance/delete/chefebot")) return response(400);
+      throw new Error(`fetch inesperado: ${url}`);
+    });
+
+    const res = await POST(req("token-admin"));
+    const data = await res.json();
+
+    expect(res.status).toBe(502);
+    expect(data.estado).toBe("provider_delete_failed");
+    expect(data.error).toContain("delete 400");
+    expect(data.error).toContain("restart 500");
+  });
+
   test("QR entregue sem remoção mantém o webhook garantido", async () => {
     vi.mocked(fetch).mockImplementation(async (input) => {
       const url = String(input);
