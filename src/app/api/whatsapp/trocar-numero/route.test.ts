@@ -430,9 +430,9 @@ describe("POST /api/whatsapp/trocar-numero — recuperação da raiz do provider
     expect(data.qrcode.base64).toContain("QR-SEM-REMOCAO");
     expect(data.recovery).toBe("qr_sem_remocao");
 
-    // A instância NUNCA pode ser recriada por este caminho: nada foi removido,
-    // então recriar duplicaria/derrubaria a instância real.
-    expect(deleteChamado).toBe(true);
+    // Garantia mais forte que "não recriou": quando pedir o QR já resolve, a
+    // remoção NEM É TENTADA. Nada de destrutivo chega a sair daqui.
+    expect(deleteChamado).toBe(false);
     expect(createChamado).toBe(false);
 
     // Sem etapa destrutiva pendente, a recuperação é encerrada — um segundo
