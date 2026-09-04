@@ -1,6 +1,7 @@
 import { deveSilenciarNovoAtendimentoWhatsapp } from "./assinaturaWhatsappGuard";
 import { obterConfigEvolution } from "./evolutionApi";
 import { maskMessageId } from "./sanitizeLog";
+import { marcarTentativaEnvio } from "./whatsappDiag";
 
 // Envio cru de texto pela Evolution API (sendText) — extraído do `enviarMensagem`
 // do webhook (src/app/api/whatsapp/route.ts) para ser reaproveitado por
@@ -72,7 +73,32 @@ async function tentarEnvio(
   }
 }
 
+/**
+ * Choke point real de saída para a Evolution. Envolve `executarEnvioTexto`
+ * apenas para registrar telemetria do resultado — sem alterar payload,
+ * retries, timeout ou o valor devolvido.
+ *
+ * Existe porque `outboundLastSuccessAt` só é gravado dentro de
+ * `enviarMensagem` (fluxo de conversa do bot) e portanto NÃO cobre a
+ * notificação de status de pedido, que chama esta função direto. Sem isso não
+ * há como distinguir "notificação nem foi tentada" de "foi tentada e a
+ * Evolution recusou".
+ */
 export async function enviarTextoWhatsApp(
+  phone: string,
+  text: string,
+  opts?: { delay?: number; presence?: "composing"; timeoutMs?: number }
+): Promise<ResultadoEnvioWhatsApp> {
+  const resultado = await executarEnvioTexto(phone, text, opts);
+  marcarTentativaEnvio({
+    ok: resultado.ok,
+    motivo: resultado.motivo,
+    statusHttp: resultado.statusHttp,
+  }).catch(() => {});
+  return resultado;
+}
+
+async function executarEnvioTexto(
   phone: string,
   text: string,
   opts?: { delay?: number; presence?: "composing"; timeoutMs?: number }
