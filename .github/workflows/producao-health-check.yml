@@ -68,6 +68,7 @@ jobs:
           echo "### 2) Outras rotas publicas que leem o mesmo datastore"
           sondar "/api/cardapio" "Cardapio publico (force-dynamic, le cardapio/esgotados do datastore). 200 = leitura funciona; 5xx = datastore fora."
           sondar "/api/diagnostico/datastore" "Sonda classificada do datastore (existe so depois deste PR chegar em producao)."
+          sondar "/api/diagnostico/whatsapp" "Sonda do webhook/conexao da Evolution: connectionState, webhook registrado/aponta pra producao/eventos, e os timestamps inboundLastSeenAt/outboundLastSuccessAt (sem PII)."
 
           echo "### 3) Rotas do painel e do dominio"
           sondar "/api/orders" "Rota do painel SEM cookie. 401 JSON = rota viva; 5xx = quebra antes da autenticacao."
