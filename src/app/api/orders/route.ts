@@ -47,6 +47,7 @@ import { listarComandas, PAGAMENTO_COMANDA_EM_ABERTO } from '@/lib/comandas'
 import { enriquecerPedidosComComanda } from '@/lib/pedidoComandaPainel.server'
 import { classificarFalhaDatastore } from '@/lib/datastoreDiagnostico'
 import { lerComRetry } from '@/lib/datastoreRetry'
+import { chaveExpedienteOperacional, chaveExpedienteDoPedido } from '@/lib/expedienteOperacional'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 
@@ -285,6 +286,34 @@ function limparPedidosExpirados(pedidos: Pedido[], agora: number = Date.now()): 
   return { pedidos: limpos, mudou }
 }
 
+// Pedidos terminais (entregue/cancelado) de expedientes anteriores são
+// arquivados automaticamente na virada das 03:00, sem intervenção manual.
+// Pedidos não-terminais (novo, em_preparo, saiu_entrega) atravessam a virada
+// visíveis até que alguém registre uma resolução — comportamento intencional.
+function autoArquivarTerminaisDeExpedienteAnterior(
+  pedidos: Pedido[],
+  agora: number = Date.now(),
+): { pedidos: Pedido[]; mudou: boolean } {
+  const expedienteAtual = chaveExpedienteOperacional(agora)
+  const isoAgora = new Date(agora).toISOString()
+  let mudou = false
+  const atualizados = pedidos.map(p => {
+    if (p.isArchived) return p
+    if (p.status !== 'entregue' && p.status !== 'cancelado') return p
+    const chave = chaveExpedienteDoPedido(p, agora)
+    if (chave === null || chave === expedienteAtual) return p
+    mudou = true
+    return {
+      ...p,
+      isArchived: true,
+      archivedAt: isoAgora,
+      archivedBy: 'auto_virada',
+      archivedReason: 'expediente_anterior',
+    }
+  })
+  return { pedidos: atualizados, mudou }
+}
+
 export async function GET(req: NextRequest) {
   const auth = await checkAuth(req)
   if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
@@ -332,13 +361,16 @@ async function listarPedidosDoPainel(req: NextRequest) {
     },
   })) || []
   const limpezaInicial = limparPedidosExpirados(snapshotPedidos)
+  const arquivamentoInicial = autoArquivarTerminaisDeExpedienteAnterior(limpezaInicial.pedidos)
   let limpos = snapshotPedidos
 
-  if (limpezaInicial.mudou) {
+  if (limpezaInicial.mudou || arquivamentoInicial.mudou) {
     limpos = await mutarPedidos<Pedido, Pedido[]>((pedidosFrescos) => {
       const limpezaAtual = limparPedidosExpirados(pedidosFrescos)
-      return limpezaAtual.mudou
-        ? { persistir: true, pedidos: limpezaAtual.pedidos, resultado: limpezaAtual.pedidos }
+      const arquivamentoAtual = autoArquivarTerminaisDeExpedienteAnterior(limpezaAtual.pedidos)
+      const mudou = limpezaAtual.mudou || arquivamentoAtual.mudou
+      return mudou
+        ? { persistir: true, pedidos: arquivamentoAtual.pedidos, resultado: arquivamentoAtual.pedidos }
         : { persistir: false, resultado: pedidosFrescos }
     })
   }
