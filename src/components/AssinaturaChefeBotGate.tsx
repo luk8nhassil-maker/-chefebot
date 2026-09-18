@@ -47,6 +47,11 @@ function ehRotaGestao(pathname: string) {
   return ROTAS_GESTAO.some((rota) => pathname === rota || pathname.startsWith(`${rota}/`));
 }
 
+/** Rotas de cupom/impressão — Gate não monta aqui (cobre window.print, iframe e agente local). */
+function ehRotaImpressao(pathname: string) {
+  return pathname.includes("/imprimir");
+}
+
 export default function AssinaturaChefeBotGate() {
   const pathname = usePathname();
   const router = useRouter();
@@ -55,9 +60,12 @@ export default function AssinaturaChefeBotGate() {
   const [planoSelecionado, setPlanoSelecionado] = useState<Plano["id"] | null>(null);
   const [message, setMessage] = useState("");
   const [gestaoAberta, setGestaoAberta] = useState(false);
+  const [bannerDispensado, setBannerDispensado] = useState(false);
+  const [planosAbertos, setPlanosAbertos] = useState(false);
 
   const sessaoOperacional = typeof document !== "undefined" && temSessaoOperacionalAssinatura(document.cookie);
-  const ativo = sessaoOperacional && ehRotaOperacionalAssinatura(pathname);
+  // Nunca ativar em rotas de impressão — guard primário, cobre todos os caminhos de impressão.
+  const ativo = sessaoOperacional && ehRotaOperacionalAssinatura(pathname) && !ehRotaImpressao(pathname);
 
   const carregar = useCallback(async () => {
     if (!ativo) return;
@@ -162,6 +170,178 @@ export default function AssinaturaChefeBotGate() {
   }
 
   if (!ativo || !status?.ok || !status.configured) return null;
+
+  // ── Branch WARNING: banner liquid glass + modal de pagamento antecipado ──
+  if (status.status === "warning") {
+    const estiloGlass = {
+      background: "rgba(20,20,22,0.70)",
+      backdropFilter: "blur(20px) saturate(180%)",
+      WebkitBackdropFilter: "blur(20px) saturate(180%)",
+      border: "1px solid rgba(255,255,255,0.10)",
+      boxShadow: "0 8px 32px rgba(0,0,0,0.28)",
+    };
+    const cssPrint = `@media print { .cb-sub-ui { display: none !important; } }`;
+
+    if (bannerDispensado && !planosAbertos) return null;
+
+    if (!planosAbertos) {
+      return (
+        <>
+          <style>{cssPrint}</style>
+          <div className="cb-sub-ui fixed inset-x-0 top-0 z-[9998] flex justify-center p-3 pointer-events-none">
+            <div className="pointer-events-auto w-full max-w-2xl rounded-2xl p-4 sm:p-5" style={estiloGlass}>
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-amber-400">
+                    Pagar antecipado
+                  </p>
+                  <p className="mt-1 text-base font-bold text-white">
+                    Sua assinatura vence em {Math.max(0, status.daysUntilDue ?? 0)} dia{status.daysUntilDue === 1 ? "" : "s"}
+                  </p>
+                  <p className="mt-0.5 text-sm text-zinc-400">
+                    Plano {planoAtual?.nome ?? "Básico"}
+                    {planoAtual ? ` · ${moeda(planoAtual.valorCentavos)}/mês` : ""}
+                    {status.dueDate ? ` · vence em ${dataBr(status.dueDate)}` : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {status.canManage && (
+                    <button
+                      type="button"
+                      onClick={() => { setMessage(""); setPlanoSelecionado(null); setPlanosAbertos(true); }}
+                      className="rounded-xl bg-amber-400 px-4 py-2 text-sm font-bold text-zinc-950 hover:bg-amber-300 transition-colors"
+                    >
+                      Pagar antecipado
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setBannerDispensado(true)}
+                    aria-label="Dispensar aviso"
+                    className="rounded-full p-1.5 text-zinc-400 hover:bg-white/10 hover:text-white transition-colors"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="M12 4L4 12M4 4l8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    // planosAbertos: modal de pagamento antecipado
+    return (
+      <>
+        <style>{cssPrint}</style>
+        <div
+          className="cb-sub-ui fixed inset-0 z-[9998] flex items-center justify-center overflow-y-auto p-4"
+          style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)" }}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="relative w-full max-w-xl rounded-3xl p-5 sm:p-7" style={estiloGlass}>
+            <button
+              type="button"
+              onClick={() => { setPlanosAbertos(false); setMessage(""); setPlanoSelecionado(null); }}
+              aria-label="Fechar"
+              className="absolute right-4 top-4 rounded-full p-1.5 text-zinc-400 hover:bg-white/10 hover:text-white transition-colors"
+            >
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                <path d="M14 4L4 14M4 4l10 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+              </svg>
+            </button>
+
+            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-amber-400">Pagar antecipado</p>
+            <h2 className="mt-2 text-xl font-black text-white sm:text-2xl">Escolha seu plano</h2>
+            <p className="mt-1.5 text-sm text-zinc-400">
+              Vencimento em {dataBr(status.dueDate)}. Pagar agora evita o aviso nos próximos dias.
+            </p>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
+              {status.plans?.map((plano) => {
+                const atual = plano.id === status.currentPlanId;
+                const selecionado = plano.id === planoSelecionado;
+                const recomendado = plano.id === "plus";
+                const downgradeAgendado = plano.id === status.pendingDowngradePlanId;
+                const bloqueadoPorPendencia = planoIndisponivelPorPendencia({
+                  blocked: false,
+                  daysLate: status.daysLate ?? 0,
+                  isCurrent: atual,
+                });
+                return (
+                  <button
+                    key={plano.id}
+                    type="button"
+                    disabled={!status.canManage || loadingPlan !== null || bloqueadoPorPendencia}
+                    onClick={() => { setMessage(""); setPlanoSelecionado(plano.id); }}
+                    className={`relative rounded-2xl border p-4 text-left transition ${
+                      selecionado
+                        ? "border-amber-500 ring-2 ring-amber-300"
+                        : atual
+                          ? "border-amber-500/60 ring-2 ring-amber-400/30"
+                          : recomendado
+                            ? "border-white/20"
+                            : "border-white/10"
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
+                    style={{ background: atual ? "rgba(255,205,0,0.08)" : "rgba(255,255,255,0.04)" }}
+                  >
+                    {atual && (
+                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-amber-400 px-3 py-0.5 text-[10px] font-black uppercase text-zinc-950">
+                        Seu plano
+                      </span>
+                    )}
+                    {!atual && recomendado && (
+                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-zinc-600 px-3 py-0.5 text-[10px] font-black uppercase text-white">
+                        Recomendado
+                      </span>
+                    )}
+                    <span className="block text-sm font-bold text-white">{plano.nome}</span>
+                    <span className="mt-1 block text-xl font-black tabular-nums text-white">{moeda(plano.valorCentavos)}</span>
+                    <span className="mt-2 block text-xs font-medium leading-5 text-zinc-400">
+                      {plano.creditosEvolucaoMensais > 0
+                        ? `Até ${plano.creditosEvolucaoMensais} créditos/mês`
+                        : "Evoluções à parte"}
+                    </span>
+                    <span className="mt-1 block text-xs text-zinc-500">
+                      {selecionado
+                        ? "Selecionado"
+                        : downgradeAgendado
+                          ? "Agendado"
+                          : atual
+                            ? "Pagar mensalidade"
+                            : bloqueadoPorPendencia
+                              ? "Quite a pendência primeiro"
+                              : "Selecionar"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              disabled={!status.canManage || loadingPlan !== null || !planoSelecionado}
+              onClick={() => { if (planoSelecionado) void escolherPlano(planoSelecionado); }}
+              className="mt-5 w-full rounded-2xl bg-amber-400 px-4 py-3.5 text-sm font-black text-zinc-950 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-500"
+            >
+              {loadingPlan ? "Abrindo pagamento..." : !planoSelecionado ? "Escolha um plano" : "Continuar para o pagamento"}
+            </button>
+
+            {!status.canManage && (
+              <p className="mt-3 text-sm font-semibold text-amber-400">Entre com uma conta administrativa para pagar ou trocar o plano.</p>
+            )}
+            {message && (
+              <p className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold text-white">{message}</p>
+            )}
+          </div>
+        </div>
+      </>
+    );
+  }
+  // ── Fim branch WARNING ──
 
   const bloqueado = status.blocked === true;
   const regular = status.status === "regular";
