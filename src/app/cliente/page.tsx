@@ -33,6 +33,7 @@ type Jornada = {
 
 type Fidelidade = {
   ativo: boolean
+  unidade?: 'pontos' | 'estrelas'
   descricaoRecompensa: string
   saldoPontos: number
   pontosPrevistos: number
@@ -548,7 +549,7 @@ export default function ClientePage() {
       <div style={{ background: cores.cardBg, borderBottom: `1px solid ${cores.cardBorda}`, padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Pizza size={22} color={cores.navy} />
-          <div style={{ fontSize: 15, fontWeight: 700, color: cores.navy }}>Meus pontos</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: cores.navy }}>Minha fidelidade</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           {step === 'perfil' && (
@@ -587,7 +588,7 @@ export default function ClientePage() {
               {waMascarado}
             </div>
             <p style={{ fontSize: 13.5, color: cores.textoSecundario, margin: 0, lineHeight: 1.5, textAlign: 'center' }}>
-              Confirme seu WhatsApp para ativar seus pontos, acompanhar suas recompensas e não perder nenhuma vantagem.
+              Confirme seu WhatsApp para ativar sua fidelidade, acompanhar suas recompensas e não perder nenhuma vantagem.
             </p>
             {erro && <p style={{ color: cores.perigo, fontSize: 13, margin: 0, textAlign: 'center' }}>{erro}</p>}
             <button onClick={pedirCodigoVinculo} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
@@ -701,7 +702,7 @@ export default function ClientePage() {
             />
             {erro && <p style={{ color: cores.perigo, fontSize: 13, margin: 0 }}>{erro}</p>}
             <button onClick={salvarNome} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
-              {enviando ? 'Ativando...' : 'Ativar meus pontos'}
+              {enviando ? 'Ativando...' : 'Ativar minha fidelidade'}
             </button>
             {erro && traceId && (
               <p style={{ fontSize: 11, color: cores.textoTerciario, margin: 0, textAlign: 'center' }}>
@@ -748,7 +749,7 @@ export default function ClientePage() {
                 <>
                   {/* Hero de saldo */}
                   <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
-                    <div style={{ fontSize: 13, color: cores.textoSecundario, marginBottom: 4 }}>Seu saldo de pontos</div>
+                    <div style={{ fontSize: 13, color: cores.textoSecundario, marginBottom: 4 }}>Seu saldo de {fidelidade.unidade === 'estrelas' ? 'Estrelas' : 'pontos'}</div>
                     <div style={{ fontSize: 56, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
                       {fidelidade.saldoPontos}
                     </div>
@@ -776,7 +777,7 @@ export default function ClientePage() {
                   ) : (
                     <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
                       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
-                        {fidelidade.saldoPontos} de {fidelidade.metaPontos} pontos
+                        {fidelidade.saldoPontos} de {fidelidade.metaPontos} {fidelidade.unidade === 'estrelas' ? 'Estrelas' : 'pontos'}
                       </div>
                       <div style={{ background: cores.moldura, borderRadius: 999, height: 12, overflow: 'hidden' }}>
                         <div style={{
@@ -787,7 +788,7 @@ export default function ClientePage() {
                         }} />
                       </div>
                       <p style={{ fontSize: 13, color: cores.textoSecundario, margin: '10px 0 0' }}>
-                        Faltam {fidelidade.pontosFaltantes} pontos para: {fidelidade.descricaoRecompensa}
+                        Faltam {fidelidade.pontosFaltantes} {fidelidade.unidade === 'estrelas' ? 'Estrelas' : 'pontos'} para seu próximo presente
                       </p>
                     </div>
                   )}
@@ -867,7 +868,7 @@ export default function ClientePage() {
 
               {fidelidade && fidelidade.ativo && (
                 <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 18 }}>
-                  <p style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 12px' }}>Extrato de pontos</p>
+                  <p style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 12px' }}>Extrato de {fidelidade.unidade === 'estrelas' ? 'Estrelas' : 'pontos'}</p>
                   {fidelidade.extrato.length === 0 && (
                     <p style={{ fontSize: 13, color: cores.textoSecundario, margin: 0 }}>Nenhuma movimentação ainda — seu primeiro pedido entra aqui.</p>
                   )}

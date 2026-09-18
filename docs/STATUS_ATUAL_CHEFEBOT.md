@@ -34,7 +34,47 @@ Estes itens já foram corrigidos e validados. Só investigar de novo se houver *
 
 ## 4. Pendências reais
 
-*(preencher conforme forem identificadas e confirmadas)*
+### Estrelas V1 + Indicação — PR #422 (branch `codex/chefebot-estrelas-v1`)
+
+**Estado: implementado, aguardando merge.**
+
+#### O que foi implementado
+
+**Estrelas V1 (`src/lib/estrelas.ts`, `src/lib/fidelidade.ts`)**
+- Regra `"estrelas-faixas-v1"`, meta = 50 estrelas.
+- Faixas por valor elegível (subtotal − desconto fidelidade):
+  - 0 cent → 0 ★; 1–3 999 → 3 ★; 4 000–6 999 → 5 ★; 7 000–9 999 → 7 ★; 10 000–14 999 → 9 ★; ≥ 15 000 → 12 ★.
+- Gated por `estrelasV1Ativa(config)` que verifica `config.regraVersao === "estrelas-faixas-v1"`.
+- Novo campo `saldoEstrelas`/`metaEstrelas`/`estrelasFaltantes`/`marcoEstrelasAtingido` na API `GET /api/cliente/fidelidade`.
+
+**Indicação (`src/lib/indicacaoToken.ts`)**
+- Token opaco 18 bytes → 24 chars base64url, TTL 90 dias (`indicacao:token:{token}`).
+- Relação permanente `indicacao:relacao:{indicadoId}` — first-write-wins, self-referral bloqueado.
+- API `GET /api/cliente/indicacao` — retorna (criando se necessário) o token do cliente autenticado.
+- API `POST /api/cliente/indicacao { ref: TOKEN }` — registra a relação indicador→indicado. Idempotente.
+
+**Efeitos de indicação (`src/lib/fidelidadeEfeitos.ts`)**
+- Novo efeito `"indicacao"` adicionado à cadeia do pedido entregue.
+- Primeira compra comercial válida → `creditarEstrelasIndicacaoValida` → +6 ★ para o indicador.
+- Todo pedido entregue com relação → `creditarEstrelaApoioRecorrente` → +1 ★ por relação por expediente (idempotente via `apoio:{indicadoId}:expediente:{expedienteId}`).
+- Todas as operações são idempotentes: se o processo cair após `"jornada"` mas antes de persistir `"indicacao"`, o retry executa somente o efeito pendente.
+
+#### Dry-run histórico (Bloqueio 1)
+
+Simulação pura sobre dataset sintético de 524 pedidos / 436 clientes (`src/lib/estrelasDryRun.test.ts`):
+
+| Métrica | Resultado |
+|---|---|
+| Pedidos analisados | 524 |
+| Clientes únicos | 436 |
+| Estrelas distribuídas | 2 046 |
+| Clientes na meta (≥ 50 ★) | 0 |
+| Média por cliente | ~4,69 ★ |
+| Mediana por cliente | 0 ★ |
+| Impacto +1 indicação (+6 ★) | 0 clientes adicionais |
+| Impacto +2 indicações (+12 ★) | 0 clientes adicionais |
+
+Interpretação: com 1–3 pedidos por cliente e valores típicos de R$45–R$120, nenhum cliente chega a 50 ★ no dataset histórico. O marco de recompensa será atingido naturalmente à medida que a base acumular pedidos ao longo do tempo.
 
 ## 5. Como usar este documento
 
