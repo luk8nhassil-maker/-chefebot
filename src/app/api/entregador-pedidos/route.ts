@@ -3,8 +3,7 @@ import { redis } from "@/lib/redis";
 import { adquirirMutexPedidos, liberarMutexPedidos } from "@/lib/pedidosConcorrencia";
 import { autenticarEntregador, pedidoIdValido } from "@/lib/entregadorAuth";
 import type { PedidoEntregador } from "@/types/entregador";
-import { creditarPontosPedidoEntregue } from "@/lib/fidelidade";
-import { processarConclusaoPedidoJornada } from "@/lib/jornadaChef";
+import { processarEfeitosPedidoEntregue } from "@/lib/fidelidadeEfeitos";
 import type { ItemApp } from "@/lib/pedidoAppItens";
 import type { ItemElegibilidadeJornada } from "@/lib/jornadaChef";
 import type { PedidoSnapshotOficial } from "@/lib/pedidoSnapshot";
@@ -194,24 +193,10 @@ export async function POST(req: NextRequest) {
 
     const pedidoMainAtualizado = resultado.pedidoMain;
     try {
-      await creditarPontosPedidoEntregue({
-        id: pedidoMainAtualizado.id,
-        status: "entregue",
-        telefone: pedidoMainAtualizado.telefone,
-        clienteId: pedidoMainAtualizado.clienteId,
-        total: pedidoMainAtualizado.total ?? 0,
-        taxaEntrega: pedidoMainAtualizado.taxaEntrega,
-        snapshotOficial: pedidoMainAtualizado.snapshotOficial,
-      });
+      await processarEfeitosPedidoEntregue({ ...pedidoMainAtualizado, status: "entregue" });
     } catch (error) {
-      console.error("[ChefeBot] Erro ao creditar pontos de fidelidade do pedido entregue (ignorado):", error);
+      console.error("[ChefeBot] Efeitos de fidelidade pendentes após entrega (retry necessário):", error);
     }
-
-    // Jornada do Chef: hook centralizado, mesma função chamada em toda
-    // transição oficial para "entregue" — nunca duplica a regra por rota.
-    await processarConclusaoPedidoJornada({ ...pedidoMainAtualizado, status: "entregue" }).catch((error) =>
-      console.error("[ChefeBot] Erro ao processar Jornada do Chef (ignorado):", error)
-    );
 
     return NextResponse.json({ ok: true, pedido: resultado.pedidoFila });
   } catch {

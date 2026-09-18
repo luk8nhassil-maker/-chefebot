@@ -24,8 +24,8 @@ import { avaliarHorarioComprovantePix, extrairDataHoraComprovantePix, FUSO_OPERA
 import { avaliarEvidenciaPix, type ResultadoEvidenciaPix } from "@/lib/pixComprovanteAvaliacao";
 import { encontrarPedidoPixPendentePorTelefone } from "@/lib/pixPedidoMatching";
 import { telefonesCorrespondem } from "@/lib/telefone";
-import { creditarPontosPedidoEntregue } from "@/lib/fidelidade";
-import { itensJornadaDoCarrinhoWhatsApp, processarConclusaoPedidoJornada } from "@/lib/jornadaChef";
+import { itensJornadaDoCarrinhoWhatsApp } from "@/lib/jornadaChef";
+import { processarEfeitosPedidoEntregue } from "@/lib/fidelidadeEfeitos";
 import { buildCatalog } from "@/lib/catalog/adapter";
 import { norm, type ItemApp } from "@/lib/pedidoAppItens";
 import type { Menu } from "@/lib/menu";
@@ -1314,27 +1314,13 @@ export async function POST(req: NextRequest) {
         if (resultadoEntrega) {
           const { pedido, pedidosAtualizados: pedidos } = resultadoEntrega
 
-          // Fidelidade por pontos: idempotente por pedidoId, isolada em
-          // try/catch proprio — falha aqui nunca pode impedir a confirmacao
-          // de entrega, que ja foi salva acima.
+          // Todos os efeitos de fidelidade passam pela autoridade única. A
+          // entrega já foi persistida; falha aqui fica pendente para retry.
           try {
-            await creditarPontosPedidoEntregue({
-              id: pedido.id,
-              status: 'entregue',
-              telefone: pedido.telefone,
-              clienteId: pedido.clienteId,
-              total: pedido.total,
-              taxaEntrega: pedido.taxaEntrega,
-            })
+            await processarEfeitosPedidoEntregue(pedido)
           } catch (err) {
-            console.error('[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):', err)
+            console.error('[ChefeBot] Efeitos de fidelidade pendentes após entrega (retry necessário):', err)
           }
-
-          // Jornada do Chef: hook centralizado, mesma função chamada em toda
-          // transição oficial para "entregue" — nunca duplica a regra por rota.
-          await processarConclusaoPedidoJornada(pedido).catch((err) =>
-            console.error('[ChefeBot] Erro ao processar Jornada do Chef (ignorado):', err)
-          )
 
           await redis.del(`entregador_aguardando:${phone}`)
           const firstName = pedido.cliente.split(' ')[0]

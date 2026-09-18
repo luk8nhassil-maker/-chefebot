@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { store, redisMock, authMock, pontosMock } = vi.hoisted(() => {
+const { store, redisMock, authMock, pontosMock, legadoMock, jornadaMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   return {
     store,
@@ -31,6 +31,8 @@ const { store, redisMock, authMock, pontosMock } = vi.hoisted(() => {
     },
     authMock: vi.fn(),
     pontosMock: vi.fn(async () => undefined),
+    legadoMock: vi.fn(async () => undefined),
+    jornadaMock: vi.fn(async () => null),
   };
 });
 
@@ -39,7 +41,14 @@ vi.mock("@/lib/entregadorAuth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/entregadorAuth")>();
   return { ...actual, autenticarEntregador: authMock };
 });
-vi.mock("@/lib/fidelidade", () => ({ creditarPontosPedidoEntregue: pontosMock }));
+vi.mock("@/lib/fidelidade", () => ({
+  creditarFidelidadePedido: legadoMock,
+  creditarPontosPedidoEntregue: pontosMock,
+}));
+vi.mock("@/lib/jornadaChef", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/jornadaChef")>();
+  return { ...actual, processarConclusaoPedidoJornada: jornadaMock };
+});
 
 import { GET, POST } from "./route";
 
