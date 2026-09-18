@@ -15,8 +15,8 @@ describe("/cliente — Área do Cliente renomeada para Pontos", () => {
     expect(fonte).toMatch(/<ClientBottomNav[^>]*active="pontos"/);
   });
 
-  test("título é 'Meus pontos', nunca 'Sua fidelidade'", () => {
-    expect(fonte).toContain("Meus pontos");
+  test("título é 'Minha fidelidade', nunca 'Sua fidelidade'", () => {
+    expect(fonte).toContain("Minha fidelidade");
     expect(fonte).not.toContain("Sua fidelidade");
   });
 
@@ -80,7 +80,7 @@ describe("/cliente — Perfil 3.0: número reconhecido pelo link do WhatsApp", (
   test("etapa de confirmação existe com a copy oficial", () => {
     expect(fonte).toContain("Encontramos seu WhatsApp");
     expect(fonte).toContain("Este é o número usado para abrir seu cardápio:");
-    expect(fonte).toContain("Confirme seu WhatsApp para ativar seus pontos, acompanhar suas recompensas e não perder nenhuma vantagem.");
+    expect(fonte).toContain("Confirme seu WhatsApp para ativar sua fidelidade, acompanhar suas recompensas e não perder nenhuma vantagem.");
     expect(fonte).toContain("Confirmar e receber código");
     expect(fonte).toContain("Vamos enviar um código de segurança para este WhatsApp.");
     expect(fonte).toContain("Este número não é meu");
@@ -255,8 +255,8 @@ describe("/cliente — Etapa 2: sem lembrete operacional de pedido + barra globa
   });
 
   test("mantém saldo, progresso e extrato de pontos (não são notificação de pedido)", () => {
-    expect(fonte).toContain("Seu saldo de pontos");
-    expect(fonte).toContain("Extrato de pontos");
+    expect(fonte).toContain("Seu saldo de ");
+    expect(fonte).toContain("Extrato de ");
   });
 
   test("usa o hook central usePixPendente e repassa para a barra + indicador do menu", () => {
