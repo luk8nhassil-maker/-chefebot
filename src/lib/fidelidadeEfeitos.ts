@@ -13,10 +13,12 @@ import {
   liberarRecompensaDePedidoCancelado,
   processarConclusaoPedidoJornada,
   reverterConclusaoPedidoJornada,
+  TENANT_PADRAO,
   type PedidoParaJornada,
 } from "./jornadaChef";
 import type { PedidoSnapshotOficial } from "./pedidoSnapshot";
 import type { ItemApp } from "./pedidoAppItens";
+import type { PedidoRedis } from "@/types/pedidoRedis";
 
 export type PedidoParaEfeitosFidelidade = PedidoParaJornada & {
   id: string;
@@ -31,6 +33,16 @@ export type PedidoParaEfeitosFidelidade = PedidoParaJornada & {
   recompensaJornadaId?: string;
   itensDetalhados?: ItemApp[];
   statusAnterior?: string;
+  tenantId?: string;
+};
+
+export type PendenciaEfeitosFidelidade = {
+  tenantId: string;
+  pedidoId: string;
+  acao: "entregue" | "cancelado";
+  criadaEm: string;
+  atualizadaEm: string;
+  ultimoErro?: string;
 };
 
 type EstadoEfeito = "pendente" | "concluido";
@@ -46,6 +58,7 @@ type EstadoProcessamento = {
 };
 
 const LOCK_TTL_SEGUNDOS = 10;
+const PENDENCIA_LOCK_TTL_SEGUNDOS = 10;
 
 function chaveEstado(pedidoId: string, acao: EstadoProcessamento["acao"]): string {
   return `fidelidade:efeitos:pedido:${pedidoId}:${acao}`;
@@ -53,6 +66,14 @@ function chaveEstado(pedidoId: string, acao: EstadoProcessamento["acao"]): strin
 
 function chaveLock(pedidoId: string): string {
   return `fidelidade:efeitos:lock:${pedidoId}`;
+}
+
+function chavePendencias(tenantId: string): string {
+  return `fidelidade:efeitos:pendencias:${tenantId}`;
+}
+
+function chaveLockPendencias(tenantId: string): string {
+  return `fidelidade:efeitos:pendencias:lock:${tenantId}`;
 }
 
 const LIBERAR_LOCK_LUA = `
@@ -65,6 +86,25 @@ end
 
 function tokenLock(pedidoId: string): string {
   return `${pedidoId}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function comLockPendencias<T>(tenantId: string, fn: () => Promise<T>): Promise<T> {
+  const token = tokenLock(tenantId);
+  const chave = chaveLockPendencias(tenantId);
+  const adquirido = await redis.set(chave, token, { nx: true, ex: PENDENCIA_LOCK_TTL_SEGUNDOS });
+  if (!adquirido) throw new Error("fidelidade_pendencias_lock_indisponivel");
+  try {
+    return await fn();
+  } finally {
+    const clienteComEval = redis as typeof redis & {
+      eval?: (script: string, keys: string[], args: string[]) => Promise<unknown>;
+    };
+    if (clienteComEval.eval) {
+      await clienteComEval.eval(LIBERAR_LOCK_LUA, [chave], [token]);
+    } else if ((await redis.get<string>(chave)) === token) {
+      await redis.del(chave);
+    }
+  }
 }
 
 async function comLockPedido<T>(pedidoId: string, fn: () => Promise<T>): Promise<T | null> {
@@ -92,6 +132,62 @@ function erroTexto(error: unknown): string {
 
 async function salvarEstado(chave: string, estado: EstadoProcessamento): Promise<void> {
   await redis.set(chave, { ...estado, atualizadoEm: new Date().toISOString() });
+}
+
+async function registrarPendencia(
+  pedidoId: string,
+  acao: EstadoProcessamento["acao"],
+  erro: unknown,
+  tenantId: string
+): Promise<void> {
+  await comLockPendencias(tenantId, async () => {
+    const chave = chavePendencias(tenantId);
+    const agora = new Date().toISOString();
+    const atuais = (await redis.get<PendenciaEfeitosFidelidade[]>(chave)) ?? [];
+    const existente = atuais.find((item) => item.pedidoId === pedidoId && item.acao === acao);
+    const pendencia: PendenciaEfeitosFidelidade = {
+      tenantId,
+      pedidoId,
+      acao,
+      criadaEm: existente?.criadaEm ?? agora,
+      atualizadaEm: agora,
+      ultimoErro: erroTexto(erro).slice(0, 300),
+    };
+    await redis.set(chave, [...atuais.filter((item) => item.pedidoId !== pedidoId || item.acao !== acao), pendencia]);
+  });
+}
+
+async function removerPendencia(pedidoId: string, acao: EstadoProcessamento["acao"], tenantId: string): Promise<void> {
+  await comLockPendencias(tenantId, async () => {
+    const chave = chavePendencias(tenantId);
+    const atuais = (await redis.get<PendenciaEfeitosFidelidade[]>(chave)) ?? [];
+    const restantes = atuais.filter((item) => item.pedidoId !== pedidoId || item.acao !== acao);
+    if (restantes.length === atuais.length) return;
+    await redis.set(chave, restantes);
+  });
+}
+
+export async function obterPendenciasEfeitosFidelidade(
+  tenantId: string = TENANT_PADRAO
+): Promise<PendenciaEfeitosFidelidade[]> {
+  return (await redis.get<PendenciaEfeitosFidelidade[]>(chavePendencias(tenantId))) ?? [];
+}
+
+export async function reprocessarPendenciaEfeitosFidelidade(
+  pedidoId: string,
+  acao: "entregue" | "cancelado",
+  tenantId: string = TENANT_PADRAO
+): Promise<void> {
+  const pendente = (await obterPendenciasEfeitosFidelidade(tenantId)).some(
+    (item) => item.pedidoId === pedidoId && item.acao === acao
+  );
+  if (!pendente) throw new Error("pendencia_de_efeitos_nao_encontrada");
+  const pedidos = (await redis.get<PedidoRedis[]>("pedidos")) ?? [];
+  const pedido = pedidos.find((item) => item.id === pedidoId);
+  if (!pedido) throw new Error("pedido_da_pendencia_nao_encontrado");
+  const pedidoComTenant = { ...pedido, tenantId } as PedidoParaEfeitosFidelidade;
+  if (acao === "entregue") return processarEfeitosPedidoEntregue(pedidoComTenant);
+  return processarEfeitosPedidoCancelado(pedidoComTenant);
 }
 
 async function executarEfeito(
@@ -138,10 +234,15 @@ async function novoEstado(
  */
 export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFidelidade): Promise<void> {
   if (!pedido.id || pedido.status !== "entregue") return;
-  const resultado = await comLockPedido(pedido.id, async () => {
+  const tenantId = pedido.tenantId ?? TENANT_PADRAO;
+  try {
+    const resultado = await comLockPedido(pedido.id, async () => {
     const chave = chaveEstado(pedido.id, "entregue");
     let estado = await redis.get<EstadoProcessamento>(chave);
-    if (estado?.status === "concluido") return;
+    if (estado?.status === "concluido") {
+      await removerPendencia(pedido.id, "entregue", tenantId);
+      return;
+    }
     estado = estado ?? (await novoEstado(pedido.id, "entregue", ["fidelidade_legada", "pontos", "jornada"]));
 
     await executarEfeito(chave, estado, "fidelidade_legada", async () => {
@@ -168,10 +269,13 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
 
     estado.status = "concluido";
     await salvarEstado(chave, estado);
-  });
+    await removerPendencia(pedido.id, "entregue", tenantId);
+    });
 
-  if (resultado === null) {
-    throw new Error("fidelidade_efeitos_pedido_em_processamento");
+    if (resultado === null) throw new Error("fidelidade_efeitos_pedido_em_processamento");
+  } catch (error) {
+    await registrarPendencia(pedido.id, "entregue", error, tenantId).catch(() => undefined);
+    throw error;
   }
 }
 
@@ -182,10 +286,15 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
  */
 export async function processarEfeitosPedidoCancelado(pedido: PedidoParaEfeitosFidelidade): Promise<void> {
   if (!pedido.id || pedido.status !== "cancelado") return;
-  const resultado = await comLockPedido(pedido.id, async () => {
+  const tenantId = pedido.tenantId ?? TENANT_PADRAO;
+  try {
+    const resultado = await comLockPedido(pedido.id, async () => {
     const chave = chaveEstado(pedido.id, "cancelado");
     let estado = await redis.get<EstadoProcessamento>(chave);
-    if (estado?.status === "concluido") return;
+    if (estado?.status === "concluido") {
+      await removerPendencia(pedido.id, "cancelado", tenantId);
+      return;
+    }
     estado = estado ?? (await novoEstado(pedido.id, "cancelado", ["pontos", "resgate", "jornada"]));
 
     await executarEfeito(chave, estado, "pontos", async () => {
@@ -230,9 +339,12 @@ export async function processarEfeitosPedidoCancelado(pedido: PedidoParaEfeitosF
 
     estado.status = "concluido";
     await salvarEstado(chave, estado);
-  });
+    await removerPendencia(pedido.id, "cancelado", tenantId);
+    });
 
-  if (resultado === null) {
-    throw new Error("fidelidade_efeitos_pedido_em_processamento");
+    if (resultado === null) throw new Error("fidelidade_efeitos_pedido_em_processamento");
+  } catch (error) {
+    await registrarPendencia(pedido.id, "cancelado", error, tenantId).catch(() => undefined);
+    throw error;
   }
 }

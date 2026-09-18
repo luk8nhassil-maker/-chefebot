@@ -44,12 +44,18 @@ vi.mock("./fidelidade", () => ({
 }));
 
 vi.mock("./jornadaChef", () => ({
+  TENANT_PADRAO: "default",
   processarConclusaoPedidoJornada: jornadaMock,
   reverterConclusaoPedidoJornada: reversaoJornadaMock,
   liberarRecompensaDePedidoCancelado: liberarRecompensaMock,
 }));
 
-import { processarEfeitosPedidoCancelado, processarEfeitosPedidoEntregue } from "./fidelidadeEfeitos";
+import {
+  obterPendenciasEfeitosFidelidade,
+  processarEfeitosPedidoCancelado,
+  processarEfeitosPedidoEntregue,
+  reprocessarPendenciaEfeitosFidelidade,
+} from "./fidelidadeEfeitos";
 
 const pedidoEntregue = {
   id: "ped_entregue",
@@ -95,6 +101,21 @@ describe("processarEfeitosPedidoEntregue", () => {
     expect(jornadaMock).toHaveBeenCalledTimes(1);
   });
 
+  test("falha na Jornada cria pendência e retry executa somente a Jornada", async () => {
+    jornadaMock.mockRejectedValueOnce(new Error("falha jornada"));
+
+    await expect(processarEfeitosPedidoEntregue(pedidoEntregue)).rejects.toThrow("falha jornada");
+    expect(await obterPendenciasEfeitosFidelidade()).toEqual([
+      expect.objectContaining({ pedidoId: pedidoEntregue.id, acao: "entregue", ultimoErro: "falha jornada" }),
+    ]);
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+    expect(legadoMock).toHaveBeenCalledTimes(1);
+    expect(pontosMock).toHaveBeenCalledTimes(1);
+    expect(jornadaMock).toHaveBeenCalledTimes(2);
+    expect(await obterPendenciasEfeitosFidelidade()).toEqual([]);
+  });
+
   test("dois workers concorrentes não executam os efeitos em duplicidade", async () => {
     let liberarPrimeiro!: () => void;
     const bloqueio = new Promise<void>((resolve) => { liberarPrimeiro = resolve; });
@@ -131,5 +152,27 @@ describe("processarEfeitosPedidoCancelado", () => {
     expect(resgateMock).toHaveBeenCalledTimes(1);
     expect(reversaoJornadaMock).toHaveBeenCalledTimes(1);
     expect(liberarRecompensaMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("índice de pendências é isolado por tenant", async () => {
+    store.set("fidelidade:efeitos:pendencias:tenant-a", [
+      { tenantId: "tenant-a", pedidoId: "ped-a", acao: "entregue", criadaEm: "agora", atualizadaEm: "agora" },
+    ]);
+
+    expect(await obterPendenciasEfeitosFidelidade("tenant-a")).toHaveLength(1);
+    expect(await obterPendenciasEfeitosFidelidade("tenant-b")).toEqual([]);
+  });
+
+  test("retry operacional só reprocessa uma pendência existente e a resolve", async () => {
+    store.set("pedidos", [pedidoEntregue]);
+    store.set("fidelidade:efeitos:pendencias:default", [
+      { tenantId: "default", pedidoId: pedidoEntregue.id, acao: "entregue", criadaEm: "agora", atualizadaEm: "agora" },
+    ]);
+
+    await reprocessarPendenciaEfeitosFidelidade(pedidoEntregue.id, "entregue");
+    expect(await obterPendenciasEfeitosFidelidade()).toEqual([]);
+    await expect(reprocessarPendenciaEfeitosFidelidade("pedido-inexistente", "entregue")).rejects.toThrow(
+      "pendencia_de_efeitos_nao_encontrada"
+    );
   });
 });
