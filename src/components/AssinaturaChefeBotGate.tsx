@@ -169,7 +169,10 @@ export default function AssinaturaChefeBotGate() {
     }
   }
 
-  if (!ativo || !status?.ok || !status.configured) return null;
+  if (!ativo || !status?.ok) return null;
+  // configured só bloqueia branches de pagamento (due/grace/blocked/regular)
+  // — o banner warning é informativo e aparece mesmo sem InfinitePay configurado
+  if (!status.configured && status.status !== "warning") return null;
 
   // ── Branch WARNING: banner liquid glass + modal de pagamento antecipado ──
   if (status.status === "warning") {
@@ -205,7 +208,7 @@ export default function AssinaturaChefeBotGate() {
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  {status.canManage && (
+                  {status.canManage && status.configured && (
                     <button
                       type="button"
                       onClick={() => { setMessage(""); setPlanoSelecionado(null); setPlanosAbertos(true); }}
