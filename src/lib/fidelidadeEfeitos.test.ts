@@ -11,6 +11,8 @@ const {
   liberarRecompensaMock,
   obterExtratoPontosMock,
   obterRelacaoMock,
+  obterCandidaturaMock,
+  registrarRelacaoMock,
   creditarIndicacaoMock,
   creditarApoioMock,
 } = vi.hoisted(() => {
@@ -26,6 +28,8 @@ const {
     liberarRecompensaMock: vi.fn(async () => undefined),
     obterExtratoPontosMock: vi.fn(async () => [{ pedidoId: "ped_cancelado", tipo: "confirmado" }] as Array<{ pedidoId?: string; tipo: string }>),
     obterRelacaoMock: vi.fn(async () => null as { indicadorId: string; criadoEm: string } | null),
+    obterCandidaturaMock: vi.fn(async () => null as { indicadorId: string; criadoEm: string } | null),
+    registrarRelacaoMock: vi.fn(async () => "ja_existe" as "registrado" | "ja_existe" | "self_referral"),
     creditarIndicacaoMock: vi.fn(async () => undefined),
     creditarApoioMock: vi.fn(async () => undefined),
   };
@@ -69,6 +73,8 @@ vi.mock("./jornadaChef", () => ({
 
 vi.mock("./indicacaoToken", () => ({
   obterRelacaoIndicacao: obterRelacaoMock,
+  obterCandidaturaIndicacao: obterCandidaturaMock,
+  registrarRelacaoIndicacao: registrarRelacaoMock,
 }));
 
 vi.mock("./estrelasIndicacao", () => ({
@@ -106,7 +112,10 @@ beforeEach(() => {
   reversaoJornadaMock.mockReset().mockResolvedValue({ ok: true, pendenciaAberta: false });
   liberarRecompensaMock.mockReset().mockResolvedValue(undefined);
   obterExtratoPontosMock.mockReset().mockResolvedValue([{ pedidoId: "ped_cancelado", tipo: "confirmado" }]);
+  // Defaults: sem relação permanente, sem candidatura — indicacao é no-op
   obterRelacaoMock.mockReset().mockResolvedValue(null);
+  obterCandidaturaMock.mockReset().mockResolvedValue(null);
+  registrarRelacaoMock.mockReset().mockResolvedValue("ja_existe");
   creditarIndicacaoMock.mockReset().mockResolvedValue(undefined);
   creditarApoioMock.mockReset().mockResolvedValue(undefined);
 });
@@ -212,21 +221,35 @@ describe("processarEfeitosPedidoCancelado", () => {
 });
 
 describe("efeito indicacao", () => {
-  test("pedido sem relação de indicação não dispara crédito", async () => {
-    // obterRelacaoMock already returns null by default
+  test("sem candidatura e sem relação: nenhum crédito disparado", async () => {
+    // defaults: obterRelacaoMock → null, obterCandidaturaMock → null
     await processarEfeitosPedidoEntregue(pedidoEntregue);
 
     expect(creditarIndicacaoMock).not.toHaveBeenCalled();
     expect(creditarApoioMock).not.toHaveBeenCalled();
+    expect(registrarRelacaoMock).not.toHaveBeenCalled();
   });
 
-  test("primeira compra dispara +6 para indicador e +1 apoio", async () => {
-    obterRelacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
-    // Extrato com exatamente 1 confirmado, para este pedido → primeira compra
-    obterExtratoPontosMock.mockResolvedValue([{ pedidoId: "ped_entregue", tipo: "confirmado" }]);
+  test("POST salva apenas candidatura — relação permanente NÃO existe antes da compra", async () => {
+    // Simula o estado APÓS o POST /api/cliente/indicacao:
+    // candidatura existe, relação permanente ainda não
+    obterRelacaoMock.mockResolvedValue(null);
+    obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    registrarRelacaoMock.mockResolvedValue("registrado");
+
+    // Antes do primeiro pedido: só candidatura, zero crédito
+    // Relação permanente não existe ainda (mock retorna null)
+    expect(await obterRelacaoMock()).toBeNull();
+  });
+
+  test("primeira compra confirma relação permanente e credita +6 somente (sem +1 apoio)", async () => {
+    obterRelacaoMock.mockResolvedValue(null); // sem relação permanente ainda
+    obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    registrarRelacaoMock.mockResolvedValue("registrado"); // confirmação bem-sucedida
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
 
+    // +6 ao indicador na primeira compra
     expect(creditarIndicacaoMock).toHaveBeenCalledOnce();
     expect(creditarIndicacaoMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -236,20 +259,21 @@ describe("efeito indicacao", () => {
         primeiraCompraComercialValida: true,
       })
     );
-    expect(creditarApoioMock).toHaveBeenCalledOnce();
+    // NÃO credita +1 apoio no mesmo evento da aquisição
+    expect(creditarApoioMock).not.toHaveBeenCalled();
+    // relação confirmada via registrarRelacaoIndicacao
+    expect(registrarRelacaoMock).toHaveBeenCalledWith("cli_canonico", "cli_indicador");
   });
 
-  test("compra posterior dispara somente +1 apoio (sem +6)", async () => {
+  test("compra posterior (relação permanente já existe) credita SOMENTE +1 apoio (sem +6)", async () => {
+    // Relação permanente já confirmada — este é um pedido após a aquisição
     obterRelacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
-    // Extrato com 2 confirmados → não é primeira compra
-    obterExtratoPontosMock.mockResolvedValue([
-      { pedidoId: "ped_anterior", tipo: "confirmado" },
-      { pedidoId: "ped_entregue", tipo: "confirmado" },
-    ]);
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
 
+    // Sem +6 em compra posterior
     expect(creditarIndicacaoMock).not.toHaveBeenCalled();
+    // +1 apoio (uma vez por relação/expediente)
     expect(creditarApoioMock).toHaveBeenCalledOnce();
     expect(creditarApoioMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -258,34 +282,60 @@ describe("efeito indicacao", () => {
         pedidoId: "ped_entregue",
       })
     );
+    // registrar NÃO é chamado em compras posteriores
+    expect(registrarRelacaoMock).not.toHaveBeenCalled();
   });
 
-  test("retry não duplica crédito de indicação (efeito idempotente via estado)", async () => {
-    obterRelacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
-    obterExtratoPontosMock.mockResolvedValue([{ pedidoId: "ped_entregue", tipo: "confirmado" }]);
+  test("retry na primeira compra não duplica +6 (estado persiste concluído)", async () => {
+    obterRelacaoMock.mockResolvedValue(null);
+    obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    registrarRelacaoMock.mockResolvedValue("registrado");
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
-    await processarEfeitosPedidoEntregue(pedidoEntregue);
+    await processarEfeitosPedidoEntregue(pedidoEntregue); // segunda chamada: estado já concluído
 
     expect(creditarIndicacaoMock).toHaveBeenCalledTimes(1);
+    expect(creditarApoioMock).not.toHaveBeenCalled();
+  });
+
+  test("retry na compra posterior não duplica +1 apoio (estado persiste concluído)", async () => {
+    obterRelacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
     expect(creditarApoioMock).toHaveBeenCalledTimes(1);
+    expect(creditarIndicacaoMock).not.toHaveBeenCalled();
+  });
+
+  test("race condition na confirmação (ja_existe) não credita +6 nem +1", async () => {
+    // Outro worker confirmou a relação primeiro → registrarRelacao retorna "ja_existe"
+    obterRelacaoMock.mockResolvedValue(null);
+    obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    registrarRelacaoMock.mockResolvedValue("ja_existe"); // perdeu a corrida
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    // O worker que perdeu não credita nada — o vencedor já creditou +6
+    expect(creditarIndicacaoMock).not.toHaveBeenCalled();
+    expect(creditarApoioMock).not.toHaveBeenCalled();
   });
 
   test("falha no efeito indicacao cria pendência e retry executa somente indicacao", async () => {
     obterRelacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
-    obterExtratoPontosMock.mockResolvedValue([{ pedidoId: "ped_entregue", tipo: "confirmado" }]);
     creditarApoioMock.mockRejectedValueOnce(new Error("falha apoio"));
 
     await expect(processarEfeitosPedidoEntregue(pedidoEntregue)).rejects.toThrow("falha apoio");
     expect(legadoMock).toHaveBeenCalledTimes(1);
     expect(pontosMock).toHaveBeenCalledTimes(1);
     expect(jornadaMock).toHaveBeenCalledTimes(1);
-    expect(creditarIndicacaoMock).toHaveBeenCalledTimes(1);
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
+    // Efeitos anteriores não repetidos
     expect(legadoMock).toHaveBeenCalledTimes(1);
     expect(pontosMock).toHaveBeenCalledTimes(1);
     expect(jornadaMock).toHaveBeenCalledTimes(1);
+    // Apoio executado no retry
     expect(creditarApoioMock).toHaveBeenCalledTimes(2);
   });
 });

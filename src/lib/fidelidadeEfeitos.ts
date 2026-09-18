@@ -11,7 +11,7 @@ import {
 } from "./fidelidade";
 import { calcularEstrelasPorValorElegivel, REGRA_ESTRELAS_V1 } from "./estrelas";
 import { creditarEstrelasIndicacaoValida, creditarEstrelaApoioRecorrente } from "./estrelasIndicacao";
-import { obterRelacaoIndicacao } from "./indicacaoToken";
+import { obterRelacaoIndicacao, obterCandidaturaIndicacao, registrarRelacaoIndicacao } from "./indicacaoToken";
 import { chaveExpedienteOperacional } from "./expedienteOperacional";
 import {
   liberarRecompensaDePedidoCancelado,
@@ -278,32 +278,39 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
     await executarEfeito(chave, estado, "indicacao", async () => {
       const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
       if (!clienteId) return;
+
+      // Relação permanente já existe → compra posterior à aquisição → apoio +1/expediente
       const relacao = await obterRelacaoIndicacao(clienteId);
-      if (!relacao) return;
-      // Primeira compra comercial: extrato contém exatamente 1 "confirmado" com este pedidoId
-      const extrato = await obterExtratoPontos(clienteId);
-      const confirmados = extrato.filter((m) => m.tipo === "confirmado");
-      const primeiraCompra = confirmados.length === 1 && confirmados[0].pedidoId === pedido.id;
-      if (primeiraCompra) {
-        await creditarEstrelasIndicacaoValida({
+      if (relacao) {
+        const snapshotOficial = pedido.snapshotOficial;
+        const pedidoTemPartePaga = snapshotOficial
+          ? snapshotOficial.subtotalCents > snapshotOficial.descontoFidelidadeCents
+          : (pedido.total ?? 0) > (pedido.taxaEntrega ?? 0);
+        await creditarEstrelaApoioRecorrente({
           indicadorId: relacao.indicadorId,
           indicadoId: clienteId,
           pedidoId: pedido.id,
-          primeiraCompraComercialValida: true,
+          expedienteId: chaveExpedienteOperacional(),
+          pedidoComercialValido: true,
+          pedidoTemPartePaga,
         });
+        return;
       }
-      // Apoio recorrente: +1 por relação por expediente (idempotente via eventoId)
-      const snapshotOficial = pedido.snapshotOficial;
-      const pedidoTemPartePaga = snapshotOficial
-        ? snapshotOficial.subtotalCents > snapshotOficial.descontoFidelidadeCents
-        : (pedido.total ?? 0) > (pedido.taxaEntrega ?? 0);
-      await creditarEstrelaApoioRecorrente({
-        indicadorId: relacao.indicadorId,
+
+      // Sem relação permanente: verifica candidatura pendente
+      const candidatura = await obterCandidaturaIndicacao(clienteId);
+      if (!candidatura) return;
+
+      // Confirma relação permanente (first-write-wins); se outro worker venceu a corrida, pula
+      const confirmado = await registrarRelacaoIndicacao(clienteId, candidatura.indicadorId);
+      if (confirmado !== "registrado") return;
+
+      // Primeira compra comercial válida: +6 ao indicador — SEM apoio neste evento
+      await creditarEstrelasIndicacaoValida({
+        indicadorId: candidatura.indicadorId,
         indicadoId: clienteId,
         pedidoId: pedido.id,
-        expedienteId: chaveExpedienteOperacional(),
-        pedidoComercialValido: true,
-        pedidoTemPartePaga,
+        primeiraCompraComercialValida: true,
       });
     });
 

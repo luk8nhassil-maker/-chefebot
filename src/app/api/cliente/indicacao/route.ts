@@ -5,7 +5,7 @@ import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
 import {
   salvarTokenIndicacao,
   resolverTokenIndicacao,
-  registrarRelacaoIndicacao,
+  salvarCandidaturaIndicacao,
 } from "@/lib/indicacaoToken";
 
 // GET /api/cliente/indicacao — retorna o token opaco de indicação do cliente
@@ -23,8 +23,8 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ token });
 }
 
-// POST /api/cliente/indicacao { ref: TOKEN } — registra a relação indicador→indicado
-// para o cliente autenticado. Idempotente (first-write-wins), self-referral bloqueado.
+// POST /api/cliente/indicacao { ref: TOKEN } — salva candidatura de indicação para
+// o cliente autenticado. A relação permanente só é confirmada na primeira compra.
 export async function POST(req: NextRequest) {
   const payload = await lerSessaoCliente(req);
   if (!payload) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
 
   const indicadoId = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
 
-  const resultado = await registrarRelacaoIndicacao(indicadoId, indicadorId);
+  const resultado = await salvarCandidaturaIndicacao(indicadoId, indicadorId);
   if (resultado === "self_referral") {
     return NextResponse.json({ error: "Indicacao propria nao permitida" }, { status: 400 });
   }
