@@ -371,11 +371,9 @@ export default function AssinaturaChefeBotGate() {
     ? "Plano do sistema"
     : bloqueado
       ? "Assinatura pendente"
-      : status.status === "warning"
-        ? `Vencimento em ${Math.max(0, status.daysUntilDue ?? 0)} dia${status.daysUntilDue === 1 ? "" : "s"}`
-        : status.status === "due"
-          ? "A assinatura vence hoje"
-          : `Pagamento pendente — ${status.daysLate ?? 0} dia${status.daysLate === 1 ? "" : "s"}`;
+      : status.status === "due"
+        ? "A assinatura vence hoje"
+        : `Pagamento pendente — ${status.daysLate ?? 0} dia${status.daysLate === 1 ? "" : "s"}`;
 
   const conteudo = (
     <div className="relative w-full max-w-3xl rounded-3xl border border-zinc-200 bg-white p-5 text-zinc-950 shadow-2xl sm:p-7">
