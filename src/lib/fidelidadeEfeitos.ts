@@ -10,6 +10,9 @@ import {
   reverterResgateConfirmado,
 } from "./fidelidade";
 import { calcularEstrelasPorValorElegivel, REGRA_ESTRELAS_V1 } from "./estrelas";
+import { creditarEstrelasIndicacaoValida, creditarEstrelaApoioRecorrente } from "./estrelasIndicacao";
+import { obterRelacaoIndicacao } from "./indicacaoToken";
+import { chaveExpedienteOperacional } from "./expedienteOperacional";
 import {
   liberarRecompensaDePedidoCancelado,
   processarConclusaoPedidoJornada,
@@ -249,7 +252,7 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       await removerPendencia(pedido.id, "entregue", tenantId);
       return;
     }
-    estado = estado ?? (await novoEstado(pedido.id, "entregue", ["fidelidade_legada", "pontos", "jornada"]));
+    estado = estado ?? (await novoEstado(pedido.id, "entregue", ["fidelidade_legada", "pontos", "jornada", "indicacao"]));
 
     await executarEfeito(chave, estado, "fidelidade_legada", async () => {
       await creditarFidelidadePedido({
@@ -271,6 +274,37 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
     });
     await executarEfeito(chave, estado, "jornada", async () => {
       await processarConclusaoPedidoJornada(pedido);
+    });
+    await executarEfeito(chave, estado, "indicacao", async () => {
+      const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
+      if (!clienteId) return;
+      const relacao = await obterRelacaoIndicacao(clienteId);
+      if (!relacao) return;
+      // Primeira compra comercial: extrato contém exatamente 1 "confirmado" com este pedidoId
+      const extrato = await obterExtratoPontos(clienteId);
+      const confirmados = extrato.filter((m) => m.tipo === "confirmado");
+      const primeiraCompra = confirmados.length === 1 && confirmados[0].pedidoId === pedido.id;
+      if (primeiraCompra) {
+        await creditarEstrelasIndicacaoValida({
+          indicadorId: relacao.indicadorId,
+          indicadoId: clienteId,
+          pedidoId: pedido.id,
+          primeiraCompraComercialValida: true,
+        });
+      }
+      // Apoio recorrente: +1 por relação por expediente (idempotente via eventoId)
+      const snapshotOficial = pedido.snapshotOficial;
+      const pedidoTemPartePaga = snapshotOficial
+        ? snapshotOficial.subtotalCents > snapshotOficial.descontoFidelidadeCents
+        : (pedido.total ?? 0) > (pedido.taxaEntrega ?? 0);
+      await creditarEstrelaApoioRecorrente({
+        indicadorId: relacao.indicadorId,
+        indicadoId: clienteId,
+        pedidoId: pedido.id,
+        expedienteId: chaveExpedienteOperacional(),
+        pedidoComercialValido: true,
+        pedidoTemPartePaga,
+      });
     });
 
     estado.status = "concluido";

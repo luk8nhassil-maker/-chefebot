@@ -1,6 +1,19 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { store, legadoMock, pontosMock, jornadaMock, estornoMock, resgateMock, reversaoJornadaMock, liberarRecompensaMock } = vi.hoisted(() => {
+const {
+  store,
+  legadoMock,
+  pontosMock,
+  jornadaMock,
+  estornoMock,
+  resgateMock,
+  reversaoJornadaMock,
+  liberarRecompensaMock,
+  obterExtratoPontosMock,
+  obterRelacaoMock,
+  creditarIndicacaoMock,
+  creditarApoioMock,
+} = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   return {
     store,
@@ -11,6 +24,10 @@ const { store, legadoMock, pontosMock, jornadaMock, estornoMock, resgateMock, re
     resgateMock: vi.fn(async () => undefined),
     reversaoJornadaMock: vi.fn(async () => ({ ok: true, pendenciaAberta: false })),
     liberarRecompensaMock: vi.fn(async () => undefined),
+    obterExtratoPontosMock: vi.fn(async () => [{ pedidoId: "ped_cancelado", tipo: "confirmado" }] as Array<{ pedidoId?: string; tipo: string }>),
+    obterRelacaoMock: vi.fn(async () => null as { indicadorId: string; criadoEm: string } | null),
+    creditarIndicacaoMock: vi.fn(async () => undefined),
+    creditarApoioMock: vi.fn(async () => undefined),
   };
 });
 
@@ -38,7 +55,7 @@ vi.mock("./fidelidade", () => ({
   calcularPontosElegiveisPedido: vi.fn(() => 40),
   construirEventoIdPontos: vi.fn((pedidoId: string, tipo: string) => `${tipo}:${pedidoId}`),
   derivarClienteIdPorTelefone: vi.fn(() => "cli_canonico"),
-  obterExtratoPontos: vi.fn(async () => [{ pedidoId: "ped_cancelado", tipo: "confirmado" }]),
+  obterExtratoPontos: obterExtratoPontosMock,
   registrarMovimentoPontosIdempotente: estornoMock,
   reverterResgateConfirmado: resgateMock,
 }));
@@ -48,6 +65,19 @@ vi.mock("./jornadaChef", () => ({
   processarConclusaoPedidoJornada: jornadaMock,
   reverterConclusaoPedidoJornada: reversaoJornadaMock,
   liberarRecompensaDePedidoCancelado: liberarRecompensaMock,
+}));
+
+vi.mock("./indicacaoToken", () => ({
+  obterRelacaoIndicacao: obterRelacaoMock,
+}));
+
+vi.mock("./estrelasIndicacao", () => ({
+  creditarEstrelasIndicacaoValida: creditarIndicacaoMock,
+  creditarEstrelaApoioRecorrente: creditarApoioMock,
+}));
+
+vi.mock("./expedienteOperacional", () => ({
+  chaveExpedienteOperacional: vi.fn(() => "2024-01-01"),
 }));
 
 import {
@@ -75,6 +105,10 @@ beforeEach(() => {
   resgateMock.mockReset().mockResolvedValue(undefined);
   reversaoJornadaMock.mockReset().mockResolvedValue({ ok: true, pendenciaAberta: false });
   liberarRecompensaMock.mockReset().mockResolvedValue(undefined);
+  obterExtratoPontosMock.mockReset().mockResolvedValue([{ pedidoId: "ped_cancelado", tipo: "confirmado" }]);
+  obterRelacaoMock.mockReset().mockResolvedValue(null);
+  creditarIndicacaoMock.mockReset().mockResolvedValue(undefined);
+  creditarApoioMock.mockReset().mockResolvedValue(undefined);
 });
 
 describe("processarEfeitosPedidoEntregue", () => {
@@ -174,5 +208,84 @@ describe("processarEfeitosPedidoCancelado", () => {
     await expect(reprocessarPendenciaEfeitosFidelidade("pedido-inexistente", "entregue")).rejects.toThrow(
       "pendencia_de_efeitos_nao_encontrada"
     );
+  });
+});
+
+describe("efeito indicacao", () => {
+  test("pedido sem relação de indicação não dispara crédito", async () => {
+    // obterRelacaoMock already returns null by default
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(creditarIndicacaoMock).not.toHaveBeenCalled();
+    expect(creditarApoioMock).not.toHaveBeenCalled();
+  });
+
+  test("primeira compra dispara +6 para indicador e +1 apoio", async () => {
+    obterRelacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    // Extrato com exatamente 1 confirmado, para este pedido → primeira compra
+    obterExtratoPontosMock.mockResolvedValue([{ pedidoId: "ped_entregue", tipo: "confirmado" }]);
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(creditarIndicacaoMock).toHaveBeenCalledOnce();
+    expect(creditarIndicacaoMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        indicadorId: "cli_indicador",
+        indicadoId: "cli_canonico",
+        pedidoId: "ped_entregue",
+        primeiraCompraComercialValida: true,
+      })
+    );
+    expect(creditarApoioMock).toHaveBeenCalledOnce();
+  });
+
+  test("compra posterior dispara somente +1 apoio (sem +6)", async () => {
+    obterRelacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    // Extrato com 2 confirmados → não é primeira compra
+    obterExtratoPontosMock.mockResolvedValue([
+      { pedidoId: "ped_anterior", tipo: "confirmado" },
+      { pedidoId: "ped_entregue", tipo: "confirmado" },
+    ]);
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(creditarIndicacaoMock).not.toHaveBeenCalled();
+    expect(creditarApoioMock).toHaveBeenCalledOnce();
+    expect(creditarApoioMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        indicadorId: "cli_indicador",
+        indicadoId: "cli_canonico",
+        pedidoId: "ped_entregue",
+      })
+    );
+  });
+
+  test("retry não duplica crédito de indicação (efeito idempotente via estado)", async () => {
+    obterRelacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    obterExtratoPontosMock.mockResolvedValue([{ pedidoId: "ped_entregue", tipo: "confirmado" }]);
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(creditarIndicacaoMock).toHaveBeenCalledTimes(1);
+    expect(creditarApoioMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("falha no efeito indicacao cria pendência e retry executa somente indicacao", async () => {
+    obterRelacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    obterExtratoPontosMock.mockResolvedValue([{ pedidoId: "ped_entregue", tipo: "confirmado" }]);
+    creditarApoioMock.mockRejectedValueOnce(new Error("falha apoio"));
+
+    await expect(processarEfeitosPedidoEntregue(pedidoEntregue)).rejects.toThrow("falha apoio");
+    expect(legadoMock).toHaveBeenCalledTimes(1);
+    expect(pontosMock).toHaveBeenCalledTimes(1);
+    expect(jornadaMock).toHaveBeenCalledTimes(1);
+    expect(creditarIndicacaoMock).toHaveBeenCalledTimes(1);
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+    expect(legadoMock).toHaveBeenCalledTimes(1);
+    expect(pontosMock).toHaveBeenCalledTimes(1);
+    expect(jornadaMock).toHaveBeenCalledTimes(1);
+    expect(creditarApoioMock).toHaveBeenCalledTimes(2);
   });
 });
