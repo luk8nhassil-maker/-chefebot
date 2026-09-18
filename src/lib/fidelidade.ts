@@ -75,6 +75,41 @@ function chaveIdempotencia(pedidoId: string): string {
   return `fidelidade:creditado:${pedidoId}`;
 }
 
+function chaveProcessamentoLegado(pedidoId: string): string {
+  return `fidelidade:creditado:estado:${pedidoId}`;
+}
+
+function chaveLockLegado(clienteId: string): string {
+  return `fidelidade:creditado:lock:${clienteId}`;
+}
+
+const LOCK_LEGADO_TTL_SEGUNDOS = 8;
+
+const LIBERAR_LOCK_LEGADO_LUA = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+else
+  return 0
+end
+`;
+
+type PlanoCreditoLegado = {
+  movimentoCreditoId: string;
+  movimentoRecompensaIds: string[];
+  recompensaIds: string[];
+  progressoDepois: number;
+  createdAt: string;
+};
+
+type EstadoProcessamentoLegado = {
+  status: "processando" | "concluido";
+  pedidoId: string;
+  clienteId: string;
+  pizzas: number;
+  plano: PlanoCreditoLegado;
+  atualizadoEm: string;
+};
+
 function novoId(prefixo: string): string {
   return `${prefixo}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -87,49 +122,48 @@ export function contarPizzas(itens: Array<{ kind?: string; qty?: number }>): num
     .reduce((soma, item) => soma + (Number(item.qty) || 0), 0);
 }
 
-async function registrarMovimento(
-  clienteId: string,
-  movimento: Omit<MovimentoFidelidade, "movimentoId" | "clienteId" | "createdAt">
-): Promise<MovimentoFidelidade> {
-  const extrato = (await redis.get<MovimentoFidelidade[]>(chaveExtrato(clienteId))) ?? [];
-  const registro: MovimentoFidelidade = {
-    movimentoId: novoId("mov"),
-    clienteId,
-    createdAt: new Date().toISOString(),
-    ...movimento,
-  };
-  await redis.set(chaveExtrato(clienteId), [...extrato, registro]);
-  return registro;
+async function comLockLegado<T>(clienteId: string, fn: () => Promise<T>): Promise<T> {
+  const token = novoId("lock");
+  const chave = chaveLockLegado(clienteId);
+  const adquirido = await redis.set(chave, token, { nx: true, ex: LOCK_LEGADO_TTL_SEGUNDOS });
+  if (!adquirido) throw new Error("fidelidade_legada_lock_indisponivel");
+  try {
+    return await fn();
+  } finally {
+    const clienteComEval = redis as typeof redis & {
+      eval?: (script: string, keys: string[], args: string[]) => Promise<unknown>;
+    };
+    if (clienteComEval.eval) {
+      await clienteComEval.eval(LIBERAR_LOCK_LEGADO_LUA, [chave], [token]);
+    } else if ((await redis.get<string>(chave)) === token) {
+      await redis.del(chave);
+    }
+  }
 }
 
-async function criarRecompensa(
+async function garantirMovimentoLegado(
   clienteId: string,
-  config: ConfigFidelidade,
-  pedidoOrigemId: string
-): Promise<Recompensa> {
-  const recompensas = (await redis.get<Recompensa[]>(chaveRecompensas(clienteId))) ?? [];
-  const agora = new Date();
-  const recompensa: Recompensa = {
-    recompensaId: novoId("rec"),
-    clienteId,
-    status: "disponivel",
-    tipo: config.tipoRecompensa,
-    descricao: config.descricaoRecompensa,
-    pedidoOrigemId,
-    createdAt: agora.toISOString(),
-    ...(config.validadeDias
-      ? { expiresAt: new Date(agora.getTime() + config.validadeDias * 86400000).toISOString() }
-      : {}),
-  };
-  await redis.set(chaveRecompensas(clienteId), [...recompensas, recompensa]);
-  return recompensa;
+  movimento: MovimentoFidelidade
+): Promise<void> {
+  const chave = chaveExtrato(clienteId);
+  const extrato = (await redis.get<MovimentoFidelidade[]>(chave)) ?? [];
+  if (extrato.some((item) => item.movimentoId === movimento.movimentoId)) return;
+  await redis.set(chave, [...extrato, movimento]);
+}
+
+async function garantirRecompensaLegada(clienteId: string, recompensa: Recompensa): Promise<void> {
+  const chave = chaveRecompensas(clienteId);
+  const recompensas = (await redis.get<Recompensa[]>(chave)) ?? [];
+  if (recompensas.some((item) => item.recompensaId === recompensa.recompensaId)) return;
+  await redis.set(chave, [...recompensas, recompensa]);
 }
 
 /**
- * Credita fidelidade para um pedido finalizado. Idempotente por pedidoId
- * (chave fidelidade:creditado:{pedidoId} com SET NX). Nunca lanca excecao
- * que impeca o chamador de responder — quem chama deve envolver em try/catch,
- * mas mesmo aqui os efeitos colaterais sao best-effort.
+ * Credita fidelidade para um pedido finalizado. O estado do processamento é
+ * um plano reprocessável: a marca antiga continua sendo reconhecida para
+ * compatibilidade, mas a nova marca só vira concluída depois de movimento,
+ * recompensas e saldo terem sido garantidos. Uma falha intermediária deixa o
+ * plano em `processando`; o retry repete apenas o que estiver faltando.
  */
 export async function creditarFidelidadePedido(params: {
   pedidoId: string;
@@ -142,31 +176,81 @@ export async function creditarFidelidadePedido(params: {
   const config = await obterConfigFidelidade();
   if (!config.ativo || config.pizzasParaPremio <= 0) return;
 
-  const marcou = await redis.set(chaveIdempotencia(pedidoId), true, { nx: true });
-  if (!marcou) return; // ja creditado antes (idempotencia)
+  await comLockLegado(clienteId, async () => {
+    const marcadorAntigo = await redis.get<boolean>(chaveIdempotencia(pedidoId));
+    if (marcadorAntigo === true) return;
 
-  await registrarMovimento(clienteId, {
-    pedidoId,
-    tipo: "credito",
-    quantidade: pizzas,
-    motivo: `Credito por pedido ${pedidoId}`,
-  });
+    const chaveEstado = chaveProcessamentoLegado(pedidoId);
+    let estado = await redis.get<EstadoProcessamentoLegado>(chaveEstado);
+    if (estado?.status === "concluido") return;
 
-  const saldo = (await redis.get<SaldoFidelidade>(chaveSaldo(clienteId))) ?? { progresso: 0 };
-  let progresso = saldo.progresso + pizzas;
+    if (!estado) {
+      const saldo = (await redis.get<SaldoFidelidade>(chaveSaldo(clienteId))) ?? { progresso: 0 };
+      const progressoTotal = saldo.progresso + pizzas;
+      const quantidadeRecompensas = Math.floor(progressoTotal / config.pizzasParaPremio);
+      const agora = new Date().toISOString();
+      const plano: PlanoCreditoLegado = {
+        movimentoCreditoId: `mov_legacy_${pedidoId}_credito`,
+        movimentoRecompensaIds: Array.from({ length: quantidadeRecompensas }, (_, indice) =>
+          `mov_legacy_${pedidoId}_recompensa_${indice + 1}`
+        ),
+        recompensaIds: Array.from({ length: quantidadeRecompensas }, (_, indice) =>
+          `rec_legacy_${pedidoId}_${indice + 1}`
+        ),
+        progressoDepois: progressoTotal % config.pizzasParaPremio,
+        createdAt: agora,
+      };
+      estado = {
+        status: "processando",
+        pedidoId,
+        clienteId,
+        pizzas,
+        plano,
+        atualizadoEm: agora,
+      };
+      await redis.set(chaveEstado, estado);
+    }
 
-  while (progresso >= config.pizzasParaPremio) {
-    progresso -= config.pizzasParaPremio;
-    await criarRecompensa(clienteId, config, pedidoId);
-    await registrarMovimento(clienteId, {
+    const { plano } = estado;
+    await garantirMovimentoLegado(clienteId, {
+      movimentoId: plano.movimentoCreditoId,
+      clienteId,
       pedidoId,
-      tipo: "recompensa",
-      quantidade: config.pizzasParaPremio,
-      motivo: "Meta de fidelidade atingida",
+      tipo: "credito",
+      quantidade: estado.pizzas,
+      motivo: `Credito por pedido ${pedidoId}`,
+      createdAt: plano.createdAt,
     });
-  }
 
-  await redis.set(chaveSaldo(clienteId), { progresso });
+    for (let indice = 0; indice < plano.recompensaIds.length; indice++) {
+      const recompensaId = plano.recompensaIds[indice];
+      await garantirRecompensaLegada(clienteId, {
+        recompensaId,
+        clienteId,
+        status: "disponivel",
+        tipo: config.tipoRecompensa,
+        descricao: config.descricaoRecompensa,
+        pedidoOrigemId: pedidoId,
+        createdAt: plano.createdAt,
+        ...(config.validadeDias
+          ? { expiresAt: new Date(new Date(plano.createdAt).getTime() + config.validadeDias * 86400000).toISOString() }
+          : {}),
+      });
+      await garantirMovimentoLegado(clienteId, {
+        movimentoId: plano.movimentoRecompensaIds[indice],
+        clienteId,
+        pedidoId,
+        tipo: "recompensa",
+        quantidade: config.pizzasParaPremio,
+        motivo: "Meta de fidelidade atingida",
+        createdAt: plano.createdAt,
+      });
+    }
+
+    await redis.set(chaveSaldo(clienteId), { progresso: plano.progressoDepois });
+    await redis.set(chaveEstado, { ...estado, status: "concluido", atualizadoEm: new Date().toISOString() });
+    await redis.set(chaveIdempotencia(pedidoId), true);
+  });
 }
 
 export type ProgressoFidelidade = {

@@ -4,17 +4,7 @@ import { redis } from '@/lib/redis'
 import { gerarIdPedidoUnico, proximoNumeroPedido } from '@/lib/numeracao'
 import { criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
 import type { EntregadorCadastro, PedidoEntregador } from '@/types/entregador'
-import {
-  creditarFidelidadePedido,
-  creditarPontosPedidoEntregue,
-  calcularPontosElegiveisPedido,
-  registrarMovimentoPontosIdempotente,
-  construirEventoIdPontos,
-  obterExtratoPontos,
-  derivarClienteIdPorTelefone,
-  reverterResgateConfirmado,
-} from '@/lib/fidelidade'
-import { processarConclusaoPedidoJornada, reverterConclusaoPedidoJornada, liberarRecompensaDePedidoCancelado } from '@/lib/jornadaChef'
+import { processarEfeitosPedidoEntregue, processarEfeitosPedidoCancelado } from '@/lib/fidelidadeEfeitos'
 import type { ItemElegibilidadeJornada } from '@/lib/jornadaChef'
 import type { ItemApp } from '@/lib/pedidoAppItens'
 import type { PedidoSnapshotOficial } from '@/lib/pedidoSnapshot'
@@ -758,116 +748,21 @@ export async function PATCH(req: NextRequest) {
 
     }
 
-    // Credito de fidelidade: so conta quando o pedido chega a 'entregue'
-    // (finalizado com sucesso). Idempotente por pedidoId — nunca duplica.
-    // Isolado em try/catch proprio: falha aqui jamais pode afetar a resposta
-    // do PATCH nem impedir a mudanca de status do pedido, que ja foi salva.
+    // Todos os efeitos de fidelidade passam pela autoridade única. O estado
+    // de cada consumidor é persistido separadamente para que retry retome
+    // após falha parcial sem bloquear a atualização do pedido.
     try {
-      await creditarFidelidadePedido({
-        pedidoId: id,
-        clienteId: pedidos[index].clienteId,
-        pizzas: pedidos[index].pizzasCount ?? 0,
-      })
+      await processarEfeitosPedidoEntregue(pedidos[index])
     } catch (err) {
-      console.error('[ChefeBot] Erro ao creditar fidelidade (ignorado):', err)
-    }
-
-    // Fidelidade por pontos (novo modelo, R$1 = 1 ponto): roda em paralelo ao
-    // credito antigo acima, sem substitui-lo. Mesma protecao — isolado em
-    // try/catch proprio, idempotente por pedidoId, nunca impede o pedido de
-    // ser marcado como entregue nem a resposta do PATCH.
-    try {
-      await creditarPontosPedidoEntregue({
-        id,
-        status: 'entregue',
-        telefone: pedidos[index].telefone,
-        clienteId: pedidos[index].clienteId,
-        total: pedidos[index].total,
-        taxaEntrega: pedidos[index].taxaEntrega,
-        snapshotOficial: pedidos[index].snapshotOficial,
-      })
-    } catch (err) {
-      console.error('[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):', err)
-    }
-
-    // Jornada do Chef: hook centralizado, mesma função chamada em toda
-    // transição oficial para "entregue" (aqui, no app do entregador e na
-    // confirmação via WhatsApp) — nunca duplica a regra por rota.
-    await processarConclusaoPedidoJornada(pedidos[index]).catch((err) =>
-      console.error('[ChefeBot] Erro ao processar Jornada do Chef (ignorado):', err)
-    )
-  }
-
-  // Cancelamento (modelo novo de pontos): registra a resolucao do previsto ou
-  // o estorno de um credito confirmado, sempre no cliente canonico derivado
-  // do telefone. Repetir "cancelado" nao cria novo evento; estorno so existe
-  // se houver confirmado original no extrato.
-  if (status === 'cancelado' && statusAnterior !== 'cancelado') {
-    try {
-      const clienteIdPontos = derivarClienteIdPorTelefone(pedidos[index].telefone)
-      if (clienteIdPontos) {
-        const pontosElegiveis = calcularPontosElegiveisPedido({
-          total: pedidos[index].total,
-          taxaEntrega: pedidos[index].taxaEntrega,
-        })
-        if (statusAnterior === 'entregue') {
-          if (pontosElegiveis > 0) {
-            const extratoAtual = await obterExtratoPontos(clienteIdPontos)
-            const teveConfirmado = extratoAtual.some(m => m.pedidoId === id && m.tipo === 'confirmado')
-            if (teveConfirmado) {
-              await registrarMovimentoPontosIdempotente(clienteIdPontos, {
-                eventoId: construirEventoIdPontos(id, 'estornado'),
-                pedidoId: id,
-                tipo: 'estornado',
-                pontos: pontosElegiveis,
-                motivo: `Pedido ${id} corrigido para cancelado apos entrega`,
-              })
-            }
-          }
-        } else if (pontosElegiveis > 0) {
-          await registrarMovimentoPontosIdempotente(clienteIdPontos, {
-            eventoId: construirEventoIdPontos(id, 'cancelado'),
-            pedidoId: id,
-            tipo: 'cancelado',
-            pontos: pontosElegiveis,
-            motivo: `Pedido ${id} cancelado antes da entrega`,
-          })
-        }
-      }
-    } catch (err) {
-      console.error('[ChefeBot] Erro ao registrar cancelamento de pontos (ignorado):', err)
-    }
-
-  }
-
-  // Reverte resgate de fidelidade (Etapa 5), se este pedido tinha usado um:
-  // fica fora do guard de transicao para permitir reprocessar falha anterior
-  // quando o pedido ja esta cancelado. A lib garante idempotencia.
-  if (status === 'cancelado' && pedidos[index].resgateId) {
-    try {
-      const clienteIdResgate = derivarClienteIdPorTelefone(pedidos[index].telefone)
-      if (clienteIdResgate) {
-        await reverterResgateConfirmado(
-          clienteIdResgate,
-          pedidos[index].resgateId,
-          `Pedido ${id} cancelado apos usar resgate de fidelidade`
-        )
-      }
-    } catch (err) {
-      console.error('[ChefeBot] Erro ao reverter resgate de fidelidade (ignorado):', err)
+      console.error('[ChefeBot] Efeitos de fidelidade pendentes após entrega (retry necessário):', err)
     }
   }
 
-  // Jornada do Chef: reverte (ou sinaliza para revisão da Kellyne, nunca
-  // silenciosamente) o crédito de trilha e libera/sinaliza o presente usado
-  // neste pedido, se houver. Idempotente — fica fora do guard de transição
-  // pelo mesmo motivo do resgate de pontos acima.
   if (status === 'cancelado') {
     try {
-      await reverterConclusaoPedidoJornada(id, `Pedido ${id} cancelado`)
-      await liberarRecompensaDePedidoCancelado(pedidos[index])
+      await processarEfeitosPedidoCancelado({ ...pedidos[index], statusAnterior })
     } catch (err) {
-      console.error('[ChefeBot] Erro ao reverter Jornada do Chef (ignorado):', err)
+      console.error('[ChefeBot] Efeitos de cancelamento de fidelidade pendentes (retry necessário):', err)
     }
   }
 
