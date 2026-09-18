@@ -12,6 +12,9 @@ import {
   calcularProgressoPontos,
   ordenarExtratoPontosDesc,
   derivarClienteIdPorTelefone,
+  calcularSaldoEstrelas,
+  estrelasV1Ativa,
+  metaEstrelasDaConfig,
 } from "@/lib/fidelidade";
 
 // GET /api/cliente/fidelidade — saldo, progresso e extrato da fidelidade por
@@ -51,18 +54,25 @@ export async function GET(req: NextRequest) {
     obterRecompensasPontos(clienteIdPontos),
   ]);
 
-  const saldoPontos = calcularSaldoDoExtrato(extratoCompleto);
-  const pontosPrevistos = calcularPontosPrevistos(extratoCompleto);
-  const metaPontos = calcularMetaPontos(config);
+  const estrelasAtivas = estrelasV1Ativa(config);
+  const saldoPontos = estrelasAtivas ? calcularSaldoEstrelas(extratoCompleto) : calcularSaldoDoExtrato(extratoCompleto);
+  const pontosPrevistos = calcularPontosPrevistos(estrelasAtivas
+    ? extratoCompleto.filter((movimento) => movimento.regraVersao === config.regraVersao)
+    : extratoCompleto);
+  const metaPontos = estrelasAtivas ? metaEstrelasDaConfig(config) : calcularMetaPontos(config);
   const { pontosFaltantes, progressoPercentual, metaAtingida } = calcularProgressoPontos(saldoPontos, metaPontos);
 
-  const extrato = ordenarExtratoPontosDesc(extratoCompleto)
+  const extratoVisivel = estrelasAtivas
+    ? extratoCompleto.filter((movimento) => movimento.regraVersao === config.regraVersao)
+    : extratoCompleto;
+  const extrato = ordenarExtratoPontosDesc(extratoVisivel)
     .slice(0, limite)
     .map((m) => ({
       id: m.movimentoId,
       pedidoId: m.pedidoId ?? null,
       tipo: m.tipo,
       pontos: m.pontos,
+      ...(m.unidade ? { unidade: m.unidade } : {}),
       descricao: m.motivo,
       criadoEm: m.createdAt,
     }));
@@ -73,6 +83,7 @@ export async function GET(req: NextRequest) {
   // (saldo atual) combinado com `ativo` e a existência de uma recompensa
   // aberta abaixo, revalidados de novo no próprio endpoint de reserva.
   const recompensasAbertas = recompensasCompletas
+    .filter(() => !estrelasAtivas || config.coberturaEconomicaAprovada === true)
     .filter((r) => r.status === "disponivel" || r.status === "notificada")
     .map((r) => ({ recompensaId: r.recompensaId, status: r.status, criadoEm: r.createdAt }));
 
@@ -82,13 +93,19 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     ativo: config.ativo,
+    unidade: estrelasAtivas ? "estrelas" : "pontos",
+    regraVersao: estrelasAtivas ? config.regraVersao : null,
     descricaoRecompensa: config.descricaoRecompensa,
     saldoPontos,
+    saldoEstrelas: estrelasAtivas ? saldoPontos : 0,
     pontosPrevistos,
     metaPontos,
+    metaEstrelas: estrelasAtivas ? metaPontos : 0,
     pontosFaltantes,
+    estrelasFaltantes: estrelasAtivas ? pontosFaltantes : 0,
     progressoPercentual,
     metaAtingida,
+    marcoEstrelasAtingido: estrelasAtivas ? metaAtingida : false,
     extrato,
     recompensas: recompensasAbertas,
     recompensasHistorico,

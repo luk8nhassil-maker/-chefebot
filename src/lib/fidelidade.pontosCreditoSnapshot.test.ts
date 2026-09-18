@@ -47,6 +47,8 @@ import {
   calcularPontosElegiveisDoSnapshot,
   salvarConfigFidelidadePontos,
   obterSaldoPontos,
+  obterExtratoPontos,
+  calcularSaldoEstrelas,
 } from "./fidelidade";
 import { construirSnapshotOficial, construirSnapshotItem } from "./pedidoSnapshot";
 
@@ -145,5 +147,48 @@ describe("creditarPontosPedidoEntregue — snapshot como fonte quando presente",
     await creditarPontosPedidoEntregue(pedido);
     const saldo = await obterSaldoPontos("cli_86999990013");
     expect(saldo.disponivel).toBe(30);
+  });
+});
+
+describe("creditarPontosPedidoEntregue — Estrelas V1", () => {
+  test.each([
+    [0, 0], [0.01, 3], [39.99, 3], [40, 5], [69.99, 5], [70, 7],
+    [99.99, 7], [100, 9], [149.99, 9], [150, 12], [300, 12],
+  ])("pedido de R$%s credita %s Estrelas", async (subtotalReais, esperado) => {
+    await salvarConfigFidelidadePontos({
+      ativo: true,
+      regraVersao: "estrelas-faixas-v1",
+      metaEstrelas: 50,
+      coberturaEconomicaAprovada: false,
+      descricaoRecompensa: "presente pendente de cobertura",
+    });
+    const pedidoId = `ped_estrelas_${String(subtotalReais).replace('.', '_')}`;
+    await creditarPontosPedidoEntregue({
+      id: pedidoId,
+      status: "entregue",
+      telefone: `8699999${String(Math.round(subtotalReais * 100)).padStart(4, "0")}`,
+      snapshotOficial: snapshotSimples({ subtotalReais, taxaReais: 8 }),
+    });
+    const extrato = await obterExtratoPontos("cli_8699999" + String(Math.round(subtotalReais * 100)).padStart(4, "0"));
+    expect(calcularSaldoEstrelas(extrato)).toBe(esperado);
+    if (esperado > 0) {
+      expect(extrato[0]?.regraVersao).toBe("estrelas-faixas-v1");
+      expect(extrato[0]?.unidade).toBe("estrelas");
+    }
+  });
+
+  test("taxa e parte gratuita não entram e 50 Estrelas não liberam presente sem cobertura", async () => {
+    await salvarConfigFidelidadePontos({
+      ativo: true,
+      regraVersao: "estrelas-faixas-v1",
+      metaEstrelas: 50,
+      coberturaEconomicaAprovada: false,
+      descricaoRecompensa: "presente pendente de cobertura",
+    });
+    const snapshot = snapshotSimples({ subtotalReais: 300, descontoReais: 250, taxaReais: 20 });
+    await creditarPontosPedidoEntregue({ id: "ped_estrelas_gate", status: "entregue", telefone: "86999990123", snapshotOficial: snapshot });
+    const estado = await obterExtratoPontos("cli_86999990123");
+    expect(calcularSaldoEstrelas(estado)).toBe(5);
+    expect(estado[0]?.valorElegivel).toBe(50);
   });
 });

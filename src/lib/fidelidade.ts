@@ -1,4 +1,5 @@
 import { redis } from "./redis";
+import { calcularEstrelasPorValorElegivel, META_ESTRELAS_V1, REGRA_ESTRELAS_V1 } from "./estrelas";
 import { sanitizeTelefoneCliente, clienteIdDoTelefone } from "./clientes";
 import type { PedidoSnapshotOficial } from "./pedidoSnapshot";
 
@@ -330,6 +331,10 @@ export type MovimentoPontos = {
   valorElegivel?: number;
   /** Saldo confirmado logo após este movimento — snapshot para auditoria, recalculável a qualquer momento a partir do extrato completo. */
   saldoApos?: number;
+  /** Regra que originou o movimento. Ausente significa movimento histórico. */
+  regraVersao?: string;
+  /** Unidade apresentada ao cliente quando a regra estiver ativa. */
+  unidade?: "pontos" | "estrelas";
 };
 
 export type SaldoPontos = {
@@ -339,6 +344,11 @@ export type SaldoPontos = {
 
 export type ConfigFidelidadePontos = {
   ativo: boolean;
+  /** Ativação explícita da nova experiência; ausência preserva o modelo legado. */
+  regraVersao?: typeof REGRA_ESTRELAS_V1;
+  /** Meta visual da V1. O presente só é liberável com cobertura aprovada. */
+  metaEstrelas?: number;
+  coberturaEconomicaAprovada?: boolean;
   /**
    * Meta em pontos — fonte principal e explícita da configuração. Quando
    * definida (> 0), sempre vence sobre o cálculo derivado das referências de
@@ -365,6 +375,15 @@ export const CONFIG_FIDELIDADE_PONTOS_PADRAO: ConfigFidelidadePontos = {
   metaPizzasFamilia: 12,
   descricaoRecompensa: "1 Pizza Família",
 };
+
+export function estrelasV1Ativa(config: Pick<ConfigFidelidadePontos, "ativo" | "regraVersao">): boolean {
+  return config.ativo === true && config.regraVersao === REGRA_ESTRELAS_V1;
+}
+
+export function metaEstrelasDaConfig(config: Pick<ConfigFidelidadePontos, "metaEstrelas">): number {
+  const meta = Number(config.metaEstrelas);
+  return Number.isFinite(meta) && meta > 0 ? Math.round(meta) : META_ESTRELAS_V1;
+}
 
 const CHAVE_CONFIG_PONTOS = "config:fidelidade:pontos";
 
@@ -658,6 +677,19 @@ export function calcularSaldoDoExtrato(movimentos: MovimentoPontos[]): number {
   }, 0);
 }
 
+/** Saldo exclusivo da regra V1; movimentos antigos nunca são convertidos. */
+export function calcularSaldoEstrelas(movimentos: MovimentoPontos[]): number {
+  return calcularSaldoDoExtrato(movimentos.filter((movimento) => movimento.regraVersao === REGRA_ESTRELAS_V1));
+}
+
+export function calcularEstrelasElegiveisDoSnapshot(snapshot: PedidoSnapshotOficial): {
+  valorElegivelCents: number;
+  estrelas: number;
+} {
+  const valorElegivelCents = Math.max(snapshot.subtotalCents - snapshot.descontoFidelidadeCents, 0);
+  return { valorElegivelCents, estrelas: calcularEstrelasPorValorElegivel(valorElegivelCents) };
+}
+
 export async function obterConfigFidelidadePontos(): Promise<ConfigFidelidadePontos> {
   const salva = await redis.get<ConfigFidelidadePontos>(CHAVE_CONFIG_PONTOS);
   return salva ?? CONFIG_FIDELIDADE_PONTOS_PADRAO;
@@ -774,6 +806,9 @@ export async function reservarResgatePontos(clienteId: string, recompensaId: str
 
     const config = await obterConfigFidelidadePontos();
     if (!config.ativo) throw new Error("Fidelidade nao esta ativa");
+    if (estrelasV1Ativa(config)) {
+      throw new Error("Resgate de Estrelas bloqueado ate existir presente e cobertura economica aprovados");
+    }
     const meta = calcularMetaPontos(config);
     const saldoAtual = calcularSaldoDoExtrato(estado.extrato);
     if (meta <= 0 || saldoAtual < meta) {
@@ -835,6 +870,10 @@ export async function confirmarResgatePontos(
 
   return comBloqueioCliente(clienteId, async (token) => {
     const estado = await obterEstadoPontos(clienteId);
+    const configAtual = await obterConfigFidelidadePontos();
+    if (estrelasV1Ativa(configAtual)) {
+      throw new Error("Resgate de Estrelas bloqueado ate existir presente e cobertura economica aprovados");
+    }
     const jaProcessado = estado.extrato.find((m) => m.eventoId === eventoId);
     if (jaProcessado) return jaProcessado; // reprocessamento idempotente
 
@@ -1075,7 +1114,7 @@ function aplicarQuedaAbaixoDaMeta(
  */
 export async function registrarMovimentoPontosIdempotente(
   clienteId: string,
-  evento: { eventoId?: string; pedidoId: string; tipo: TipoMovimentoPontos; pontos: number; motivo: string; valorElegivel?: number }
+  evento: { eventoId?: string; pedidoId: string; tipo: TipoMovimentoPontos; pontos: number; motivo: string; valorElegivel?: number; regraVersao?: string; unidade?: "pontos" | "estrelas" }
 ): Promise<MovimentoPontos | null> {
   const eventoId = evento.eventoId ?? construirEventoIdPontos(evento.pedidoId, evento.tipo);
 
@@ -1083,7 +1122,9 @@ export async function registrarMovimentoPontosIdempotente(
     const estado = await obterEstadoPontos(clienteId);
     if (estado.extrato.some((m) => m.eventoId === eventoId)) return null; // ja processado
 
-    const saldoAnterior = calcularSaldoDoExtrato(estado.extrato);
+    const config = await obterConfigFidelidadePontos();
+    const usaEstrelas = estrelasV1Ativa(config) && evento.regraVersao === REGRA_ESTRELAS_V1;
+    const saldoAnterior = usaEstrelas ? calcularSaldoEstrelas(estado.extrato) : calcularSaldoDoExtrato(estado.extrato);
     const registroSemSaldo: MovimentoPontos = {
       movimentoId: novoId("pt"),
       clienteId,
@@ -1094,11 +1135,13 @@ export async function registrarMovimentoPontosIdempotente(
       createdAt: new Date().toISOString(),
       eventoId,
       ...(evento.valorElegivel !== undefined ? { valorElegivel: evento.valorElegivel } : {}),
+      ...(evento.regraVersao ? { regraVersao: evento.regraVersao } : {}),
+      ...(evento.unidade ? { unidade: evento.unidade } : {}),
     };
     const novoExtrato = [...estado.extrato, registroSemSaldo];
     // saldoApos é um snapshot de auditoria — sempre recalculável a partir do
     // extrato completo (calcularSaldoDoExtrato), nunca a fonte de verdade.
-    const saldoApos = calcularSaldoDoExtrato(novoExtrato);
+    const saldoApos = usaEstrelas ? calcularSaldoEstrelas(novoExtrato) : calcularSaldoDoExtrato(novoExtrato);
     const registro: MovimentoPontos = { ...registroSemSaldo, saldoApos };
     novoExtrato[novoExtrato.length - 1] = registro;
 
@@ -1106,17 +1149,17 @@ export async function registrarMovimentoPontosIdempotente(
     // (expiração) são sempre revalidados a partir do saldo real — nunca só
     // incrementais. Tudo em memória; a escrita real é uma só, abaixo, junto
     // com o extrato.
-    const config = await obterConfigFidelidadePontos();
-    const meta = calcularMetaPontos(config);
+    const meta = usaEstrelas ? metaEstrelasDaConfig(config) : calcularMetaPontos(config);
     let novasRecompensas = estado.recompensas;
-    if (saldoApos > saldoAnterior) {
+    const podeLiberarBeneficio = !usaEstrelas || config.coberturaEconomicaAprovada === true;
+    if (podeLiberarBeneficio && saldoApos > saldoAnterior) {
       novasRecompensas = aplicarDeteccaoRecompensa(clienteId, novasRecompensas, meta, {
         saldoAnterior,
         saldoAtual: saldoApos,
         pedidoId: evento.pedidoId,
       });
     }
-    novasRecompensas = aplicarQuedaAbaixoDaMeta(novasRecompensas, meta, saldoApos);
+    if (podeLiberarBeneficio) novasRecompensas = aplicarQuedaAbaixoDaMeta(novasRecompensas, meta, saldoApos);
 
     const persistiu = await persistirEstadoPontosSeDono(clienteId, token, { extrato: novoExtrato, recompensas: novasRecompensas, reservas: estado.reservas });
     if (!persistiu) {
@@ -1229,12 +1272,14 @@ export async function creditarPontosPedidoEntregue(pedido: PedidoParaCreditoPont
   const config = await obterConfigFidelidadePontos();
   if (!config.ativo) return;
 
-  const { valorElegivel, pontos } = pedido.snapshotOficial
-    ? calcularPontosElegiveisDoSnapshot(pedido.snapshotOficial)
-    : {
-        valorElegivel: Math.max((Number(pedido.total) || 0) - (Number(pedido.taxaEntrega) || 0), 0),
-        pontos: calcularPontosElegiveisPedido({ total: pedido.total ?? 0, taxaEntrega: pedido.taxaEntrega }),
-      };
+  const usaEstrelas = estrelasV1Ativa(config);
+  const valorElegivelCents = pedido.snapshotOficial
+    ? Math.max(pedido.snapshotOficial.subtotalCents - pedido.snapshotOficial.descontoFidelidadeCents, 0)
+    : Math.max(Math.round(((Number(pedido.total) || 0) - (Number(pedido.taxaEntrega) || 0)) * 100), 0);
+  const valorElegivel = valorElegivelCents / 100;
+  const pontos = usaEstrelas ? calcularEstrelasPorValorElegivel(valorElegivelCents) : pedido.snapshotOficial
+    ? calcularPontosElegiveisDoSnapshot(pedido.snapshotOficial).pontos
+    : calcularPontosElegiveisPedido({ total: pedido.total ?? 0, taxaEntrega: pedido.taxaEntrega });
   if (pontos <= 0) return;
 
   await registrarMovimentoPontosIdempotente(clienteId, {
@@ -1244,6 +1289,7 @@ export async function creditarPontosPedidoEntregue(pedido: PedidoParaCreditoPont
     pontos,
     valorElegivel,
     motivo: `Credito por pedido ${pedido.id} entregue`,
+    ...(usaEstrelas ? { regraVersao: REGRA_ESTRELAS_V1, unidade: "estrelas" as const } : {}),
   });
 }
 

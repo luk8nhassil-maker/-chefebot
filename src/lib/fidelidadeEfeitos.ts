@@ -9,6 +9,7 @@ import {
   registrarMovimentoPontosIdempotente,
   reverterResgateConfirmado,
 } from "./fidelidade";
+import { calcularEstrelasPorValorElegivel, REGRA_ESTRELAS_V1 } from "./estrelas";
 import {
   liberarRecompensaDePedidoCancelado,
   processarConclusaoPedidoJornada,
@@ -59,6 +60,11 @@ type EstadoProcessamento = {
 
 const LOCK_TTL_SEGUNDOS = 10;
 const PENDENCIA_LOCK_TTL_SEGUNDOS = 10;
+
+async function estrelasV1AtivaEmProducao(): Promise<boolean> {
+  const config = await redis.get<{ ativo?: boolean; regraVersao?: string }>("config:fidelidade:pontos");
+  return config?.ativo === true && config.regraVersao === REGRA_ESTRELAS_V1;
+}
 
 function chaveEstado(pedidoId: string, acao: EstadoProcessamento["acao"]): string {
   return `fidelidade:efeitos:pedido:${pedidoId}:${acao}`;
@@ -300,9 +306,15 @@ export async function processarEfeitosPedidoCancelado(pedido: PedidoParaEfeitosF
     await executarEfeito(chave, estado, "pontos", async () => {
       const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
       if (!clienteId) return;
-      const pontos = pedido.snapshotOficial
-        ? Math.max(Math.floor(Math.max(pedido.snapshotOficial.subtotalCents - pedido.snapshotOficial.descontoFidelidadeCents, 0) / 100), 0)
-        : calcularPontosElegiveisPedido({ total: pedido.total ?? 0, taxaEntrega: pedido.taxaEntrega });
+      const usaEstrelas = await estrelasV1AtivaEmProducao();
+      const valorElegivelCents = pedido.snapshotOficial
+        ? Math.max(pedido.snapshotOficial.subtotalCents - pedido.snapshotOficial.descontoFidelidadeCents, 0)
+        : Math.max(Math.round(((Number(pedido.total) || 0) - (Number(pedido.taxaEntrega) || 0)) * 100), 0);
+      const pontos = usaEstrelas
+        ? calcularEstrelasPorValorElegivel(valorElegivelCents)
+        : pedido.snapshotOficial
+          ? Math.max(Math.floor(valorElegivelCents / 100), 0)
+          : calcularPontosElegiveisPedido({ total: pedido.total ?? 0, taxaEntrega: pedido.taxaEntrega });
       if (pontos <= 0) return;
 
       if (pedido.status === "cancelado") {
@@ -315,6 +327,7 @@ export async function processarEfeitosPedidoCancelado(pedido: PedidoParaEfeitosF
             tipo: "estornado",
             pontos,
             motivo: `Pedido ${pedido.id} corrigido para cancelado`,
+            ...(usaEstrelas ? { regraVersao: REGRA_ESTRELAS_V1, unidade: "estrelas" as const } : {}),
           });
         } else if (pedido.statusAnterior !== "entregue") {
           await registrarMovimentoPontosIdempotente(clienteId, {
@@ -323,6 +336,7 @@ export async function processarEfeitosPedidoCancelado(pedido: PedidoParaEfeitosF
             tipo: "cancelado",
             pontos,
             motivo: `Pedido ${pedido.id} cancelado antes da entrega`,
+            ...(usaEstrelas ? { regraVersao: REGRA_ESTRELAS_V1, unidade: "estrelas" as const } : {}),
           });
         }
       }
