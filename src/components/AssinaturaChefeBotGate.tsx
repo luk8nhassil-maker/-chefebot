@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   ehRotaOperacionalAssinatura,
@@ -62,6 +62,7 @@ export default function AssinaturaChefeBotGate() {
   const [gestaoAberta, setGestaoAberta] = useState(false);
   const [bannerDispensado, setBannerDispensado] = useState(false);
   const [planosAbertos, setPlanosAbertos] = useState(false);
+  const modalWarningAutoAberto = useRef(false);
 
   const sessaoOperacional = typeof document !== "undefined" && temSessaoOperacionalAssinatura(document.cookie);
   // Nunca ativar em rotas de impressão — guard primário, cobre todos os caminhos de impressão.
@@ -121,6 +122,14 @@ export default function AssinaturaChefeBotGate() {
     })();
     return () => { cancelled = true; };
   }, [ativo, carregar, pathname, router]);
+
+  // Abre o modal de planos automaticamente na primeira carga do aviso de vencimento.
+  useEffect(() => {
+    if (status?.status === 'warning' && !modalWarningAutoAberto.current) {
+      modalWarningAutoAberto.current = true
+      setPlanosAbertos(true)
+    }
+  }, [status?.status])
 
   const planoAtual = useMemo(
     () => status?.plans?.find((plano) => plano.id === status.currentPlanId),
@@ -330,7 +339,15 @@ export default function AssinaturaChefeBotGate() {
               onClick={() => { if (planoSelecionado) void escolherPlano(planoSelecionado); }}
               className="mt-5 w-full rounded-2xl bg-amber-400 px-4 py-3.5 text-sm font-black text-zinc-950 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-500"
             >
-              {loadingPlan ? "Abrindo pagamento..." : !planoSelecionado ? "Escolha um plano" : "Continuar para o pagamento"}
+              {loadingPlan ? "Abrindo pagamento..." : !planoSelecionado ? "Escolha um plano" : "Pagar agora"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { setPlanosAbertos(false); setMessage(""); setPlanoSelecionado(null); }}
+              className="mt-3 w-full rounded-2xl px-4 py-3 text-sm font-semibold text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              Pagar depois
             </button>
 
             {!status.canManage && (
