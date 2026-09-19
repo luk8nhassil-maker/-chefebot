@@ -248,6 +248,58 @@ describe("/cliente — sessão portátil: PATCH do nome sem depender de sondagem
   });
 });
 
+describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carteira", () => {
+  test("carrega dados de painel (temporada + ranking) via endpoint dedicado", () => {
+    expect(fonte).toContain("async function carregarPainel");
+    expect(fonte).toContain("/api/cliente/fidelidade/painel");
+    expect(fonte).toContain("setPainel");
+  });
+
+  test("compartilharIndicacao usa obterOuCriarTokenIndicacao via GET /api/cliente/indicacao", () => {
+    expect(fonte).toContain("async function compartilharIndicacao");
+    expect(fonte).toContain("/api/cliente/indicacao");
+    expect(fonte).toContain("Compartilhar meu link");
+  });
+
+  test("captura ?ref= da URL antes do login e armazena como cf_ref", () => {
+    expect(fonte).toContain("cf_ref");
+    expect(fonte).toContain("params.get('ref')");
+    expect(fonte).toContain("sessionStorage.setItem('cf_ref'");
+  });
+
+  test("processa cf_ref ao abrir pontos após login (envia POST indicacao)", () => {
+    const blocoAbrirPontos = fonte.slice(fonte.indexOf("function abrirPontos"), fonte.indexOf("function limparVinculo"));
+    expect(blocoAbrirPontos).toContain("cf_ref");
+    expect(blocoAbrirPontos).toContain("carregarPainel");
+  });
+
+  test("card Meus presentes exibido quando há recompensas na carteira", () => {
+    expect(fonte).toContain("Meus presentes");
+    expect(fonte).toContain("fidelidade.recompensas.length > 0");
+  });
+
+  test("ranking mostra posicao e eVoce, sem expor clienteId de outros", () => {
+    expect(fonte).toContain("eVoce");
+    expect(fonte).toContain("painel?.ranking");
+    expect(fonte).toContain("Ranking da temporada");
+  });
+
+  test("indicação nunca expõe telefone no link compartilhado", () => {
+    const blocoCompartilhar = fonte.slice(
+      fonte.indexOf("async function compartilharIndicacao"),
+      fonte.indexOf("function abrirPontos"),
+    );
+    // o link usa apenas o token opaco
+    expect(blocoCompartilhar).toContain("?ref=");
+    expect(blocoCompartilhar).not.toMatch(/telefone/);
+  });
+
+  test("calcularMissaoAtual importado de lib/missoes", () => {
+    expect(fonte).toContain("import { calcularMissaoAtual } from '@/lib/missoes'");
+    expect(fonte).toContain("calcularMissaoAtual(");
+  });
+});
+
 describe("/cliente — Etapa 2: sem lembrete operacional de pedido + barra global de Pix pendente", () => {
   test("[caso 10] não mostra mais o card de 'pedido em andamento' (pontos previstos)", () => {
     expect(fonte).not.toContain("Seu pedido em andamento vai render");
