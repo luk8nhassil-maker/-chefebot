@@ -101,6 +101,24 @@ describe("POST /api/admin/fidelidade/pontos-config", () => {
     expect(saved.coberturaEconomicaAprovada).toBeUndefined();
   });
 
+  test("ativa estrelas sem descricaoRecompensa — campo não é inventado no Redis", async () => {
+    // store vazio: nunca houve config salva
+    const res = await POST(req(adminToken, {
+      ativo: true,
+      regraVersao: "estrelas-faixas-v1",
+    }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.config.ativo).toBe(true);
+    expect(data.config.regraVersao).toBe("estrelas-faixas-v1");
+    expect(data.config.coberturaEconomicaAprovada).toBeUndefined();
+    // descricaoRecompensa deve estar ausente — nunca inventar "1 Pizza Família"
+    expect(data.config.descricaoRecompensa).toBeUndefined();
+
+    const saved = store.get("config:fidelidade:pontos") as Record<string, unknown>;
+    expect(saved.descricaoRecompensa).toBeUndefined();
+  });
+
   test("ativa cobertura econômica separadamente", async () => {
     store.set("config:fidelidade:pontos", { ativo: true, regraVersao: "estrelas-faixas-v1", descricaoRecompensa: "Pizza" });
     const res = await POST(req(adminToken, { coberturaEconomicaAprovada: true }));
