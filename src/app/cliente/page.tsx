@@ -753,7 +753,6 @@ export default function ClientePage() {
                     <div style={{ fontSize: 56, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
                       {fidelidade.saldoPontos}
                     </div>
-                    <div style={{ fontSize: 12.5, color: cores.textoTerciario, marginTop: 10 }}>A cada R$1 gasto = 1 ponto</div>
                   </div>
 
                   {podeResgatar ? (
