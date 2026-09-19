@@ -39,11 +39,16 @@ export async function criarTemporada(
   temporadaId: string,
   params: Partial<Pick<ConfigTemporada, "nome" | "metaCompras" | "metaIndicacoes">> = {}
 ): Promise<ConfigTemporada> {
+  const existente = await obterTemporada(tenantId, temporadaId);
+  // Temporada ativa ou encerrada é imutável — apenas atualiza campos opcionais de rascunho
+  if (existente && existente.estado !== "rascunho") {
+    return existente;
+  }
   const config: ConfigTemporada = {
     temporadaId,
     tenantId,
     estado: "rascunho",
-    criadaEm: new Date().toISOString(),
+    criadaEm: existente?.criadaEm ?? new Date().toISOString(),
     ...params,
   };
   await redis.set(chaveTemporada(tenantId, temporadaId), config);

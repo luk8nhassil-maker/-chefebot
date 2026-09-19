@@ -4,7 +4,7 @@
 // Regra de segurança (Manual Mestre): missão NÃO cria pontos; os pontos
 // só entram quando o evento real é validado pelo servidor. Aqui só texto/tipo.
 //
-// Prioridade (Manual Mestre, seção Camada 4):
+// Prioridade (Manual Mestre, Decisão de Produto — Motor de Missões, 18/09/2026):
 // 1. presente disponível para uso
 // 2. presente quase conquistado
 // 3. nível quase liberado
@@ -12,6 +12,11 @@
 // 5. risco de inatividade
 // 6. sabor / coleção
 // 7. ranking
+// 8. descoberta de benefício ainda pouco usado (não implementado — aguarda regra)
+//
+// Limiares operacionais (prioridades 2, 5, 7) NÃO estão definidos no Manual Mestre.
+// A função é fail-closed: essas missões só disparam se o chamador passar
+// os limiares explicitamente via ConfigMissoes.
 
 export type TipoMissao =
   | "presente_disponivel"
@@ -38,11 +43,26 @@ export type EstadoClienteMissao = {
   totalNoRanking?: number;
 };
 
-const LIMIAR_QUASE_CONQUISTADO = 0.80;
-const LIMIAR_INATIVIDADE_DIAS = 30;
-const LIMIAR_PROXIMO_TOP5 = 5;
+/**
+ * Limiares operacionais para missões que dependem de regras comerciais.
+ * PENDENTES de aprovação (Manual Mestre, seção Motor de Missões).
+ * Sem estes valores, as missões correspondentes não disparam (fail-closed).
+ */
+export type ConfigMissoes = {
+  /** Fração da meta de estrelas a partir da qual considerar "quase conquistado". Ex: 0.80 */
+  limiarQuaseConquistado?: number;
+  /** Dias desde a última compra a partir dos quais emitir alerta de inatividade. Ex: 30 */
+  limiarInativiaDias?: number;
+  /** Posição do Top a ser atingido. Ex: 5 para Top 5 */
+  limiarProximoTop?: number;
+  /** Quantas posições acima do limiarProximoTop ainda são consideradas "perto". Ex: 5 */
+  limiarRangeTop?: number;
+};
 
-export function calcularMissaoAtual(estado: EstadoClienteMissao): MissaoAtual | null {
+export function calcularMissaoAtual(
+  estado: EstadoClienteMissao,
+  config?: ConfigMissoes,
+): MissaoAtual | null {
   if (!estado) return null;
 
   // 1. Presente disponível
@@ -56,10 +76,14 @@ export function calcularMissaoAtual(estado: EstadoClienteMissao): MissaoAtual | 
     };
   }
 
-  // 2. Presente quase conquistado
-  if (estado.estrelasAtivas && estado.metaEstrelas > 0) {
+  // 2. Presente quase conquistado — requer limiar aprovado comercialmente
+  if (
+    estado.estrelasAtivas &&
+    estado.metaEstrelas > 0 &&
+    typeof config?.limiarQuaseConquistado === "number"
+  ) {
     const progresso = estado.saldoEstrelas / estado.metaEstrelas;
-    if (progresso >= LIMIAR_QUASE_CONQUISTADO && progresso < 1) {
+    if (progresso >= config.limiarQuaseConquistado && progresso < 1) {
       const faltam = Math.max(1, estado.metaEstrelas - estado.saldoEstrelas);
       return {
         tipo: "presente_quase_conquistado",
@@ -71,7 +95,7 @@ export function calcularMissaoAtual(estado: EstadoClienteMissao): MissaoAtual | 
   }
 
   // 3. Nível quase liberado — placeholder até nível ser implementado
-  // (sem comercial: só quando há estado de nível concreto)
+  // (sem regra comercial: só quando há estado de nível concreto)
 
   // 4. Indicação nova como melhor caminho
   if (estado.temIndicacoesPendentes) {
@@ -81,10 +105,11 @@ export function calcularMissaoAtual(estado: EstadoClienteMissao): MissaoAtual | 
     };
   }
 
-  // 5. Risco de inatividade
+  // 5. Risco de inatividade — requer limiar aprovado comercialmente
   if (
     typeof estado.diasDesdeUltimaCompra === "number" &&
-    estado.diasDesdeUltimaCompra >= LIMIAR_INATIVIDADE_DIAS
+    typeof config?.limiarInativiaDias === "number" &&
+    estado.diasDesdeUltimaCompra >= config.limiarInativiaDias
   ) {
     return {
       tipo: "risco_inatividade",
@@ -94,17 +119,21 @@ export function calcularMissaoAtual(estado: EstadoClienteMissao): MissaoAtual | 
 
   // 6. Sabor / coleção — sem regra comercial definida, não exibir por ora
 
-  // 7. Ranking
+  // 7. Ranking — requer limiares aprovados comercialmente
   if (
     typeof estado.posicaoRanking === "number" &&
     typeof estado.totalNoRanking === "number" &&
-    estado.posicaoRanking > LIMIAR_PROXIMO_TOP5 &&
-    estado.posicaoRanking <= LIMIAR_PROXIMO_TOP5 + 5
+    typeof config?.limiarProximoTop === "number" &&
+    typeof config?.limiarRangeTop === "number"
   ) {
-    return {
-      tipo: "subir_ranking",
-      mensagem: "Você está perto do Top 5. Faça mais pedidos para avançar.",
-    };
+    const top = config.limiarProximoTop;
+    const range = config.limiarRangeTop;
+    if (estado.posicaoRanking > top && estado.posicaoRanking <= top + range) {
+      return {
+        tipo: "subir_ranking",
+        mensagem: `Você está perto do Top ${top}. Faça mais pedidos para avançar.`,
+      };
+    }
   }
 
   // Sem missão identificada

@@ -50,12 +50,12 @@ export async function obterTopRanking(
   if (!tenantId || !temporadaId) return [];
   const n = Math.min(Math.max(1, Math.round(limite)), TAMANHO_MAXIMO);
   const chave = chaveRanking(tenantId, temporadaId);
-  const membros = await zredis.zrange(chave, 0, n - 1, { rev: true });
+  const membros = (await zredis.zrange(chave, 0, n - 1, { rev: true })) as string[];
   if (!membros || membros.length === 0) return [];
-  const entradas = await Promise.all(
-    membros.map(async (clienteId, idx) => {
+  const entradas: EntradaRanking[] = await Promise.all(
+    membros.map(async (clienteId: string, idx: number) => {
       const s = await zredis.zscore(chave, clienteId);
-      return { clienteId, score: s ?? 0, posicao: idx + 1 } satisfies EntradaRanking;
+      return { clienteId, score: s ?? 0, posicao: idx + 1 };
     }),
   );
   return entradas;

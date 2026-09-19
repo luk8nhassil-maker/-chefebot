@@ -7,13 +7,13 @@ const { store, mocks } = vi.hoisted(() => {
     obterRecompensasCliente: vi.fn(async (clienteId: string, tenantId: string) => {
       return store.get(`${tenantId}:${clienteId}`) ?? [];
     }),
-    abrirRecompensa: vi.fn(async (_clienteId: string, recompensaId: string, _tenantId: string) => {
+    abrirRecompensa: vi.fn(async (_clienteId: string, recompensaId: string, _tenantId: string): Promise<RecompensaJornada> => {
       throw new Error(`abrirRecompensa not stubbed for ${recompensaId}`);
     }),
-    reservarRecompensaParaProximoPedido: vi.fn(async (_clienteId: string, recompensaId: string, _tenantId: string) => {
+    reservarRecompensaParaProximoPedido: vi.fn(async (_clienteId: string, recompensaId: string, _tenantId: string): Promise<RecompensaJornada> => {
       throw new Error(`reservar not stubbed for ${recompensaId}`);
     }),
-    cancelarReservaRecompensa: vi.fn(async (_clienteId: string, recompensaId: string, _tenantId: string) => {
+    cancelarReservaRecompensa: vi.fn(async (_clienteId: string, recompensaId: string, _tenantId: string): Promise<RecompensaJornada> => {
       throw new Error(`cancelarReserva not stubbed for ${recompensaId}`);
     }),
   };

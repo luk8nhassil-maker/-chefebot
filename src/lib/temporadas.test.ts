@@ -55,6 +55,23 @@ describe("criarTemporada", () => {
     const lista = await listarTemporadas(TENANT);
     expect(lista.filter((t) => t.temporadaId === "t1")).toHaveLength(1);
   });
+
+  test("temporada ativa é imutável via criar — ignora novos parâmetros", async () => {
+    await criarTemporada(TENANT, "t1", { nome: "Original" });
+    await ativarTemporada(TENANT, "t1");
+    const tentativa = await criarTemporada(TENANT, "t1", { nome: "Sobrescrito" });
+    expect(tentativa.estado).toBe("ativa");
+    expect(tentativa.nome).toBe("Original");
+  });
+
+  test("temporada encerrada é imutável via criar", async () => {
+    await criarTemporada(TENANT, "t1", { nome: "Original" });
+    await ativarTemporada(TENANT, "t1");
+    await encerrarTemporada(TENANT, "t1");
+    const tentativa = await criarTemporada(TENANT, "t1", { nome: "Sobrescrito" });
+    expect(tentativa.estado).toBe("encerrada");
+    expect(tentativa.nome).toBe("Original");
+  });
 });
 
 describe("ativarTemporada", () => {
