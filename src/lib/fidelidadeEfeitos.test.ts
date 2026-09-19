@@ -86,6 +86,11 @@ vi.mock("./expedienteOperacional", () => ({
   chaveExpedienteOperacional: vi.fn(() => "2024-01-01"),
 }));
 
+vi.mock("./historicoAnalitico", () => ({
+  registrarEventoEntregue: vi.fn(async () => undefined),
+  estornarEventoAnalitico: vi.fn(async () => undefined),
+}));
+
 import {
   obterPendenciasEfeitosFidelidade,
   processarEfeitosPedidoCancelado,

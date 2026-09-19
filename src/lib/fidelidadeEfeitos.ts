@@ -21,6 +21,7 @@ import {
   type PedidoParaJornada,
 } from "./jornadaChef";
 import type { PedidoSnapshotOficial } from "./pedidoSnapshot";
+import { registrarEventoEntregue, estornarEventoAnalitico } from "./historicoAnalitico";
 import type { ItemApp } from "./pedidoAppItens";
 import type { PedidoRedis } from "@/types/pedidoRedis";
 
@@ -252,7 +253,7 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       await removerPendencia(pedido.id, "entregue", tenantId);
       return;
     }
-    estado = estado ?? (await novoEstado(pedido.id, "entregue", ["fidelidade_legada", "pontos", "jornada", "indicacao"]));
+    estado = estado ?? (await novoEstado(pedido.id, "entregue", ["fidelidade_legada", "pontos", "jornada", "indicacao", "analytics"]));
 
     await executarEfeito(chave, estado, "fidelidade_legada", async () => {
       await creditarFidelidadePedido({
@@ -314,6 +315,19 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       });
     });
 
+    await executarEfeito(chave, estado, "analytics", async () => {
+      await registrarEventoEntregue({
+        id: pedido.id,
+        telefone: pedido.telefone,
+        tenantId: pedido.tenantId,
+        total: pedido.total,
+        taxaEntrega: pedido.taxaEntrega,
+        snapshotOficial: pedido.snapshotOficial,
+        origem: pedido.origem,
+        tipoEntrega: pedido.tipoEntrega,
+      });
+    });
+
     estado.status = "concluido";
     await salvarEstado(chave, estado);
     await removerPendencia(pedido.id, "entregue", tenantId);
@@ -342,7 +356,7 @@ export async function processarEfeitosPedidoCancelado(pedido: PedidoParaEfeitosF
       await removerPendencia(pedido.id, "cancelado", tenantId);
       return;
     }
-    estado = estado ?? (await novoEstado(pedido.id, "cancelado", ["pontos", "resgate", "jornada"]));
+    estado = estado ?? (await novoEstado(pedido.id, "cancelado", ["pontos", "resgate", "jornada", "analytics"]));
 
     await executarEfeito(chave, estado, "pontos", async () => {
       const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
@@ -390,6 +404,11 @@ export async function processarEfeitosPedidoCancelado(pedido: PedidoParaEfeitosF
     await executarEfeito(chave, estado, "jornada", async () => {
       await reverterConclusaoPedidoJornada(pedido.id, `Pedido ${pedido.id} cancelado`);
       await liberarRecompensaDePedidoCancelado(pedido);
+    });
+    await executarEfeito(chave, estado, "analytics", async () => {
+      if (pedido.statusAnterior === "entregue") {
+        await estornarEventoAnalitico(pedido.id, pedido.tenantId);
+      }
     });
 
     estado.status = "concluido";
