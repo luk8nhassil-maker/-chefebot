@@ -231,7 +231,7 @@ export default function ClientePage() {
       if (!token) { setCompartilhandoIndicacao(false); return }
       const url = `${window.location.origin}/pedido?ref=${token}`
       if (navigator.share) {
-        await navigator.share({ title: 'Ganhe desconto!', text: 'Use meu link para pedir e ganhe vantagens no primeiro pedido!', url })
+        await navigator.share({ title: 'Indique um amigo', text: 'Peça pelo meu link do Chefe da Pizza.', url })
       } else {
         await navigator.clipboard.writeText(url)
       }
@@ -831,8 +831,8 @@ export default function ClientePage() {
 
               {fidelidade && fidelidade.ativo && (
                 <>
-                  {/* Hero de saldo */}
-                  <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
+                  {/* Hero de saldo — maior peso visual, sem transparência excessiva */}
+                  <div className="cf-glass cf-glass-hero" style={{ borderRadius: 16, padding: 22 }}>
                     <div style={{ fontSize: 13, color: cores.textoSecundario, marginBottom: 4 }}>Seu saldo de {fidelidade.unidade === 'estrelas' ? 'Estrelas' : 'pontos'}</div>
                     <div style={{ fontSize: 56, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
                       {fidelidade.saldoPontos}
@@ -840,8 +840,7 @@ export default function ClientePage() {
                   </div>
 
                   {podeResgatar ? (
-                    // Meta atingida: substitui o card de progresso pelo card
-                    // navy com CTA — único lugar da tela com fundo escuro.
+                    // Meta atingida: card de resgate com fundo sólido — máximo peso visual para CTA.
                     <div style={{ background: cores.navyCard, borderRadius: 16, padding: 22, color: cores.navyCardTexto }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                         <Sparkles size={20} color={cores.amarelo} />
@@ -858,7 +857,7 @@ export default function ClientePage() {
                       </button>
                     </div>
                   ) : (
-                    <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
+                    <div className="cf-glass" style={{ borderRadius: 16, padding: 22 }}>
                       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
                         {fidelidade.saldoPontos} de {fidelidade.metaPontos} {fidelidade.unidade === 'estrelas' ? 'Estrelas' : 'pontos'}
                       </div>
@@ -938,7 +937,7 @@ export default function ClientePage() {
 
               {/* Temporada ativa */}
               {painel?.temporada && (
-                <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 20 }}>
+                <div className="cf-glass" style={{ borderRadius: 16, padding: 20 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                     <Star size={16} color={cores.amarelo} />
                     <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5 }}>
@@ -956,50 +955,58 @@ export default function ClientePage() {
                 </div>
               )}
 
-              {/* Posição no ranking */}
-              {painel?.ranking && (
-                <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 20 }}>
+              {/* Posição no ranking — sempre visível quando há temporada ativa */}
+              {painel?.temporada && (
+                <div className="cf-glass" style={{ borderRadius: 16, padding: 20 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                     <Trophy size={16} color={cores.amarelo} />
                     <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5 }}>Ranking da temporada</span>
                   </div>
-                  <div style={{ fontSize: 32, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums', marginBottom: 4 }}>
-                    #{painel.ranking.posicao}
-                  </div>
-                  <div style={{ fontSize: 13, color: cores.textoSecundario, marginBottom: 12 }}>
-                    {painel.ranking.score} {fidelidade?.unidade === 'estrelas' ? 'Estrelas' : 'pontos'} acumulados
-                  </div>
-                  {painel.ranking.entorno.length > 0 && (
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      {painel.ranking.entorno.map((e) => (
-                        <div
-                          key={e.posicao}
-                          style={{
-                            padding: '4px 10px',
-                            borderRadius: 999,
-                            fontSize: 12,
-                            fontWeight: e.eVoce ? 800 : 400,
-                            background: e.eVoce ? cores.amarelo : cores.moldura,
-                            color: e.eVoce ? cores.amareloTexto : cores.textoSecundario,
-                          }}
-                        >
-                          #{e.posicao}{e.eVoce ? ' (você)' : ''}
+                  {painel.ranking ? (
+                    <>
+                      <div style={{ fontSize: 32, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums', marginBottom: 4 }}>
+                        #{painel.ranking.posicao}
+                      </div>
+                      <div style={{ fontSize: 13, color: cores.textoSecundario, marginBottom: 12 }}>
+                        {painel.ranking.score} {fidelidade?.unidade === 'estrelas' ? 'Estrelas' : 'pontos'} acumulados
+                      </div>
+                      {painel.ranking.entorno.length > 0 && (
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          {painel.ranking.entorno.map((e) => (
+                            <div
+                              key={e.posicao}
+                              style={{
+                                padding: '4px 10px',
+                                borderRadius: 999,
+                                fontSize: 12,
+                                fontWeight: e.eVoce ? 800 : 400,
+                                background: e.eVoce ? cores.amarelo : cores.moldura,
+                                color: e.eVoce ? cores.amareloTexto : cores.textoSecundario,
+                              }}
+                            >
+                              #{e.posicao}{e.eVoce ? ' (você)' : ''}
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      )}
+                    </>
+                  ) : (
+                    <p style={{ fontSize: 14, color: cores.textoSecundario, margin: 0 }}>
+                      O ranking começa a aparecer conforme a temporada avança.
+                    </p>
                   )}
                 </div>
               )}
 
-              {/* Indicação: compartilhar link */}
+              {/* Indicação: compartilhar link — sem prometer benefício ao indicado */}
               {fidelidade && fidelidade.ativo && (
-                <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 20 }}>
+                <div className="cf-glass" style={{ borderRadius: 16, padding: 20 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                     <Users size={16} color={cores.textoTerciario} />
-                    <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5 }}>Indicar amigos</span>
+                    <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5 }}>Indique um amigo</span>
                   </div>
                   <p style={{ fontSize: 14, color: cores.textoSecundario, margin: '0 0 12px' }}>
-                    Indique um amigo e ganhe Estrelas quando ele fizer o primeiro pedido.
+                    Ganhe +6 Estrelas quando um novo amigo fizer o primeiro pedido válido.
                     {estrelasDeIndicacao > 0 && ` Você já ganhou ${estrelasDeIndicacao} ${fidelidade.unidade === 'estrelas' ? 'Estrelas' : 'pontos'} por indicações.`}
                   </p>
                   <button
@@ -1018,19 +1025,23 @@ export default function ClientePage() {
             </div>
 
             <div className="cliente-col-direita" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {/* Meus presentes: recompensas disponíveis (coberturaEconomicaAprovada controla no servidor) */}
-              {fidelidade && fidelidade.recompensas.length > 0 && (
-                <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 18 }}>
+              {/* Meus presentes: sempre visível quando ativo — coberturaEconomicaAprovada controla no servidor */}
+              {fidelidade && fidelidade.ativo && (
+                <div className="cf-glass" style={{ borderRadius: 14, padding: 18 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                     <Gift size={16} color={cores.amarelo} />
                     <p style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5, margin: 0 }}>Meus presentes</p>
                   </div>
-                  {fidelidade.recompensas.map((r) => (
-                    <div key={r.recompensaId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13.5, padding: '8px 0', borderTop: `1px solid ${cores.moldura}` }}>
-                      <span style={{ color: cores.navy }}>{fidelidade.descricaoRecompensa}</span>
-                      <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase' }}>{r.status}</span>
-                    </div>
-                  ))}
+                  {fidelidade.recompensas.length === 0 ? (
+                    <p style={{ fontSize: 13, color: cores.textoSecundario, margin: 0 }}>Seu próximo presente vai aparecer aqui.</p>
+                  ) : (
+                    fidelidade.recompensas.map((r) => (
+                      <div key={r.recompensaId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13.5, padding: '8px 0', borderTop: `1px solid ${cores.moldura}` }}>
+                        <span style={{ color: cores.navy }}>{fidelidade.descricaoRecompensa}</span>
+                        <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase' }}>{r.status}</span>
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
 
@@ -1091,15 +1102,33 @@ export default function ClientePage() {
           backdrop-filter: blur(12px);
           -webkit-backdrop-filter: blur(12px);
         }
+        @supports not (backdrop-filter: blur(1px)) {
+          .cf-glass { background: var(--surface); border: 1px solid var(--border); }
+          .cf-glass-hero { background: var(--surface); }
+        }
+        .cf-glass-hero {
+          background: rgba(255,255,255,0.82);
+          border: 1px solid rgba(255,255,255,0.6);
+          backdrop-filter: blur(20px) saturate(1.4);
+          -webkit-backdrop-filter: blur(20px) saturate(1.4);
+        }
         @media (prefers-color-scheme: dark) {
           :root:not([data-theme="light"]) .cf-glass {
             background: rgba(30,30,40,0.55);
             border: 1px solid rgba(255,255,255,0.12);
           }
+          :root:not([data-theme="light"]) .cf-glass-hero {
+            background: rgba(20,20,32,0.82);
+            border: 1px solid rgba(255,255,255,0.18);
+          }
         }
         :root[data-theme="dark"] .cf-glass {
           background: rgba(30,30,40,0.55);
           border: 1px solid rgba(255,255,255,0.12);
+        }
+        :root[data-theme="dark"] .cf-glass-hero {
+          background: rgba(20,20,32,0.82);
+          border: 1px solid rgba(255,255,255,0.18);
         }
       `}</style>
     </div>

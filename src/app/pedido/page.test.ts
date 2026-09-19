@@ -12,3 +12,18 @@ describe("/pedido — sempre cardápio público, mesmo com sessão admin", () =>
     expect(fonte).not.toContain("auth-user");
   });
 });
+
+describe("/pedido — captura de token de indicação (?ref=)", () => {
+  test("captura ?ref= da URL, remove da barra de endereço e armazena em cf_ref", () => {
+    expect(fonte).toContain("cf_ref");
+    expect(fonte).toContain('params.get("ref")');
+    expect(fonte).toContain('sessionStorage.setItem("cf_ref"');
+    expect(fonte).toContain("params.delete");
+    expect(fonte).toContain("window.history.replaceState");
+  });
+
+  test("ref nunca expõe telefone — apenas token opaco", () => {
+    const blocoRef = fonte.slice(fonte.indexOf('params.get("ref")'), fonte.indexOf('window.history.replaceState'));
+    expect(blocoRef).not.toMatch(/telefone/);
+  });
+});
