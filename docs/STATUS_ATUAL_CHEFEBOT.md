@@ -21,6 +21,7 @@ Fonte da verdade do projeto. Objetivo: evitar reabrir diagnóstico ou trabalho e
 - **Proteção de `/setup`** — resolvida pelo PR #162. `/setup` exige login, só `admin`/`dev` acessam (`atendente` bloqueado). O wizard não avança mais silenciosamente se o `POST /api/configuracoes` falhar (401/403 ou qualquer erro mostra alerta claro e não avança o step).
 - **Fluxo público `/cardapio`** — validado em produção (checklist manual, ver `docs/DEPLOYMENT.md`): pedido completo, bebida/suco, entrega com taxa por bairro, retirada sem endereço, Pix com badge no painel, dinheiro com troco, atendimento humano assumido e devolvido corretamente.
 - **Montagem/checkout dinâmico** — validado em produção junto com o checklist acima.
+- **Estrelas V1 + Indicação** — mergeado na main via PR #422 (merge commit `c03332c`). Regra `"estrelas-faixas-v1"` implementada mas desativada por padrão (`config.ativo = false`, sem `regraVersao`). Para ativar em produção, usar `POST /api/admin/fidelidade/pontos-config` (PR em aberto: `claude/ativar-estrelas-v1-gate`). Dois gates independentes: `ativo + regraVersao` (liga estrelas) e `coberturaEconomicaAprovada` (libera resgates).
 
 ## 3. Problemas que não devem ser reabertos sem nova evidência
 
@@ -34,9 +35,15 @@ Estes itens já foram corrigidos e validados. Só investigar de novo se houver *
 
 ## 4. Pendências reais
 
+### Ativação da Estrelas V1 — PR em aberto (`claude/ativar-estrelas-v1-gate`)
+
+**Estado: patch criado, aguardando aprovação e merge.**
+
+Adiciona rota `GET+POST /api/admin/fidelidade/pontos-config` para que admin/dev possam ativar/desativar a estrelas V1 sem deploy. PR #422 (Estrelas V1 + Indicação) já está mergeado na main — este patch fecha o gap da API de administração.
+
 ### Estrelas V1 + Indicação — PR #422 (branch `codex/chefebot-estrelas-v1`)
 
-**Estado: implementado, aguardando merge.**
+**Estado: mergeado na main (commit `c03332c`). Deploy em produção pendente de confirmação manual.**
 
 #### O que foi implementado
 
