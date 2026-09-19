@@ -22,6 +22,8 @@ export type ConfigTemporada = {
   encerradaEm?: string;
   metaCompras?: number;
   metaIndicacoes?: number;
+  duracaoDias?: number;
+  fimEm?: string;
 };
 
 function chaveTemporada(tenantId: string, temporadaId: string): string {
@@ -34,10 +36,18 @@ function chaveListaTemporadas(tenantId: string): string {
   return `temporada:lista:${tenantId}`;
 }
 
+// Retorna true se a temporada ativa expirou pelo campo fimEm.
+// agora permite injeção de data em testes.
+export function temporadaExpirada(config: ConfigTemporada, agora?: Date): boolean {
+  if (!config.fimEm) return false;
+  const ref = agora ?? new Date();
+  return ref.getTime() > new Date(config.fimEm).getTime();
+}
+
 export async function criarTemporada(
   tenantId: string,
   temporadaId: string,
-  params: Partial<Pick<ConfigTemporada, "nome" | "metaCompras" | "metaIndicacoes">> = {}
+  params: Partial<Pick<ConfigTemporada, "nome" | "metaCompras" | "metaIndicacoes" | "duracaoDias">> = {}
 ): Promise<ConfigTemporada> {
   const existente = await obterTemporada(tenantId, temporadaId);
   // Temporada ativa ou encerrada é imutável — apenas atualiza campos opcionais de rascunho
@@ -68,7 +78,20 @@ export async function obterTemporadaAtiva(tenantId: string): Promise<ConfigTempo
   if (!tenantId) return null;
   const temporadaId = await redis.get<string>(chaveTemporadaAtiva(tenantId));
   if (!temporadaId) return null;
-  return obterTemporada(tenantId, temporadaId);
+  const config = await obterTemporada(tenantId, temporadaId);
+  if (!config) return null;
+  // Auto-expiry server-side: sem cron, verifica no momento da leitura
+  if (config.estado === "ativa" && temporadaExpirada(config)) {
+    const encerrada: ConfigTemporada = {
+      ...config,
+      estado: "encerrada",
+      encerradaEm: new Date().toISOString(),
+    };
+    await redis.set(chaveTemporada(tenantId, temporadaId), encerrada);
+    await redis.del(chaveTemporadaAtiva(tenantId));
+    return null;
+  }
+  return config;
 }
 
 export async function listarTemporadas(tenantId: string): Promise<ConfigTemporada[]> {
@@ -102,7 +125,11 @@ export async function ativarTemporada(
     await redis.set(chaveTemporada(tenantId, ativaAtual.temporadaId), encerrada);
   }
 
-  const nova: ConfigTemporada = { ...config, estado: "ativa", ativadaEm: new Date().toISOString() };
+  const ativadaEm = new Date().toISOString();
+  const fimEm = config.duracaoDias
+    ? new Date(new Date(ativadaEm).getTime() + config.duracaoDias * 86400000).toISOString()
+    : config.fimEm;
+  const nova: ConfigTemporada = { ...config, estado: "ativa", ativadaEm, fimEm };
   await redis.set(chaveTemporada(tenantId, temporadaId), nova);
   await redis.set(chaveTemporadaAtiva(tenantId), temporadaId);
   return { ok: true, config: nova };

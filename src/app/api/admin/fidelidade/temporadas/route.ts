@@ -58,10 +58,11 @@ export async function POST(req: NextRequest) {
   if (!acao) return NextResponse.json({ error: "acao obrigatoria" }, { status: 400 });
 
   if (acao === "criar") {
-    const params: { nome?: string; metaCompras?: number; metaIndicacoes?: number } = {};
+    const params: { nome?: string; metaCompras?: number; metaIndicacoes?: number; duracaoDias?: number } = {};
     if (typeof body.nome === "string") params.nome = body.nome.trim();
     if (typeof body.metaCompras === "number" && body.metaCompras > 0) params.metaCompras = Math.round(body.metaCompras);
     if (typeof body.metaIndicacoes === "number" && body.metaIndicacoes > 0) params.metaIndicacoes = Math.round(body.metaIndicacoes);
+    if (typeof body.duracaoDias === "number" && body.duracaoDias >= 1) params.duracaoDias = Math.round(body.duracaoDias);
     const config = await criarTemporada(tenantId, temporadaId, params);
     return NextResponse.json({ ok: true, config });
   }

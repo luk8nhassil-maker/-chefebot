@@ -17,6 +17,7 @@ import {
   listarTemporadas,
   ativarTemporada,
   encerrarTemporada,
+  temporadaExpirada,
 } from "./temporadas";
 
 const TENANT = "default";
@@ -168,5 +169,83 @@ describe("obterTemporadaAtiva", () => {
     const ativa = await obterTemporadaAtiva(TENANT);
     expect(ativa?.temporadaId).toBe("t1");
     expect(ativa?.estado).toBe("ativa");
+  });
+});
+
+describe("temporadaExpirada", () => {
+  test("retorna false quando fimEm não definido", () => {
+    expect(temporadaExpirada({ temporadaId: "t1", tenantId: "x", estado: "ativa", criadaEm: new Date().toISOString() })).toBe(false);
+  });
+
+  test("retorna false quando agora < fimEm", () => {
+    const fimEm = new Date(Date.now() + 86400000).toISOString();
+    expect(temporadaExpirada({ temporadaId: "t1", tenantId: "x", estado: "ativa", criadaEm: new Date().toISOString(), fimEm })).toBe(false);
+  });
+
+  test("retorna true quando agora > fimEm", () => {
+    const fimEm = new Date(Date.now() - 1000).toISOString();
+    expect(temporadaExpirada({ temporadaId: "t1", tenantId: "x", estado: "ativa", criadaEm: new Date().toISOString(), fimEm })).toBe(true);
+  });
+
+  test("aceita injeção de data para testes determinísticos", () => {
+    const fimEm = "2026-06-01T00:00:00.000Z";
+    const antes = new Date("2026-05-31T00:00:00.000Z");
+    const depois = new Date("2026-06-02T00:00:00.000Z");
+    expect(temporadaExpirada({ temporadaId: "t1", tenantId: "x", estado: "ativa", criadaEm: new Date().toISOString(), fimEm }, antes)).toBe(false);
+    expect(temporadaExpirada({ temporadaId: "t1", tenantId: "x", estado: "ativa", criadaEm: new Date().toISOString(), fimEm }, depois)).toBe(true);
+  });
+});
+
+describe("duracaoDias e fimEm", () => {
+  test("criarTemporada aceita duracaoDias", async () => {
+    const t = await criarTemporada(TENANT, "t-dur", { duracaoDias: 30 });
+    expect(t.duracaoDias).toBe(30);
+    expect(t.fimEm).toBeUndefined();
+  });
+
+  test("ativarTemporada calcula fimEm a partir de duracaoDias", async () => {
+    await criarTemporada(TENANT, "t-dur", { duracaoDias: 30 });
+    const r = await ativarTemporada(TENANT, "t-dur");
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.config.fimEm).toBeTruthy();
+      const dias = Math.round((new Date(r.config.fimEm!).getTime() - new Date(r.config.ativadaEm!).getTime()) / 86400000);
+      expect(dias).toBe(30);
+    }
+  });
+
+  test("temporada sem duracaoDias não tem fimEm após ativar", async () => {
+    await criarTemporada(TENANT, "t-sem-dur");
+    const r = await ativarTemporada(TENANT, "t-sem-dur");
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.config.fimEm).toBeUndefined();
+  });
+});
+
+describe("auto-expiry em obterTemporadaAtiva", () => {
+  test("retorna null e encerra temporada expirada", async () => {
+    await criarTemporada(TENANT, "t-exp", { duracaoDias: 1 });
+    const r = await ativarTemporada(TENANT, "t-exp");
+    expect(r.ok).toBe(true);
+
+    // Manipular fimEm para ser no passado
+    if (r.ok) {
+      const configExpirada = { ...r.config, fimEm: new Date(Date.now() - 1000).toISOString() };
+      store.set(`temporada:config:${TENANT}:t-exp`, configExpirada);
+    }
+
+    const ativa = await obterTemporadaAtiva(TENANT);
+    expect(ativa).toBeNull();
+
+    const encerrada = await obterTemporada(TENANT, "t-exp");
+    expect(encerrada?.estado).toBe("encerrada");
+    expect(encerrada?.encerradaEm).toBeTruthy();
+  });
+
+  test("temporada com fimEm futuro permanece ativa", async () => {
+    await criarTemporada(TENANT, "t-futuro", { duracaoDias: 30 });
+    await ativarTemporada(TENANT, "t-futuro");
+    const ativa = await obterTemporadaAtiva(TENANT);
+    expect(ativa?.temporadaId).toBe("t-futuro");
   });
 });
