@@ -20,6 +20,7 @@ import {
   resolverTokenIndicacao,
   registrarRelacaoIndicacao,
   obterRelacaoIndicacao,
+  obterOuCriarTokenIndicacao,
 } from "./indicacaoToken";
 
 beforeEach(() => store.clear());
@@ -101,5 +102,38 @@ describe("obterRelacaoIndicacao", () => {
 
   test("indicado vazio retorna null sem consultar Redis", async () => {
     expect(await obterRelacaoIndicacao("")).toBeNull();
+  });
+});
+
+describe("obterOuCriarTokenIndicacao", () => {
+  test("cria token novo quando não existe", async () => {
+    const token = await obterOuCriarTokenIndicacao("cli_x");
+    expect(tokenIndicacaoValido(token)).toBe(true);
+    expect(await resolverTokenIndicacao(token)).toBe("cli_x");
+  });
+
+  test("retorna o mesmo token em chamadas repetidas (idempotente)", async () => {
+    const t1 = await obterOuCriarTokenIndicacao("cli_idem");
+    const t2 = await obterOuCriarTokenIndicacao("cli_idem");
+    expect(t1).toBe(t2);
+  });
+
+  test("cria token diferente para clientes distintos", async () => {
+    const t1 = await obterOuCriarTokenIndicacao("cli_p");
+    const t2 = await obterOuCriarTokenIndicacao("cli_q");
+    expect(t1).not.toBe(t2);
+  });
+
+  test("lança erro quando clienteId vazio", async () => {
+    await expect(obterOuCriarTokenIndicacao("")).rejects.toThrow("clienteId obrigatorio");
+  });
+
+  test("cria novo token quando o token armazenado não resolve para o mesmo indicador", async () => {
+    // Simula estado inconsistente: chave tokenCliente aponta para token de outro cliente
+    const tokenOutro = await salvarTokenIndicacao("cli_outro");
+    store.set(`indicacao:tokenCliente:cli_y`, tokenOutro);
+    const token = await obterOuCriarTokenIndicacao("cli_y");
+    // token deve ser novo (não o de cli_outro)
+    expect(await resolverTokenIndicacao(token)).toBe("cli_y");
   });
 });

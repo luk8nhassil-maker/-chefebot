@@ -76,3 +76,25 @@ export async function obterRelacaoIndicacao(indicadoId: string): Promise<Relacao
   if (!indicadoId) return null;
   return redis.get<RelacaoIndicacao>(chaveRelacao(indicadoId));
 }
+
+function chaveTokenCliente(clienteId: string): string {
+  return `indicacao:tokenCliente:${clienteId}`;
+}
+
+/**
+ * Retorna o token de indicação existente (se ainda válido e pertence a este
+ * cliente) ou cria um novo. Idempotente: chamadas repetidas retornam o mesmo
+ * token enquanto ele estiver no prazo.
+ */
+export async function obterOuCriarTokenIndicacao(clienteId: string): Promise<string> {
+  if (!clienteId) throw new Error("clienteId obrigatorio");
+  const existente = await redis.get<string>(chaveTokenCliente(clienteId));
+  if (existente && tokenIndicacaoValido(existente)) {
+    const entry = await redis.get<{ indicadorId: string }>(chaveToken(existente));
+    if (entry?.indicadorId === clienteId) return existente;
+  }
+  const token = gerarTokenIndicacao();
+  await redis.set(chaveToken(token), { indicadorId: clienteId, criadoEm: new Date().toISOString() }, { ex: TTL_TOKEN_SEGUNDOS });
+  await redis.set(chaveTokenCliente(clienteId), token, { ex: TTL_TOKEN_SEGUNDOS });
+  return token;
+}

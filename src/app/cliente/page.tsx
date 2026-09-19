@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Gift, Phone, MessageCircle, LogOut, Receipt, ShieldCheck, Sparkles, Pizza } from 'lucide-react'
+import { Gift, Phone, MessageCircle, LogOut, Receipt, ShieldCheck, Sparkles, Pizza, Trophy, Users, Star } from 'lucide-react'
+import { calcularMissaoAtual } from '@/lib/missoes'
 import ClientBottomNav from '@/components/ClientBottomNav'
 import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
 import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
@@ -43,6 +44,20 @@ type Fidelidade = {
   metaAtingida: boolean
   extrato: Movimento[]
   recompensas: Recompensa[]
+}
+
+type PainelFidelidade = {
+  temporada: {
+    nome: string | null
+    diasRestantes: number | null
+    fimEm: string | null
+    estado: string
+  } | null
+  ranking: {
+    posicao: number
+    score: number
+    entorno: { posicao: number; eVoce: boolean }[]
+  } | null
 }
 
 type PedidoResumo = {
@@ -106,6 +121,9 @@ export default function ClientePage() {
   const [perfil, setPerfil] = useState<Perfil | null>(null)
   const [fidelidade, setFidelidade] = useState<Fidelidade | null>(null)
   const [jornada, setJornada] = useState<Jornada | null>(null)
+  const [painel, setPainel] = useState<PainelFidelidade | null>(null)
+  const [indicacaoToken, setIndicacaoToken] = useState<string | null>(null)
+  const [compartilhandoIndicacao, setCompartilhandoIndicacao] = useState(false)
   const [resgatando, setResgatando] = useState(false)
   const [resgateErro, setResgateErro] = useState('')
   // Vínculo reconhecido: token opaco + máscaras vindas do servidor.
@@ -191,12 +209,55 @@ export default function ClientePage() {
     } catch {}
   }
 
+  async function carregarPainel(): Promise<void> {
+    try {
+      const res = await fetchCliente('/api/cliente/fidelidade/painel', { cache: 'no-store' }, sessaoMemRef.current)
+      if (res.ok) setPainel(await res.json())
+    } catch {}
+  }
+
+  async function compartilharIndicacao() {
+    setCompartilhandoIndicacao(true)
+    try {
+      let token = indicacaoToken
+      if (!token) {
+        const res = await fetchCliente('/api/cliente/indicacao', { cache: 'no-store' }, sessaoMemRef.current)
+        if (res.ok) {
+          const data = await res.json()
+          token = typeof data.token === 'string' ? data.token : null
+          if (token) setIndicacaoToken(token)
+        }
+      }
+      if (!token) { setCompartilhandoIndicacao(false); return }
+      const url = `${window.location.origin}/pedido?ref=${token}`
+      if (navigator.share) {
+        await navigator.share({ title: 'Indique um amigo', text: 'Peça pelo meu link do Chefe da Pizza.', url })
+      } else {
+        await navigator.clipboard.writeText(url)
+      }
+    } catch {}
+    setCompartilhandoIndicacao(false)
+  }
+
   function abrirPontos() {
     setStep('perfil')
     telemetria('points_step_opened', { trace: traceId })
     carregarIdentidade()
     carregarFidelidade()
     carregarJornada()
+    carregarPainel()
+    // Processa indicação capturada antes do login (cf_ref)
+    try {
+      const ref = sessionStorage.getItem('cf_ref')
+      if (ref) {
+        sessionStorage.removeItem('cf_ref')
+        fetchCliente('/api/cliente/indicacao', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ref }),
+        }, sessaoMemRef.current).catch(() => {})
+      }
+    } catch {}
   }
 
   function limparVinculo() {
@@ -260,6 +321,14 @@ export default function ClientePage() {
         params.delete('cadastro')
         const qs = params.toString()
         window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
+      }
+      // Captura ?ref= de indicação antes do login; removido da URL imediatamente.
+      const refParam = params.get('ref')
+      if (refParam) {
+        params.delete('ref')
+        const qs = params.toString()
+        window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
+        try { sessionStorage.setItem('cf_ref', refParam) } catch {}
       }
     } catch {}
     // ÚNICA fonte de "estou autenticado?": /api/cliente/estado-sessao (valida
@@ -458,6 +527,8 @@ export default function ClientePage() {
     setPerfil(null)
     setFidelidade(null)
     setJornada(null)
+    setPainel(null)
+    setIndicacaoToken(null)
     setPerfilErro(false)
     setFidelidadeErro(false)
     setTelefone('')
@@ -475,6 +546,19 @@ export default function ClientePage() {
   // uma recompensa aberta de verdade — nunca confia só na existência de um
   // texto de "próxima recompensa".
   const podeResgatar = !!fidelidade && fidelidade.ativo && fidelidade.metaAtingida && fidelidade.recompensas.length > 0
+
+  const missaoAtual = (!podeResgatar && fidelidade)
+    ? calcularMissaoAtual({
+        presentesDisponiveis: 0,
+        estrelasAtivas: fidelidade.ativo && fidelidade.unidade === 'estrelas',
+        saldoEstrelas: fidelidade.saldoPontos,
+        metaEstrelas: fidelidade.metaPontos,
+      })
+    : null
+
+  const estrelasDeIndicacao = fidelidade?.extrato.filter(
+    (m) => m.descricao.toLowerCase().includes('indicaç')
+  ).reduce((acc, m) => acc + m.pontos, 0) ?? 0
 
   async function resgatar() {
     if (!fidelidade || fidelidade.recompensas.length === 0) return
@@ -747,8 +831,8 @@ export default function ClientePage() {
 
               {fidelidade && fidelidade.ativo && (
                 <>
-                  {/* Hero de saldo */}
-                  <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
+                  {/* Hero de saldo — maior peso visual, sem transparência excessiva */}
+                  <div className="cf-glass cf-glass-hero" style={{ borderRadius: 16, padding: 22 }}>
                     <div style={{ fontSize: 13, color: cores.textoSecundario, marginBottom: 4 }}>Seu saldo de {fidelidade.unidade === 'estrelas' ? 'Estrelas' : 'pontos'}</div>
                     <div style={{ fontSize: 56, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
                       {fidelidade.saldoPontos}
@@ -756,8 +840,7 @@ export default function ClientePage() {
                   </div>
 
                   {podeResgatar ? (
-                    // Meta atingida: substitui o card de progresso pelo card
-                    // navy com CTA — único lugar da tela com fundo escuro.
+                    // Meta atingida: card de resgate com fundo sólido — máximo peso visual para CTA.
                     <div style={{ background: cores.navyCard, borderRadius: 16, padding: 22, color: cores.navyCardTexto }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                         <Sparkles size={20} color={cores.amarelo} />
@@ -774,7 +857,7 @@ export default function ClientePage() {
                       </button>
                     </div>
                   ) : (
-                    <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
+                    <div className="cf-glass" style={{ borderRadius: 16, padding: 22 }}>
                       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
                         {fidelidade.saldoPontos} de {fidelidade.metaPontos} {fidelidade.unidade === 'estrelas' ? 'Estrelas' : 'pontos'}
                       </div>
@@ -844,12 +927,124 @@ export default function ClientePage() {
                 </a>
               )}
 
+              {/* Missão: próxima melhor ação — só quando não há resgate disponível */}
+              {missaoAtual && (
+                <div className="cf-glass" style={{ borderRadius: 16, padding: 20 }}>
+                  <div style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Sua missão</div>
+                  <p style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>{missaoAtual.mensagem}</p>
+                </div>
+              )}
+
+              {/* Temporada ativa */}
+              {painel?.temporada && (
+                <div className="cf-glass" style={{ borderRadius: 16, padding: 20 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <Star size={16} color={cores.amarelo} />
+                    <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      {painel.temporada.nome ?? 'Temporada ativa'}
+                    </span>
+                  </div>
+                  {painel.temporada.diasRestantes !== null && painel.temporada.diasRestantes > 0 && (
+                    <p style={{ fontSize: 14, color: cores.textoSecundario, margin: 0 }}>
+                      {painel.temporada.diasRestantes} {painel.temporada.diasRestantes === 1 ? 'dia restante' : 'dias restantes'}
+                    </p>
+                  )}
+                  {painel.temporada.diasRestantes === 0 && (
+                    <p style={{ fontSize: 14, color: cores.textoSecundario, margin: 0 }}>Temporada encerrada</p>
+                  )}
+                </div>
+              )}
+
+              {/* Posição no ranking — sempre visível quando há temporada ativa */}
+              {painel?.temporada && (
+                <div className="cf-glass" style={{ borderRadius: 16, padding: 20 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <Trophy size={16} color={cores.amarelo} />
+                    <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5 }}>Ranking da temporada</span>
+                  </div>
+                  {painel.ranking ? (
+                    <>
+                      <div style={{ fontSize: 32, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums', marginBottom: 4 }}>
+                        #{painel.ranking.posicao}
+                      </div>
+                      <div style={{ fontSize: 13, color: cores.textoSecundario, marginBottom: 12 }}>
+                        {painel.ranking.score} {fidelidade?.unidade === 'estrelas' ? 'Estrelas' : 'pontos'} acumulados
+                      </div>
+                      {painel.ranking.entorno.length > 0 && (
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          {painel.ranking.entorno.map((e) => (
+                            <div
+                              key={e.posicao}
+                              style={{
+                                padding: '4px 10px',
+                                borderRadius: 999,
+                                fontSize: 12,
+                                fontWeight: e.eVoce ? 800 : 400,
+                                background: e.eVoce ? cores.amarelo : cores.moldura,
+                                color: e.eVoce ? cores.amareloTexto : cores.textoSecundario,
+                              }}
+                            >
+                              #{e.posicao}{e.eVoce ? ' (você)' : ''}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p style={{ fontSize: 14, color: cores.textoSecundario, margin: 0 }}>
+                      O ranking começa a aparecer conforme a temporada avança.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Indicação: compartilhar link — sem prometer benefício ao indicado */}
+              {fidelidade && fidelidade.ativo && (
+                <div className="cf-glass" style={{ borderRadius: 16, padding: 20 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <Users size={16} color={cores.textoTerciario} />
+                    <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5 }}>Indique um amigo</span>
+                  </div>
+                  <p style={{ fontSize: 14, color: cores.textoSecundario, margin: '0 0 12px' }}>
+                    Ganhe +6 Estrelas quando um novo amigo fizer o primeiro pedido válido.
+                    {estrelasDeIndicacao > 0 && ` Você já ganhou ${estrelasDeIndicacao} ${fidelidade.unidade === 'estrelas' ? 'Estrelas' : 'pontos'} por indicações.`}
+                  </p>
+                  <button
+                    onClick={compartilharIndicacao}
+                    disabled={compartilhandoIndicacao}
+                    style={{ ...botaoPrimario, opacity: compartilhandoIndicacao ? 0.6 : 1 }}
+                  >
+                    {compartilhandoIndicacao ? 'Aguarde...' : 'Compartilhar meu link'}
+                  </button>
+                </div>
+              )}
+
               <a href="/pedido" style={{ ...botaoPrimario, textDecoration: 'none', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}>
                 Continuar comprando
               </a>
             </div>
 
             <div className="cliente-col-direita" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Meus presentes: sempre visível quando ativo — coberturaEconomicaAprovada controla no servidor */}
+              {fidelidade && fidelidade.ativo && (
+                <div className="cf-glass" style={{ borderRadius: 14, padding: 18 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <Gift size={16} color={cores.amarelo} />
+                    <p style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5, margin: 0 }}>Meus presentes</p>
+                  </div>
+                  {fidelidade.recompensas.length === 0 ? (
+                    <p style={{ fontSize: 13, color: cores.textoSecundario, margin: 0 }}>Seu próximo presente vai aparecer aqui.</p>
+                  ) : (
+                    fidelidade.recompensas.map((r) => (
+                      <div key={r.recompensaId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13.5, padding: '8px 0', borderTop: `1px solid ${cores.moldura}` }}>
+                        <span style={{ color: cores.navy }}>{fidelidade.descricaoRecompensa}</span>
+                        <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase' }}>{r.status}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
               {perfil && perfil.ultimosPedidos.length > 0 && (
                 <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 18 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
@@ -897,7 +1092,45 @@ export default function ClientePage() {
       <PixPendenteBar pendente={pixPendente} />
       <ClientBottomNav active="pontos" onSacolaClick={abrirSacola} pixPendente={!!pixPendente} />
 
-      <style>{`.cliente-grid { display: flex; flex-direction: column; } @media (min-width: 1024px) { .cliente-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 24px; align-items: start; } } @media (min-width: 768px) and (max-width: 1023.98px) { .cliente-conteudo { padding: 32px 32px calc(env(safe-area-inset-bottom) + 96px); } }`}</style>
+      <style>{`
+        .cliente-grid { display: flex; flex-direction: column; }
+        @media (min-width: 1024px) { .cliente-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 24px; align-items: start; } }
+        @media (min-width: 768px) and (max-width: 1023.98px) { .cliente-conteudo { padding: 32px 32px calc(env(safe-area-inset-bottom) + 96px); } }
+        .cf-glass {
+          background: rgba(255,255,255,0.6);
+          border: 1px solid rgba(255,255,255,0.4);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+        }
+        @supports not (backdrop-filter: blur(1px)) {
+          .cf-glass { background: var(--surface); border: 1px solid var(--border); }
+          .cf-glass-hero { background: var(--surface); }
+        }
+        .cf-glass-hero {
+          background: rgba(255,255,255,0.82);
+          border: 1px solid rgba(255,255,255,0.6);
+          backdrop-filter: blur(20px) saturate(1.4);
+          -webkit-backdrop-filter: blur(20px) saturate(1.4);
+        }
+        @media (prefers-color-scheme: dark) {
+          :root:not([data-theme="light"]) .cf-glass {
+            background: rgba(30,30,40,0.55);
+            border: 1px solid rgba(255,255,255,0.12);
+          }
+          :root:not([data-theme="light"]) .cf-glass-hero {
+            background: rgba(20,20,32,0.82);
+            border: 1px solid rgba(255,255,255,0.18);
+          }
+        }
+        :root[data-theme="dark"] .cf-glass {
+          background: rgba(30,30,40,0.55);
+          border: 1px solid rgba(255,255,255,0.12);
+        }
+        :root[data-theme="dark"] .cf-glass-hero {
+          background: rgba(20,20,32,0.82);
+          border: 1px solid rgba(255,255,255,0.18);
+        }
+      `}</style>
     </div>
   )
 }

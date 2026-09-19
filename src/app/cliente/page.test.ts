@@ -248,6 +248,59 @@ describe("/cliente — sessão portátil: PATCH do nome sem depender de sondagem
   });
 });
 
+describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carteira", () => {
+  test("carrega dados de painel (temporada + ranking) via endpoint dedicado", () => {
+    expect(fonte).toContain("async function carregarPainel");
+    expect(fonte).toContain("/api/cliente/fidelidade/painel");
+    expect(fonte).toContain("setPainel");
+  });
+
+  test("compartilharIndicacao usa obterOuCriarTokenIndicacao via GET /api/cliente/indicacao", () => {
+    expect(fonte).toContain("async function compartilharIndicacao");
+    expect(fonte).toContain("/api/cliente/indicacao");
+    expect(fonte).toContain("Compartilhar meu link");
+  });
+
+  test("captura ?ref= da URL antes do login e armazena como cf_ref", () => {
+    expect(fonte).toContain("cf_ref");
+    expect(fonte).toContain("params.get('ref')");
+    expect(fonte).toContain("sessionStorage.setItem('cf_ref'");
+  });
+
+  test("processa cf_ref ao abrir pontos após login (envia POST indicacao)", () => {
+    const blocoAbrirPontos = fonte.slice(fonte.indexOf("function abrirPontos"), fonte.indexOf("function limparVinculo"));
+    expect(blocoAbrirPontos).toContain("cf_ref");
+    expect(blocoAbrirPontos).toContain("carregarPainel");
+  });
+
+  test("card Meus presentes exibido quando há recompensas na carteira", () => {
+    expect(fonte).toContain("Meus presentes");
+    expect(fonte).toContain("fidelidade.recompensas.length > 0");
+  });
+
+  test("ranking mostra posicao e eVoce, sem expor clienteId de outros", () => {
+    expect(fonte).toContain("eVoce");
+    // seção de ranking fica visível quando há temporada (estado vazio incluso)
+    expect(fonte).toContain("painel?.temporada");
+    expect(fonte).toContain("Ranking da temporada");
+  });
+
+  test("indicação nunca expõe telefone no link compartilhado", () => {
+    const blocoCompartilhar = fonte.slice(
+      fonte.indexOf("async function compartilharIndicacao"),
+      fonte.indexOf("function abrirPontos"),
+    );
+    // o link usa apenas o token opaco
+    expect(blocoCompartilhar).toContain("?ref=");
+    expect(blocoCompartilhar).not.toMatch(/telefone/);
+  });
+
+  test("calcularMissaoAtual importado de lib/missoes", () => {
+    expect(fonte).toContain("import { calcularMissaoAtual } from '@/lib/missoes'");
+    expect(fonte).toContain("calcularMissaoAtual(");
+  });
+});
+
 describe("/cliente — Etapa 2: sem lembrete operacional de pedido + barra global de Pix pendente", () => {
   test("[caso 10] não mostra mais o card de 'pedido em andamento' (pontos previstos)", () => {
     expect(fonte).not.toContain("Seu pedido em andamento vai render");
@@ -264,5 +317,64 @@ describe("/cliente — Etapa 2: sem lembrete operacional de pedido + barra globa
     expect(fonte).toContain("usePixPendente()");
     expect(fonte).toContain("<PixPendenteBar pendente={pixPendente} />");
     expect(fonte).toMatch(/<ClientBottomNav[\s\S]{0,120}pixPendente=\{!!pixPendente\}/);
+  });
+});
+
+describe("/cliente — Correções PR #427: textos comerciais, estados vazios, PII", () => {
+  test("texto de indicação não promete desconto nem benefício ao indicado", () => {
+    expect(fonte).not.toContain("Ganhe desconto");
+    expect(fonte).not.toContain("ganhe desconto");
+    expect(fonte).not.toContain("ganhe vantagens no primeiro pedido");
+    expect(fonte).not.toContain("Ganhe vantagens no primeiro pedido");
+  });
+
+  test("texto de indicação menciona Estrelas e primeiro pedido válido (não benefício ao indicado)", () => {
+    expect(fonte).toContain("Ganhe +6 Estrelas quando um novo amigo fizer o primeiro pedido válido.");
+    expect(fonte).toContain("Indique um amigo");
+  });
+
+  test("ranking seção sempre visível quando há temporada — estado vazio exibe mensagem de espera", () => {
+    expect(fonte).toContain("painel?.temporada");
+    expect(fonte).toContain("O ranking começa a aparecer conforme a temporada avança.");
+  });
+
+  test("Meus presentes sempre visível quando fidelidade ativo — estado vazio exibe mensagem de espera", () => {
+    expect(fonte).toContain("Meus presentes");
+    expect(fonte).toContain("Seu próximo presente vai aparecer aqui.");
+    // seção aparece mesmo sem recompensas (guarda por coberturaEconomicaAprovada no servidor)
+    expect(fonte).toContain("fidelidade && fidelidade.ativo");
+  });
+
+  test("texto compartilhado via share API não promete benefícios", () => {
+    expect(fonte).toContain("Peça pelo meu link do Chefe da Pizza.");
+    expect(fonte).not.toContain("ganhe desconto");
+  });
+
+  test("link de indicação usa apenas token opaco, sem telefone ou PII", () => {
+    const blocoCompartilhar = fonte.slice(
+      fonte.indexOf("async function compartilharIndicacao"),
+      fonte.indexOf("function abrirPontos"),
+    );
+    expect(blocoCompartilhar).toContain("?ref=");
+    expect(blocoCompartilhar).not.toMatch(/telefone/);
+    expect(blocoCompartilhar).not.toMatch(/\d{10,}/);
+  });
+
+  test("self-referral bloqueado: relação registrada no servidor, front nunca compara clienteId localmente", () => {
+    // client não conhece o indicadorId; a rejeição acontece na API
+    expect(fonte).toContain("cf_ref");
+    // nunca compara clienteId localmente (regra cabe ao servidor)
+    expect(fonte).not.toContain("clienteId === ref");
+    expect(fonte).not.toContain("indicadorId === clienteId");
+  });
+
+  test("relação de indicação criada após login, não na abertura do link (candidacy after auth)", () => {
+    // POST de indicação fica dentro de abrirPontos (pós-autenticação), não no useEffect inicial
+    const blocoAbrirPontos = fonte.slice(fonte.indexOf("function abrirPontos"), fonte.indexOf("function limparVinculo"));
+    expect(blocoAbrirPontos).toContain("cf_ref");
+    expect(blocoAbrirPontos).toContain("POST");
+    // o useEffect inicial só armazena o ref, não processa
+    const blocoUseEffect = fonte.slice(fonte.indexOf("useEffect(() => {"), fonte.indexOf("function abrirSacola"));
+    expect(blocoUseEffect).not.toContain("POST");
   });
 });

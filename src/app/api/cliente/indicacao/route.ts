@@ -3,7 +3,7 @@ import { lerSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
 import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
 import {
-  salvarTokenIndicacao,
+  obterOuCriarTokenIndicacao,
   resolverTokenIndicacao,
   salvarCandidaturaIndicacao,
 } from "@/lib/indicacaoToken";
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   if (!cliente) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
 
   const clienteId = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
-  const token = await salvarTokenIndicacao(clienteId);
+  const token = await obterOuCriarTokenIndicacao(clienteId);
   return NextResponse.json({ token });
 }
 
