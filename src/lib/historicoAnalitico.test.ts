@@ -463,6 +463,62 @@ describe("consultarEventosCliente", () => {
   });
 });
 
+// ── Paginação >1000 eventos ───────────────────────────────────────────────────
+
+describe("paginação — mais de 1000 eventos", () => {
+  const TOTAL = 1250; // maior que PAGINA_ZRANGE=500 e que o antigo cap=1000
+
+  test("consultarEventosPorPeriodo retorna todos os " + TOTAL + " eventos sem truncamento", async () => {
+    // Insere TOTAL pedidos diretamente no mock (sem passar por registrarEventoEntregue
+    // para não sofrer limitação de performance — queremos testar a leitura)
+    const indice: Array<{ score: number; member: string }> = [];
+    for (let i = 0; i < TOTAL; i++) {
+      const id = `bulk_${i}`;
+      const ts = AGORA + i * 100;
+      indice.push({ score: ts, member: id });
+      store.set(chaveEvento(TENANT, id), {
+        pedidoId: id,
+        clienteId: "cid_bulk",
+        tenantId: TENANT,
+        criadoEmMs: ts,
+        expedienteId: "2026-09-19",
+        valorElegivelCents: 5000,
+        statusAnalitico: "entregue",
+        canal: "desconhecido",
+        estrelasGeradas: 3,
+        schemaVersao: 1,
+        regraVersao: "estrelas-faixas-v1",
+      });
+    }
+    sortedSets.set(chaveIndiceGlobal(TENANT), indice);
+
+    const resultado = await consultarEventosPorPeriodo(TENANT, AGORA - 1, AGORA + TOTAL * 100 + 1);
+    expect(resultado.length).toBe(TOTAL);
+  });
+
+  test("calcularMetricas sobre " + TOTAL + " eventos produz resultado correto", async () => {
+    const eventos = Array.from({ length: TOTAL }, (_, i) => ({
+      pedidoId: `m_${i}`,
+      clienteId: `cid_${i % 100}`, // 100 clientes únicos, cada um com TOTAL/100 pedidos
+      tenantId: TENANT,
+      criadoEmMs: AGORA + i,
+      expedienteId: "2026-09-19",
+      valorElegivelCents: 5000,
+      statusAnalitico: "entregue" as const,
+      canal: "whatsapp" as const,
+      estrelasGeradas: 3,
+      schemaVersao: 1 as const,
+      regraVersao: "estrelas-faixas-v1",
+    }));
+    const m = calcularMetricas(eventos);
+    expect(m.pedidosValidos).toBe(TOTAL);
+    expect(m.clientesUnicos).toBe(100);
+    expect(m.receitaElegivelCents).toBe(TOTAL * 5000);
+    // todos os 100 clientes têm TOTAL/100 >= 2 pedidos → recorrência = 100%
+    expect(m.percentualReceitaRecorrentes).toBe(100);
+  });
+});
+
 // ── Helpers de período ────────────────────────────────────────────────────────
 
 describe("helpers de período", () => {

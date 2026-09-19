@@ -66,8 +66,11 @@ export type MetricasAnaliticas = {
 };
 
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
-// Cap per query: protects Redis quota (500k/month free plan)
-const MAX_EVENTOS_POR_QUERY = 1000;
+// Page size for ZRANGEBYSCORE pagination — each page = 1 ZRANGE + N GETs.
+// 500 balances Redis round-trips vs command budget on Upstash Free plan.
+const PAGINA_ZRANGE = 500;
+// Parallel GET batch size per page — avoids building huge Promise.all arrays.
+const BATCH_GET = 200;
 
 export const TENANT_PADRAO_ANALYTICS = "default";
 
@@ -197,12 +200,55 @@ export async function estornarEventoAnalitico(
   });
 }
 
+// ── Read helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Paginates a Sorted Set by score range — no SCAN, no silent truncation.
+ *
+ * Each page issues one ZRANGEBYSCORE with LIMIT offset/count.
+ * Stops when a page returns fewer entries than the page size.
+ * GETs are batched in parallel chunks of BATCH_GET to bound memory.
+ */
+async function lerTodosEventosDaChave(
+  indiceKey: string,
+  tenantId: string,
+  inicioMs: number,
+  fimMs: number
+): Promise<EventoAnalitico[]> {
+  const todos: EventoAnalitico[] = [];
+  let offset = 0;
+
+  while (true) {
+    const pagina = await aredis.zrange(indiceKey, inicioMs, fimMs, {
+      byScore: true,
+      limit: { offset, count: PAGINA_ZRANGE },
+    });
+
+    if (pagina.length === 0) break;
+
+    // Fetch this page's events in parallel batches
+    for (let i = 0; i < pagina.length; i += BATCH_GET) {
+      const slice = pagina.slice(i, i + BATCH_GET);
+      const resultados = await Promise.all(
+        slice.map((id) => redis.get<EventoAnalitico>(chaveEvento(tenantId, id)))
+      );
+      for (const ev of resultados) {
+        if (ev !== null) todos.push(ev);
+      }
+    }
+
+    if (pagina.length < PAGINA_ZRANGE) break; // last page
+    offset += pagina.length;
+  }
+
+  return todos;
+}
+
 // ── Read operations ───────────────────────────────────────────────────────────
 
 /**
  * Returns all analytics events in [inicioMs, fimMs].
- * Uses ZRANGEBYSCORE on the global index — no SCAN.
- * Hard-capped at MAX_EVENTOS_POR_QUERY (1000) to protect Redis quota.
+ * Paginates ZRANGEBYSCORE — no SCAN, no silent truncation above 1000 events.
  */
 export async function consultarEventosPorPeriodo(
   tenantId: string,
@@ -210,23 +256,12 @@ export async function consultarEventosPorPeriodo(
   fimMs: number
 ): Promise<EventoAnalitico[]> {
   if (inicioMs > fimMs) return [];
-
-  const pedidoIds = await aredis.zrange(chaveIndiceGlobal(tenantId), inicioMs, fimMs, {
-    byScore: true,
-    limit: { offset: 0, count: MAX_EVENTOS_POR_QUERY },
-  });
-
-  if (pedidoIds.length === 0) return [];
-
-  const resultados = await Promise.all(
-    pedidoIds.map((id) => redis.get<EventoAnalitico>(chaveEvento(tenantId, id)))
-  );
-  return resultados.filter((ev): ev is EventoAnalitico => ev !== null);
+  return lerTodosEventosDaChave(chaveIndiceGlobal(tenantId), tenantId, inicioMs, fimMs);
 }
 
 /**
  * Returns analytics events for a single client in [inicioMs, fimMs].
- * Uses per-client sorted set — no SCAN, no cross-client data.
+ * Paginates per-client sorted set — no SCAN, no cross-client data.
  */
 export async function consultarEventosCliente(
   tenantId: string,
@@ -235,20 +270,7 @@ export async function consultarEventosCliente(
   fimMs: number
 ): Promise<EventoAnalitico[]> {
   if (inicioMs > fimMs) return [];
-
-  const pedidoIds = await aredis.zrange(
-    chaveIndiceCliente(tenantId, clienteId),
-    inicioMs,
-    fimMs,
-    { byScore: true, limit: { offset: 0, count: MAX_EVENTOS_POR_QUERY } }
-  );
-
-  if (pedidoIds.length === 0) return [];
-
-  const resultados = await Promise.all(
-    pedidoIds.map((id) => redis.get<EventoAnalitico>(chaveEvento(tenantId, id)))
-  );
-  return resultados.filter((ev): ev is EventoAnalitico => ev !== null);
+  return lerTodosEventosDaChave(chaveIndiceCliente(tenantId, clienteId), tenantId, inicioMs, fimMs);
 }
 
 // ── Period helpers ────────────────────────────────────────────────────────────
