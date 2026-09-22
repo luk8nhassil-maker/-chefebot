@@ -61,11 +61,17 @@ export async function GET(req: NextRequest) {
       const entorno = vizinhos.map((e) => ({ posicao: e.posicao, eVoce: e.clienteId === clienteId }));
       // A decisao de exposicao fica na DAL server-only. A rota nunca recebe
       // consentimento bruto nem o perfil inteiro, e omite campos ausentes.
+      // O resumo pode mostrar uma posição além do Top 50. Nesse caso, ainda
+      // incluímos o próprio cliente na lista para que a aba "Participando"
+      // nunca pareça vazia depois do consentimento.
+      const listaBase = top.some((e) => e.clienteId === clienteId)
+        ? top
+        : [...top, { clienteId, score: pos.score, posicao: pos.posicao }];
       const identidades = await projetarIdentidadesPublicasRanking([
-        ...top.map((e) => e.clienteId),
+        ...listaBase.map((e) => e.clienteId),
         clienteId,
       ]);
-      const lista = top.map((e) => {
+      const lista = listaBase.map((e) => {
         const identidade = identidades.get(e.clienteId);
         return {
           posicao: e.posicao,

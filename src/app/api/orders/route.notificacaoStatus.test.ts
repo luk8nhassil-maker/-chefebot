@@ -121,6 +121,17 @@ describe("PATCH /api/orders — cliente recebe a sequência completa de status",
     expect(textoEnviado()).toBe("*Wesley*, seu pedido foi enviado para a cozinha! 👨‍🍳🍕\n\nJá começamos o preparo e avisaremos você a cada etapa.");
   });
 
+  test("pedido do site com WhatsApp vinculado recebe convite do Rank ao entrar na cozinha", async () => {
+    seedPedido({ origem: "site", whatsappVinculado: true, status: "novo" });
+    const res = await PATCH(patchRequest({ id: "ped_notif_1", status: "em_preparo" }));
+    expect(res.status).toBe(200);
+    const textos = textosEnviados();
+    expect(textos).toHaveLength(1);
+    expect(textos[0]).toContain("seu pedido foi enviado para a cozinha");
+    expect(textos[0]).toContain("E se ele também te aproximasse de uma pizza grátis?");
+    expect(textos[0]).toContain("/cliente?fromOrder=1");
+  });
+
   // Delivery envia somente no saiu_entrega — 1. copy exata.
   test("delivery: envia a copy exata de 'saiu para entrega' em saiu_entrega", async () => {
     seedPedido({ cliente: "Wesley Dutra", tipoEntrega: "delivery", endereco: "Rua das Flores, 123" });

@@ -12,6 +12,7 @@ type Pedido = {
   id: string; cliente: string; telefone: string; itens: string[]
   total: number; status: string; horario: string; endereco: string
   escalonado?: boolean; observacao?: string; cancelamentoSolicitado?: boolean; data?: string
+  origem?: string; numero?: number; criadoEm?: string
   taxaEntrega?: number; bairro?: string; tipoEntrega?: string
   entregador?: { id: string; nome: string; telefone: string }
 }
@@ -547,6 +548,9 @@ export default function AdminPage() {
     (statusCounts['pendente'] || 0) +
     (statusCounts['em preparo'] || 0) +
     (statusCounts['saiu para entrega'] || 0)
+  const pedidosAutoatendimento = pedidosFiltrados.filter((p) => p.origem === 'site')
+  const autoatendidosEntregues = pedidosAutoatendimento.filter((p) => p.status === 'entregue').length
+  const autoatendimentoRecentes = [...pedidosAutoatendimento].reverse().slice(0, 4)
 
   const salvarConfig = async () => {
     setSalvando(true)
@@ -839,6 +843,26 @@ export default function AdminPage() {
                 <p style={{ color: emAndamento > 0 ? 'var(--text-primary)' : 'var(--foreground)', fontSize: 30, fontWeight: 900, margin: 0, letterSpacing: -1, lineHeight: 1 }}>{emAndamento}</p>
                 <p style={{ color: emAndamento > 0 ? 'var(--text-secondary)' : 'var(--border-strong)', fontSize: 10, margin: '6px 0 0' }}>{emAndamento > 0 ? 'ativos agora' : 'nenhum ativo'}</p>
               </div>
+            </div>
+
+            <div style={{ ...card, marginBottom: 16, background: 'linear-gradient(135deg, color-mix(in srgb, var(--info) 5%, var(--surface)), var(--surface))', border: '1px solid color-mix(in srgb, var(--info) 22%, var(--border))' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                <div>
+                  <p style={{ ...sectionTitle, margin: '0 0 5px', color: 'var(--info-text)' }}>Leads do autoatendimento</p>
+                  <p style={{ color: 'var(--foreground)', fontSize: 13, fontWeight: 700, margin: 0 }}>Clientes que concluíram o pedido sozinhos</p>
+                </div>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 8px', borderRadius: 999, background: 'color-mix(in srgb, var(--success) 11%, transparent)', color: 'var(--success)', fontSize: 10, fontWeight: 800, whiteSpace: 'nowrap' }}>● sinal forte</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, marginBottom: autoatendimentoRecentes.length ? 13 : 0 }}>
+                <div style={{ padding: '10px 11px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--border)' }}><strong style={{ display: 'block', color: 'var(--foreground)', fontSize: 22, lineHeight: 1 }}>{pedidosAutoatendimento.length}</strong><span style={{ color: 'var(--foreground-muted)', fontSize: 10 }}>pedidos no período</span></div>
+                <div style={{ padding: '10px 11px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--border)' }}><strong style={{ display: 'block', color: 'var(--success)', fontSize: 22, lineHeight: 1 }}>{autoatendidosEntregues}</strong><span style={{ color: 'var(--foreground-muted)', fontSize: 10 }}>concluídos</span></div>
+                <div style={{ padding: '10px 11px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--border)' }}><strong style={{ display: 'block', color: 'var(--brand-text)', fontSize: 22, lineHeight: 1 }}>{pedidosAutoatendimento.length ? Math.round((autoatendidosEntregues / pedidosAutoatendimento.length) * 100) : 0}%</strong><span style={{ color: 'var(--foreground-muted)', fontSize: 10 }}>taxa concluída</span></div>
+              </div>
+              {autoatendimentoRecentes.length > 0 && <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                <p style={{ color: 'var(--foreground-secondary)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 7px', letterSpacing: .5 }}>Movimentação recente</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>{autoatendimentoRecentes.map((p) => <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 11 }}><span style={{ color: 'var(--foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.cliente || 'Cliente do site'} <small style={{ color: 'var(--foreground-muted)' }}>#{p.numero ?? '—'} · {p.horario || 'agora'}</small></span><span style={{ color: p.status === 'entregue' ? 'var(--success)' : 'var(--info-text)', fontWeight: 700, whiteSpace: 'nowrap' }}>{p.status === 'entregue' ? 'concluído' : 'em andamento'}</span></div>)}</div>
+              </div>}
+              {autoatendimentoRecentes.length === 0 && <p style={{ margin: 0, color: 'var(--foreground-muted)', fontSize: 11 }}>Nenhum pedido de autoatendimento neste período.</p>}
             </div>
 
             {/* Breakdown por status */}

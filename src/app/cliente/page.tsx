@@ -481,16 +481,6 @@ function FidelidadeRankingScreen({
         <span>🏆</span><div><strong>Acumule estrelas para subir</strong><p>As estrelas desta temporada contam para sua posição.</p></div>
       </section>
 
-      {privacidade !== null && (
-        <PrivacidadeRankingControls
-          privacidade={privacidade}
-          carregando={privacidadeCarregando}
-          salvando={privacidadeSalvando}
-          erro={privacidadeErro}
-          onAlterar={onAlterarPrivacidade}
-          onRevogarTodas={onRevogarTodas}
-        />
-      )}
     </main>
   )
 }
@@ -664,6 +654,7 @@ export default function ClientePage() {
   const [resgateErro, setResgateErro] = useState('')
   const [mobilePanel, setMobilePanel] = useState<'presentes' | 'extrato' | 'ranking' | null>(null)
   const [rankingConsentModal, setRankingConsentModal] = useState(false)
+  const convitePosPedidoRef = useRef(false)
   // Vínculo reconhecido: token opaco + máscaras vindas do servidor.
   const [waToken, setWaToken] = useState('')
   const [waMascarado, setWaMascarado] = useState('')
@@ -891,7 +882,12 @@ export default function ClientePage() {
     carregarFidelidade()
     carregarJornada()
     carregarPainel()
-    carregarPrivacidadeRanking()
+    carregarPrivacidadeRanking().then((preferencias) => {
+      if (!convitePosPedidoRef.current) return
+      convitePosPedidoRef.current = false
+      const jaParticipa = preferencias?.finalidades.some((item) => item.estado === 'concedido') ?? false
+      if (!jaParticipa) setRankingConsentModal(true)
+    })
     // Processa indicação capturada antes do login (cf_ref)
     try {
       const ref = sessionStorage.getItem('cf_ref')
@@ -963,6 +959,12 @@ export default function ClientePage() {
     // sempre do estado-sessao, nunca da URL.
     try {
       const params = new URLSearchParams(window.location.search)
+      if (params.get('fromOrder') === '1') {
+        convitePosPedidoRef.current = true
+        params.delete('fromOrder')
+        const qs = params.toString()
+        window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
+      }
       if (params.get('cadastro')) {
         params.delete('cadastro')
         const qs = params.toString()
