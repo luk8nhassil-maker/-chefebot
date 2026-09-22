@@ -126,6 +126,14 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       expect(entrada).toHaveProperty("posicao");
       expect(entrada).toHaveProperty("eVoce");
     }
+    const lista = body.ranking?.lista ?? [];
+    expect(lista.length).toBeGreaterThan(0);
+    for (const entrada of lista) {
+      expect(entrada).not.toHaveProperty("clienteId");
+      expect(entrada).toHaveProperty("posicao");
+      expect(entrada).toHaveProperty("score");
+      expect(entrada).toHaveProperty("eVoce");
+    }
     const voce = entorno.find((e) => (e as { eVoce: boolean }).eVoce === true);
     expect(voce).toBeDefined();
     expect((voce as { posicao: number }).posicao).toBe(3);

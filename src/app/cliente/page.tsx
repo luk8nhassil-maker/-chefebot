@@ -57,6 +57,7 @@ type PainelFidelidade = {
     posicao: number
     score: number
     entorno: { posicao: number; eVoce: boolean }[]
+    lista: { posicao: number; score: number; eVoce: boolean }[]
   } | null
 }
 
@@ -140,6 +141,11 @@ const PAINEL_PREVIEW: PainelFidelidade = {
       { posicao: 7, eVoce: false },
       { posicao: 8, eVoce: true },
       { posicao: 9, eVoce: false },
+    ],
+    lista: [
+      { posicao: 7, score: 22, eVoce: false },
+      { posicao: 8, score: 20, eVoce: true },
+      { posicao: 9, score: 18, eVoce: false },
     ],
   },
 }
@@ -304,6 +310,79 @@ function FidelidadeMobileScreen({
         <h2>Chegue mais rápido ao seu presente</h2>
         <p>Indique um amigo. Quando ele fizer o primeiro pedido, você avança.</p>
         <button type="button" onClick={onIndicacao} disabled={indicando}>{indicando ? 'Aguarde...' : 'Indicar amigo'}</button>
+      </section>
+    </main>
+  )
+}
+
+type FidelidadeRankingScreenProps = {
+  ranking: NonNullable<PainelFidelidade['ranking']>
+  temporada: PainelFidelidade['temporada']
+  onClose: () => void
+}
+
+/** Pódio detalhado: scores são reais; nomes, fotos e variações de terceiros
+ * não são expostos porque a API do cliente deliberadamente não fornece PII. */
+function FidelidadeRankingScreen({ ranking, temporada, onClose }: FidelidadeRankingScreenProps) {
+  const [aba, setAba] = useState<'top10' | 'minha' | 'todos'>('top10')
+  const lista = ranking.lista
+  const podium = lista.filter((entrada) => entrada.posicao <= 3)
+  const linhas = aba === 'minha'
+    ? lista.filter((entrada) => entrada.eVoce)
+    : lista
+  const nomeSeguro = (entrada: { eVoce: boolean; posicao: number }) => entrada.eVoce ? 'Você' : `Participante ${entrada.posicao}`
+
+  return (
+    <main className="cf-ranking-screen" aria-label="Pódio Chefe">
+      <header className="cf-ranking-header">
+        <button type="button" onClick={onClose} aria-label="Voltar para Fidelidade">‹</button>
+        <div>
+          <h1>Pódio Chefe</h1>
+          <p>Os clientes que mais brilham nesta temporada!</p>
+        </div>
+        <span className="cf-ranking-season"><strong>♛ Temporada atual</strong><small>{temporada?.diasRestantes == null ? 'em andamento' : `${temporada.diasRestantes} dias restantes`}</small></span>
+      </header>
+
+      <section className="cf-ranking-podium" aria-label="Melhores posições">
+        {[2, 1, 3].map((posicao) => {
+          const entrada = podium.find((item) => item.posicao === posicao)
+          return (
+            <div key={posicao} className={`cf-ranking-podium-item cf-ranking-podium-${posicao}`}>
+              <div className="cf-ranking-medal">{posicao}</div>
+              <div className="cf-ranking-avatar">{entrada?.eVoce ? 'Você'.slice(0, 1) : '★'}</div>
+              <strong>{entrada ? nomeSeguro(entrada) : `Posição ${posicao}`}</strong>
+              <b>{entrada ? `${entrada.score} Estrelas` : 'Aguardando dados'}</b>
+            </div>
+          )
+        })}
+      </section>
+
+      <section className="cf-ranking-current" aria-label="Minha posição no ranking">
+        <div><small>Sua posição</small><strong>{ranking.posicao}º</strong></div>
+        <div className="cf-ranking-current-user"><span>{'Você'.slice(0, 1)}</span><b>Você<em>{ranking.score} Estrelas</em></b></div>
+        <div><small>{ranking.posicao > 1 ? 'Continue acumulando Estrelas' : 'Você está no topo'}</small><strong>{ranking.posicao > 1 ? 'para subir' : 'parabéns!'}</strong></div>
+      </section>
+
+      <div className="cf-ranking-tabs" role="tablist" aria-label="Filtro do ranking">
+        {([['top10', 'Top 10'], ['minha', 'Minha posição'], ['todos', 'Todos']] as const).map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={aba === id} className={aba === id ? 'ativo' : ''} onClick={() => setAba(id)}>{label}</button>
+        ))}
+      </div>
+
+      <section className="cf-ranking-list" aria-label="Lista de posições">
+        {linhas.length === 0 ? <p className="cf-ranking-empty">Sua posição ainda não apareceu no ranking desta temporada.</p> : linhas.map((entrada) => (
+          <div key={entrada.posicao} className={`cf-ranking-row ${entrada.eVoce ? 'voce' : ''}`}>
+            <strong>{entrada.posicao}</strong>
+            <span className="cf-ranking-row-avatar">{entrada.eVoce ? 'V' : '★'}</span>
+            <span className="cf-ranking-row-name">{nomeSeguro(entrada)}</span>
+            <b>{entrada.score} Estrelas</b>
+          </div>
+        ))}
+        {aba === 'todos' && <p className="cf-ranking-footnote">Mostrando os participantes disponíveis no ranking desta temporada.</p>}
+      </section>
+
+      <section className="cf-ranking-note">
+        <span>🏆</span><div><strong>Acumule Estrelas para subir</strong><p>A posição considera apenas as Estrelas válidas da temporada atual.</p></div>
       </section>
     </main>
   )
@@ -1047,7 +1126,14 @@ export default function ClientePage() {
             {!fidelidade && !fidelidadeErro && <p style={{ color: cores.textoSecundario, fontSize: 14, textAlign: 'center' }}>Carregando suas Estrelas...</p>}
             {fidelidadeErro && <div className="cf-mobile-empty" role="alert">Não conseguimos carregar suas Estrelas agora. <button type="button" onClick={carregarFidelidade}>Tentar novamente</button></div>}
             {fidelidade && !fidelidade.ativo && <div className="cf-mobile-empty">O programa de pontos ainda não está ativo por aqui. Volte em breve!</div>}
-            {fidelidade && fidelidade.ativo && (
+            {fidelidade && fidelidade.ativo && mobilePanel === 'ranking' && painel?.ranking && (
+              <FidelidadeRankingScreen
+                ranking={painel.ranking}
+                temporada={painel.temporada}
+                onClose={() => setMobilePanel(null)}
+              />
+            )}
+            {fidelidade && fidelidade.ativo && mobilePanel !== 'ranking' && (
               <FidelidadeMobileScreen
                 nome={perfil?.cliente.nome ?? 'Cliente'}
                 saldo={fidelidade.saldoPontos}
@@ -1066,7 +1152,7 @@ export default function ClientePage() {
               />
             )}
 
-            {mobilePanel && (
+            {mobilePanel && mobilePanel !== 'ranking' && (
               <div className="cf-mobile-sheet-backdrop" role="presentation" onClick={() => setMobilePanel(null)}>
                 <section className="cf-mobile-sheet" role="dialog" aria-modal="true" aria-label={mobilePanel} onClick={(event) => event.stopPropagation()}>
                   <button type="button" className="cf-mobile-sheet-close" onClick={() => setMobilePanel(null)} aria-label="Fechar">×</button>
@@ -1085,12 +1171,6 @@ export default function ClientePage() {
                       {fidelidade?.extrato.length ? fidelidade.extrato.map((movimento) => (
                         <div key={movimento.id} className="cf-mobile-sheet-row"><span>{movimento.descricao}<small>{dataCurta(movimento.criadoEm)}</small></span><strong>{movimento.pontos > 0 ? '+' : ''}{movimento.pontos}</strong></div>
                       )) : <p>Nenhuma movimentação ainda — seu primeiro pedido entra aqui.</p>}
-                    </>
-                  )}
-                  {mobilePanel === 'ranking' && (
-                    <>
-                      <p className="cf-preview-kicker">RANKING DA TEMPORADA</p>
-                      {painel?.ranking ? <><strong className="cf-mobile-sheet-position">#{painel.ranking.posicao}</strong><p>{painel.ranking.score} Estrelas acumuladas</p></> : <p>O ranking começa a aparecer conforme a temporada avança.</p>}
                     </>
                   )}
                 </section>
@@ -1422,6 +1502,23 @@ export default function ClientePage() {
       <style>{`
         .cliente-conteudo-fidelidade { padding: 18px 16px calc(env(safe-area-inset-bottom) + 102px)!important; max-width: 422px!important; }
         .cliente-conteudo-fidelidade .cf-preview-phone { max-width: 390px; }
+        .cf-ranking-screen { width: 100%; max-width: 390px; margin: -4px auto 0; color: #1e2a3b; }
+        .cf-ranking-header { display: grid; grid-template-columns: 52px 1fr auto; align-items: start; gap: 8px; margin-bottom: 16px; }
+        .cf-ranking-header>button { width: 48px; height: 48px; border: 0; border-radius: 50%; background: rgba(255,255,255,.9); color: #182337; font-size: 39px; line-height: 38px; cursor: pointer; box-shadow: 0 8px 20px rgba(39,68,100,.08); }
+        .cf-ranking-header h1 { margin: 4px 0 3px; font-size: 28px; line-height: 1.1; letter-spacing: -.7px; text-align: center; }
+        .cf-ranking-header p { margin: 0; color: #6c7788; font-size: 12.5px; text-align: center; white-space: nowrap; }
+        .cf-ranking-season { min-width: 112px; padding: 10px 11px; border: 1px solid rgba(216,170,44,.25); border-radius: 22px; background: rgba(255,250,235,.92); color: #9c6a0b; font-size: 10px; }
+        .cf-ranking-season strong,.cf-ranking-season small { display: block; white-space: nowrap; }.cf-ranking-season small { color: #667284; font-size: 11px; margin-top: 3px; }
+        .cf-ranking-podium { display: grid; grid-template-columns: 1fr 1.18fr 1fr; align-items: end; gap: 5px; min-height: 220px; padding: 18px 5px 0; border-radius: 24px 24px 0 0; background: radial-gradient(circle at 50% 25%, rgba(255,230,131,.6), transparent 45%), linear-gradient(180deg, rgba(255,250,237,.88), rgba(255,255,255,.58)); }
+        .cf-ranking-podium-item { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-width: 0; padding: 0 4px 15px; border-radius: 18px 18px 0 0; background: linear-gradient(180deg, rgba(255,255,255,.84), rgba(244,247,250,.96)); box-shadow: 0 -2px 12px rgba(88,111,137,.08); text-align: center; }
+        .cf-ranking-podium-1 { min-height: 180px; background: linear-gradient(180deg, rgba(255,243,176,.95), rgba(255,255,255,.96)); }.cf-ranking-podium-2,.cf-ranking-podium-3 { min-height: 145px; }
+        .cf-ranking-medal { width: 28px; height: 28px; margin-top: -14px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #e1e8ef; color: #4f5d70; font-weight: 800; box-shadow: 0 2px 0 rgba(41,59,82,.15); }.cf-ranking-podium-1 .cf-ranking-medal { background: #f5bd20; color: #8a5c00; }.cf-ranking-podium-3 .cf-ranking-medal { background: #e6b58b; color: #7b4322; }
+        .cf-ranking-avatar { width: 56px; height: 56px; margin: 6px 0 6px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 4px solid #c9d4df; background: #f5f8fb; color: #53647a; font-size: 18px; font-weight: 800; }.cf-ranking-podium-1 .cf-ranking-avatar { width: 70px; height: 70px; border-color: #f1b92e; background: #fff3c4; color: #9d6900; }.cf-ranking-podium-3 .cf-ranking-avatar { border-color: #dda16e; }
+        .cf-ranking-podium-item strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }.cf-ranking-podium-item b { margin-top: 4px; color: #ae7109; font-size: 11px; }
+        .cf-ranking-current { display: grid; grid-template-columns: .78fr 1.15fr 1.15fr; align-items: center; gap: 10px; margin-top: -1px; padding: 16px 15px; border: 1px solid rgba(107,164,245,.32); border-radius: 22px; background: linear-gradient(110deg, rgba(247,252,255,.98), rgba(230,243,255,.95)); box-shadow: 0 10px 22px rgba(62,117,180,.08); }
+        .cf-ranking-current small { display: block; color: #69798d; font-size: 10px; line-height: 1.25; }.cf-ranking-current>div>strong { display: block; margin-top: 3px; color: #17263d; font-size: 30px; line-height: 1; }.cf-ranking-current-user { display: flex; align-items: center; gap: 8px; border-left: 1px solid rgba(88,133,192,.22); border-right: 1px solid rgba(88,133,192,.22); padding: 0 8px; }.cf-ranking-current-user>span { width: 37px; height: 37px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #4f86ed; color: white; font-weight: 800; }.cf-ranking-current-user b { display: flex; flex-direction: column; font-size: 14px; }.cf-ranking-current-user em { margin-top: 3px; color: #b27108; font-size: 11px; font-style: normal; white-space: nowrap; }.cf-ranking-current>div:last-child strong { font-size: 15px; color: #40536f; }
+        .cf-ranking-tabs { display: grid; grid-template-columns: repeat(3,1fr); gap: 2px; margin: 17px 0 11px; padding: 3px; border-radius: 24px; background: rgba(222,227,234,.75); }.cf-ranking-tabs button { min-height: 39px; border: 0; border-radius: 21px; background: transparent; color: #687488; font: 700 12px inherit; cursor: pointer; }.cf-ranking-tabs button.ativo { color: #1f63d6; background: rgba(255,255,255,.98); box-shadow: 0 3px 10px rgba(48,75,108,.1); }
+        .cf-ranking-list { display: flex; flex-direction: column; gap: 7px; }.cf-ranking-row { display: grid; grid-template-columns: 30px 34px 1fr auto; align-items: center; gap: 7px; min-height: 48px; padding: 6px 11px; border: 1px solid rgba(255,255,255,.85); border-radius: 24px; background: rgba(255,255,255,.84); box-shadow: 0 5px 14px rgba(58,78,101,.05); }.cf-ranking-row.voce { border-color: rgba(88,151,247,.4); background: linear-gradient(90deg, rgba(234,244,255,.98), rgba(248,252,255,.9)); }.cf-ranking-row>strong { font-size: 17px; text-align: center; }.cf-ranking-row-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #e8eef5; color: #61738a; font-size: 12px; font-weight: 800; }.cf-ranking-row.voce .cf-ranking-row-avatar { background: #4f86ed; color: #fff; }.cf-ranking-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }.cf-ranking-row>b { color: #ae7109; font-size: 12px; white-space: nowrap; }.cf-ranking-empty,.cf-ranking-footnote { margin: 7px 2px; color: #6d7a8c; font-size: 12px; line-height: 1.45; text-align: center; }.cf-ranking-note { display: flex; gap: 12px; align-items: center; margin-top: 17px; padding: 14px 15px; border: 1px solid rgba(226,180,55,.38); border-radius: 18px; background: linear-gradient(110deg, rgba(255,252,239,.96), rgba(255,247,218,.75)); }.cf-ranking-note>span { font-size: 25px; }.cf-ranking-note strong { font-size: 13px; }.cf-ranking-note p { margin: 4px 0 0; color: #697588; font-size: 11.5px; line-height: 1.35; }
         .cf-mobile-empty { width: 100%; box-sizing: border-box; padding: 18px; border-radius: 19px; background: rgba(255,255,255,.75); border: 1px solid rgba(255,255,255,.82); color: #697588; font-size: 14px; text-align: center; }
         .cf-mobile-empty button { margin-top: 10px; border: 0; border-radius: 12px; padding: 10px 14px; background: #ffc900; color: #252a30; font-weight: 700; cursor: pointer; }
         .cf-mobile-sheet-backdrop { position: fixed; inset: 0; z-index: 80; display: flex; align-items: flex-end; justify-content: center; padding: 18px; background: rgba(20,27,37,.38); }
