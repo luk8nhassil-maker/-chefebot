@@ -37,11 +37,21 @@ vi.mock("@/lib/auth", async () => {
   };
 });
 
-const creditarFidelidadePedidoMock = vi.fn(async () => undefined);
-const creditarPontosPedidoEntregueMock = vi.fn(async () => undefined);
+type CreditoFidelidadeParams = { pedidoId: string; clienteId?: string; pizzas: number };
+type CreditoPontosParams = {
+  id: string;
+  status: string;
+  telefone?: string;
+  clienteId?: string;
+  total?: number;
+  taxaEntrega?: number;
+};
+
+const creditarFidelidadePedidoMock = vi.fn(async (_params: CreditoFidelidadeParams) => undefined);
+const creditarPontosPedidoEntregueMock = vi.fn(async (_pedido: CreditoPontosParams) => undefined);
 vi.mock("@/lib/fidelidade", () => ({
-  creditarFidelidadePedido: (...args: unknown[]) => creditarFidelidadePedidoMock(...args),
-  creditarPontosPedidoEntregue: (...args: unknown[]) => creditarPontosPedidoEntregueMock(...args),
+  creditarFidelidadePedido: (params: CreditoFidelidadeParams) => creditarFidelidadePedidoMock(params),
+  creditarPontosPedidoEntregue: (pedido: CreditoPontosParams) => creditarPontosPedidoEntregueMock(pedido),
 }));
 
 vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({}) })));

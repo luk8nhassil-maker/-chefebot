@@ -102,10 +102,12 @@ export default function RastrearPage({ params }: PageProps) {
 
   useEffect(() => {
     params.then(p => setPedidoId(p.pedidoId))
-    try {
-      const sp = new URLSearchParams(window.location.search)
-      setStatusToken(sp.get('token'))
-    } catch {}
+    queueMicrotask(() => {
+      try {
+        const sp = new URLSearchParams(window.location.search)
+        setStatusToken(sp.get('token'))
+      } catch {}
+    })
   }, [params])
 
   useEffect(() => {

@@ -21,6 +21,7 @@ type Config = {
 }
 type Funcionario = { username: string; name: string; password: string; ativo: boolean; role: string }
 type ImagensCardapio = { pizza?: string; lanche?: string; bebida?: string; suco?: string; ativo: boolean }
+type ChaveImagemCardapio = Exclude<keyof ImagensCardapio, 'ativo'>
 type Avaliacao = { phone: string; nota: number; data: string }
 type AvaliacoesData = { total: number; media: number; ultimas: Avaliacao[] }
 type ItemCardapio = { name: string; price: number }
@@ -201,7 +202,7 @@ export default function AdminPage() {
   useEffect(() => {
     const user = getUserInfo()
     if (!user || (user.role !== 'admin' && user.role !== 'dev')) { router.push('/login?callbackUrl=/admin'); return }
-    setNomeUsuario(user.name)
+    queueMicrotask(() => setNomeUsuario(user.name))
     Promise.all([
       fetch('/api/orders?historico=true', { cache: 'no-store' }).then(r => r.json()).catch(err => { console.error('Falha ao carregar pedidos:', err); return [] }),
       fetch('/api/configuracoes').then(r => r.json()).catch(err => { console.error('Falha ao carregar configuracoes:', err); return { nomePizzaria: '', horaAbertura: 18, horaFechamento: 23, chavePix: '' } }),
@@ -252,7 +253,7 @@ export default function AdminPage() {
     if (aba === 'cardapio') {
       try {
         const visto = localStorage.getItem('tour_cardapio_visto')
-        if (!visto) setShowTourCardapio(true)
+        if (!visto) queueMicrotask(() => setShowTourCardapio(true))
       } catch {}
     }
   }, [aba])
@@ -306,7 +307,7 @@ export default function AdminPage() {
     if (!waTickRef.current) waTickRef.current = setInterval(atualizarContagemQr, 1000)
   }
 
-  const garantirPollingAtivo = () => {
+  function garantirPollingAtivo() {
     if (waPollRef.current) return
     waPollRef.current = setInterval(fetchWaStatus, 3000)
   }
@@ -314,7 +315,7 @@ export default function AdminPage() {
   // Busca o QR já existente na instância (sem reset). `silencioso` é usado
   // pela abertura automática da tela e pelo auto-heal do polling — nunca
   // mostra spinner/erro nesses casos, só aplica o QR se vier um.
-  const fetchQrCode = async (silencioso = false) => {
+  async function fetchQrCode(silencioso = false) {
     if (!silencioso) { setWaLoadingQr(true); setWaQrError(null) }
     try {
       const res = await fetch('/api/whatsapp/qrcode', { method: 'POST' })
@@ -429,7 +430,7 @@ export default function AdminPage() {
 
   const msg = (m: string) => { setMensagem(m); setTimeout(() => setMensagem(''), 3000) }
 
-  const carregarMercadoPago = async () => {
+  async function carregarMercadoPago() {
     setMpLoading(true)
     try {
       const res = await fetch('/api/admin/integracoes/mercadopago')
@@ -1274,11 +1275,11 @@ export default function AdminPage() {
               {[{ key: 'pizza', label: 'Pizzas', ref: inputPizzaRef }, { key: 'lanche', label: 'Lanches', ref: inputLancheRef }, { key: 'bebida', label: 'Bebidas', ref: inputBebidaRef }, { key: 'suco', label: 'Sucos', ref: inputSucoRef }].map(({ key, label, ref }) => (
                 <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                   <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--surface-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
-                    {(imagens as any)[key] ? <img src={(imagens as any)[key]} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={label} /> : <span style={{ color: 'var(--border-strong)', fontSize: 11 }}>{label}</span>}
+                    {imagens[key as ChaveImagemCardapio] ? <img src={imagens[key as ChaveImagemCardapio]} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={label} /> : <span style={{ color: 'var(--border-strong)', fontSize: 11 }}>{label}</span>}
                   </div>
                   <div style={{ flex: 1 }}>
                     <p style={{ color: 'var(--foreground)', fontSize: 13, margin: '0 0 4px' }}>{label}</p>
-                    <p style={{ color: 'var(--border-strong)', fontSize: 11, margin: 0 }}>{(imagens as any)[key] ? 'Imagem carregada' : 'Sem imagem'}</p>
+                    <p style={{ color: 'var(--border-strong)', fontSize: 11, margin: 0 }}>{imagens[key as ChaveImagemCardapio] ? 'Imagem carregada' : 'Sem imagem'}</p>
                   </div>
                   <input ref={ref} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { if (e.target.files?.[0]) uploadImagem(key, e.target.files[0]) }} />
                   <button onClick={() => ref.current?.click()} disabled={uploadando === key} style={{ background: 'var(--surface-secondary)', border: '1px solid var(--surface-elevated)', color: 'var(--brand-text)', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -1302,7 +1303,7 @@ export default function AdminPage() {
                   <input placeholder="Nome" value={novoFunc.name} onChange={e => setNovoFunc(p => ({ ...p, name: e.target.value }))} style={inp} />
                   <input placeholder="@usuario" value={novoFunc.username} onChange={e => setNovoFunc(p => ({ ...p, username: e.target.value }))} style={inp} />
                   <input placeholder="Senha" type="password" value={novoFunc.password} onChange={e => setNovoFunc(p => ({ ...p, password: e.target.value }))} style={inp} />
-                  <select value={novoFunc.role} onChange={e => setNovoFunc(p => ({ ...p, role: e.target.value }))} style={{ ...inp, appearance: 'none' as any }}>
+                  <select value={novoFunc.role} onChange={e => setNovoFunc(p => ({ ...p, role: e.target.value }))} style={{ ...inp, appearance: 'none' }}>
                     <option value="atendente">Atendente (Cozinha)</option>
                     <option value="financeiro">Financeiro (Dono)</option>
                     <option value="contador">Contador</option>

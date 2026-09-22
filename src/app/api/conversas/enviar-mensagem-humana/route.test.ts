@@ -7,7 +7,8 @@ const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
     get: vi.fn(async (key: string) => store.get(key) ?? null),
-    set: vi.fn(async (key: string, value: unknown) => {
+    set: vi.fn(async (key: string, value: unknown, opts?: { ex?: number }) => {
+      void opts;
       store.set(key, value);
       return "OK";
     }),
@@ -77,12 +78,12 @@ describe("POST /api/conversas/enviar-mensagem-humana — TTL 7200", () => {
     const res = await POST(postReq({ phone: PHONE, text: "Pedido confirmado!" }, token));
     expect(res.status).toBe(200);
 
-    const manualCall = redisMock.set.mock.calls.find(([k]: [string]) =>
+    const manualCall = redisMock.set.mock.calls.find(([k]) =>
       k === `manual:${PHONE}`
     );
     expect(manualCall).toBeDefined();
-    expect(manualCall[1]).toBe(true);
-    expect(manualCall[2]).toEqual({ ex: 7200 });
+    expect(manualCall?.[1]).toBe(true);
+    expect(manualCall?.[2]).toEqual({ ex: 7200 });
   });
 
   it("renova session:{phone} com TTL 7200 quando sessão existe", async () => {
@@ -92,12 +93,12 @@ describe("POST /api/conversas/enviar-mensagem-humana — TTL 7200", () => {
     const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
     await POST(postReq({ phone: PHONE, text: "Seu pedido está a caminho!" }, token));
 
-    const sessionCall = redisMock.set.mock.calls.find(([k]: [string]) =>
+    const sessionCall = redisMock.set.mock.calls.find(([k]) =>
       k === `session:${PHONE}`
     );
     expect(sessionCall).toBeDefined();
-    expect(sessionCall[1]).toEqual(sessao);
-    expect(sessionCall[2]).toEqual({ ex: 7200 });
+    expect(sessionCall?.[1]).toEqual(sessao);
+    expect(sessionCall?.[2]).toEqual({ ex: 7200 });
   });
 
   it("não renova TTL quando Evolution API retorna erro HTTP", async () => {
@@ -106,7 +107,7 @@ describe("POST /api/conversas/enviar-mensagem-humana — TTL 7200", () => {
     const res = await POST(postReq({ phone: PHONE, text: "Olá!" }, token));
     expect(res.status).toBe(502);
 
-    const manualRenewal = redisMock.set.mock.calls.find(([k]: [string]) =>
+    const manualRenewal = redisMock.set.mock.calls.find(([k]) =>
       k === `manual:${PHONE}`
     );
     expect(manualRenewal).toBeUndefined();
@@ -118,7 +119,7 @@ describe("POST /api/conversas/enviar-mensagem-humana — TTL 7200", () => {
     const res = await POST(postReq({ phone: PHONE, text: "Olá!" }, token));
     expect(res.status).toBe(502);
 
-    const manualRenewal = redisMock.set.mock.calls.find(([k]: [string]) =>
+    const manualRenewal = redisMock.set.mock.calls.find(([k]) =>
       k === `manual:${PHONE}`
     );
     expect(manualRenewal).toBeUndefined();
@@ -143,13 +144,13 @@ describe("POST /api/conversas/enviar-mensagem-humana — eco do painel (Etapa 2B
     const res = await POST(postReq({ phone: PHONE, text: "Seu pedido está pronto!" }, token));
     expect(res.status).toBe(200);
 
-    const ecoCall = redisMock.set.mock.calls.find(([k]: [string]) => k === "conversa:echo-painel:WHATS-MSG-ID-1");
+    const ecoCall = redisMock.set.mock.calls.find(([k]) => k === "conversa:echo-painel:WHATS-MSG-ID-1");
     expect(ecoCall).toBeDefined();
-    expect(ecoCall[1]).toBe(true);
-    expect(ecoCall[2]).toEqual({ ex: 600 });
+    expect(ecoCall?.[1]).toBe(true);
+    expect(ecoCall?.[2]).toEqual({ ex: 600 });
     // A chave/valor não contêm texto, telefone ou nome da atendente.
-    expect(ecoCall[0]).not.toContain(PHONE);
-    expect(ecoCall[0]).not.toContain("Kellyne");
+    expect(ecoCall?.[0]).not.toContain(PHONE);
+    expect(ecoCall?.[0]).not.toContain("Kellyne");
     expect(JSON.stringify(ecoCall)).not.toContain("Seu pedido está pronto");
   });
 
@@ -159,7 +160,7 @@ describe("POST /api/conversas/enviar-mensagem-humana — eco do painel (Etapa 2B
     const res = await POST(postReq({ phone: PHONE, text: "Olá!" }, token));
     expect(res.status).toBe(200);
 
-    const ecoCalls = redisMock.set.mock.calls.filter(([k]: [string]) => k.startsWith("conversa:echo-painel:"));
+    const ecoCalls = redisMock.set.mock.calls.filter(([k]) => k.startsWith("conversa:echo-painel:"));
     expect(ecoCalls).toHaveLength(0);
   });
 
@@ -169,7 +170,7 @@ describe("POST /api/conversas/enviar-mensagem-humana — eco do painel (Etapa 2B
     const res = await POST(postReq({ phone: PHONE, text: "Olá!" }, token));
     expect(res.status).toBe(200);
 
-    const ecoCalls = redisMock.set.mock.calls.filter(([k]: [string]) => k.startsWith("conversa:echo-painel:"));
+    const ecoCalls = redisMock.set.mock.calls.filter(([k]) => k.startsWith("conversa:echo-painel:"));
     expect(ecoCalls).toHaveLength(0);
   });
 
@@ -179,7 +180,7 @@ describe("POST /api/conversas/enviar-mensagem-humana — eco do painel (Etapa 2B
     const res = await POST(postReq({ phone: PHONE, text: "Olá!" }, token));
     expect(res.status).toBe(502);
 
-    const ecoCalls = redisMock.set.mock.calls.filter(([k]: [string]) => k.startsWith("conversa:echo-painel:"));
+    const ecoCalls = redisMock.set.mock.calls.filter(([k]) => k.startsWith("conversa:echo-painel:"));
     expect(ecoCalls).toHaveLength(0);
   });
 
@@ -189,7 +190,7 @@ describe("POST /api/conversas/enviar-mensagem-humana — eco do painel (Etapa 2B
     const res = await POST(postReq({ phone: PHONE, text: "Chegando em instantes!" }, token));
     expect(res.status).toBe(200);
 
-    const chaves = redisMock.set.mock.calls.map(([k]: [string]) => k);
+    const chaves = redisMock.set.mock.calls.map(([k]) => k);
     const idxEco = chaves.indexOf("conversa:echo-painel:WHATS-MSG-ORDEM-1");
     const idxConversa = chaves.indexOf(`conversa:${PHONE}`);
     expect(idxEco).toBeGreaterThanOrEqual(0);

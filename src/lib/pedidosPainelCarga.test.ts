@@ -111,7 +111,7 @@ describe("/pedidos — a tela não pode voltar a engolir a falha da carga inicia
   const fonte = readFileSync(
     fileURLToPath(new URL("../app/pedidos/page.tsx", import.meta.url)),
     "utf-8"
-  );
+  ).replace(/\r\n/g, "\n");
   const carregar = fonte.slice(
     fonte.indexOf("const carregarPedidos ="),
     fonte.indexOf("useEffect(() => {\n    const tituloOriginal")

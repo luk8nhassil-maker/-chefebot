@@ -236,16 +236,18 @@ export default function ConfiguracoesPage() {
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
 
   useEffect(() => {
-    const role = getUserRole()
-    const admin = role === 'admin' || role === 'dev'
-    setIsAdmin(admin)
-    setChecking(false)
-    if (admin) {
-      fetch('/api/fidelidade/config')
-        .then(r => (r.ok ? r.json() : null))
-        .then(data => { if (data) setFidelidade({ ...FIDELIDADE_PADRAO, ...data }) })
-        .catch(err => console.error('Falha ao carregar fidelidade:', err))
-    }
+    queueMicrotask(() => {
+      const role = getUserRole()
+      const admin = role === 'admin' || role === 'dev'
+      setIsAdmin(admin)
+      setChecking(false)
+      if (admin) {
+        fetch('/api/fidelidade/config')
+          .then(r => (r.ok ? r.json() : null))
+          .then(data => { if (data) setFidelidade({ ...FIDELIDADE_PADRAO, ...data }) })
+          .catch(err => console.error('Falha ao carregar fidelidade:', err))
+      }
+    })
     fetch('/api/configuracoes')
       .then(r => { if (r.status === 401) { router.push('/login?callbackUrl=/configuracoes'); return null } return r.json() })
       .then(data => {
@@ -507,7 +509,7 @@ export default function ConfiguracoesPage() {
                       />
                     </div>
                     <p style={{ color: 'var(--foreground-muted)', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
-                      Botão "Falar com a pizzaria" · inclua o código do país (55)
+                      Botão &quot;Falar com a pizzaria&quot; · inclua o código do país (55)
                     </p>
                   </FieldGroup>
                 </SectionCard>

@@ -108,17 +108,21 @@ export default function EditarPedidoPage({ params }: { params: Promise<{ id: str
 
   useEffect(() => {
     params.then((p) => setId(p.id));
-    try {
-      const sp = new URLSearchParams(window.location.search);
-      setToken(sp.get("token"));
-    } catch {}
+    queueMicrotask(() => {
+      try {
+        const sp = new URLSearchParams(window.location.search);
+        setToken(sp.get("token"));
+      } catch {}
+    });
   }, [params]);
 
   useEffect(() => {
     if (!id || token === null) return;
     if (!token) {
-      setErroInicio("Link inválido. Volte para o acompanhamento do pedido e toque em Editar pedido de novo.");
-      setCarregando(false);
+      queueMicrotask(() => {
+        setErroInicio("Link inválido. Volte para o acompanhamento do pedido e toque em Editar pedido de novo.");
+        setCarregando(false);
+      });
       return;
     }
     let ativo = true;

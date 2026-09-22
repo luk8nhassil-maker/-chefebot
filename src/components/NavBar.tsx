@@ -37,7 +37,7 @@ export function NavBar({ currentPage }: NavBarProps) {
   const isDark = currentPage === "dashboard";
 
   useEffect(() => {
-    setUser(getAuthUser());
+    queueMicrotask(() => setUser(getAuthUser()));
   }, []);
 
   async function handleLogout() {

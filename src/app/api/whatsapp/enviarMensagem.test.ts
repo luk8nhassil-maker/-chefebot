@@ -24,7 +24,12 @@ const { store, redisMock } = vi.hoisted(() => {
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 
 const { enviarTextoWhatsAppMock } = vi.hoisted(() => ({
-  enviarTextoWhatsAppMock: vi.fn(),
+  enviarTextoWhatsAppMock: vi.fn<
+    (
+      telefone: string,
+      mensagem: string,
+    ) => Promise<{ ok: true } | { ok: false; motivo: string }>
+  >(),
 }));
 
 vi.mock("@/lib/whatsappMensagem", () => ({
@@ -32,7 +37,9 @@ vi.mock("@/lib/whatsappMensagem", () => ({
 }));
 
 const { registrarMensagemMock } = vi.hoisted(() => ({
-  registrarMensagemMock: vi.fn(async () => {}),
+  registrarMensagemMock: vi.fn<
+    (telefone: string, autor: string, texto: string) => Promise<void>
+  >(async () => {}),
 }));
 
 vi.mock("@/lib/conversa", () => ({

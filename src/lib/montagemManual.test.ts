@@ -239,13 +239,11 @@ describe("etapas obrigatórias — pizza", () => {
     expect(etapas[0].maxEscolhas).toBe(1); // MINI nunca é meio a meio na etapa guiada
   });
 
-  test("etapa de sabores no tamanho MINI só lista sabores Tradicionais/Doces (Especiais não têm MINI)", () => {
+  test("etapa de sabores no tamanho MINI lista Tradicionais/Doces e apenas as duas exceções Especiais aprovadas", () => {
     const etapaMini = montarEtapas(produtoPorId("pizza:mini"), MENU)[0];
-    const nomesEspeciais = PIZZA_CATALOG.flavors.filter((f) => f.category === "especial").map((f) => f.name);
-    for (const nome of nomesEspeciais) {
-      expect(etapaMini.opcoes.some((o) => o.valor === nome)).toBe(false);
-    }
-    expect(etapaMini.opcoes.length).toBe(PIZZA_CATALOG.flavors.filter((f) => f.category !== "especial").length);
+    const saboresPermitidos = PIZZA_CATALOG.flavors.filter((f) => f.pricesBySizeCode.MINI !== undefined);
+    expect(etapaMini.opcoes.map((o) => o.valor).sort()).toEqual(saboresPermitidos.map((f) => f.name).sort());
+    expect(etapaMini.opcoes.filter((o) => ["Carne Seca", "Portuguesa"].includes(o.valor))).toHaveLength(2);
   });
 
   test("etapa de sabores no tamanho G lista todos os 45 sabores oficiais", () => {
@@ -315,17 +313,17 @@ describe("etapas obrigatórias — demais categorias", () => {
     expect(etapa.opcoes).toHaveLength(12);
   });
 
-  test("Pastel de Feira (dentro de Lanches): sabor único, 6 recheios", () => {
-    const etapa = montarEtapas(produtoPorId("lanches:pastel de feira"), MENU)[0];
+  test("Pastel de Feira (na seção de pastéis): sabor único, 6 recheios", () => {
+    const etapa = montarEtapas(produtoPorId("pastelForno:pastel de feira"), MENU)[0];
     expect(etapa.tipo).toBe("sabor_unico");
     expect(etapa.opcoes).toHaveLength(6);
   });
 
-  test("Macarronada: tamanho obrigatório + adicional opcional (Bacon/Ovos)", () => {
+  test("Macarronada: tamanho obrigatório + adicional opcional (Bacon/Ovo)", () => {
     const etapas = montarEtapas(produtoPorId("macarronada:macarronada de carne"), MENU);
     expect(etapas.map((e) => e.tipo)).toEqual(["tamanho_item", "adicional_opcional"]);
     expect(etapas[0].opcoes.map((o) => o.valor).sort()).toEqual(["G", "M", "P", "PP"]);
-    expect(etapas[1].opcoes.map((o) => o.valor)).toEqual(["", "Bacon", "Ovos"]);
+    expect(etapas[1].opcoes.map((o) => o.valor)).toEqual(["", "Bacon", "Ovo"]);
     expect(etapaSatisfeita(etapas[1], selecaoVazia())).toBe(true); // opcional
   });
 
@@ -347,8 +345,8 @@ describe("etapas obrigatórias — demais categorias", () => {
     expect(calzone.opcoes.find((o) => o.valor === "Carne Seca")?.ingredientes).toBe("Molho, Mussarela, Carne seca, Requeijão Cremoso e Orégano.");
     const pastelForno = montarEtapas(produtoPorId("pastelForno:pastel de forno"), MENU)[0];
     expect(pastelForno.opcoes.find((o) => o.valor === "Baiana")?.ingredientes).toBe("Molho, Mussarela, Calabresa Processada, Azeite de Dedê, Orégano e Pimenta.");
-    const pastelFeira = montarEtapas(produtoPorId("lanches:pastel de feira"), MENU)[0];
-    expect(pastelFeira.opcoes.find((o) => o.valor === "Queijo")?.ingredientes).toBe("queijo coalho");
+    const pastelFeira = montarEtapas(produtoPorId("pastelForno:pastel de feira"), MENU)[0];
+    expect(pastelFeira.opcoes.find((o) => o.valor === "Queijo")?.ingredientes).toBe("Queijo coalho.");
   });
 
   test("Hambúrguer (produto fixed, sem etapa) carrega ingredientes no próprio ProdutoManual — pedido manual consegue exibi-los sem abrir etapa", () => {
@@ -446,8 +444,8 @@ describe("construção do item — cardápio oficial 2026 (reaproveita o motor d
     expect(item?.price).toBe(55); // 45 + 10 (Bacon G)
   });
 
-  test("MINI + Especial é recusado (servidor rejeitaria)", () => {
-    const especial = PIZZA_CATALOG.flavors.find((f) => f.category === "especial")!.name;
+  test("MINI + Especial sem exceção aprovada é recusado (servidor rejeitaria)", () => {
+    const especial = PIZZA_CATALOG.flavors.find((f) => f.category === "especial" && f.pricesBySizeCode.MINI === undefined)!.name;
     const item = construirItemManual(produtoPorId("pizza:mini"), { sabores: [especial], borda: null }, MENU);
     expect(item).toBeNull();
   });

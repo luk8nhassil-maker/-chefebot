@@ -233,8 +233,11 @@ describe("10 e 11. token correto + número autorizado marca inbound_received e r
     const novoInicio = await iniciarCanario();
     expect(novoInicio.ok).toBe(false);
     if (!novoInicio.ok) {
-      expect(novoInicio.retryAfterSeconds).toBeGreaterThan(0);
-      expect(novoInicio.retryAfterSeconds).toBeLessThanOrEqual(120);
+      expect(novoInicio.motivo).toBe("rate_limited");
+      if (novoInicio.motivo === "rate_limited") {
+        expect(novoInicio.retryAfterSeconds).toBeGreaterThan(0);
+        expect(novoInicio.retryAfterSeconds).toBeLessThanOrEqual(120);
+      }
     }
   });
 
@@ -566,7 +569,9 @@ describe("11A. tokens de canário nunca vazam para o fluxo normal", () => {
     const tokenAntigo = iniciado.ok ? iniciado.record.token : "";
     const antigo = store.get("whatsapp:canary:active") as Record<string, unknown>;
     const novaGeracao = { ...antigo, token: "CBTEST-ZZZZ", createdAt: Date.now(), expiresAt: Date.now() + 600_000 };
-    hooks.afterAckLockSet = () => store.set("whatsapp:canary:active", novaGeracao);
+    hooks.afterAckLockSet = () => {
+      store.set("whatsapp:canary:active", novaGeracao);
+    };
 
     const consumido = await processarPossivelInboundCanario(PHONE_AUTORIZADO, tokenAntigo, "msg-fronteira");
 

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ResultadoEnvioWhatsApp } from "@/lib/whatsappMensagem";
 
 const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
@@ -14,7 +15,7 @@ const { store, redisMock } = vi.hoisted(() => {
 
 const { verifyTokenMock } = vi.hoisted(() => ({ verifyTokenMock: vi.fn() }));
 const { enviarTextoWhatsAppMock } = vi.hoisted(() => ({
-  enviarTextoWhatsAppMock: vi.fn(async () => ({ ok: true, latenciaMs: 1, tentativas: 1 })),
+  enviarTextoWhatsAppMock: vi.fn(async (): Promise<ResultadoEnvioWhatsApp> => ({ ok: true, latenciaMs: 1, tentativas: 1 })),
 }));
 
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));

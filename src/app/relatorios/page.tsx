@@ -21,7 +21,7 @@ export default function RelatoriosPage() {
         const raw = cookie.split('=').slice(1).join('=')
         const user = JSON.parse(decodeURIComponent(decodeURIComponent(raw)))
         if (user.role !== 'admin') { router.push('/login?callbackUrl=/relatorios'); return }
-        setUserName(user.name || '')
+        queueMicrotask(() => setUserName(user.name || ''))
       } catch {
         router.push('/login?callbackUrl=/relatorios')
       }

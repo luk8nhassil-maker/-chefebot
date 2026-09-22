@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
-import { middleware } from "./middleware";
+import { proxy as middleware } from "./src/proxy";
 
 function request(url: string, method = "GET") {
   const parsed = new URL(url);

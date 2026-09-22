@@ -269,10 +269,13 @@ function Step5WhatsApp({ onNext, onBack }: { onNext: () => void; onBack: () => v
     let autoFetching = false
     let lastAutoFetchAt = 0
 
-    setStatus('loading')
-    setQr(null)
-    setSecondsLeft(0)
-    setTimedOut(false)
+    queueMicrotask(() => {
+      if (cancelled) return
+      setStatus('loading')
+      setQr(null)
+      setSecondsLeft(0)
+      setTimedOut(false)
+    })
 
     // Só chamado de callbacks (tick de 1s, aplicarQr) — nunca durante o
     // render, para nunca ler relógio de dentro do corpo do componente.

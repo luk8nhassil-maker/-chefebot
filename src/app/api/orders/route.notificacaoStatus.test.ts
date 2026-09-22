@@ -48,7 +48,15 @@ vi.mock("@/lib/evolutionApi", () => ({
   })),
 }));
 
-const fetchMock = vi.fn(async (_url: string, _opts?: RequestInit) => ({ ok: true, json: async () => ({}) }));
+type FetchResult = {
+  ok: boolean;
+  status?: number;
+  json: () => Promise<Record<string, never>>;
+};
+
+const fetchMock = vi.fn<
+  (_url: string, _opts?: RequestInit) => Promise<FetchResult>
+>(async () => ({ ok: true, json: async () => ({}) }));
 vi.stubGlobal("fetch", fetchMock);
 
 import { PATCH } from "./route";

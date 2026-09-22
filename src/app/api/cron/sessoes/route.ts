@@ -5,6 +5,10 @@ import { obterConfigEvolution } from "@/lib/evolutionApi";
 const TIMEOUT_MS = 15 * 60 * 1000 // 15 minutos
 const STEPS_IGNORADOS = ['done', 'escalado', 'confirm', 'welcome']
 
+type SessaoComStep = {
+  step: string
+}
+
 async function enviarMensagem(phone: string, text: string) {
   const config = obterConfigEvolution()
   if (!config) { console.error('[cron sessoes] Provider de WhatsApp não configurado — mensagem não enviada.'); return }
@@ -38,7 +42,7 @@ export async function GET(req: Request) {
       if (agora - ts < TIMEOUT_MS) continue
 
       // Verifica se tem sessão ativa
-      const session = await redis.get<any>(`session:${phone}`)
+      const session = await redis.get<SessaoComStep>(`session:${phone}`)
       if (!session) { await redis.del(chave); continue }
 
       // Não reseta steps que não devem ser resetados

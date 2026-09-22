@@ -117,6 +117,23 @@ const basePayload = {
   pagamento: "Pix",
 };
 
+type PedidoSalvo = {
+  endereco: string;
+  itens: string[];
+  itensDetalhados?: unknown[];
+  pix?: {
+    valorEsperado?: number;
+    [campo: string]: unknown;
+  };
+  pixConfirmado?: boolean;
+  snapshotOficial?: Record<string, unknown>;
+  status: string;
+  statusToken: string;
+  taxaEntrega?: number;
+  total: number;
+  troco?: string;
+};
+
 beforeEach(() => {
   store.clear();
   vi.clearAllMocks();
@@ -332,7 +349,7 @@ describe("POST /api/pedido-app", () => {
     }));
     const pedidos = store.get("pedidos") as PedidoSalvo[];
     expect(pedidos[0].total).toBe(33);
-    expect(pedidos[0].pix.valorEsperado).toBe(20);
+    expect(pedidos[0].pix?.valorEsperado).toBe(20);
     expect(data.pix.valorEsperado).toBe(20);
   });
 
@@ -398,7 +415,7 @@ describe("POST /api/pedido-app", () => {
       valorEsperado: 33,
       status: "pendente",
     });
-    expect(pedidos[0].pix.provider).toBeUndefined();
+    expect(pedidos[0].pix?.provider).toBeUndefined();
     expect(pedidos[0].pixConfirmado).toBeUndefined();
     expect(pedidos[0].status).toBe("novo");
     expect(data.pix).toBeUndefined();

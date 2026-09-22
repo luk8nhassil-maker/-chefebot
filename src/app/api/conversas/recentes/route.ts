@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
 import { verifyToken } from '@/lib/auth'
 import { CONVERSAS_ZSET, type ConversaMeta } from '@/lib/conversasHistorico'
-import type { MensagemRelevante } from '@/lib/bot'
+import type { BotSession, MensagemRelevante } from '@/lib/bot'
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value ?? null
@@ -64,7 +64,7 @@ export async function GET(req: NextRequest) {
     for (const phone of phones) {
       const [meta, session, manualVal] = await Promise.all([
         redis.get<ConversaMeta>(`conversa_meta:${phone}`),
-        redis.get<any>(`session:${phone}`),
+        redis.get<BotSession>(`session:${phone}`),
         redis.get(`manual:${phone}`),
       ])
 

@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages";
 import { normalizarCodigoAutenticacaoPix, normalizarE2EIdPix } from "./pixComprovanteEvidencia";
 
 type ResultadoAnalise = {
@@ -14,6 +15,14 @@ type ResultadoAnalise = {
   motivo: string | null;
   mensagem: string;
 };
+
+function ehObjeto(valor: unknown): valor is Record<string, unknown> {
+  return typeof valor === "object" && valor !== null;
+}
+
+function textoOpcional(valor: unknown): string | null {
+  return typeof valor === "string" && valor.length > 0 ? valor : null;
+}
 
 export async function analisarComprovantePix(
   imagemBase64: string,
@@ -56,7 +65,7 @@ Responda APENAS em JSON sem explicações:
 
 Se não conseguir ler: {"valor": null, "chave": null, "beneficiario": null, "e2eId": null, "codigoAutenticacao": null, "dataPagamento": null, "horaPagamento": null, "dataHoraPagamento": null, "valido": false, "motivo": "ilegivel"}`;
 
-    const content: any[] = [];
+    const content: ContentBlockParam[] = [];
 
     if (mediaType === "application/pdf") {
       content.push({
@@ -88,9 +97,12 @@ Se não conseguir ler: {"valor": null, "chave": null, "beneficiario": null, "e2e
 
     const texto = response.content[0].type === "text" ? response.content[0].text : "";
     const clean = texto.replace(/```json|```/g, "").trim();
-    const resultado = JSON.parse(clean);
+    const resultadoBruto: unknown = JSON.parse(clean);
+    const resultado = ehObjeto(resultadoBruto) ? resultadoBruto : {};
 
-    const motivo = resultado.motivo || "";
+    const motivo = textoOpcional(resultado.motivo) ?? "";
+    const valor = typeof resultado.valor === "number" ? resultado.valor : null;
+    const valido = resultado.valido === true;
     let mensagemInvalido = "Hmm, não consegui confirmar esse comprovante. 😕 Pode tentar enviar de novo?";
     if (motivo.includes("data")) mensagemInvalido = "Eita! 😅 Esse comprovante parece ser de outro dia. Para confirmar seu pedido precisa ser o comprovante de hoje mesmo, tá? Faz o Pix agora e manda o comprovante fresquinho! 🍕";
     else if (motivo.includes("horario")) mensagemInvalido = "Opa! 🤔 Esse comprovante é de antes do seu pedido. Precisa ser o Pix feito agora, depois que você confirmou o pedido. Faz o pagamento e manda o comprovante, pode ser? 😊";
@@ -100,21 +112,25 @@ Se não conseguir ler: {"valor": null, "chave": null, "beneficiario": null, "e2e
     else if (motivo.includes("ilegivel")) mensagemInvalido = "Não consegui ler esse comprovante direito. 😅 Tenta mandar uma foto mais nítida ou o PDF completo do comprovante!";
 
     return {
-      valido: resultado.valido === true,
-      valorEncontrado: resultado.valor ?? null,
-      chavePix: resultado.chave ?? null,
-      beneficiario: resultado.beneficiario ?? resultado.destinatario ?? null,
-      e2eId: normalizarE2EIdPix(resultado.e2eId ?? resultado.e2e ?? resultado.endToEndId) ?? null,
-      codigoAutenticacao: normalizarCodigoAutenticacaoPix(resultado.codigoAutenticacao ?? resultado.codigo ?? resultado.codigoTransacao) ?? null,
-      dataPagamento: resultado.dataPagamento ?? null,
-      horaPagamento: resultado.horaPagamento ?? resultado.horarioPagamento ?? null,
-      dataHoraPagamento: resultado.dataHoraPagamento ?? null,
+      valido,
+      valorEncontrado: valor,
+      chavePix: textoOpcional(resultado.chave),
+      beneficiario: textoOpcional(resultado.beneficiario) ?? textoOpcional(resultado.destinatario),
+      e2eId: normalizarE2EIdPix(
+        textoOpcional(resultado.e2eId) ?? textoOpcional(resultado.e2e) ?? textoOpcional(resultado.endToEndId),
+      ) ?? null,
+      codigoAutenticacao: normalizarCodigoAutenticacaoPix(
+        textoOpcional(resultado.codigoAutenticacao) ?? textoOpcional(resultado.codigo) ?? textoOpcional(resultado.codigoTransacao),
+      ) ?? null,
+      dataPagamento: textoOpcional(resultado.dataPagamento),
+      horaPagamento: textoOpcional(resultado.horaPagamento) ?? textoOpcional(resultado.horarioPagamento),
+      dataHoraPagamento: textoOpcional(resultado.dataHoraPagamento),
       motivo: motivo || null,
-      mensagem: resultado.valido
-        ? `Pix de R$ ${resultado.valor} confirmado! ✅`
+      mensagem: valido
+        ? `Pix de R$ ${valor} confirmado! ✅`
         : mensagemInvalido,
     };
-  } catch (err) {
+  } catch {
     return {
       valido: false,
       valorEncontrado: null,

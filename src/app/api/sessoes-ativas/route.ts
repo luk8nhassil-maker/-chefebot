@@ -5,6 +5,7 @@ import { calcularResumoAtendimentoHumano } from '@/lib/resumoAtendimentoHumano'
 import { montarSessaoManualMinima } from '@/lib/sessaoTempoReal'
 import type { ConversaMeta } from '@/lib/conversasHistorico'
 import { deveExibirNoTempoReal } from '@/lib/permanenciaTempoReal'
+import type { BotSession } from '@/lib/bot'
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value ?? null
@@ -67,7 +68,7 @@ export async function GET(req: NextRequest) {
       const phone = chave.replace('session:', '')
       if (!phone || phone.length < 8) continue
 
-      const session = await redis.get<any>(chave)
+      const session = await redis.get<BotSession>(chave)
       if (!session) continue
       if (STEPS_SEMPRE_IGNORADOS.includes(session.step)) continue
 
@@ -86,7 +87,7 @@ export async function GET(req: NextRequest) {
       const ultimaMensagem = await redis.get<string>(`ultima_msg:${phone}`)
       const novaMsgManual = manual && !!(await redis.get(`nova_msg_manual:${phone}`))
 
-      const cartResumo = (session.cart || []).map((i: any) => {
+      const cartResumo = session.cart.map((i) => {
         const parts = [i.name]
         if (i.flavor) parts.push(i.flavor)
         if (i.size) parts.push(`(${i.size})`)

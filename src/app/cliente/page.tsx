@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Gift, Phone, MessageCircle, LogOut, Receipt, ShieldCheck, Sparkles, Pizza, Trophy, Users, Star } from 'lucide-react'
+import { ArrowUp, ChevronRight, Clock3, Gift, Info, List, Phone, MessageCircle, LogOut, Receipt, ShieldCheck, Sparkles, Pizza, Trophy, Users, Star } from 'lucide-react'
 import { calcularMissaoAtual } from '@/lib/missoes'
 import ClientBottomNav from '@/components/ClientBottomNav'
 import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
@@ -18,7 +18,7 @@ type Movimento = {
   criadoEm: string
 }
 
-type Recompensa = { recompensaId: string; status: string; criadoEm: string }
+type Recompensa = { recompensaId: string; status: string; criadoEm: string; descricao: string }
 
 type Jornada = {
   ativo: boolean
@@ -107,6 +107,128 @@ const cores = {
 const WA_TOKEN_KEY = 'cf_wa_token'
 const WA_FINAL_KEY = 'cf_wa_final'
 
+// O Preview existe somente no bundle de desenvolvimento. Ele reutiliza a tela
+// real com dados totalmente locais e nunca chama APIs, WhatsApp, Pix, Redis ou
+// rotas de pedido. Em produção, nem o atalho nem o parâmetro têm efeito.
+const PREVIEW_LOCAL_DISPONIVEL = process.env.NODE_ENV !== 'production'
+
+const PERFIL_PREVIEW: Perfil = {
+  cliente: { nome: 'Lucas', telefone: 'preview-local' },
+  ultimosPedidos: [],
+}
+
+const FIDELIDADE_PREVIEW: Fidelidade = {
+  ativo: true,
+  unidade: 'estrelas',
+  descricaoRecompensa: 'Recompensa configurada pela loja',
+  saldoPontos: 20,
+  pontosPrevistos: 0,
+  metaPontos: 50,
+  pontosFaltantes: 30,
+  progressoPercentual: 40,
+  metaAtingida: false,
+  extrato: [],
+  recompensas: [],
+}
+
+const PAINEL_PREVIEW: PainelFidelidade = {
+  temporada: { nome: 'Temporada Preview', diasRestantes: 30, fimEm: null, estado: 'ativa' },
+  ranking: {
+    posicao: 8,
+    score: 20,
+    entorno: [
+      { posicao: 7, eVoce: false },
+      { posicao: 8, eVoce: true },
+      { posicao: 9, eVoce: false },
+    ],
+  },
+}
+
+type PreviewFidelidadeMobileProps = {
+  aviso: string
+  onAviso: (mensagem: string) => void
+  onClose: () => void
+}
+
+function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeMobileProps) {
+  const [modalCompartilhar, setModalCompartilhar] = useState(false)
+  const progresso = Math.max(0, Math.min(100, FIDELIDADE_PREVIEW.progressoPercentual))
+  const nome = PERFIL_PREVIEW.cliente.nome ?? 'Cliente'
+  const primeiroNome = nome.split(' ')[0]
+  const inicial = primeiroNome.slice(0, 1).toUpperCase()
+
+  function simularCompartilhamento(canal: string) {
+    setModalCompartilhar(false)
+    onAviso(`${canal}: ação simulada. Nenhum link real foi criado ou enviado.`)
+  }
+
+  return (
+    <div className="cf-preview-phone">
+      <div className="cf-preview-safety" role="status">
+        Preview local seguro · dados fictícios · nenhuma integração real é acionada.
+      </div>
+
+      <header className="cf-preview-header">
+        <div className="cf-preview-avatar" aria-hidden="true">{inicial}</div>
+        <div className="cf-preview-greeting"><span>Olá,</span><strong>{primeiroNome}</strong></div>
+        <button type="button" onClick={onClose}>Sair</button>
+      </header>
+
+      {aviso && <div className="cf-preview-notice" role="status">{aviso}</div>}
+
+      <section className="cf-preview-stars" aria-label="Resumo das Estrelas">
+        <p className="cf-preview-kicker">SUAS ESTRELAS</p>
+        <strong className="cf-preview-balance">{FIDELIDADE_PREVIEW.saldoPontos}</strong>
+        <div className="cf-preview-progress-title"><strong>Próximo presente</strong><strong>{progresso}%</strong></div>
+        <div className="cf-preview-progress" aria-label={`${progresso}% do próximo presente`}>
+          <span style={{ width: `${progresso}%` }}><i /></span><b aria-hidden="true">🔥</b>
+        </div>
+        <div className="cf-preview-progress-copy">
+          <strong>{FIDELIDADE_PREVIEW.saldoPontos} de {FIDELIDADE_PREVIEW.metaPontos} Estrelas</strong>
+          <span>Faltam {FIDELIDADE_PREVIEW.pontosFaltantes}</span>
+        </div>
+        <div className="cf-preview-season"><Clock3 size={14} /> Temporada atual · {PAINEL_PREVIEW.temporada?.diasRestantes} dias restantes</div>
+        <div className="cf-preview-rule"><Info size={18} /><span>Juntou {FIDELIDADE_PREVIEW.metaPontos} Estrelas = ganha 1 presente.</span></div>
+        <div className="cf-preview-actions">
+          <button type="button" onClick={() => onAviso('Meus presentes aberto em modo demonstrativo. Nenhuma recompensa real foi reservada.')}><Gift size={18} /> Meus presentes</button>
+          <button type="button" onClick={() => onAviso('Extrato demonstrativo aberto. Nenhuma movimentação real foi consultada ou alterada.')}><List size={18} /> Extrato</button>
+        </div>
+      </section>
+
+      <button type="button" className="cf-preview-ranking" onClick={() => onAviso('Pódio Chefe aberto em modo demonstrativo, sem consultar dados reais.')}>
+        <div className="cf-preview-ranking-top">
+          <span className="cf-preview-trophy"><Trophy size={22} /></span>
+          <span className="cf-preview-ranking-title"><small>RANKING</small><strong>Sua posição</strong></span>
+          <span className="cf-preview-faces" aria-label="Participantes anônimos"><i>A</i><i>B</i><i>C</i><i>+27</i></span>
+          <ChevronRight size={21} />
+        </div>
+        <div className="cf-preview-ranking-copy"><ArrowUp size={22} /><span>Faltam <strong>4 Estrelas</strong> para subir de posição</span></div>
+      </button>
+
+      <section className="cf-preview-referral">
+        <div className="cf-preview-gift" aria-hidden="true">🎁</div>
+        <p className="cf-preview-kicker">INDICAÇÃO</p>
+        <h2>Chegue mais rápido ao seu presente</h2>
+        <p>Indique um amigo. Quando ele fizer o primeiro pedido, você avança.</p>
+        <button type="button" onClick={() => setModalCompartilhar(true)}>Indicar amigo</button>
+      </section>
+
+      {modalCompartilhar && (
+        <div className="cf-preview-modal-backdrop" role="presentation" onClick={() => setModalCompartilhar(false)}>
+          <div className="cf-preview-modal" role="dialog" aria-modal="true" aria-label="Compartilhar indicação" onClick={(event) => event.stopPropagation()}>
+            <h2>Indicar amigo</h2>
+            <p>Escolha onde deseja compartilhar. No Preview, nenhuma mensagem será enviada.</p>
+            {['WhatsApp', 'Instagram', 'Telegram', 'Facebook', 'Copiar link'].map((canal) => (
+              <button type="button" key={canal} onClick={() => simularCompartilhamento(canal)}>{canal}</button>
+            ))}
+            <button type="button" className="cf-preview-modal-cancel" onClick={() => setModalCompartilhar(false)}>Cancelar</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ClientePage() {
   // Etapas: carregando → (perfil | confirmar | telefone) → otp → (nome) → perfil.
   // "confirmar" é a experiência de número reconhecido pelo link do WhatsApp:
@@ -140,7 +262,24 @@ export default function ClientePage() {
   // Erros LOCAIS de carregamento — nunca viram logout nem troca de etapa.
   const [perfilErro, setPerfilErro] = useState(false)
   const [fidelidadeErro, setFidelidadeErro] = useState(false)
+  const [modoPreview, setModoPreview] = useState(false)
+  const [previewAviso, setPreviewAviso] = useState('')
   const codigoRef = useRef<HTMLInputElement>(null)
+
+  function entrarPreview() {
+    if (!PREVIEW_LOCAL_DISPONIVEL) return
+    setModoPreview(true)
+    setPreviewAviso('')
+    setPerfil(PERFIL_PREVIEW)
+    setFidelidade(FIDELIDADE_PREVIEW)
+    setJornada(null)
+    setPainel(PAINEL_PREVIEW)
+    setIndicacaoToken('preview-local')
+    setPerfilErro(false)
+    setFidelidadeErro(false)
+    setErro('')
+    setStep('perfil')
+  }
 
   // Retorno seguro pós-login (ex.: veio de "Pedido" no menu inferior sem
   // sessão ativa): só aceita destinos de uma allowlist explícita, nunca uma
@@ -155,6 +294,10 @@ export default function ClientePage() {
   }
 
   function abrirSacola() {
+    if (modoPreview) {
+      setPreviewAviso('A sacola não é aberta no Preview para impedir qualquer pedido real.')
+      return
+    }
     try { sessionStorage.setItem(CF_OPEN_CART_KEY, '1') } catch {}
     window.location.href = '/pedido'
   }
@@ -217,6 +360,10 @@ export default function ClientePage() {
   }
 
   async function compartilharIndicacao() {
+    if (modoPreview) {
+      setPreviewAviso('O compartilhamento foi simulado. Nenhum link real foi criado ou enviado.')
+      return
+    }
     setCompartilhandoIndicacao(true)
     try {
       let token = indicacaoToken
@@ -520,6 +667,17 @@ export default function ClientePage() {
   }
 
   async function sair() {
+    if (modoPreview) {
+      setModoPreview(false)
+      setPreviewAviso('')
+      setPerfil(null)
+      setFidelidade(null)
+      setJornada(null)
+      setPainel(null)
+      setIndicacaoToken(null)
+      setStep('telefone')
+      return
+    }
     try { await fetchCliente('/api/cliente/logout', { method: 'POST' }, sessaoMemRef.current) } catch {}
     limparSessaoFallback()
     sessaoMemRef.current = null
@@ -561,6 +719,10 @@ export default function ClientePage() {
   ).reduce((acc, m) => acc + m.pontos, 0) ?? 0
 
   async function resgatar() {
+    if (modoPreview) {
+      setPreviewAviso('O resgate foi simulado. Nenhuma recompensa real foi reservada.')
+      return
+    }
     if (!fidelidade || fidelidade.recompensas.length === 0) return
     setResgateErro('')
     setResgatando(true)
@@ -630,7 +792,7 @@ export default function ClientePage() {
 
   return (
     <div style={{ background: cores.fundo, minHeight: '100dvh', fontFamily: 'Archivo, sans-serif', color: cores.navy, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ background: cores.cardBg, borderBottom: `1px solid ${cores.cardBorda}`, padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      {!modoPreview && <div style={{ background: cores.cardBg, borderBottom: `1px solid ${cores.cardBorda}`, padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Pizza size={22} color={cores.navy} />
           <div style={{ fontSize: 15, fontWeight: 700, color: cores.navy }}>Minha fidelidade</div>
@@ -638,18 +800,18 @@ export default function ClientePage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           {step === 'perfil' && (
             <button onClick={sair} aria-label="Sair da conta" style={{ background: 'none', border: 'none', color: cores.textoSecundario, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif' }}>
-              <LogOut size={16} /> Sair
+              <LogOut size={16} /> {modoPreview ? 'Fechar Preview' : 'Sair'}
             </button>
           )}
         </div>
-      </div>
+      </div>}
 
       <div
         className="cliente-conteudo"
         style={{
           flex: 1,
           padding: '28px 20px calc(env(safe-area-inset-bottom) + 96px)',
-          maxWidth: 1180,
+          maxWidth: modoPreview ? 430 : 1180,
           width: '100%',
           margin: '0 auto',
           boxSizing: 'border-box',
@@ -716,6 +878,11 @@ export default function ClientePage() {
             <a href="/pedido" style={{ textAlign: 'center', fontSize: 13, color: cores.textoSecundario, textDecoration: 'none' }}>
               Prefiro pedir sem entrar agora
             </a>
+            {PREVIEW_LOCAL_DISPONIVEL && (
+              <button onClick={entrarPreview} style={{ ...botaoTextoDiscreto, textAlign: 'center' }}>
+                Abrir Preview local seguro
+              </button>
+            )}
           </div>
         )}
 
@@ -796,9 +963,19 @@ export default function ClientePage() {
           </div>
         )}
 
-        {step === 'perfil' && (
+        {step === 'perfil' && modoPreview && (
+          <PreviewFidelidadeMobile aviso={previewAviso} onAviso={setPreviewAviso} onClose={() => void sair()} />
+        )}
+
+        {step === 'perfil' && !modoPreview && (
           <div className="cliente-grid">
             <div className="cliente-col-esquerda" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {modoPreview && (
+                <div role="status" style={{ background: 'var(--info-surface)', border: '1px solid var(--info-border)', borderRadius: 12, padding: '11px 14px', color: 'var(--info-text)', fontSize: 12.5, lineHeight: 1.45 }}>
+                  <strong>Preview local:</strong> dados fictícios; nenhum pedido, Pix, WhatsApp, estoque, Redis ou fidelidade real será alterado.
+                  {previewAviso && <div style={{ marginTop: 6 }}>{previewAviso}</div>}
+                </div>
+              )}
               <div style={{ fontSize: 15, color: cores.textoSecundario }}>
                 Olá{perfil?.cliente.nome ? `, ${perfil.cliente.nome.split(' ')[0]}` : ''}!
               </div>
@@ -846,7 +1023,7 @@ export default function ClientePage() {
                         <Sparkles size={20} color={cores.amarelo} />
                         <span style={{ fontSize: 13, fontWeight: 700, color: cores.amarelo, textTransform: 'uppercase', letterSpacing: 0.5 }}>Recompensa disponível</span>
                       </div>
-                      <p style={{ fontSize: 16, fontWeight: 700, margin: '0 0 16px' }}>{fidelidade.descricaoRecompensa}</p>
+                      <p style={{ fontSize: 16, fontWeight: 700, margin: '0 0 16px' }}>{fidelidade.recompensas[0]?.descricao ?? fidelidade.descricaoRecompensa}</p>
                       {resgateErro && <p style={{ color: 'var(--danger-border)', fontSize: 13, margin: '0 0 12px' }}>{resgateErro}</p>}
                       <button
                         onClick={resgatar}
@@ -1019,7 +1196,15 @@ export default function ClientePage() {
                 </div>
               )}
 
-              <a href="/pedido" style={{ ...botaoPrimario, textDecoration: 'none', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}>
+              <a
+                onClick={(event) => {
+                  if (!modoPreview) return
+                  event.preventDefault()
+                  setPreviewAviso('A compra não é aberta no Preview para impedir qualquer pedido real.')
+                }}
+                style={{ ...botaoPrimario, textDecoration: 'none', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}
+                href="/pedido"
+              >
                 Continuar comprando
               </a>
             </div>
@@ -1037,7 +1222,7 @@ export default function ClientePage() {
                   ) : (
                     fidelidade.recompensas.map((r) => (
                       <div key={r.recompensaId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13.5, padding: '8px 0', borderTop: `1px solid ${cores.moldura}` }}>
-                        <span style={{ color: cores.navy }}>{fidelidade.descricaoRecompensa}</span>
+                        <span style={{ color: cores.navy }}>{r.descricao}</span>
                         <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase' }}>{r.status}</span>
                       </div>
                     ))
@@ -1089,8 +1274,18 @@ export default function ClientePage() {
         )}
       </div>
 
-      <PixPendenteBar pendente={pixPendente} />
-      <ClientBottomNav active="pontos" onSacolaClick={abrirSacola} pixPendente={!!pixPendente} />
+      {!modoPreview && <PixPendenteBar pendente={pixPendente} />}
+      <ClientBottomNav
+        active="pontos"
+        onSacolaClick={abrirSacola}
+        pixPendente={!!pixPendente}
+        onInicioClick={modoPreview ? () => setPreviewAviso('Início: navegação simulada. Nenhum pedido real foi aberto.') : undefined}
+        onPedidoClick={modoPreview ? () => setPreviewAviso('Pedido: navegação simulada. Nenhum pedido real foi consultado ou criado.') : undefined}
+        onPontosClick={modoPreview ? () => setPreviewAviso('Você já está na tela de Fidelidade do Preview.') : undefined}
+        loyaltyLabel={modoPreview ? 'Fidelidade' : 'Pontos'}
+        loyaltyIcon={modoPreview ? 'star' : 'user'}
+        compactMobile={modoPreview}
+      />
 
       <style>{`
         .cliente-grid { display: flex; flex-direction: column; }
@@ -1130,6 +1325,32 @@ export default function ClientePage() {
           background: rgba(20,20,32,0.82);
           border: 1px solid rgba(255,255,255,0.18);
         }
+        .cf-preview-phone{display:flex;flex-direction:column;gap:11px;width:100%;max-width:390px;margin:0 auto;color:#414851;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif}
+        .cf-preview-safety{padding:9px 12px;border:1px solid rgba(57,124,246,.28);border-radius:12px;background:rgba(235,244,255,.88);color:#315d9d;font-size:11px;line-height:1.35;text-align:center}
+        .cf-preview-header{display:flex;align-items:center;padding:4px 5px 7px;min-height:52px}
+        .cf-preview-avatar{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,#e1efff,#bfd9f7);color:#5b6c83;font-size:20px;font-weight:700;flex:none}
+        .cf-preview-greeting{display:flex;flex-direction:column;justify-content:center;margin-left:12px;line-height:1.08}.cf-preview-greeting span{font-size:13px;color:#7b8490}.cf-preview-greeting strong{font-size:22px;font-weight:760;color:#343a43;margin-top:4px}
+        .cf-preview-header button{margin-left:auto;border:0;background:none;color:#6d7684;font:600 13px inherit;cursor:pointer;padding:10px}
+        .cf-preview-notice{border-radius:12px;padding:9px 12px;background:#fff8db;border:1px solid rgba(230,187,53,.3);font-size:11.5px;line-height:1.35;color:#6e5a1d}
+        .cf-preview-stars,.cf-preview-ranking,.cf-preview-referral{border:1px solid rgba(255,255,255,.82);border-radius:19px;backdrop-filter:blur(20px) saturate(1.12);-webkit-backdrop-filter:blur(20px) saturate(1.12)}
+        .cf-preview-stars{padding:22px;background:linear-gradient(145deg,rgba(255,255,255,.93) 18%,rgba(225,242,255,.9) 100%);box-shadow:0 12px 34px rgba(50,116,190,.11)}
+        .cf-preview-kicker{margin:0 0 7px;color:#747f8f;font-size:12px;font-weight:700;letter-spacing:.3px}
+        .cf-preview-balance{display:block;font-size:51px;font-weight:840;line-height:.95;color:#252a30;margin-bottom:18px}
+        .cf-preview-progress-title,.cf-preview-progress-copy{display:flex;justify-content:space-between;align-items:center}.cf-preview-progress-title{font-size:14px;margin-bottom:12px}.cf-preview-progress-title strong:last-child{font-size:21px}
+        .cf-preview-progress{height:24px;display:flex;align-items:center;position:relative;margin-right:2px}.cf-preview-progress:before{content:"";position:absolute;left:0;right:34px;height:7px;border-radius:999px;background:rgba(208,218,229,.72)}
+        .cf-preview-progress>span{height:7px;border-radius:999px;background:linear-gradient(90deg,#22c7d6,#397cf6 55%,#efb62d);position:relative;z-index:1;max-width:calc(100% - 34px)}.cf-preview-progress>span i{position:absolute;right:-9px;top:50%;transform:translateY(-50%);width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 0 0 5px rgba(107,164,245,.28)}
+        .cf-preview-progress>b{position:absolute;right:0;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#fff3bf;font-size:16px}
+        .cf-preview-progress-copy{font-size:12px;margin-top:7px;color:#6f7987}.cf-preview-progress-copy strong{color:#47505c}.cf-preview-season{display:flex;align-items:center;gap:5px;font-size:11px;color:#7a8493;margin-top:16px;padding-bottom:15px;border-bottom:1px solid rgba(126,157,192,.23)}
+        .cf-preview-rule{display:flex;gap:9px;align-items:center;color:#697588;font-size:12.5px;padding:15px 0}.cf-preview-rule svg{color:#3d4f67;flex:none}
+        .cf-preview-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.cf-preview-actions button{min-height:40px;border:1px solid rgba(144,178,218,.45);border-radius:12px;background:rgba(255,255,255,.38);color:#4e5968;font:700 12px inherit;display:flex;align-items:center;justify-content:center;gap:7px;cursor:pointer}
+        .cf-preview-ranking{width:100%;padding:16px 17px;background:linear-gradient(135deg,rgba(255,255,255,.79),rgba(255,245,211,.82));box-shadow:0 9px 28px rgba(159,125,24,.08);color:#59616a;text-align:left;cursor:pointer;font-family:inherit}
+        .cf-preview-ranking-top{display:flex;align-items:center}.cf-preview-trophy{width:40px;height:40px;border-radius:13px;display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,rgba(255,244,184,.99),rgba(241,209,92,.96));color:#896818;flex:none}.cf-preview-ranking-title{display:flex;flex-direction:column;margin-left:10px;min-width:80px}.cf-preview-ranking-title small{font-size:10px;color:#7f8996;font-weight:700}.cf-preview-ranking-title strong{font-size:16px;font-weight:700;margin-top:3px}
+        .cf-preview-faces{margin-left:auto;display:flex;align-items:center}.cf-preview-faces i{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-left:-8px;border:1px solid rgba(255,255,255,.85);font-style:normal;font-size:11px;color:#fff}.cf-preview-faces i:nth-child(1){background:#ecc7bf}.cf-preview-faces i:nth-child(2){background:#b8d4e8}.cf-preview-faces i:nth-child(3){background:#c9afea}.cf-preview-faces i:nth-child(4){background:#fff;color:#9aa2ad}
+        .cf-preview-ranking-copy{border-top:1px solid rgba(189,166,82,.25);margin-top:12px;padding-top:12px;display:flex;align-items:center;gap:8px;font-size:12.5px;color:#7a828e}.cf-preview-ranking-copy svg,.cf-preview-ranking-copy strong{color:#2f9a65}
+        .cf-preview-referral{position:relative;overflow:hidden;padding:19px 17px 17px;background:rgba(255,255,255,.56);min-height:188px}.cf-preview-referral h2{position:relative;z-index:2;font-size:18px;font-weight:800;line-height:1.2;margin:0 0 7px;max-width:88%}.cf-preview-referral>p:not(.cf-preview-kicker){position:relative;z-index:2;font-size:12.5px;line-height:1.45;color:#737d8b;max-width:86%;margin:0 0 17px}.cf-preview-referral>button{position:relative;z-index:3;width:100%;min-height:46px;border:1px solid rgba(255,255,255,.38);border-radius:13px;background:linear-gradient(135deg,rgba(67,134,247,.82),rgba(31,91,204,.8));color:#fff;font:700 15px inherit;backdrop-filter:blur(18px) saturate(1.45);box-shadow:0 8px 22px rgba(31,91,204,.18),inset 0 1px 0 rgba(255,255,255,.4);cursor:pointer}
+        .cf-preview-gift{position:absolute;right:-36px;top:48%;transform:translateY(-50%) rotate(-7deg) scale(2.2);font-size:54px;opacity:.9;z-index:1;filter:drop-shadow(0 15px 22px rgba(233,80,126,.22))}
+        .cf-preview-modal-backdrop{position:fixed;inset:0;z-index:80;background:rgba(20,27,37,.38);display:flex;align-items:flex-end;justify-content:center;padding:18px}.cf-preview-modal{width:100%;max-width:390px;background:#fff;border-radius:22px;padding:20px;box-shadow:0 24px 60px rgba(0,0,0,.22)}.cf-preview-modal h2{margin:0 0 5px;font-size:20px}.cf-preview-modal p{margin:0 0 14px;font-size:12.5px;line-height:1.4;color:#6d7684}.cf-preview-modal button{width:100%;min-height:42px;border:0;border-top:1px solid #edf0f4;background:#fff;color:#285fb9;font:700 14px inherit;cursor:pointer}.cf-preview-modal .cf-preview-modal-cancel{margin-top:7px;border-radius:11px;border:0;background:#f2f4f7;color:#59616a}
+        @media (max-width:420px){.cliente-conteudo{padding:14px 12px calc(env(safe-area-inset-bottom) + 102px)!important}.cf-preview-phone{max-width:390px}}
       `}</style>
     </div>
   )

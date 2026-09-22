@@ -215,7 +215,7 @@ describe("gate central: nunca duplica o link", () => {
 
 describe("gate central: fluxo do pedido continua normal", () => {
   it("caso 13: saudação com link -> pedido de pizza segue o fluxo", () => {
-    let sess = createInitialSession();
+    const sess = createInitialSession();
     const saudacao = processMessage("oi", sess);
     expect(saudacao.messages.join("\n")).toContain(LINK_CARDAPIO_DIGITAL);
     expect(saudacao.session.step).toBe("category");

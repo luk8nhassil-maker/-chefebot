@@ -1,6 +1,5 @@
 "use client";
 import { useState, useEffect, useRef, type CSSProperties } from "react";
-import { useRouter } from "next/navigation";
 import { Pizza, Sandwich, Soup, CupSoda, GlassWater, Zap, Banknote, CreditCard, Shuffle, Wallet, Bike, Store, UtensilsCrossed, Sun, Moon, Receipt, Gift, Pencil, Plus, Minus, Clock, ChevronRight, Sparkles, Beef, Croissant, Milk, Search, PartyPopper } from "lucide-react";
 import PanelShell from "@/components/PanelShell";
 import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
@@ -83,12 +82,38 @@ export type MenuType = {
 
 type Produto = { id?: string; nome: string; categoria: string; preco?: number }
 
+function agoraEmMs() {
+  return Date.now()
+}
+
+function pedidoTemConversaPendente(pedido: unknown) {
+  if (!pedido || typeof pedido !== "object") return false
+  const registro = pedido as Record<string, unknown>
+  return registro.escalonado === true && registro.status === "novo"
+}
+
+function usuarioTemPapelDeEquipe() {
+  try {
+    for (const cookie of document.cookie.split(";")) {
+      const trecho = cookie.trim()
+      if (!trecho.startsWith("auth-user=")) continue
+      const bruto = trecho.substring("auth-user=".length)
+      let decodificado = bruto
+      try { decodificado = decodeURIComponent(bruto) } catch {}
+      const usuario: unknown = JSON.parse(decodificado)
+      if (!usuario || typeof usuario !== "object") return false
+      const papel = (usuario as Record<string, unknown>).role
+      return papel === "admin" || papel === "atendente" || papel === "dev"
+    }
+  } catch {}
+  return false
+}
+
 function normStr(s: string) {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
 }
 
 function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void }) {
-  const router = useRouter()
   const [esgotados, setEsgotados] = useState<string[]>(menu.esgotados || [])
   const [esgotadosIds, setEsgotadosIds] = useState<string[]>(menu.esgotadosIds || [])
   const [esgotadosMetadata, setEsgotadosMetadata] = useState<EsgMetadata>(menu.esgotadosMetadata || {})
@@ -101,7 +126,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [confirmLote, setConfirmLote] = useState<"esgotado" | "disponivel" | null>(null)
   const [conversasBadge, setConversasBadge] = useState(0)
-  const toastTimer = useRef<any>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const hojeStr = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
 
@@ -110,9 +135,9 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
     const atualizar = () => {
       fetch("/api/orders")
         .then(r => r.ok ? r.json() : [])
-        .then((data: any[]) => {
+        .then((data: unknown) => {
           if (Array.isArray(data)) {
-            setConversasBadge(data.filter((p: any) => p.escalonado && p.status === "novo").length)
+            setConversasBadge(data.filter(pedidoTemConversaPendente).length)
           }
         })
         .catch(() => {})
@@ -217,7 +242,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
         setEsgotadosIds(d.esgotadosIds || [])
         if (d.esgotadosMetadata) setEsgotadosMetadata(d.esgotadosMetadata)
         if (withToast) {
-          clearTimeout(toastTimer.current)
+          if (toastTimer.current) clearTimeout(toastTimer.current)
           const msg = novoEstado
             ? `${nome} esgotado. O bot não vai vender esse produto.`
             : `${nome} disponível. O bot já pode vender novamente.`
@@ -231,7 +256,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
 
   async function desfazer() {
     if (!toast || !toast.nome) return
-    clearTimeout(toastTimer.current)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
     const voltarPara = toast.era
     setToast(null)
     await toggleEsgotado(toast.nome, voltarPara, false, toast.id)
@@ -264,7 +289,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
     const count = produtos.length
     setSelecionados(new Set())
     setModoSel(false)
-    clearTimeout(toastTimer.current)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
     const msg = esgotado
       ? `${count} produto${count > 1 ? "s" : ""} marcado${count > 1 ? "s" : ""} como esgotado${count > 1 ? "s" : ""}. O bot não vai vender.`
       : `${count} produto${count > 1 ? "s" : ""} voltou${count > 1 ? "ram" : ""} a ficar disponíve${count > 1 ? "is" : "l"}. O bot já pode vender.`
@@ -288,7 +313,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
         document.body.removeChild(ta)
       } catch {}
     }
-    clearTimeout(toastTimer.current)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
     setToast({ msg: ok ? "Link copiado" : `Não consegui copiar. Link: ${url}`, nome: "", era: false })
     toastTimer.current = setTimeout(() => setToast(null), 4500)
   }
@@ -1140,16 +1165,19 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // isso aqui é só para refletir o mesmo valor na tela antes de enviar.
   const [resgatePontos, setResgatePontos] = useState<{ resgateId: string; valorDescontoMaximo: number; expiraEm: string } | null>(null);
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem("cf_resgate_pontos");
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (parsed?.resgateId && typeof parsed.valorDescontoMaximo === "number" && parsed.expiraEm && new Date(parsed.expiraEm).getTime() > Date.now()) {
-        setResgatePontos(parsed);
-      } else {
-        sessionStorage.removeItem("cf_resgate_pontos");
-      }
-    } catch {}
+    const timer = setTimeout(() => {
+      try {
+        const raw = sessionStorage.getItem("cf_resgate_pontos");
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (parsed?.resgateId && typeof parsed.valorDescontoMaximo === "number" && parsed.expiraEm && new Date(parsed.expiraEm).getTime() > agoraEmMs()) {
+          setResgatePontos(parsed);
+        } else {
+          sessionStorage.removeItem("cf_resgate_pontos");
+        }
+      } catch {}
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   // Presente da Jornada do Chef reservado na Área do Cliente (/cliente/jornada),
@@ -1342,7 +1370,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const promoScrollRef = useRef<HTMLDivElement>(null);
   const promoUserInteractRef = useRef(false);
   const pagamentoRef = useRef<HTMLDivElement>(null);
-  const toastTimer = useRef<any>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nomeRef = useRef<HTMLInputElement>(null);
   const telefoneRef = useRef<HTMLInputElement>(null);
 
@@ -1350,6 +1378,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // sessão do navegador. Token inválido/expirado nunca quebra o fluxo — o
   // checkout volta a pedir o WhatsApp manualmente.
   useEffect(() => {
+    let restauracaoTimer: ReturnType<typeof setTimeout> | null = null;
     async function ativarVinculo(token: string) {
       try {
         const r = await fetch(`/api/cardapio-whatsapp-session?t=${encodeURIComponent(token)}`, { cache: "no-store" });
@@ -1375,50 +1404,59 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       }
       const salvo = sessionStorage.getItem("cf_wa_token");
       const salvoFinal = sessionStorage.getItem("cf_wa_final");
-      if (salvo && salvoFinal) { setWaToken(salvo); setWaFinal(salvoFinal); }
+      if (salvo && salvoFinal) {
+        restauracaoTimer = setTimeout(() => {
+          setWaToken(salvo);
+          setWaFinal(salvoFinal);
+        }, 0);
+      }
     } catch {}
+    return () => { if (restauracaoTimer) clearTimeout(restauracaoTimer); };
   }, []);
 
   useEffect(() => {
-    try {
-      const n = localStorage.getItem("cf_nome"); const t = localStorage.getItem("cf_tel");
-      if (n) setNome(n); if (t) setTelefone(t);
-      // Cliente vinculado ao WhatsApp (token do link) não precisa ter telefone
-      // salvo no navegador para já ver o pedido identificado — lê a mesma
-      // sessionStorage que a validação do token grava (evita depender da ordem
-      // dos efeitos de montagem, já que o state de vínculo pode não estar
-      // atualizado neste mesmo ciclo de render).
-      const temVinculoWa = !!sessionStorage.getItem("cf_wa_final");
-      const telValido = !!t && t.replace(/\D/g, "").length >= 10;
-      if (n && n.trim() && (telValido || temVinculoWa)) setEditandoIdentidade(false);
-      else setEditandoIdentidade(true);
-    } catch { setEditandoIdentidade(true); }
-    try {
-      const raw = sessionStorage.getItem("cf_draft");
-      if (raw) {
-        const d = JSON.parse(raw);
-        if (Array.isArray(d.cart) && d.cart.length > 0) {
-          setCart(d.cart);
-          if (d.delType) setDelType(d.delType);
-          if (d.bairroIdx) setBairroIdx(d.bairroIdx);
-          if (d.rua) setRua(d.rua);
-          if (d.numero) setNumero(d.numero);
-          if (d.referencia) setReferencia(d.referencia);
-          if (d.payment) setPayment(d.payment);
-          if (d.trocoOpcao) setTrocoOpcao(d.trocoOpcao);
-          if (d.troco) setTroco(d.troco);
-          if (d.observacao) setObservacao(d.observacao);
-          if (d.plan) setPlan(d.plan);
-          const safeScreens = ["sc-cart", "sc-delivery", "sc-pay", "sc-another"];
-          setScreen(safeScreens.includes(d.screen) ? d.screen : "sc-cart");
-          setRestoredDraft(true);
+    const timer = setTimeout(() => {
+      try {
+        const n = localStorage.getItem("cf_nome"); const t = localStorage.getItem("cf_tel");
+        if (n) setNome(n); if (t) setTelefone(t);
+        // Cliente vinculado ao WhatsApp (token do link) não precisa ter telefone
+        // salvo no navegador para já ver o pedido identificado — lê a mesma
+        // sessionStorage que a validação do token grava (evita depender da ordem
+        // dos efeitos de montagem, já que o state de vínculo pode não estar
+        // atualizado neste mesmo ciclo de render).
+        const temVinculoWa = !!sessionStorage.getItem("cf_wa_final");
+        const telValido = !!t && t.replace(/\D/g, "").length >= 10;
+        if (n && n.trim() && (telValido || temVinculoWa)) setEditandoIdentidade(false);
+        else setEditandoIdentidade(true);
+      } catch { setEditandoIdentidade(true); }
+      try {
+        const raw = sessionStorage.getItem("cf_draft");
+        if (raw) {
+          const d = JSON.parse(raw);
+          if (Array.isArray(d.cart) && d.cart.length > 0) {
+            setCart(d.cart);
+            if (d.delType) setDelType(d.delType);
+            if (d.bairroIdx) setBairroIdx(d.bairroIdx);
+            if (d.rua) setRua(d.rua);
+            if (d.numero) setNumero(d.numero);
+            if (d.referencia) setReferencia(d.referencia);
+            if (d.payment) setPayment(d.payment);
+            if (d.trocoOpcao) setTrocoOpcao(d.trocoOpcao);
+            if (d.troco) setTroco(d.troco);
+            if (d.observacao) setObservacao(d.observacao);
+            if (d.plan) setPlan(d.plan);
+            const safeScreens = ["sc-cart", "sc-delivery", "sc-pay", "sc-another"];
+            setScreen(safeScreens.includes(d.screen) ? d.screen : "sc-cart");
+            setRestoredDraft(true);
+          }
         }
-      }
-    } catch {}
-    // Veio da aba "Sacola" do menu inferior em /cliente ou /rastrear — abre a
-    // sacola aqui, preservando o que já foi restaurado do rascunho acima.
-    if (consumirFlagAbrirSacola(sessionStorage)) setScreen("sc-cart");
-    setHydrated(true);
+      } catch {}
+      // Veio da aba "Sacola" do menu inferior em /cliente ou /rastrear — abre a
+      // sacola aqui, preservando o que já foi restaurado do rascunho acima.
+      if (consumirFlagAbrirSacola(sessionStorage)) setScreen("sc-cart");
+      setHydrated(true);
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   // Autocomplete de rua (objetivo 8): busca sugestões da memória universal
@@ -1492,7 +1530,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     try {
       sessionStorage.setItem("cf_draft", JSON.stringify({ cart, screen, delType, bairroIdx, rua, numero, referencia, payment, trocoOpcao, troco, observacao, plan }));
     } catch {}
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [hydrated, cart, screen, delType, bairroIdx, rua, numero, referencia, payment, trocoOpcao, troco, observacao, plan]);
 
   useEffect(() => {
@@ -1509,7 +1547,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     const tokenSeguro = token;
     let active = true;
     let tentativas = 0;
-    let interval: ReturnType<typeof setInterval> | undefined;
 
     async function fetchStatusPedido() {
       tentativas += 1;
@@ -1531,20 +1568,20 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           tentativas >= 240
         ) {
           active = false;
-          if (interval) clearInterval(interval);
+          clearInterval(interval);
         }
       } catch {}
     }
 
-    fetchStatusPedido();
-    interval = setInterval(fetchStatusPedido, 5000);
+    const interval = setInterval(fetchStatusPedido, 5000);
+    void fetchStatusPedido();
     return () => {
       active = false;
-      if (interval) clearInterval(interval);
+      clearInterval(interval);
     };
   }, [pedidoConfirmado?.id, pedidoConfirmado?.statusToken]);
 
-  function showToast(m: string) { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 1700); }
+  function showToast(m: string) { setToast(m); if (toastTimer.current) clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 1700); }
 
   useEffect(() => {
     let alive = true;
@@ -2246,19 +2283,21 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // está montando ficou esgotado, limpa só essa seleção (buildOk volta a ser
   // falso e ele não consegue continuar). Não mexe no carrinho.
   useEffect(() => {
-    if (f1 && esgotados.includes(f1)) {
-      setF1(f2 && !esgotados.includes(f2) ? f2 : null);
-      setF2(null);
-      showToast("Um sabor que você escolheu ficou esgotado.");
-    } else if (f2 && esgotados.includes(f2)) {
-      setF2(null);
-      showToast("Um sabor que você escolheu ficou esgotado.");
-    }
-    if (border && esgotados.includes(border)) {
-      setBorder(null);
-      setBorderPrice(0);
-      showToast("A borda que você escolheu ficou esgotada.");
-    }
+    queueMicrotask(() => {
+      if (f1 && esgotados.includes(f1)) {
+        setF1(f2 && !esgotados.includes(f2) ? f2 : null);
+        setF2(null);
+        showToast("Um sabor que você escolheu ficou esgotado.");
+      } else if (f2 && esgotados.includes(f2)) {
+        setF2(null);
+        showToast("Um sabor que você escolheu ficou esgotado.");
+      }
+      if (border && esgotados.includes(border)) {
+        setBorder(null);
+        setBorderPrice(0);
+        showToast("A borda que você escolheu ficou esgotada.");
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [esgotadosKey]);
 
@@ -2446,11 +2485,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     // usar e (pizza) o sabor escolhido.
     const itemRecompensaJornada = cart.find((c) => c.recompensaJornadaId);
     const itensSemRecompensa = cart.filter((c) => !c.recompensaJornadaId);
-    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}), ...(c.simpleSelection ? { simpleSelection: c.simpleSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > Date.now() ? resgatePontos.resgateId : undefined };
+    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}), ...(c.simpleSelection ? { simpleSelection: c.simpleSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > agoraEmMs() ? resgatePontos.resgateId : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} if (itemRecompensaJornada) limparReferenciaRecompensa(localStorage); try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now(), statusToken: typeof data.statusToken === "string" ? data.statusToken : undefined }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } go("sc-done"); } else { if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
+      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} if (itemRecompensaJornada) limparReferenciaRecompensa(localStorage); try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: agoraEmMs(), statusToken: typeof data.statusToken === "string" ? data.statusToken : undefined }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } go("sc-done"); } else { if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
   function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setBairroQuery(""); setBairroDropdownOpen(false); setRua(""); setRuaSugestoes([]); setRuaDropdownOpen(false); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setMistoPixInput(""); setMistoDinheiroInput(""); setErroMisto(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
@@ -2471,7 +2510,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // como número mágico: reaproveita PIX_PENDENTE_BAR_HEIGHT_PX.
   const pixBarVisivel = showBottomNav && screen !== "sc-done" && !!pixPendente;
   const feitas = pizzasNoCarrinho();
-  let ctxBadge = "", ctxTxt = "", ctxDots: { cls: string }[] = [];
+  let ctxBadge = "", ctxTxt = "";
+  const ctxDots: { cls: string }[] = [];
   if (plan.openEnded) { ctxBadge = `Pizza ${feitas + 1}`; ctxTxt = feitas === 0 ? "Sua 1ª pizza" : `${feitas} já no carrinho`; }
   else if (plan.total > 0) { ctxBadge = `Pizza ${plan.current} de ${plan.total}`; ctxTxt = `Montando a pizza ${plan.current}`; for (let i = 1; i <= plan.total; i++) ctxDots.push({ cls: i < plan.current ? "done" : i === plan.current ? "cur" : "" }); }
 
@@ -3561,7 +3601,7 @@ export default function CardapioPage() {
           try { decoded = decodeURIComponent(raw) } catch {}
           const user = JSON.parse(decoded)
           if (user && (user.role === "admin" || user.role === "atendente" || user.role === "dev")) {
-            setIsAdmin(true)
+            queueMicrotask(() => setIsAdmin(true))
           }
         }
       }

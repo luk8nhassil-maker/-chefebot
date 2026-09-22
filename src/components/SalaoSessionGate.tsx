@@ -38,11 +38,11 @@ export default function SalaoSessionGate({ children }: { children: ReactNode }) 
 
   useEffect(() => {
     if (ehTelaLogin) {
-      setPronto(true);
+      queueMicrotask(() => setPronto(true));
       return;
     }
 
-    void garantirSessao();
+    queueMicrotask(() => { void garantirSessao(); });
 
     const renovarAoFocar = () => { void garantirSessao(true); };
     const renovacao = window.setInterval(() => { void garantirSessao(true); }, RENOVACAO_SESSAO_MS);

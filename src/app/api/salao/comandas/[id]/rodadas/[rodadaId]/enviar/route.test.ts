@@ -22,7 +22,12 @@ const { store, redisMock } = vi.hoisted(() => {
       return next;
     }),
     expire: vi.fn(async () => 1),
-    eval: vi.fn(async () => 1),
+    eval: vi.fn(async (_script: string, keys: string[], args: unknown[]) => {
+      const key = keys[0];
+      if (!key || store.get(key) !== args[0]) return 0;
+      store.delete(key);
+      return 1;
+    }),
   };
   return { store, redisMock };
 });

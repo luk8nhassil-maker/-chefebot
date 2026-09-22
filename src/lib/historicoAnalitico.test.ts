@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import type { PedidoSnapshotOficial } from "./pedidoSnapshot";
 
 // ── In-memory Redis mock with sorted set support ──────────────────────────────
 
@@ -29,7 +30,7 @@ const {
         opts: { score: number; member: string } | Array<{ score: number; member: string }>
       ) => {
         const entries = Array.isArray(opts) ? opts : [opts];
-        let ss = sortedSets.get(key) ?? [];
+        const ss = sortedSets.get(key) ?? [];
         let added = 0;
         for (const entry of entries) {
           const idx = ss.findIndex((e) => e.member === entry.member);
@@ -104,7 +105,7 @@ vi.mock("./estrelas", () => ({
   }),
 }));
 vi.mock("./expedienteOperacional", () => ({
-  chaveExpedienteOperacional: vi.fn((_agora?: number) => "2026-09-19"),
+  chaveExpedienteOperacional: vi.fn(() => "2026-09-19"),
 }));
 
 import {
@@ -127,6 +128,17 @@ import {
 
 const AGORA = 1758290400000; // fixed timestamp for determinism
 const TENANT = "t1";
+
+function snapshotOficial(
+  financeiro: Omit<PedidoSnapshotOficial, "entrega" | "pagamento" | "criadoEm">
+): PedidoSnapshotOficial {
+  return {
+    ...financeiro,
+    entrega: { tipo: "delivery" },
+    pagamento: "Pix",
+    criadoEm: new Date(AGORA).toISOString(),
+  };
+}
 
 const pedidoBase = {
   id: "ped_001",
@@ -158,13 +170,13 @@ describe("calcularValorElegivelCentsParaHistorico", () => {
       id: "x",
       total: 999,
       taxaEntrega: 999,
-      snapshotOficial: {
+      snapshotOficial: snapshotOficial({
         subtotalCents: 6000,
         descontoFidelidadeCents: 0,
         taxaEntregaCents: 1000,
         totalCents: 7000,
         itens: [],
-      } as any,
+      }),
     };
     expect(calcularValorElegivelCentsParaHistorico(pedido)).toBe(6000);
   });
@@ -172,13 +184,13 @@ describe("calcularValorElegivelCentsParaHistorico", () => {
   test("snapshot: desconto fidelidade é subtraído", () => {
     const pedido = {
       id: "x",
-      snapshotOficial: {
+      snapshotOficial: snapshotOficial({
         subtotalCents: 10000,
         descontoFidelidadeCents: 2000,
         taxaEntregaCents: 1000,
         totalCents: 9000,
         itens: [],
-      } as any,
+      }),
     };
     expect(calcularValorElegivelCentsParaHistorico(pedido)).toBe(8000);
   });
@@ -186,13 +198,13 @@ describe("calcularValorElegivelCentsParaHistorico", () => {
   test("zero quando desconto iguala subtotal", () => {
     const pedido = {
       id: "x",
-      snapshotOficial: {
+      snapshotOficial: snapshotOficial({
         subtotalCents: 5000,
         descontoFidelidadeCents: 5000,
         taxaEntregaCents: 1000,
         totalCents: 1000,
         itens: [],
-      } as any,
+      }),
     };
     expect(calcularValorElegivelCentsParaHistorico(pedido)).toBe(0);
   });
@@ -272,13 +284,13 @@ describe("registrarEventoEntregue", () => {
       tenantId: TENANT,
       total: 999,
       taxaEntrega: 999,
-      snapshotOficial: {
+      snapshotOficial: snapshotOficial({
         subtotalCents: 14500,
         descontoFidelidadeCents: 0,
         taxaEntregaCents: 1000,
         totalCents: 15500,
         itens: [],
-      } as any,
+      }),
     };
     await registrarEventoEntregue(pedidoComSnapshot, AGORA);
     const evento = store.get(chaveEvento(TENANT, "ped_snap")) as EventoAnalitico;
@@ -309,13 +321,13 @@ describe("registrarEventoEntregue", () => {
       {
         ...pedidoBase,
         id: "ped_app",
-        snapshotOficial: {
+        snapshotOficial: snapshotOficial({
           subtotalCents: 7000,
           descontoFidelidadeCents: 0,
           taxaEntregaCents: 1000,
           totalCents: 8000,
           itens: [],
-        } as any,
+        }),
       },
       AGORA
     );
@@ -704,13 +716,13 @@ describe("presente gratuito e pedido operacional", () => {
       id: "ped_free",
       telefone: "5511987654321",
       tenantId: TENANT,
-      snapshotOficial: {
+      snapshotOficial: snapshotOficial({
         subtotalCents: 7000,
         descontoFidelidadeCents: 7000,
         taxaEntregaCents: 1000,
         totalCents: 1000,
         itens: [],
-      } as any,
+      }),
     };
     await registrarEventoEntregue(pedidoGratuito, AGORA);
     expect(store.size).toBe(0);

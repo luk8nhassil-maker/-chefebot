@@ -1,5 +1,5 @@
 "use client"
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useEffectEvent, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { useDialogA11y } from '@/components/useDialogA11y'
@@ -36,6 +36,7 @@ function whatsappLink(telefoneBruto: string, mensagem?: string): string {
 }
 
 type Status = "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado"
+type FiltroPedidos = Status | "todos" | "tempo_real" | "arquivados"
 type Pedido = {
   id: string
   numero?: number
@@ -96,6 +97,115 @@ type Pedido = {
   // Limpeza operacional (ver src/lib/limpezaOperacionalPedidos.ts).
   statusAtualizadoEm?: string
   limpezaOperacional?: RegistroLimpeza
+}
+
+type SessaoAtiva = {
+  phone: string
+  telefone?: string
+  ultimaTs?: number
+  lastMessageAt?: string | number
+  updatedAt?: string | number
+  timestamp?: string | number
+  createdAt?: string | number
+  novaMsgManual?: boolean
+  manual?: boolean
+  postOrderPriority?: boolean
+  conversationAlert?: boolean
+  customerName?: string
+  lastDigits?: string
+  ultimaMensagem?: string
+  stepLabel?: string
+  step: string
+  cart?: string[]
+  resumoRapido?: {
+    cliente?: string
+    itens: string[]
+    total: number
+    pendencias: string[]
+  }
+}
+
+type Entregador = { id: string; nome: string; telefone: string; ativo: boolean }
+
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>
+}
+
+type WakeLockSentinelCompat = { release: () => Promise<void> }
+type NavigatorCompat = Navigator & {
+  setAppBadge?: (conteudo?: number) => Promise<void>
+  clearAppBadge?: () => Promise<void>
+  wakeLock?: { request: (tipo: "screen") => Promise<WakeLockSentinelCompat> }
+}
+type ScreenOrientationCompat = ScreenOrientation & {
+  lock?: (orientacao: "portrait") => Promise<void>
+}
+type WindowAudioCompat = Window & typeof globalThis & {
+  webkitAudioContext?: typeof AudioContext
+}
+
+const FILTROS_PEDIDOS: readonly FiltroPedidos[] = [
+  "novo",
+  "em_preparo",
+  "saiu_entrega",
+  "entregue",
+  "cancelado",
+  "todos",
+  "tempo_real",
+  "arquivados",
+]
+
+function isFiltroPedidos(valor: string | null): valor is FiltroPedidos {
+  return valor !== null && FILTROS_PEDIDOS.includes(valor as FiltroPedidos)
+}
+
+function lerFiltroInicial(): FiltroPedidos {
+  if (typeof window === "undefined") return "novo"
+  const filtro = new URLSearchParams(window.location.search).get("filtro")
+  return isFiltroPedidos(filtro) ? filtro : "novo"
+}
+
+function lerMuteInicial(): boolean {
+  if (typeof window === "undefined") return false
+  return localStorage.getItem("chefebot-mute") === "true"
+}
+
+function lerConversasVistas(): Record<string, number> {
+  if (typeof window === "undefined") return {}
+  try {
+    const raw = localStorage.getItem("tempoRealSeenConversas")
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {}
+    return Object.fromEntries(
+      Object.entries(parsed).filter((item): item is [string, number] => typeof item[1] === "number"),
+    )
+  } catch {
+    return {}
+  }
+}
+
+function agoraEmMs(): number {
+  return Date.now()
+}
+
+function Row({ label, value, missing }: { label: string; value: string; missing?: boolean }) {
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+      <span style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)", minWidth: 72, flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: 13, fontWeight: 700, color: missing ? "var(--danger)" : "var(--foreground-secondary)" }}>{value || "—"}</span>
+    </div>
+  )
+}
+
+function DetalheDadoRow({ label, value, missing }: { label: string; value: string; missing?: boolean }) {
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+      <span style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)", minWidth: 72, flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: 13, fontWeight: 700, color: missing ? "var(--danger)" : "var(--foreground-secondary)" }}>{value || "—"}</span>
+    </div>
+  )
 }
 
 function pedidoEmEdicao(p: Pick<Pedido, "editStatus" | "editExpiresAt">): boolean {
@@ -339,29 +449,29 @@ export default function PedidosPage() {
   const router = useRouter()
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [filtro, setFiltro] = useState<Status | "todos" | "tempo_real" | "arquivados">("novo")
-  const [sessoes, setSessoes] = useState<any[]>([])
+  const [sessoes, setSessoes] = useState<SessaoAtiva[]>([])
   // Visto-até por telefone: guarda o timestamp da última mensagem que a Kellyne
   // já viu. "Visto" é por timestamp, não só por telefone — assim uma NOVA mensagem
   // no mesmo telefone (ts maior) volta a destacar mesmo após a conversa ter sido aberta.
   const [seenConversas, setSeenConversas] = useState<Record<string, number>>({})
   // Fonte única de verdade: usada tanto no sort (subir ao topo) quanto no
   // render do badge verde. Garante que "sobe" e "mostra bolinha" nunca divirjam.
-  const getPhoneKey = (s: any) => s.phone || s.telefone || ""
-  const getSessaoTs = (s: any) => {
+  const getPhoneKey = (s: SessaoAtiva) => s.phone || s.telefone || ""
+  const getSessaoTs = (s: SessaoAtiva) => {
     const raw =
       s.ultimaTs ?? s.lastMessageAt ?? s.updatedAt ?? s.timestamp ?? s.createdAt ?? 0
     if (typeof raw === "number") return raw
     const parsed = Date.parse(raw)
     return Number.isNaN(parsed) ? 0 : parsed
   }
-  const temNovaMsgNaoVista = (s: any) => {
+  const temNovaMsgNaoVista = (s: SessaoAtiva) => {
     const ultimaTs = getSessaoTs(s)
     const vistoAte = seenConversas[getPhoneKey(s)] ?? 0
     return Boolean(s.novaMsgManual && ultimaTs > vistoAte)
   }
   // Marca a conversa como vista até o ts atual da sessão (e persiste em localStorage).
   // Idempotente: se nada novo a marcar, devolve o estado anterior (sem re-render/loop).
-  const marcarConversaComoVista = (s: any) => {
+  const marcarConversaComoVista = (s: SessaoAtiva) => {
     const phone = getPhoneKey(s)
     if (!phone) return
     const ts = getSessaoTs(s)
@@ -405,9 +515,9 @@ export default function PedidosPage() {
   const detalheRef = useDialogA11y(!!detailId, () => setDetailId(null), { focoNoContainer: true, travarScroll: false })
   const [cardUrgenciaFechado, setCardUrgenciaFechado] = useState(false)
   const [toast, setToast] = useState<{ text: string; expires: number; pedidoId: string; prevStatus: Status } | null>(null)
-  const [now, setNow] = useState(Date.now())
+  const [now, setNow] = useState(0)
   const [leavingId, setLeavingId] = useState<string | null>(null)
-  const [installPrompt, setInstallPrompt] = useState<any>(null)
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [showInstallBanner, setShowInstallBanner] = useState(false)
   const [flashId, setFlashId] = useState<string | null>(null)
   const [entregadores, setEntregadores] = useState<{id: string; nome: string; telefone: string; ativo: boolean}[]>([])
@@ -494,7 +604,7 @@ export default function PedidosPage() {
   const leaveTimerRef = useRef<NodeJS.Timeout | null>(null)
   const muteadoRef = useRef(false)
   const prevPixRef = useRef<Record<string, boolean>>({})
-  const simpleToastTimerRef = useRef<any>(null)
+  const simpleToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const historicoBottomRef = useRef<HTMLDivElement>(null)
   const sendInFlightRef = useRef(false)
   const chatMsgAreaRef = useRef<HTMLDivElement>(null)
@@ -509,7 +619,8 @@ export default function PedidosPage() {
       const audio = new Audio("/pavlov.mp3")
       audio.play().catch(() => {
         try {
-          const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
+          const Ctx = window.AudioContext || (window as WindowAudioCompat).webkitAudioContext
+          if (!Ctx) return
           const ctx = new Ctx()
           const bipe = (freq: number, delay: number) => setTimeout(() => {
             try {
@@ -530,7 +641,8 @@ export default function PedidosPage() {
   const tocarSomUrgente = () => {
     if (muteadoRef.current) return
     try {
-      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
+      const Ctx = window.AudioContext || (window as WindowAudioCompat).webkitAudioContext
+      if (!Ctx) return
       const ctx = new Ctx()
       const bipe = (delay: number) => setTimeout(() => {
         try {
@@ -549,7 +661,8 @@ export default function PedidosPage() {
   const tocarSomPix = () => {
     if (muteadoRef.current) return
     try {
-      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
+      const Ctx = window.AudioContext || (window as WindowAudioCompat).webkitAudioContext
+      if (!Ctx) return
       const ctx = new Ctx()
       ;[523, 659, 784, 1047].forEach((freq, i) => setTimeout(() => {
         try {
@@ -567,7 +680,8 @@ export default function PedidosPage() {
   const tocarSomEntrega = () => {
     if (muteadoRef.current) return
     try {
-      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
+      const Ctx = window.AudioContext || (window as WindowAudioCompat).webkitAudioContext
+      if (!Ctx) return
       const ctx = new Ctx()
       ;[[523, 0], [392, 320]].forEach(([freq, delay]) => setTimeout(() => {
         try {
@@ -655,9 +769,10 @@ export default function PedidosPage() {
   useEffect(() => {
     const tituloOriginal = tituloOriginalRef.current
     const user = getUserInfo()
-    if (user) { setIsAdmin(user.role === "admin" || user.role === "dev"); setUserName(user.name || "Kellyne") }
+    if (user) queueMicrotask(() => { setIsAdmin(user.role === "admin" || user.role === "dev"); setUserName(user.name || "Kellyne") })
     const savedMute = localStorage.getItem("chefebot-mute") === "true"
-    if (savedMute) { setMuteado(true); muteadoRef.current = true }
+    if (savedMute) { muteadoRef.current = true; queueMicrotask(() => setMuteado(true)) }
+    queueMicrotask(() => setNow(agoraEmMs()))
     const solicitarNotificacao = async () => {
       if (!("Notification" in window)) return;
       if (Notification.permission === "default") {
@@ -679,24 +794,24 @@ export default function PedidosPage() {
       } catch {}
     };
     inscreverPush();
-    carregarStatusBot()
-    fetch("/api/entregadores").then(r => r.json()).then(d => setEntregadores(Array.isArray(d) ? d.filter((e: any) => e.ativo) : [])).catch(() => {})
-    try { if (screen.orientation && (screen.orientation as any).lock) { (screen.orientation as any).lock("portrait").catch(() => {}); } } catch {}
-    const handleInstall = (e: any) => { e.preventDefault(); setInstallPrompt(e); const jaInstalou = window.matchMedia("(display-mode: standalone)").matches; if (!jaInstalou) setShowInstallBanner(true); };
+    queueMicrotask(() => { void carregarStatusBot() })
+    fetch("/api/entregadores").then(r => r.json()).then(d => setEntregadores(Array.isArray(d) ? (d as Entregador[]).filter((e) => e.ativo) : [])).catch(() => {})
+    try { screen.orientation && (screen.orientation as ScreenOrientationCompat).lock?.("portrait").catch(() => {}) } catch {}
+    const handleInstall = (event: Event) => { const e = event as BeforeInstallPromptEvent; e.preventDefault(); setInstallPrompt(e); const jaInstalou = window.matchMedia("(display-mode: standalone)").matches; if (!jaInstalou) setShowInstallBanner(true); };
     window.addEventListener("beforeinstallprompt", handleInstall);
-    let wakeLock: any = null;
-    const ativarWakeLock = async () => { try { if ("wakeLock" in navigator) { wakeLock = await (navigator as any).wakeLock.request("screen"); } } catch {} };
+    let wakeLock: WakeLockSentinelCompat | null = null;
+    const ativarWakeLock = async () => { try { wakeLock = await (navigator as NavigatorCompat).wakeLock?.request("screen") ?? null; } catch {} };
     ativarWakeLock();
     const handleVisibility = () => { if (document.visibilityState === "visible") ativarWakeLock(); };
     document.addEventListener("visibilitychange", handleVisibility);
     const pararPollingPedidos = iniciarPollingVisivel({ executar: carregarPedidos, intervaloMs: 3000, pausarOculto: false })
-    const tick = setInterval(() => setNow(Date.now()), 1000)
+    const tick = setInterval(() => setNow(agoraEmMs()), 1000)
     return () => { if (wakeLock) wakeLock.release(); document.removeEventListener("visibilitychange", handleVisibility); window.removeEventListener("beforeinstallprompt", handleInstall); pararPollingPedidos(); clearInterval(tick); if (piscarRef.current) clearInterval(piscarRef.current); if (somRepetidoRef.current) clearInterval(somRepetidoRef.current); document.title = tituloOriginal }
   }, [router])
 
   useEffect(() => {
     if (filtro !== "arquivados") return
-    setCarregandoArquivados(true)
+    queueMicrotask(() => setCarregandoArquivados(true))
     fetch("/api/orders?arquivados=true")
       .then(r => r.ok ? r.json() : [])
       .then(d => { setPedidosArquivados(Array.isArray(d) ? d : []); setCarregandoArquivados(false) })
@@ -706,7 +821,7 @@ export default function PedidosPage() {
   useEffect(() => {
     if (filtro !== "tempo_real") return
     const carregarSessoes = () => {
-      return fetch(`/api/sessoes-ativas?t=${Date.now()}`, { cache: "no-store" })
+      return fetch(`/api/sessoes-ativas?t=${agoraEmMs()}`, { cache: "no-store" })
         .then(r => r.ok ? r.json() : [])
         .then(d => {
           if (Array.isArray(d)) {
@@ -727,7 +842,7 @@ export default function PedidosPage() {
       const raw = localStorage.getItem("tempoRealSeenConversas")
       if (raw) {
         const parsed = JSON.parse(raw)
-        if (parsed && typeof parsed === "object") setSeenConversas(parsed)
+        if (parsed && typeof parsed === "object") queueMicrotask(() => setSeenConversas(parsed))
       }
     } catch {}
   }, [])
@@ -738,13 +853,15 @@ export default function PedidosPage() {
   useEffect(() => {
     if (!sessaoAtiva) return
     const ativa = sessoes.find(s => getPhoneKey(s) === sessaoAtiva)
-    if (ativa) marcarConversaComoVista(ativa)
+    if (ativa) queueMicrotask(() => marcarConversaComoVista(ativa))
   }, [sessoes, sessaoAtiva])
 
   useEffect(() => {
     if (filtro !== "tempo_real") {
-      setSessaoAtiva(null)
-      setHistoricoMsgs([])
+      queueMicrotask(() => {
+        setSessaoAtiva(null)
+        setHistoricoMsgs([])
+      })
     }
   }, [filtro])
 
@@ -755,7 +872,7 @@ export default function PedidosPage() {
     shouldScrollOnOpenRef.current = true
     isNearBottomRef.current = true
     prevMsgCountRef.current = 0
-    setNovasMsgCount(0)
+    queueMicrotask(() => setNovasMsgCount(0))
   }, [sessaoAtiva])
 
   const carregarHistoricoConversa = async (phone: string) => {
@@ -1127,7 +1244,7 @@ export default function PedidosPage() {
       if (novoStatus === "entregue") tocarSomEntrega()
       setToast({
         text: data?.avisoOperacional ? `⚠️ ${data.avisoOperacional}` : `${firstName} → ${getStatusLabel({ ...pedido, status: novoStatus })}`,
-        expires: Date.now() + 5000,
+        expires: agoraEmMs() + 5000,
         pedidoId: id,
         prevStatus,
       })
@@ -1149,7 +1266,7 @@ export default function PedidosPage() {
         statusAtualizadoEm: statusAtualizadoEmAnterior,
       } : p))
       const firstName = pedido.cliente.split(" ")[0]
-      setToast({ text: `⚠️ Não consegui atualizar ${firstName}. Tente de novo.`, expires: Date.now() + 5000, pedidoId: id, prevStatus })
+      setToast({ text: `⚠️ Não consegui atualizar ${firstName}. Tente de novo.`, expires: agoraEmMs() + 5000, pedidoId: id, prevStatus })
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
       toastTimerRef.current = setTimeout(() => setToast(null), 5000)
       return false
@@ -1234,8 +1351,9 @@ export default function PedidosPage() {
 
   useEffect(() => {
     if ("setAppBadge" in navigator) {
-      if (emAberto > 0) (navigator as any).setAppBadge(emAberto);
-      else (navigator as any).clearAppBadge();
+      const navegador = navigator as NavigatorCompat
+      if (emAberto > 0) navegador.setAppBadge?.(emAberto);
+      else navegador.clearAppBadge?.();
     }
   }, [emAberto])
 
@@ -1243,7 +1361,7 @@ export default function PedidosPage() {
     const params = new URLSearchParams(window.location.search);
     const filtroParam = params.get("filtro");
     const acaoParam = params.get("acao");
-    if (filtroParam) setFiltro(filtroParam as any);
+    if (isFiltroPedidos(filtroParam)) queueMicrotask(() => setFiltro(filtroParam));
     if (acaoParam === "pausar") {
       fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ativo: false }) }).then(() => setBotAtivo(false));
     }
@@ -1305,7 +1423,7 @@ export default function PedidosPage() {
   )
 
   const showSimpleToast = (msg: string) => {
-    setSimpleToast(msg); clearTimeout(simpleToastTimerRef.current)
+    setSimpleToast(msg); if (simpleToastTimerRef.current) clearTimeout(simpleToastTimerRef.current)
     simpleToastTimerRef.current = setTimeout(() => setSimpleToast(""), 3500)
   }
 
@@ -1435,13 +1553,6 @@ export default function PedidosPage() {
       }
     } catch {}
   }
-
-  const Row = ({ label, value, missing }: { label: string; value: string; missing?: boolean }) => (
-    <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-      <span style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)", minWidth: 72, flexShrink: 0 }}>{label}</span>
-      <span style={{ fontSize: 13, fontWeight: 700, color: missing ? "var(--danger)" : "var(--foreground-secondary)" }}>{value || (missing ? "—" : "—")}</span>
-    </div>
-  )
 
   const renderDetalhe = (p: Pedido) => {
     const mins = p.status === "saiu_entrega"
@@ -1857,7 +1968,7 @@ export default function PedidosPage() {
             // O pedido entra no painel como qualquer outro canal e imprime no
             // aceite, pelas regras que já existem — nada especial aqui.
             carregarPedidos()
-            setToast({ text: `Pedido criado ✓`, expires: Date.now() + 5000, pedidoId, prevStatus: "novo" })
+            setToast({ text: `Pedido criado ✓`, expires: agoraEmMs() + 5000, pedidoId, prevStatus: "novo" })
             if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
             toastTimerRef.current = setTimeout(() => setToast(null), 5000)
           }}
@@ -1878,7 +1989,7 @@ export default function PedidosPage() {
       <PanelShell
         pedidosCount={emAberto}
         conversasCount={escalonados.length}
-        conversasUrgent={escalonados.some(p => Math.floor((Date.now() - (p.horarioEscalonado || parseInt(p.id))) / 60000) >= 8)}
+        conversasUrgent={escalonados.some(p => Math.floor((now - (p.horarioEscalonado || parseInt(p.id))) / 60000) >= 8)}
         showEquipeNav
       >
 

@@ -11,7 +11,29 @@ vi.mock("./auth", () => ({
 }))
 
 // Helpers para criar pedidos de teste
-function pedidoNovo(overrides = {}) {
+type PedidoTeste = {
+  id: string
+  cliente: string
+  telefone: string
+  itens: string[]
+  total: number
+  status: string
+  horario: string
+  endereco: string
+  pagamento: string
+  data: string
+  troco?: number
+  tipoEntrega?: string
+  bairro?: string
+  observacao?: string
+  pixConfirmado?: boolean
+  isArchived?: boolean
+  archivedAt?: string
+  archivedBy?: string
+  archivedReason?: string
+}
+
+function pedidoNovo(overrides: Partial<PedidoTeste> = {}): PedidoTeste {
   return {
     id: Date.now().toString(),
     cliente: "Cliente Teste",
@@ -27,15 +49,15 @@ function pedidoNovo(overrides = {}) {
   }
 }
 
-function pedidoEntregue(overrides = {}) {
+function pedidoEntregue(overrides: Partial<PedidoTeste> = {}): PedidoTeste {
   return pedidoNovo({ status: "entregue", ...overrides })
 }
 
-function pedidoPix(overrides = {}) {
+function pedidoPix(overrides: Partial<PedidoTeste> = {}): PedidoTeste {
   return pedidoNovo({ pagamento: "Pix", pixConfirmado: false, ...overrides })
 }
 
-function pedidoArquivado(overrides = {}) {
+function pedidoArquivado(overrides: Partial<PedidoTeste> = {}): PedidoTeste {
   return pedidoNovo({
     isArchived: true,
     archivedAt: new Date().toISOString(),

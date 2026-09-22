@@ -184,8 +184,8 @@ describe("resolverItemComSelecaoEstruturada", () => {
     expect(resolverItemComSelecaoEstruturada(item, catalog)).toEqual({ ok: false, error: "Mini não aceita borda" });
   });
 
-  it("Especial + MINI é rejeitado", () => {
-    const especial = catalog.flavors.find((f) => f.category === "especial")!;
+  it("Especial sem exceção aprovada + MINI é rejeitado", () => {
+    const especial = catalog.flavors.find((f) => f.category === "especial" && f.pricesBySizeCode.MINI === undefined)!;
     const item: ItemApp = {
       kind: "pizza",
       name: "",
@@ -426,7 +426,7 @@ describe("resolverItemComSelecaoSimplesEstruturada — Pastel de Forno (single_f
 
 describe("resolverItemComSelecaoSimplesEstruturada — Pastel de Feira (single_flavor, recheio próprio)", () => {
   it("exige exatamente 1 recheio, preço fixo R$8", () => {
-    const pastelFeira = simpleCatalog.lanches.find((l) => l.name === "Pastel de Feira")!;
+    const pastelFeira = simpleCatalog.pastelForno.find((l) => l.name === "Pastel de Feira")!;
     const recheio = pastelFeira.flavors!.find((f) => f.name === "Calabresa")!;
     const item: ItemApp = {
       kind: "simple",

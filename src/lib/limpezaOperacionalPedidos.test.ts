@@ -51,9 +51,10 @@ describe("reconstrução de tempo", () => {
     expect(timestampDeHoraLocal(undefined, AGORA)).toBeNull();
   });
 
-  test("usa os 13 primeiros dígitos do ID quando houve desempate de colisão", () => {
+  test("ID com dígito de desempate não é interpretado como timestamp real", () => {
     const ts = AGORA - 30 * MIN;
-    expect(timestampPedido(pedido({ id: `${ts}7` }), AGORA)).toBe(ts);
+    expect(timestampPedido(pedido({ id: `${ts}7` }), AGORA)).toBeNull();
+    expect(timestampPedido(pedido({ id: `${ts}7`, pix: { criadoEm: new Date(ts).toISOString() } }), AGORA)).toBe(ts);
   });
 
   test("cai para Pix e depois para horário legado", () => {

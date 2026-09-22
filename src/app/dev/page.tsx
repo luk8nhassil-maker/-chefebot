@@ -15,6 +15,13 @@ type LogEntry = {
   data: string
 }
 
+type FuncionarioAcesso = {
+  name: string
+  username: string
+  role: string
+  ativo: boolean
+}
+
 function getUserRole(): string | null {
   if (typeof document === 'undefined') return null
   try {
@@ -35,7 +42,7 @@ function getUserRole(): string | null {
 }
 
 function ClientesAcesso({ senhasCriadas }: { senhasCriadas: Record<string, string> }) {
-  const [clientes, setClientes] = useState<any[]>([])
+  const [clientes, setClientes] = useState<FuncionarioAcesso[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -43,7 +50,7 @@ function ClientesAcesso({ senhasCriadas }: { senhasCriadas: Record<string, strin
       .then(r => r.json())
       .then(data => {
         if (Array.isArray(data)) {
-          setClientes(data.filter((f: any) => f.role === 'admin'))
+          setClientes((data as FuncionarioAcesso[]).filter((f) => f.role === 'admin'))
         }
         setLoading(false)
       }).catch(() => setLoading(false))
@@ -186,7 +193,7 @@ export default function DevPage() {
   useEffect(() => {
     const role = getUserRole()
     if (role !== 'dev') { router.push('/login'); return }
-    setChecking(false)
+    queueMicrotask(() => setChecking(false))
     Promise.all([
       fetch('/api/padroes').then(r => r.json()).catch(() => []),
       fetch('/api/logs').then(r => r.json()).catch(() => []),

@@ -194,7 +194,15 @@ export default function AdminJornadaChefPage() {
     }
   }
 
-  useEffect(() => { carregarConfig(); carregarCatalogo(); carregarPendencias(); carregarCanario(); carregarClientesCadastrados() }, [])
+  useEffect(() => {
+    queueMicrotask(() => {
+      void carregarConfig()
+      void carregarCatalogo()
+      void carregarPendencias()
+      void carregarCanario()
+      void carregarClientesCadastrados()
+    })
+  }, [])
 
   async function adicionarCanario() {
     setErroCanario('')

@@ -3,6 +3,22 @@ import { redis } from "@/lib/redis";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
 
+type SessaoPixPendente = {
+  step?: string;
+  pixIniciadoEm?: number;
+  pixCobrancas?: number;
+  [key: string]: unknown;
+};
+
+type PedidoPixPendente = {
+  id: string;
+  telefone?: string;
+  status?: string;
+  escalonado?: boolean;
+  cancelamentoSolicitado?: boolean;
+  [key: string]: unknown;
+};
+
 async function enviarMensagem(phone: string, text: string) {
   const config = obterConfigEvolution();
   if (!config) { console.error("[cron pix-pendente] Provider de WhatsApp não configurado — mensagem não enviada."); return; }
@@ -28,7 +44,7 @@ export async function GET(req: Request) {
     let cobrados = 0;
 
     for (const key of keys) {
-      const session = await redis.get<any>(key);
+      const session = await redis.get<SessaoPixPendente>(key);
       if (!session || session.step !== "aguardando_pix") continue;
 
       const phone = key.replace("session:", "");
@@ -41,7 +57,7 @@ export async function GET(req: Request) {
         // lock GLOBAL de "pedidos" (ver src/lib/pedidosConcorrencia.ts):
         // leitura+decisão+escrita sobre um snapshot fresco, dentro do lock
         // — a mensagem WhatsApp continua fora, depois da persistência.
-        await mutarPedidos<any, void>((pedidosFrescos) => {
+        await mutarPedidos<PedidoPixPendente, void>((pedidosFrescos) => {
           const pedidoAtivo = pedidosFrescos.find(p => p.telefone === phone && p.status === "novo" && !p.escalonado);
           if (!pedidoAtivo) return { persistir: false, resultado: undefined };
           return {

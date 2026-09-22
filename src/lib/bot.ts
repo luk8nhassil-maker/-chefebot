@@ -261,6 +261,8 @@ export interface BotSession {
   clientePerdidoCount?: number;
   observacao?: string;
   pedidoId?: string;
+  pixIniciadoEm?: number;
+  pixCobrancas?: number;
   troco?: string;
   ritmoRapido?: boolean;
   pagamentoPendente?: string;

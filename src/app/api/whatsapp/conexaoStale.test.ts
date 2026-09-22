@@ -26,7 +26,9 @@ const { store, redisMock } = vi.hoisted(() => {
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 
 const { registrarMensagemMock } = vi.hoisted(() => ({
-  registrarMensagemMock: vi.fn(async () => {}),
+  registrarMensagemMock: vi.fn<
+    (telefone: string, autor: string, texto: string) => Promise<void>
+  >(async () => {}),
 }));
 vi.mock("@/lib/conversa", () => ({
   registrarMensagem: registrarMensagemMock,
@@ -74,7 +76,7 @@ function qrCacheSalvo() {
 }
 
 function chamadasPorAutor(autor: string) {
-  return registrarMensagemMock.mock.calls.filter(([, a]: [string, string]) => a === autor);
+  return registrarMensagemMock.mock.calls.filter(([, a]) => a === autor);
 }
 
 function statusConexaoSalvo() {

@@ -85,11 +85,21 @@ export async function GET(req: NextRequest) {
   const recompensasAbertas = recompensasCompletas
     .filter(() => !estrelasAtivas || config.coberturaEconomicaAprovada === true)
     .filter((r) => r.status === "disponivel" || r.status === "notificada")
-    .map((r) => ({ recompensaId: r.recompensaId, status: r.status, criadoEm: r.createdAt }));
+    .map((r) => ({
+      recompensaId: r.recompensaId,
+      status: r.status,
+      criadoEm: r.createdAt,
+      descricao: r.descricaoRecompensa ?? config.descricaoRecompensa,
+    }));
 
   const recompensasHistorico = recompensasCompletas
     .filter((r) => r.status === "resgatada" || r.status === "expirada")
-    .map((r) => ({ recompensaId: r.recompensaId, status: r.status, criadoEm: r.createdAt }));
+    .map((r) => ({
+      recompensaId: r.recompensaId,
+      status: r.status,
+      criadoEm: r.createdAt,
+      descricao: r.descricaoRecompensa ?? config.descricaoRecompensa,
+    }));
 
   return NextResponse.json({
     ativo: config.ativo,

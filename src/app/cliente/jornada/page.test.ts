@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 // neste repo (mesma abordagem de /cliente/page.test.ts e
 // /cliente/pedidos/page.test.ts), então os requisitos de conteúdo/estrutura/
 // animação da tela ficam garantidos aqui direto na fonte.
-const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
+const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8").replace(/\r\n/g, "\n");
 
 function blocoRecompensasReservadas(): string {
   const inicio = fonte.indexOf("jornada.recompensasReservadas.filter");

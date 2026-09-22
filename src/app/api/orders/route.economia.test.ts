@@ -12,7 +12,7 @@ describe("GET /api/orders — leitura econômica com escrita protegida", () => {
     // de forma transitória — não introduz lock nem escrita.
     expect(getRoute).toContain("lerComRetry(() => redis.get<Pedido[]>('pedidos')");
     expect(getRoute).toContain("const limpezaInicial = limparPedidosExpirados(snapshotPedidos)");
-    expect(getRoute).toContain("if (limpezaInicial.mudou)");
+    expect(getRoute).toContain("if (limpezaInicial.mudou || arquivamentoInicial.mudou)");
     expect(getRoute).toContain("mutarPedidos<Pedido, Pedido[]>");
   });
 
@@ -28,6 +28,6 @@ describe("GET /api/orders — leitura econômica com escrita protegida", () => {
 
   test("não remove o mutex do caminho de escrita da limpeza preguiçosa", () => {
     expect(getRoute).toContain("persistir: true");
-    expect(getRoute).toContain("pedidos: limpezaAtual.pedidos");
+    expect(getRoute).toContain("pedidos: arquivamentoAtual.pedidos");
   });
 });

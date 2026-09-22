@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 // árvore. Cobre a integração entre a edição de pedido (main) e a
 // persistência de Pix pendente (PR #205), sem alterar nenhuma regra
 // financeira/de edição já validada.
-const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
+const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8").replace(/\r\n/g, "\n");
 const fonteSalvar = readFileSync(
   fileURLToPath(new URL("../../../api/pedido-app/[id]/editar/salvar/route.ts", import.meta.url)),
   "utf-8"

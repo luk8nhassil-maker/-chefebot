@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { NextRequest } from "next/server";
-import { middleware } from "./middleware";
+import { proxy as middleware } from "./src/proxy";
 import { createToken, type Role } from "@/lib/auth";
 
 function requestFor(url: string, host: string) {
@@ -82,7 +82,7 @@ describe("middleware - rewrite chefedapizza.com.br", () => {
 
 describe("middleware - rotas administrativas protegidas", () => {
   it("redireciona para /login quando não há token", async () => {
-    const req = requestFor("https://chefebot-pjif.vercel.app/admin", "chefebot-pjif.vercel.app");
+    const req = requestFor("https://chefedapizza.com.br/admin", "chefedapizza.com.br");
     const res = await middleware(req);
 
     expect(res.status).toBe(307);
@@ -112,7 +112,7 @@ describe("middleware - rotas administrativas protegidas", () => {
   });
 
   it("redireciona /pedidos para /login sem token", async () => {
-    const req = requestFor("https://chefebot-pjif.vercel.app/pedidos", "chefebot-pjif.vercel.app");
+    const req = requestFor("https://chefedapizza.com.br/pedidos", "chefedapizza.com.br");
     const res = await middleware(req);
 
     expect(res.status).toBe(307);
@@ -120,7 +120,7 @@ describe("middleware - rotas administrativas protegidas", () => {
   });
 
   it("permite acesso a rotas não protegidas sem token", async () => {
-    const req = requestFor("https://chefebot-pjif.vercel.app/cardapio", "chefebot-pjif.vercel.app");
+    const req = requestFor("https://chefedapizza.com.br/cardapio", "chefedapizza.com.br");
     const res = await middleware(req);
 
     expect(res.headers.get("location")).toBeNull();
@@ -129,7 +129,7 @@ describe("middleware - rotas administrativas protegidas", () => {
 });
 
 describe("middleware - /financeiro e /contador protegidas", () => {
-  const HOST = "chefebot-pjif.vercel.app";
+  const HOST = "chefedapizza.com.br";
 
   it("/financeiro sem token redireciona para /login com callbackUrl", async () => {
     const req = requestFor(`https://${HOST}/financeiro`, HOST);

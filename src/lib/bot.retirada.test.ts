@@ -274,7 +274,7 @@ describe("dine_in — não alterado", () => {
 
 describe("retirada — fluxo end-to-end", () => {
   it("fluxo completo: escolhe retirada → pix → aguardando_pix sem confirm", () => {
-    let sess = sessaoDeliveryType();
+    const sess = sessaoDeliveryType();
     // Escolhe retirada
     const r1 = processMessage("retirada", sess);
     expect(r1.session.step).toBe("payment");
@@ -289,7 +289,7 @@ describe("retirada — fluxo end-to-end", () => {
   });
 
   it("fluxo completo: escolhe retirada → cartão → done com resumo", () => {
-    let sess = sessaoDeliveryType();
+    const sess = sessaoDeliveryType();
     const r1 = processMessage("retirada", sess);
     const r2 = processMessage("cartão", r1.session);
     expect(r2.session.step).toBe("done");
@@ -301,7 +301,7 @@ describe("retirada — fluxo end-to-end", () => {
   });
 
   it("fluxo completo: retirada → dinheiro → sem troco → done com resumo", () => {
-    let sess = sessaoDeliveryType();
+    const sess = sessaoDeliveryType();
     const r1 = processMessage("retirada", sess);
     const r2 = processMessage("dinheiro", r1.session);
     // Deve perguntar troco

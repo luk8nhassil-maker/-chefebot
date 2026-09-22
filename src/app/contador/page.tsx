@@ -16,6 +16,8 @@ type Mensagem = {
   content: string
 }
 
+type PedidoFaturamento = { status?: string; total?: number | string }
+
 const CATEGORIAS = [
   { key: 'ingredientes', label: '🧄 Ingredientes', cor: 'var(--primary)' },
   { key: 'embalagens', label: '📦 Embalagens', cor: 'var(--info)' },
@@ -36,7 +38,10 @@ export default function ContadorPage() {
   const [fechandoMes, setFechandoMes] = useState(false)
   const [loading, setLoading] = useState(true)
   const [mensagem, setMensagem] = useState('')
-  const [mensagens, setMensagens] = useState<Mensagem[]>([])
+  const [mensagens, setMensagens] = useState<Mensagem[]>([{
+    role: 'assistant',
+    content: 'Olá! 👋 Sou o assistente contábil.\n\nEstou pronto para ajudar com as informações fiscais da pizzaria. O que precisa saber?',
+  }])
   const [input, setInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const mesAtual = new Date().toISOString().slice(0, 7)
@@ -50,16 +55,14 @@ export default function ContadorPage() {
     ]).then(([fin, pedidos]) => {
       if (fin?.custos) { setCustos(fin.custos); setMesFechado(fin.status?.fechado || false) }
       if (Array.isArray(pedidos)) {
-        const fat = pedidos.filter((p: any) => p.status === 'entregue').reduce((s: number, p: any) => s + (Number(p.total) || 0), 0)
+        const fat = (pedidos as PedidoFaturamento[])
+          .filter((p) => p.status === 'entregue')
+          .reduce((s, p) => s + (Number(p.total) || 0), 0)
         setFaturamento(fat)
       }
       setLoading(false)
     })
 
-    setMensagens([{
-      role: 'assistant',
-      content: `Olá! 👋 Sou o assistente contábil.\n\nEstou pronto para ajudar com as informações fiscais da pizzaria. O que precisa saber?`
-    }])
   }, [mesAtual])
 
   useEffect(() => {
@@ -140,7 +143,7 @@ export default function ContadorPage() {
       {/* Abas */}
       <div style={{ display: 'flex', gap: 6, padding: '12px 16px 0' }}>
         {[{ key: 'resumo', label: '📋 Resumo' }, { key: 'chat', label: '🤖 Assistente' }].map(a => (
-          <button key={a.key} onClick={() => setAba(a.key as any)} style={{ flex: 1, padding: '10px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, background: aba === a.key ? 'var(--success)' : 'var(--surface-secondary)', color: 'var(--foreground)' }}>
+          <button key={a.key} onClick={() => setAba(a.key as 'resumo' | 'chat')} style={{ flex: 1, padding: '10px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, background: aba === a.key ? 'var(--success)' : 'var(--surface-secondary)', color: 'var(--foreground)' }}>
             {a.label}
           </button>
         ))}

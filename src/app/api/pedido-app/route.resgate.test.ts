@@ -22,7 +22,7 @@ function defaultSetImpl(key: string, value: unknown, opts?: { nx?: boolean }) {
 //   — grava registro+token juntos, incondicional.
 // - 2 chaves + 1 arg: INVALIDAR_RESULTADO_SE_TOKEN_SCRIPT (Modo
 //   Sobrevivência) — compare-and-delete atômico do par registro/token.
-function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
+function defaultEvalImpl(_script: string, keys: string[], args: unknown[]) {
   if (keys.length === 1) {
     const [key] = keys;
     const [token] = args;
@@ -35,6 +35,7 @@ function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
   if (keys.length === 2 && args.length === 3) {
     const [chaveResultado, chaveToken] = keys;
     const [registroJson, token] = args;
+    if (typeof registroJson !== "string") throw new TypeError("registro serializado invalido");
     redisStore.set(chaveResultado, JSON.parse(registroJson));
     redisStore.set(chaveToken, token);
     return Promise.resolve(1);
@@ -60,6 +61,7 @@ function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
   const [lockKey, estadoKey] = keys;
   const [token, estadoJson] = args;
   if (redisStore.get(lockKey) === token) {
+    if (typeof estadoJson !== "string") throw new TypeError("estado serializado invalido");
     redisStore.set(estadoKey, JSON.parse(estadoJson));
     return Promise.resolve(1);
   }
@@ -336,7 +338,7 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     const redisLib = await import("@/lib/redis");
     const originalEval = defaultEvalImpl;
     let jaFalhou = false;
-    vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: string[]) => {
+    vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: unknown[]) => {
       if (!jaFalhou && keys.length === 2) {
         jaFalhou = true;
         return Promise.reject(new Error("falha simulada ao confirmar resgate"));

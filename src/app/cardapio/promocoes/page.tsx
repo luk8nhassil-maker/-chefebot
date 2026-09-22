@@ -49,11 +49,13 @@ export default function PromocoesPage() {
   const [aviso, setAviso] = useState("");
 
   useEffect(() => {
-    try {
-      const c = document.cookie.split(";").map((x) => x.trim()).find((x) => x.startsWith("auth-user="));
-      const user = c ? JSON.parse(decodeURIComponent(c.substring("auth-user=".length))) : null;
-      setAutorizado(!!user && ["admin", "atendente", "dev"].includes(user.role));
-    } catch { setAutorizado(false); }
+    queueMicrotask(() => {
+      try {
+        const c = document.cookie.split(";").map((x) => x.trim()).find((x) => x.startsWith("auth-user="));
+        const user = c ? JSON.parse(decodeURIComponent(c.substring("auth-user=".length))) : null;
+        setAutorizado(!!user && ["admin", "atendente", "dev"].includes(user.role));
+      } catch { setAutorizado(false); }
+    });
   }, []);
 
   const carregar = () => {

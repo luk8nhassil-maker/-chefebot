@@ -1,19 +1,53 @@
 import { vi, describe, test, expect, beforeEach } from 'vitest'
+import type { MensagemRelevante } from './bot'
+import type { ConversaMeta } from './conversasHistorico'
 
-vi.mock('./redis', () => ({
-  redis: {
-    zadd: vi.fn(),
-    get: vi.fn(),
-    set: vi.fn(),
+type ValorRedisHistorico = ConversaMeta | MensagemRelevante[] | { customerName?: string } | null
+
+const { redisMock } = vi.hoisted(() => ({
+  redisMock: {
+    zadd: vi.fn<(key: string, scoreMember: { score: number; member: string }) => Promise<number>>(),
+    get: vi.fn<(key: string) => Promise<ValorRedisHistorico>>(),
+    set: vi.fn<(key: string, value: Exclude<ValorRedisHistorico, null>) => Promise<string>>(),
     zrange: vi.fn(),
     zcard: vi.fn(),
     keys: vi.fn(),
   },
 }))
 
-import { redis as redisMock } from './redis'
+vi.mock('./redis', () => ({ redis: redisMock }))
 
 import { atualizarHistorico, CONVERSAS_ZSET, MAX_FULL_MSGS } from './conversasHistorico'
+
+function chamadaSet(chave: string) {
+  return redisMock.set.mock.calls.find(([key]) => key === chave)
+}
+
+function ehMeta(valor: unknown): valor is ConversaMeta {
+  return typeof valor === 'object'
+    && valor !== null
+    && !Array.isArray(valor)
+    && 'phone' in valor
+    && 'mensagensCount' in valor
+}
+
+function ehMensagens(valor: unknown): valor is MensagemRelevante[] {
+  return Array.isArray(valor)
+}
+
+function valorMeta(chave: string): ConversaMeta {
+  const valor = chamadaSet(chave)?.[1]
+  expect(ehMeta(valor)).toBe(true)
+  if (!ehMeta(valor)) throw new Error(`Valor Redis inválido para ${chave}`)
+  return valor
+}
+
+function valorMensagens(chave: string): MensagemRelevante[] {
+  const valor = chamadaSet(chave)?.[1]
+  expect(ehMensagens(valor)).toBe(true)
+  if (!ehMensagens(valor)) throw new Error(`Valor Redis inválido para ${chave}`)
+  return valor
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -43,9 +77,9 @@ describe('atualizarHistorico: conversa_meta', () => {
   test('cria meta com campos corretos na primeira mensagem', async () => {
     const ts = 1700000000000
     await atualizarHistorico('5586999990003', 'cliente', 'Quero um lanche', ts, 'Ana')
-    const setCall = redisMock.set.mock.calls.find(c => c[0] === 'conversa_meta:5586999990003')
+    const setCall = chamadaSet('conversa_meta:5586999990003')
     expect(setCall).toBeDefined()
-    const meta = setCall[1]
+    const meta = valorMeta('conversa_meta:5586999990003')
     expect(meta.phone).toBe('5586999990003')
     expect(meta.nome).toBe('Ana')
     expect(meta.ultimaMensagem).toBe('Quero um lanche')
@@ -60,8 +94,7 @@ describe('atualizarHistorico: conversa_meta', () => {
       return null
     })
     await atualizarHistorico('5586999990004', 'bot', 'Como posso ajudar?', 2000)
-    const setCall = redisMock.set.mock.calls.find(c => c[0] === 'conversa_meta:5586999990004')
-    expect(setCall[1].nome).toBe('João')
+    expect(valorMeta('conversa_meta:5586999990004').nome).toBe('João')
   })
 
   test('usa customerName da session quando nome não está disponível', async () => {
@@ -70,21 +103,18 @@ describe('atualizarHistorico: conversa_meta', () => {
       return null
     })
     await atualizarHistorico('5586999990005', 'cliente', 'Calabresa', 3000)
-    const setCall = redisMock.set.mock.calls.find(c => c[0] === 'conversa_meta:5586999990005')
-    expect(setCall[1].nome).toBe('Maria')
+    expect(valorMeta('conversa_meta:5586999990005').nome).toBe('Maria')
   })
 
   test('usa phone como fallback de nome quando nenhuma fonte está disponível', async () => {
     await atualizarHistorico('5586999990006', 'cliente', 'oi', 4000)
-    const setCall = redisMock.set.mock.calls.find(c => c[0] === 'conversa_meta:5586999990006')
-    expect(setCall[1].nome).toBe('5586999990006')
+    expect(valorMeta('conversa_meta:5586999990006').nome).toBe('5586999990006')
   })
 
   test('trunca ultimaMensagem a 200 chars no meta', async () => {
     const longa = 'x'.repeat(300)
     await atualizarHistorico('5586999990007', 'cliente', longa, 5000)
-    const setCall = redisMock.set.mock.calls.find(c => c[0] === 'conversa_meta:5586999990007')
-    expect(setCall[1].ultimaMensagem.length).toBe(200)
+    expect(valorMeta('conversa_meta:5586999990007').ultimaMensagem.length).toBe(200)
   })
 })
 
@@ -92,19 +122,19 @@ describe('atualizarHistorico: conversa_full', () => {
   test('cria conversa_full com a primeira mensagem', async () => {
     const ts = 6000
     await atualizarHistorico('5586999990008', 'bot', 'Bem-vindo!', ts)
-    const setCall = redisMock.set.mock.calls.find(c => c[0] === 'conversa_full:5586999990008')
+    const setCall = chamadaSet('conversa_full:5586999990008')
     expect(setCall).toBeDefined()
-    expect(setCall[1]).toHaveLength(1)
-    expect(setCall[1][0].texto).toBe('Bem-vindo!')
-    expect(setCall[1][0].autor).toBe('bot')
-    expect(setCall[1][0].ts).toBe(ts)
+    const mensagens = valorMensagens('conversa_full:5586999990008')
+    expect(mensagens).toHaveLength(1)
+    expect(mensagens[0]?.texto).toBe('Bem-vindo!')
+    expect(mensagens[0]?.autor).toBe('bot')
+    expect(mensagens[0]?.ts).toBe(ts)
   })
 
   test('trunca texto a 400 chars no full history', async () => {
     const longa = 'y'.repeat(500)
     await atualizarHistorico('5586999990009', 'cliente', longa, 7000)
-    const setCall = redisMock.set.mock.calls.find(c => c[0] === 'conversa_full:5586999990009')
-    expect(setCall[1][0].texto.length).toBe(400)
+    expect(valorMensagens('conversa_full:5586999990009')[0]?.texto.length).toBe(400)
   })
 
   test(`limita histórico a ${MAX_FULL_MSGS} mensagens`, async () => {
@@ -118,9 +148,9 @@ describe('atualizarHistorico: conversa_full', () => {
       return null
     })
     await atualizarHistorico('5586999990010', 'bot', 'nova msg', MAX_FULL_MSGS * 1000)
-    const setCall = redisMock.set.mock.calls.find(c => c[0] === 'conversa_full:5586999990010')
-    expect(setCall[1]).toHaveLength(MAX_FULL_MSGS)
-    expect(setCall[1][MAX_FULL_MSGS - 1].texto).toBe('nova msg')
+    const mensagens = valorMensagens('conversa_full:5586999990010')
+    expect(mensagens).toHaveLength(MAX_FULL_MSGS)
+    expect(mensagens[MAX_FULL_MSGS - 1]?.texto).toBe('nova msg')
   })
 
   test('mensagensCount no meta reflete o tamanho do histórico trimado', async () => {
@@ -134,34 +164,36 @@ describe('atualizarHistorico: conversa_full', () => {
       return null
     })
     await atualizarHistorico('5586999990011', 'bot', 'resposta', 600)
-    const setCall = redisMock.set.mock.calls.find(c => c[0] === 'conversa_meta:5586999990011')
-    expect(setCall[1].mensagensCount).toBe(6)
+    expect(valorMeta('conversa_meta:5586999990011').mensagensCount).toBe(6)
   })
 })
 
 describe('atualizarHistorico: histórico permanente (sem TTL)', () => {
   test('conversa_full é gravado SEM TTL (não expira com a session)', async () => {
     await atualizarHistorico('5586999990020', 'cliente', 'oi', 8000, 'Ana')
-    const setCall = redisMock.set.mock.calls.find(c => c[0] === 'conversa_full:5586999990020')
+    const setCall = chamadaSet('conversa_full:5586999990020')
     expect(setCall).toBeDefined()
     // (key, value) apenas — sem 3º argumento { ex: TTL }
-    expect(setCall.length).toBe(2)
+    expect(setCall?.length).toBe(2)
   })
 
   test('conversa_meta é gravado SEM TTL', async () => {
     await atualizarHistorico('5586999990021', 'cliente', 'oi', 9000, 'Ana')
-    const setCall = redisMock.set.mock.calls.find(c => c[0] === 'conversa_meta:5586999990021')
+    const setCall = chamadaSet('conversa_meta:5586999990021')
     expect(setCall).toBeDefined()
-    expect(setCall.length).toBe(2)
+    expect(setCall?.length).toBe(2)
   })
 
   test('append-only preserva cliente, bot e atendente em ordem', async () => {
-    let stored: Array<{ autor: string; texto: string; ts: number }> = []
+    let stored: MensagemRelevante[] = []
     redisMock.get.mockImplementation(async (key: string) =>
       key === 'conversa_full:5586999990022' ? stored : null,
     )
     redisMock.set.mockImplementation(async (key: string, value: unknown) => {
-      if (key === 'conversa_full:5586999990022') stored = value as typeof stored
+      if (key === 'conversa_full:5586999990022') {
+        if (!ehMensagens(value)) throw new Error('Histórico Redis inválido')
+        stored = value
+      }
       return 'OK'
     })
     await atualizarHistorico('5586999990022', 'cliente', 'm1', 1, 'Ana')

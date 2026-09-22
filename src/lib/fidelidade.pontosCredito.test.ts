@@ -5,7 +5,9 @@ const store = new Map<string, unknown>();
 function realGet(key: string) {
   return store.has(key) ? store.get(key) : null;
 }
-function realSet(key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) {
+type RedisSetOptions = Parameters<typeof redis.set>[2];
+
+function realSet(key: string, value: unknown, opts?: RedisSetOptions) {
   if (opts?.nx && store.has(key)) return null;
   store.set(key, value);
   return "OK";
@@ -18,7 +20,7 @@ function realDel(key: string) {
 // Replica a semântica dos dois scripts Lua reais sem interpretar Lua:
 // - liberarLockPontosSeDono (1 chave): GET == token -> DEL
 // - persistirEstadoPontosSeDono (2 chaves): GET(lock) == token -> SET(estado)
-function realEval(_script: string, keys: string[], args: string[]) {
+function realEval(_script: string, keys: string[], args: unknown[]) {
   if (keys.length === 1) {
     const [key] = keys;
     const [token] = args;
@@ -31,7 +33,7 @@ function realEval(_script: string, keys: string[], args: string[]) {
   const [lockKey, estadoKey] = keys;
   const [token, estadoJson] = args;
   if (store.get(lockKey) === token) {
-    store.set(estadoKey, JSON.parse(estadoJson as unknown as string));
+    store.set(estadoKey, JSON.parse(String(estadoJson)));
     return 1;
   }
   return 0;
@@ -40,11 +42,11 @@ function realEval(_script: string, keys: string[], args: string[]) {
 vi.mock("@/lib/redis", () => ({
   redis: {
     get: vi.fn(async (key: string) => realGet(key)),
-    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => realSet(key, value, opts)),
+    set: vi.fn(async (key: string, value: unknown, opts?: RedisSetOptions) => realSet(key, value, opts)),
     del: vi.fn(async (key: string) => realDel(key)),
     // Compare-and-delete do lock (ver liberarLockPontosSeDono): o mock replica
     // a semântica do script Lua real (GET == token -> DEL) sem interpretar Lua.
-    eval: vi.fn(async (script: string, keys: string[], args: string[]) => realEval(script, keys, args)),
+    eval: vi.fn(async (script: string, keys: string[], args: unknown[]) => realEval(script, keys, args)),
   },
 }));
 
@@ -68,9 +70,9 @@ import { obterOuCriarCliente, clienteIdDoTelefone } from "./clientes";
 beforeEach(async () => {
   store.clear();
   vi.mocked(redis.get).mockImplementation(async (key: string) => realGet(key));
-  vi.mocked(redis.set).mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => realSet(key, value, opts));
+  vi.mocked(redis.set).mockImplementation(async (key: string, value: unknown, opts?: RedisSetOptions) => realSet(key, value, opts));
   vi.mocked(redis.del).mockImplementation(async (key: string) => realDel(key));
-  vi.mocked(redis.eval).mockImplementation(async (script: string, keys: string[], args: string[]) => realEval(script, keys, args));
+  vi.mocked(redis.eval).mockImplementation(async (script: string, keys: string[], args: unknown[]) => realEval(script, keys, args));
   await salvarConfigFidelidadePontos({
     ativo: true,
     metaPontos: 720,
@@ -341,7 +343,7 @@ describe("propriedade do lock — token único e compare-and-delete seguro", () 
     const tokensObservados: unknown[] = [];
     const setMock = vi.mocked(redis.set);
     const implementacaoReal = setMock.getMockImplementation()!;
-    setMock.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
+    setMock.mockImplementation(async (key: string, value: unknown, opts?: RedisSetOptions) => {
       if (key === chave) tokensObservados.push(value);
       return implementacaoReal(key, value, opts);
     });

@@ -1,5 +1,6 @@
 import { vi, describe, test, expect, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import type { ResultadoEnvioWhatsApp } from "@/lib/whatsappMensagem";
 
 const redisStore = new Map<string, unknown>();
 
@@ -48,9 +49,21 @@ vi.mock("@/lib/pixAuditoria", () => ({
   registrarAuditoriaPixManual: (entry: Record<string, unknown>) => registrarAuditoriaPixManualMock(entry),
 }));
 
-const enviarTextoWhatsAppMock = vi.fn(async () => ({ ok: true, latenciaMs: 1, tentativas: 1 }));
+const enviarTextoWhatsAppMock = vi.fn(
+  async (
+    _phone: string,
+    _text: string,
+    _opts?: { delay?: number; presence?: "composing"; timeoutMs?: number }
+  ): Promise<ResultadoEnvioWhatsApp> => ({ ok: true, latenciaMs: 1, tentativas: 1 })
+);
 vi.mock("@/lib/whatsappMensagem", () => ({
-  enviarTextoWhatsApp: (...args: unknown[]) => enviarTextoWhatsAppMock(...args),
+  enviarTextoWhatsApp: (
+    phone: string,
+    text: string,
+    opts?: { delay?: number; presence?: "composing"; timeoutMs?: number }
+  ) => opts === undefined
+    ? enviarTextoWhatsAppMock(phone, text)
+    : enviarTextoWhatsAppMock(phone, text, opts),
 }));
 
 import { POST } from "./route";

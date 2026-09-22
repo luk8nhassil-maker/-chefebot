@@ -11,7 +11,7 @@ const { store, redisMock, enviarMock } = vi.hoisted(() => {
       del: vi.fn(async (key: string) => (store.delete(key) ? 1 : 0)),
       eval: vi.fn(async () => 1),
     },
-    enviarMock: vi.fn(async () => ({ ok: true as const })),
+    enviarMock: vi.fn(async (_phone: string, _text: string) => ({ ok: true as const })),
   };
 });
 

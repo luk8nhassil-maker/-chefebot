@@ -10,8 +10,8 @@ import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
 import { buildSimpleCatalog } from "@/lib/catalog/simpleProducts";
 import { MENU } from "@/lib/menu";
 
-const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
-const fontePixCard = readFileSync(fileURLToPath(new URL("./PixPagamentoCard.tsx", import.meta.url)), "utf-8");
+const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8").replace(/\r\n/g, "\n");
+const fontePixCard = readFileSync(fileURLToPath(new URL("./PixPagamentoCard.tsx", import.meta.url)), "utf-8").replace(/\r\n/g, "\n");
 const fonteCombinada = `${fonte}\n${fontePixCard}`;
 const blocoPixFinal = fonte.slice(
   fonte.indexOf("{isPagamentoPix && ("),

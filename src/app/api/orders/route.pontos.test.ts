@@ -15,10 +15,10 @@ function defaultSetImpl(key: string, value: unknown, opts?: { nx?: boolean }) {
 // Replica os dois scripts Lua reais da fidelidade por pontos, sem interpretar
 // Lua: liberarLockPontosSeDono (1 chave: GET==token -> DEL) e
 // persistirEstadoPontosSeDono (2 chaves: GET(lock)==token -> SET(estado)).
-function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
+function defaultEvalImpl(_script: string, keys: string[], args: unknown[]) {
   if (keys.length === 1) {
     const [key] = keys;
-    const [token] = args;
+    const token = typeof args[0] === "string" ? args[0] : undefined;
     if (redisStore.get(key) === token) {
       redisStore.delete(key);
       return Promise.resolve(1);
@@ -26,8 +26,9 @@ function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
     return Promise.resolve(0);
   }
   const [lockKey, estadoKey] = keys;
-  const [token, estadoJson] = args;
-  if (redisStore.get(lockKey) === token) {
+  const token = typeof args[0] === "string" ? args[0] : undefined;
+  const estadoJson = typeof args[1] === "string" ? args[1] : undefined;
+  if (redisStore.get(lockKey) === token && estadoKey && estadoJson) {
     redisStore.set(estadoKey, JSON.parse(estadoJson));
     return Promise.resolve(1);
   }

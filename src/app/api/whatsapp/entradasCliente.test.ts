@@ -25,7 +25,9 @@ const { store, redisMock } = vi.hoisted(() => {
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 
 const { registrarMensagemMock } = vi.hoisted(() => ({
-  registrarMensagemMock: vi.fn(async () => {}),
+  registrarMensagemMock: vi.fn<
+    (telefone: string, autor: string, texto: string) => Promise<void>
+  >(async () => {}),
 }));
 vi.mock("@/lib/conversa", () => ({
   registrarMensagem: registrarMensagemMock,
@@ -59,7 +61,7 @@ function req(body: unknown) {
 
 // Todas as chamadas de registrarMensagem feitas no request, na ordem real.
 function chamadas() {
-  return registrarMensagemMock.mock.calls as [string, string, string][];
+  return registrarMensagemMock.mock.calls;
 }
 
 function indiceDoAutor(autor: string): number {

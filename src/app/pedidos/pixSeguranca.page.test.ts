@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 // Mesmo padrão de src/app/pedidos/page.test.ts: sem jsdom/testing-library
 // para esta tela grande — os requisitos da camada de segurança da
 // confirmação manual de Pix ficam garantidos estruturalmente na fonte.
-const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
+const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8").replace(/\r\n/g, "\n");
 
 const corpoModal = fonte.slice(
   fonte.indexOf("{/* Modal de segurança"),

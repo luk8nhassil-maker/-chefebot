@@ -16,7 +16,7 @@ import { transcreverAudio } from "@/lib/transcribeAudio";
 import { gerarIdPedidoUnico, proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, StatusConexao } from "@/lib/conexaoWhatsapp";
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
-import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConversa";
+import { detectarConversaMorta } from "@/lib/reviverConversa";
 import { clientePediuChavePixManual, confirmarPixMetadata, criarPixMetadata, marcarPixRevisaoOuSuspeito, montarMensagensChavePixManual, montarMensagensPixMercadoPagoWhatsApp, prepararPixProviderMercadoPago, registrarPixEvidencia, serializarPixCliente, type PixCliente, type PixEvidenciaOrigem, type PixMetadata } from "@/lib/pix";
 import { chaveDedupIdentificadorComprovantePix, extrairIdentificadorComprovantePix, normalizarIdentificadorComprovantePix, PIX_COMPROVANTE_E2E_TTL_SEGUNDOS, type PixComprovanteIdentificador } from "@/lib/pixComprovanteEvidencia";
 import { chaveDedupComprovantePix, gerarHashComprovantePixMidia, gerarHashComprovantePixTexto, PIX_COMPROVANTE_DEDUP_TTL_SEGUNDOS } from "@/lib/pixComprovanteHash";
@@ -73,6 +73,7 @@ type Pedido = {
   horarioInicio?: string;
   pagamento?: string;
   troco?: string;
+  entregador?: { telefone?: string };
   clienteId?: string;
   taxaEntrega?: number;
   // Origem/canal do pedido (Nível 6.6A) — só é gravada em pedidos criados
@@ -225,6 +226,7 @@ export function construirItensDetalhadosWhatsApp(cart: ItemCarrinhoParaDetalhes[
 }
 
 async function salvarPedido(session: BotSession, phone: string, _config: ConfigPizzaria): Promise<PedidoSalvoResultado> {
+  void _config;
   const itens = session.cart.map((item) => {
     const border = item.border && item.border !== "Sem borda" ? ` + ${item.border}` : "";
     const size = item.size ? ` ${item.size}` : "";
@@ -817,7 +819,7 @@ Qualquer dúvida é só chamar. Bom apetite! 🍕`);
   }
 }
 
-async function processarComprovante(phone: string, data: any, config: ConfigPizzaria, isImagem: boolean) {
+async function processarComprovante(phone: string, data: unknown, config: ConfigPizzaria, isImagem: boolean) {
   try {
     const sessionKey = `session:${phone}`;
     const session = await redis.get<BotSession>(sessionKey);
@@ -847,16 +849,19 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       const configComprovante = obterConfigEvolution();
       if (!configComprovante) throw new Error("Provider de WhatsApp não configurado");
       const downloadUrl = `${configComprovante.baseUrl}/chat/getBase64FromMediaMessage/${configComprovante.instanceName}`;
-      const msgPayload = { message: data?.data || data };
+      const msgPayload = { message: obterCampo(data, "data") || data };
       const downloadRes = await fetch(downloadUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: configComprovante.apiKey },
         body: JSON.stringify(msgPayload),
       });
       if (downloadRes.ok) {
-        const downloadData = await downloadRes.json();
-        imagemBase64 = downloadData.base64 || "";
-        if (downloadData.mimetype) mediaType = downloadData.mimetype;
+        const downloadData: unknown = await downloadRes.json();
+        imagemBase64 = extrairTextoSeguro(obterCampo(downloadData, "base64"));
+        const mimetype = extrairTextoSeguro(obterCampo(downloadData, "mimetype"));
+        if (mimetype === "image/jpeg" || mimetype === "image/png" || mimetype === "image/webp" || mimetype === "application/pdf") {
+          mediaType = mimetype;
+        }
       } else {
         const errText = await downloadRes.text();
         await log("aviso", "Download comprovante falhou", errText.slice(0, 200));
@@ -880,7 +885,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
     }
 
     const resultado = await analisarComprovantePix(
-      imagemBase64, mediaType as any, valorPixEsperado(pedidoAtivo.pagamento, pedidoAtivo.total),
+      imagemBase64, mediaType, valorPixEsperado(pedidoAtivo.pagamento, pedidoAtivo.total),
       config.chavePix, config.nomeTitularPix || config.nomePizzaria,
       pedidoAtivo.horarioInicio || pedidoAtivo.horario
     );
@@ -1283,7 +1288,7 @@ export async function POST(req: NextRequest) {
         await registrarMensagem(phone, "cliente", "[Áudio recebido — transcrição indisponível]")
       }
       await enviarMensagem(phone, `Recebi seu áudio! 😊 Já chamo alguém para te atender melhor. Um instante!`)
-      const sessionAudio = await redis.get<BotSession>(`session:${phone}`) || { step: "escalado" as any, cart: [], deliveryFee: 0 }
+      const sessionAudio = await redis.get<BotSession>(`session:${phone}`) || { step: "escalado", cart: [], deliveryFee: 0 }
       await salvarEscalonamento(phone, sessionAudio)
       await redis.set(`postOrderPriority:${phone}`, true, { ex: 3600 })
       return NextResponse.json({ ok: true })
@@ -1332,12 +1337,12 @@ export async function POST(req: NextRequest) {
             await redis.set(`avaliacao:${pedido.telefone}`, true, { ex: 3600 })
             await enviarMensagem(pedido.telefone, `*${firstName}*, como foi sua experiência hoje? 😊\n\nAvalia nossa pizza de 1 a 5:\n\n  ⭐ 1 — Ruim\n  ⭐⭐ 2 — Regular\n  ⭐⭐⭐ 3 — Bom\n  ⭐⭐⭐⭐ 4 — Muito bom\n  ⭐⭐⭐⭐⭐ 5 — Excelente\n\nÉ só digitar o número! 😄`)
           }
-          const maisEntregas = pedidos.filter((p: any) => p.status === 'saiu_entrega' && p.entregador?.telefone?.replace(/\D/g, '') === phone.replace(/\D/g, ''))
+          const maisEntregas = pedidos.filter((p) => p.status === 'saiu_entrega' && p.entregador?.telefone?.replace(/\D/g, '') === phone.replace(/\D/g, ''))
           if (maisEntregas.length > 0) {
-            const lista = maisEntregas.map((p: any, i: number) => `${i + 1}. *${p.cliente}* — ${p.endereco}\n💰 R$ ${p.total.toFixed(2).replace('.', ',')}`).join('\n\n')
+            const lista = maisEntregas.map((p, i) => `${i + 1}. *${p.cliente}* — ${p.endereco}\n💰 R$ ${p.total.toFixed(2).replace('.', ',')}`).join('\n\n')
             await enviarMensagem(phone, `✅ Entrega confirmada!\n\nVocê ainda tem *${maisEntregas.length}* entrega${maisEntregas.length > 1 ? 's' : ''} pendente${maisEntregas.length > 1 ? 's' : ''}:\n\n${lista}\n\nQual vai primeiro? Responda o número.`)
             await redis.set(`entregador_aguardando:${phone}`, maisEntregas[0].id, { ex: 3 * 60 * 60 })
-            await redis.set(`entregador_escolhendo:${phone}`, JSON.stringify(maisEntregas.map((p: any) => p.id)), { ex: 3 * 60 * 60 })
+            await redis.set(`entregador_escolhendo:${phone}`, JSON.stringify(maisEntregas.map((p) => p.id)), { ex: 3 * 60 * 60 })
           } else {
             await enviarMensagem(phone, `✅ Entrega confirmada!\n\n🎉 Todas as entregas concluídas! Pode voltar para a pizzaria. 🍕`)
           }
@@ -1346,13 +1351,14 @@ export async function POST(req: NextRequest) {
       }
       const escolhendoStr = await redis.get<string>(`entregador_escolhendo:${phone}`)
       if (escolhendoStr) {
-        const ids = JSON.parse(escolhendoStr)
+        const idsBrutos: unknown = JSON.parse(escolhendoStr)
+        const ids = Array.isArray(idsBrutos) ? idsBrutos.filter((id): id is string => typeof id === 'string') : []
         const num = parseInt(messageText.trim()) - 1
         if (num >= 0 && num < ids.length) {
           await redis.set(`entregador_aguardando:${phone}`, ids[num], { ex: 3 * 60 * 60 })
           await redis.del(`entregador_escolhendo:${phone}`)
-          const pedidos = await redis.get<any[]>('pedidos') || []
-          const pedido = pedidos.find((p: any) => p.id === ids[num])
+          const pedidos = await redis.get<Pedido[]>('pedidos') || []
+          const pedido = pedidos.find((p) => p.id === ids[num])
           if (pedido) {
             const troco = pedido.troco && pedido.troco !== 'Sem troco' ? `\n💵 ${pedido.troco}` : ''
             await enviarMensagem(phone, `👍 Próxima entrega:\n\n📍 *${pedido.cliente}* — ${pedido.endereco}\n💰 R$ ${pedido.total.toFixed(2).replace('.', ',')}${troco}\n\nResponda *1* quando entregar.`)
@@ -1591,8 +1597,9 @@ export async function POST(req: NextRequest) {
 
     // Cliente em aguardando_pix mandou texto (nao imagem) — lembra de enviar comprovante
     if (currentSession.step === "aguardando_pix") {
-      const pixIniciadoEm = (currentSession as any).pixIniciadoEm || Date.now();
-      const cobrancas = (currentSession as any).pixCobrancas || 0;
+      const sessaoPix = currentSession as BotSession & { pixIniciadoEm?: number; pixCobrancas?: number };
+      const pixIniciadoEm = sessaoPix.pixIniciadoEm || Date.now();
+      const cobrancas = sessaoPix.pixCobrancas || 0;
 
       // Fluxo opcional (Nivel 6.7B): cliente pediu explicitamente a chave Pix
       // manual em vez do QR/copia-e-cola dinamico. Puramente informativo —
@@ -1642,8 +1649,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Cancelamento pos-pedido
-    if (querCancelar(messageText) && currentSession.step === "done" && (currentSession as any).pedidoId) {
-      const pedidoId = (currentSession as any).pedidoId;
+    if (querCancelar(messageText) && currentSession.step === "done" && currentSession.pedidoId) {
+      const pedidoId = currentSession.pedidoId;
       const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
       const pedido = pedidos.find(p => p.id === pedidoId);
       if (!pedido) {
@@ -1706,10 +1713,10 @@ export async function POST(req: NextRequest) {
     if (!currentSession) return NextResponse.json({ ok: true });
 
     // Se cliente esta escolhendo delivery, injeta historico para reusar endereco
-    if (currentSession && currentSession.step === "delivery_type" && !(currentSession as any).historico) {
+    if (currentSession && currentSession.step === "delivery_type" && !currentSession.historico) {
       const histSalvo = await redis.get<ClienteHistorico>(`cliente:${phone}`);
       if (histSalvo?.ultimoEndereco && histSalvo?.ultimoNeighborhood) {
-        currentSession = { ...currentSession, historico: histSalvo } as any;
+        currentSession = { ...currentSession, historico: histSalvo };
       }
     }
 
@@ -1723,13 +1730,13 @@ export async function POST(req: NextRequest) {
     // só era tentada) quando o comprovante chegava, e o cliente via nesse meio-tempo
     // só a chave Pix estatica. Detectar a TRANSICAO para aguardando_pix (em vez de
     // depender do step anterior ser "confirm") cobre os dois fluxos com o mesmo código.
-    const entrouEmAguardandoPixAgora = result.session?.step === "aguardando_pix" && !(result.session as any).pedidoId;
+    const entrouEmAguardandoPixAgora = result.session?.step === "aguardando_pix" && !result.session.pedidoId;
     if (entrouEmAguardandoPixAgora) {
       // Usa result.session (pós-processMessage), não currentSession — no fluxo de
       // retirada o pagamento é escolhido e o pedido fecha no MESMO turno, então
       // paymentMethod/cart/troco só existem na sessão já processada.
       const { pedidoId, pixCliente } = await salvarPedido(result.session, phone, config);
-      result.session = { ...result.session, pedidoId, pixIniciadoEm: Date.now(), pixCobrancas: 0 } as any;
+      result.session = { ...result.session, pedidoId, pixIniciadoEm: Date.now(), pixCobrancas: 0 };
       // Só substitui a mensagem quando a cobranca Mercado Pago foi criada de fato —
       // nunca troca o texto de fallback manual (que já orienta a enviar comprovante).
       // 3 mensagens separadas (Nível 6.7A): aviso + payload Pix isolado (fácil de
@@ -1743,7 +1750,7 @@ export async function POST(req: NextRequest) {
     // no momento em que entraram em aguardando_pix (delivery/dine_in ou retirada).
     if (currentSession!.step === "confirm" && ehConfirmacaoPedido(messageText) && !temPixNoPagamento(currentSession!.paymentMethod)) {
       const { pedidoId } = await salvarPedido(currentSession!, phone, config);
-      result.session = { ...result.session, pedidoId } as any;
+      result.session = { ...result.session, pedidoId };
       if (config.limitePico > 0) {
         const pedidosAtivos = (await redis.get<Pedido[]>("pedidos") || []).filter(p => p.status === "em_preparo" && !p.escalonado).length;
         if (pedidosAtivos >= config.limitePico) {

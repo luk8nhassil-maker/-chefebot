@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { PedidoComPix, PixMetadata } from "./pix";
 
 const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
@@ -56,7 +57,19 @@ import {
   reconciliarPixMercadoPago,
 } from "./mercadoPagoReconciliacao";
 
-function pedidoMP(overrides: Record<string, unknown> = {}) {
+type PedidoMPTeste = PedidoComPix & {
+  id: string;
+  total: number;
+  status: string;
+  pix: PixMetadata;
+  pixConfirmado?: boolean;
+  origem?: string;
+  telefone?: string;
+  chavePix?: string;
+  beneficiario?: string;
+};
+
+function pedidoMP(overrides: Record<string, unknown> = {}): PedidoMPTeste {
   return {
     id: "ped-1",
     total: 50,
@@ -150,7 +163,7 @@ describe("reconciliarPixMercadoPago", () => {
     const resumo = await reconciliarPixMercadoPago();
 
     expect(resumo).toMatchObject({ verificados: 1, confirmados: 1, pendentes: 0, ignorados: 0, erros: 0 });
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoMPTeste[];
     expect(pedidos[0].pixConfirmado).toBe(true);
     expect(pedidos[0].pix).toMatchObject({
       status: "confirmado",
@@ -168,7 +181,7 @@ describe("reconciliarPixMercadoPago", () => {
 
     expect(resumo).toMatchObject({ verificados: 1, confirmados: 0, ignorados: 1 });
     expect(resumo.detalhes[0]).toMatchObject({ outcome: "ignorado", motivo: "valor_divergente" });
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoMPTeste[];
     expect(pedidos[0].pixConfirmado).toBeUndefined();
   });
 
@@ -198,7 +211,7 @@ describe("reconciliarPixMercadoPago", () => {
     const resumo = await reconciliarPixMercadoPago();
 
     expect(resumo).toMatchObject({ confirmados: 0, pendentes: 1, ignorados: 0 });
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoMPTeste[];
     expect(pedidos[0].pixConfirmado).toBeUndefined();
     expect(pedidos[0].pix.status).toBe("pendente");
   });
@@ -290,9 +303,9 @@ describe("reconciliarPixMercadoPago", () => {
     const resumo = await reconciliarPixMercadoPago();
 
     expect(resumo).toMatchObject({ verificados: 2, confirmados: 1, pendentes: 1 });
-    const pedidos = store.get("pedidos") as any[];
-    expect(pedidos.find((p) => p.id === "ped-1").pixConfirmado).toBe(true);
-    expect(pedidos.find((p) => p.id === "ped-2").pixConfirmado).toBeUndefined();
+    const pedidos = store.get("pedidos") as PedidoMPTeste[];
+    expect(pedidos.find((p) => p.id === "ped-1")?.pixConfirmado).toBe(true);
+    expect(pedidos.find((p) => p.id === "ped-2")?.pixConfirmado).toBeUndefined();
   });
 
   test("Pix copia e cola / fallback manual não são tocados (nenhum campo chavePix/beneficiario é alterado)", async () => {
@@ -305,7 +318,7 @@ describe("reconciliarPixMercadoPago", () => {
 
     await reconciliarPixMercadoPago();
 
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoMPTeste[];
     expect(pedidos[0].chavePix).toBe("99984430294");
     expect(pedidos[0].beneficiario).toBe("Geovane Sousa da Silva");
   });
@@ -444,7 +457,7 @@ describe("reconciliarPixMercadoPago", () => {
 
       expect(resumo).toMatchObject({ confirmados: 0, erros: 1 });
       expect(resumo.detalhes[0].outcome).toBe("erro");
-      const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoMPTeste[];
       expect(pedidos[0].pixConfirmado).toBeUndefined();
     });
 
@@ -595,7 +608,7 @@ describe("reconciliarPixMercadoPago", () => {
       const resumo = await reconciliarPixMercadoPago();
 
       expect(resumo.confirmados).toBe(1);
-      const pedidos = store.get("pedidos") as ReturnType<typeof pedidoWhatsApp>[];
+      const pedidos = store.get("pedidos") as PedidoMPTeste[];
       expect(pedidos[0].pixConfirmado).toBe(true);
       expect(pedidos[0].pix.status).toBe("confirmado");
       expect(pedidos[0].pix.confirmadoPor).toBe("conciliador_mercadopago");
@@ -612,9 +625,9 @@ describe("reconciliarPixMercadoPago", () => {
 
       expect(resumo.verificados).toBe(1);
       expect(buscarPagamentoMock).toHaveBeenCalledTimes(1);
-      const pedidos = store.get("pedidos") as any[];
-      expect(pedidos.find((p) => p.id === "ped-alvo").pixConfirmado).toBe(true);
-      expect(pedidos.find((p) => p.id === "ped-outro").pixConfirmado).toBeUndefined();
+    const pedidos = store.get("pedidos") as PedidoMPTeste[];
+      expect(pedidos.find((p) => p.id === "ped-alvo")?.pixConfirmado).toBe(true);
+      expect(pedidos.find((p) => p.id === "ped-outro")?.pixConfirmado).toBeUndefined();
     });
 
     test("webhook confirma o mesmo pedido enquanto a consulta do conciliador está em voo: não sobrescreve/reverte a confirmação (primeira confirmação vence)", async () => {
@@ -631,7 +644,7 @@ describe("reconciliarPixMercadoPago", () => {
 
       await reconciliarPixMercadoPago();
 
-      const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoMPTeste[];
       expect(pedidos).toHaveLength(1);
       expect(pedidos[0].pix.confirmadoPor).toBe("webhook");
       expect(pedidos[0].pix.confirmadoEm).toBe("2026-01-01T00:00:00.000Z");
@@ -648,7 +661,7 @@ describe("reconciliarPixMercadoPago", () => {
       buscarPagamentoMock.mockImplementation(async (paymentId: string) => {
         if (paymentId === "MP-1") {
           // Confirmação manual do OUTRO pedido acontece durante a consulta.
-          const atuais = store.get("pedidos") as any[];
+    const atuais = store.get("pedidos") as PedidoMPTeste[];
           store.set(
             "pedidos",
             atuais.map((p) =>
@@ -661,9 +674,9 @@ describe("reconciliarPixMercadoPago", () => {
 
       await reconciliarPixMercadoPago();
 
-      const pedidos = store.get("pedidos") as any[];
-      expect(pedidos.find((p) => p.id === "ped-a").pix.confirmadoPor).toBe("conciliador_mercadopago");
-      expect(pedidos.find((p) => p.id === "ped-b").pix.confirmadoPor).toBe("manual");
+    const pedidos = store.get("pedidos") as PedidoMPTeste[];
+      expect(pedidos.find((p) => p.id === "ped-a")?.pix.confirmadoPor).toBe("conciliador_mercadopago");
+      expect(pedidos.find((p) => p.id === "ped-b")?.pix.confirmadoPor).toBe("manual");
     });
 
     test("lock curto de notificação evita reenvio dentro da mesma rodada mesmo sem marcador permanente ainda", async () => {

@@ -8,6 +8,9 @@ const {
   criarTicketMock,
   invalidarTicketMock,
 } = vi.hoisted(() => {
+  type ResultadoEnvio =
+    | { ok: true }
+    | { ok: false; motivo: string };
   const store = new Map<string, unknown>();
   return {
     store,
@@ -47,7 +50,9 @@ const {
         return 1;
       }),
     },
-    enviarMock: vi.fn(async () => ({ ok: true as const })),
+    enviarMock: vi.fn<(telefone: string, mensagem: string) => Promise<ResultadoEnvio>>(
+      async () => ({ ok: true }),
+    ),
     criarTicketMock: vi.fn(async () => ({ ticket: "ticket-opaco-teste", expiraEm: "2099-01-01T00:00:00.000Z" })),
     invalidarTicketMock: vi.fn(async () => undefined),
   };

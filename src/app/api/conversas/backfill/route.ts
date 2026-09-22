@@ -4,6 +4,11 @@ import { verifyToken } from '@/lib/auth'
 import { CONVERSAS_ZSET, MAX_FULL_MSGS, type ConversaMeta } from '@/lib/conversasHistorico'
 import type { MensagemRelevante } from '@/lib/bot'
 
+type PedidoParaIndice = {
+  telefone?: unknown
+  cliente?: unknown
+}
+
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value ?? null
   if (!token) return null
@@ -21,10 +26,12 @@ export async function POST(req: NextRequest) {
 
   try {
     // Build phone→name map from pedidos (permanent storage)
-    const pedidos = (await redis.get<any[]>('pedidos')) ?? []
+    const pedidos = (await redis.get<PedidoParaIndice[]>('pedidos')) ?? []
     const nomeMap: Record<string, string> = {}
     for (const p of pedidos) {
-      if (p.telefone && p.cliente) nomeMap[p.telefone] = p.cliente
+      if (typeof p.telefone === 'string' && typeof p.cliente === 'string') {
+        nomeMap[p.telefone] = p.cliente
+      }
     }
 
     // Index all existing conversa:{phone} TTL keys

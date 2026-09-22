@@ -18,11 +18,15 @@ describe("buildPizzaCatalog", () => {
     expect(catalog.sizes.map((s) => s.code)).toEqual(["F", "G", "M", "P", "MINI"]);
   });
 
-  it("sabores Especiais não têm preço MINI no catálogo", () => {
+  it("somente as duas exceções comerciais aprovadas entre os Especiais têm preço MINI", () => {
     const catalog = buildPizzaCatalog(MENU);
-    for (const flavor of catalog.flavors.filter((f) => f.category === "especial")) {
-      expect(flavor.pricesBySizeCode.MINI).toBeUndefined();
-    }
+    const especiaisComMini = catalog.flavors
+      .filter((f) => f.category === "especial" && f.pricesBySizeCode.MINI !== undefined)
+      .map((f) => f.name)
+      .sort();
+    expect(especiaisComMini).toEqual(["Carne Seca", "Portuguesa"]);
+    expect(catalog.flavors.find((f) => f.name === "Carne Seca")?.pricesBySizeCode.MINI).toBe(2000);
+    expect(catalog.flavors.find((f) => f.name === "Portuguesa")?.pricesBySizeCode.MINI).toBe(2000);
   });
 
   it("sabores Tradicionais e Doces têm preço para os 5 tamanhos", () => {
@@ -103,11 +107,15 @@ describe("buildPizzaCatalog", () => {
     expect(calabresa?.ingredients).toContain("Linguiça Calabresa");
   });
 
-  it("todo preço do catálogo bate com a fonte oficial (officialMenu2026)", () => {
+  it("todo preço do catálogo bate com a fonte oficial, salvo as duas exceções MINI aprovadas", () => {
     const catalog = buildPizzaCatalog(MENU);
     for (const oficial of PIZZA_FLAVORS) {
       const doCatalogo = catalog.flavors.find((f) => f.id === oficial.id);
-      expect(doCatalogo?.pricesBySizeCode).toEqual(oficial.pricesBySizeCode);
+      if (oficial.id === "flavor-portuguesa" || oficial.id === "flavor-carne-seca") {
+        expect(doCatalogo?.pricesBySizeCode).toEqual({ ...oficial.pricesBySizeCode, MINI: 2000 });
+      } else {
+        expect(doCatalogo?.pricesBySizeCode).toEqual(oficial.pricesBySizeCode);
+      }
     }
   });
 });

@@ -138,8 +138,8 @@ function parseIso(valor: string | undefined | null): number | null {
 
 export function timestampPedido(pedido: PedidoLimpeza, agora: number): number | null {
   const id = pedido.id;
-  if (typeof id === "string" && /^\d{13,15}$/.test(id)) {
-    const ts = Number(id.slice(0, 13));
+  if (typeof id === "string" && /^\d{13}$/.test(id)) {
+    const ts = Number(id);
     if (Number.isFinite(ts)) return ts;
   }
   const porCriacao = parseIso(pedido.criadoEm);

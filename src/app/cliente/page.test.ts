@@ -249,6 +249,30 @@ describe("/cliente — sessão portátil: PATCH do nome sem depender de sondagem
 });
 
 describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carteira", () => {
+  test("Preview local reutiliza a tela real, usa apenas dados fictícios e bloqueia ações externas", () => {
+    expect(fonte).toContain("const PREVIEW_LOCAL_DISPONIVEL = process.env.NODE_ENV !== 'production'");
+    expect(fonte).toContain("Abrir Preview local seguro");
+    expect(fonte).toContain("dados fictícios; nenhum pedido, Pix, WhatsApp, estoque, Redis ou fidelidade real será alterado");
+    expect(fonte).toContain("if (modoPreview)");
+    expect(fonte).toContain("Nenhum link real foi criado ou enviado");
+    expect(fonte).toContain("Nenhuma recompensa real foi reservada");
+  });
+
+  test("Preview permanece mobile e preserva a hierarquia visual aprovada", () => {
+    expect(fonte).toContain('max-width:390px');
+    expect(fonte).toContain('SUAS ESTRELAS');
+    expect(fonte).toContain('Próximo presente');
+    expect(fonte).toContain('Sua posição');
+    expect(fonte).toContain('Chegue mais rápido ao seu presente');
+    expect(fonte).toContain("loyaltyLabel={modoPreview ? 'Fidelidade' : 'Pontos'}");
+  });
+
+  test("modal do Preview oferece somente os cinco canais aprovados", () => {
+    expect(fonte).toContain("['WhatsApp', 'Instagram', 'Telegram', 'Facebook', 'Copiar link']");
+    expect(fonte).not.toContain("'Twitter'");
+    expect(fonte).not.toContain("'LinkedIn'");
+  });
+
   test("carrega dados de painel (temporada + ranking) via endpoint dedicado", () => {
     expect(fonte).toContain("async function carregarPainel");
     expect(fonte).toContain("/api/cliente/fidelidade/painel");

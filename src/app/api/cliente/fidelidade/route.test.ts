@@ -297,7 +297,7 @@ describe("GET /api/cliente/fidelidade — recompensas abertas e historico (CTA n
   test("expõe ativo, descricaoRecompensa e separa recompensas abertas de historico", async () => {
     configPontos = { ativo: true, metaPontos: 60, descricaoRecompensa: "1 Pizza Família" };
     recompensasPorCliente.set("cli_a", [
-      { recompensaId: "rcp_aberta", status: "disponivel", createdAt: "2026-01-01T00:00:00.000Z" },
+      { recompensaId: "rcp_aberta", status: "disponivel", createdAt: "2026-01-01T00:00:00.000Z", descricaoRecompensa: "1 Pizza Família — sabor mais comprado: Calabresa" },
       { recompensaId: "rcp_notificada", status: "notificada", createdAt: "2026-01-02T00:00:00.000Z" },
       { recompensaId: "rcp_usada", status: "resgatada", createdAt: "2026-01-03T00:00:00.000Z" },
       { recompensaId: "rcp_vencida", status: "expirada", createdAt: "2026-01-04T00:00:00.000Z" },
@@ -311,6 +311,10 @@ describe("GET /api/cliente/fidelidade — recompensas abertas e historico (CTA n
     expect(body.recompensas.map((r: { recompensaId: string }) => r.recompensaId).sort()).toEqual(
       ["rcp_aberta", "rcp_notificada"].sort()
     );
+    expect(body.recompensas.find((r: { recompensaId: string }) => r.recompensaId === "rcp_aberta").descricao)
+      .toBe("1 Pizza Família — sabor mais comprado: Calabresa");
+    expect(body.recompensas.find((r: { recompensaId: string }) => r.recompensaId === "rcp_notificada").descricao)
+      .toBe("1 Pizza Família");
     expect(body.recompensasHistorico.map((r: { recompensaId: string }) => r.recompensaId).sort()).toEqual(
       ["rcp_usada", "rcp_vencida"].sort()
     );

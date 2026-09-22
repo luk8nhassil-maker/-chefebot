@@ -101,7 +101,7 @@ export default function PagamentoPixPage({ params }: PageProps) {
   useEffect(() => {
     if (!token) return
     tentativas.current = 0
-    verificar(token)
+    queueMicrotask(() => { void verificar(token) })
     intervalRef.current = setInterval(() => verificar(token), 5000)
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)

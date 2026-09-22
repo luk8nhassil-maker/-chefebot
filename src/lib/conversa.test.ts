@@ -1,4 +1,5 @@
 import { vi, describe, test, expect, beforeEach } from "vitest";
+import type { AutorMensagem } from "./bot";
 
 // Regressão: registrarMensagem() aguardar atualizarHistorico() (histórico
 // permanente/conversa_full) antes de finalizar, em vez do antigo
@@ -23,7 +24,13 @@ const { store, redisMock } = vi.hoisted(() => {
 vi.mock("./redis", () => ({ redis: redisMock }));
 
 const { atualizarHistoricoMock } = vi.hoisted(() => ({
-  atualizarHistoricoMock: vi.fn(async () => {}),
+  atualizarHistoricoMock: vi.fn<(
+    phone: string,
+    autor: AutorMensagem,
+    texto: string,
+    ts: number,
+    nomeCliente?: string,
+  ) => Promise<void>>(async () => {}),
 }));
 
 vi.mock("./conversasHistorico", () => ({
@@ -31,7 +38,7 @@ vi.mock("./conversasHistorico", () => ({
 }));
 
 const { sincronizarCronometroMock } = vi.hoisted(() => ({
-  sincronizarCronometroMock: vi.fn(async () => {}),
+  sincronizarCronometroMock: vi.fn<(phone: string, autor: AutorMensagem) => Promise<void>>(async () => {}),
 }));
 
 vi.mock("./inatividadeConversa", () => ({

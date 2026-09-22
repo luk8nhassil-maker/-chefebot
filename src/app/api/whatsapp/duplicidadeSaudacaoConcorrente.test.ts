@@ -69,7 +69,13 @@ function criarBarreira() {
 
 const { sendGate, enviarTextoWhatsAppMock } = vi.hoisted(() => {
   const sendGate = { barreira: null as null | (() => Promise<void>) };
-  const enviarTextoWhatsAppMock = vi.fn(async () => {
+  const enviarTextoWhatsAppMock = vi.fn<
+    (telefone: string, mensagem: string) => Promise<{
+      ok: true;
+      latenciaMs: number;
+      tentativas: number;
+    }>
+  >(async () => {
     if (sendGate.barreira) await sendGate.barreira();
     return { ok: true, latenciaMs: 1, tentativas: 1 };
   });
@@ -95,7 +101,7 @@ function webhook(phone: string, texto: string, msgId?: string) {
 }
 
 function mensagensEnviadasAoCliente(): string[] {
-  return enviarTextoWhatsAppMock.mock.calls.map(([, texto]: [string, string]) => texto);
+  return enviarTextoWhatsAppMock.mock.calls.map(([, texto]) => texto);
 }
 
 function boasVindasCompletas(): string[] {

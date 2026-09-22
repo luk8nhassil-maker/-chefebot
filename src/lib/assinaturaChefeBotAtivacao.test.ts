@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { assinaturaChefeBotAtiva } from "./assinaturaChefeBotAtivacao";
 
 describe("assinatura ChefeBot — ativação operacional", () => {
-  it("fica desligada em produção enquanto a pausa temporária estiver ativa", () => {
-    expect(assinaturaChefeBotAtiva({ VERCEL_ENV: "production" })).toBe(false);
+  it("fica ativa em produção quando não há kill switch por ambiente", () => {
+    expect(assinaturaChefeBotAtiva({ VERCEL_ENV: "production" })).toBe(true);
   });
 
   it("continua desligada em produção mesmo se a flag antiga estiver false", () => {
@@ -13,11 +13,11 @@ describe("assinatura ChefeBot — ativação operacional", () => {
     })).toBe(false);
   });
 
-  it("continua desligada em produção mesmo se a flag antiga estiver true", () => {
+  it("fica ativa em produção quando a flag operacional está true", () => {
     expect(assinaturaChefeBotAtiva({
       VERCEL_ENV: "production",
       ASSINATURA_CHEFEBOT_ENABLED: "true",
-    })).toBe(false);
+    })).toBe(true);
   });
 
   it("permanece ativa fora de produção para validar a UX com segurança", () => {

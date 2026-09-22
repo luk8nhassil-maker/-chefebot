@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { redisMock, evolutionConfigMock } = vi.hoisted(() => {
-  const redisMock = { get: vi.fn(async () => null) }
-  const evolutionConfigMock = vi.fn<() => unknown>(() => null)
+  type EvolutionConfigTeste = {
+    baseUrl: string
+    apiKey: string
+    instanceName: string
+    webhookUrl: string
+  }
+  const redisMock = { get: vi.fn<(key: string) => Promise<unknown>>(async () => null) }
+  const evolutionConfigMock = vi.fn<() => EvolutionConfigTeste | null>(() => null)
   return { redisMock, evolutionConfigMock }
 })
 

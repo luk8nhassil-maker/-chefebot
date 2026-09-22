@@ -1,6 +1,6 @@
 "use client";
 
-import { Home, ShoppingCart, Receipt, User } from "lucide-react";
+import { Home, ShoppingCart, Receipt, Star, User } from "lucide-react";
 import type { ClientBottomNavTab } from "@/lib/pedidoAtivoCliente";
 
 // Altura real renderizada do .cbn-nav (medida via getBoundingClientRect em
@@ -21,6 +21,11 @@ type ClientBottomNavProps = {
   onInicioClick?: () => void;
   sacolaHref?: string;
   onSacolaClick?: () => void;
+  onPedidoClick?: () => void;
+  onPontosClick?: () => void;
+  loyaltyLabel?: "Pontos" | "Fidelidade";
+  loyaltyIcon?: "user" | "star";
+  compactMobile?: boolean;
   /** Indicador discreto (ponto, sem número) na aba Pedido — true só quando
    * o backend confirma um Pix pendente (ver usePixPendente). Nunca decide
    * isso a partir de localStorage sozinho. */
@@ -47,11 +52,16 @@ export default function ClientBottomNav({
   onInicioClick,
   sacolaHref = "/pedido",
   onSacolaClick,
+  onPedidoClick,
+  onPontosClick,
+  loyaltyLabel = "Pontos",
+  loyaltyIcon = "user",
+  compactMobile = false,
   pixPendente = false,
 }: ClientBottomNavProps) {
   return (
     <>
-      <nav className="cbn-nav" aria-label="Navegação principal">
+      <nav className={`cbn-nav ${compactMobile ? "cbn-nav-mobile" : ""}`} aria-label="Navegação principal">
         <div className="cbn-nav-inner">
           {onInicioClick ? (
             <button type="button" className={`cbn-item ${active === "inicio" ? "active" : ""}`} onClick={onInicioClick}>
@@ -87,7 +97,20 @@ export default function ClientBottomNav({
             </a>
           )}
 
-          <a
+          {onPedidoClick ? <button
+            type="button"
+            className={`cbn-item ${active === "pedido" ? "active" : ""}`}
+            onClick={onPedidoClick}
+            aria-label={pixPendente ? "Pedido — pagamento Pix pendente" : undefined}
+          >
+            <span className="cbn-icon-circle">
+              <span className="cbn-icon-wrap">
+                <span className="cbn-icon"><Receipt size={20} aria-hidden="true" /></span>
+                {pixPendente && <span className="cbn-dot" aria-hidden="true" />}
+              </span>
+            </span>
+            <span className="cbn-label">Pedido</span>
+          </button> : <a
             className={`cbn-item ${active === "pedido" ? "active" : ""}`}
             href="/cliente/pedidos"
             aria-label={pixPendente ? "Pedido — pagamento Pix pendente" : undefined}
@@ -99,16 +122,20 @@ export default function ClientBottomNav({
               </span>
             </span>
             <span className="cbn-label">Pedido</span>
-          </a>
+          </a>}
 
-          <a className={`cbn-item ${active === "pontos" ? "active" : ""}`} href="/cliente">
-            <span className="cbn-icon-circle"><span className="cbn-icon"><User size={20} aria-hidden="true" /></span></span>
-            <span className="cbn-label">Pontos</span>
-          </a>
+          {onPontosClick ? <button type="button" className={`cbn-item ${active === "pontos" ? "active" : ""}`} onClick={onPontosClick}>
+            <span className="cbn-icon-circle"><span className="cbn-icon">{loyaltyIcon === "star" ? <Star size={20} aria-hidden="true" /> : <User size={20} aria-hidden="true" />}</span></span>
+            <span className="cbn-label">{loyaltyLabel}</span>
+          </button> : <a className={`cbn-item ${active === "pontos" ? "active" : ""}`} href="/cliente">
+            <span className="cbn-icon-circle"><span className="cbn-icon">{loyaltyIcon === "star" ? <Star size={20} aria-hidden="true" /> : <User size={20} aria-hidden="true" />}</span></span>
+            <span className="cbn-label">{loyaltyLabel}</span>
+          </a>}
         </div>
       </nav>
       <style>{`
         .cbn-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:54;padding:0 12px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none;overflow:visible}
+        .cbn-nav.cbn-nav-mobile{max-width:414px}
         .cbn-nav-inner{pointer-events:auto;display:flex;align-items:stretch;justify-content:space-around;gap:4px;min-height:52px;background:var(--surface);border:1px solid rgba(var(--overlay-rgb), 0.06);border-radius:999px;padding:8px 10px;box-shadow:0 12px 28px rgba(0,0,0,.16), 0 2px 8px rgba(0,0,0,.08);overflow:visible}
         .cbn-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px;padding:2px 4px;border:none;background:none;color:var(--text-secondary);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:11px;font-weight:600;border-radius:12px;cursor:pointer;text-decoration:none;transition:color .15s}
         .cbn-item:active{transform:scale(.96)}

@@ -72,7 +72,7 @@ export function usePixPendente() {
   }, []);
 
   useEffect(() => {
-    verificar();
+    queueMicrotask(() => { void verificar(); });
 
     function tick() {
       if (document.visibilityState === "visible") verificar();

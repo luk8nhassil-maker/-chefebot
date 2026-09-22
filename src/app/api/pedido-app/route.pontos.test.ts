@@ -15,7 +15,7 @@ function defaultSetImpl(key: string, value: unknown, opts?: { nx?: boolean }) {
 // Replica os dois scripts Lua reais da fidelidade por pontos, sem interpretar
 // Lua: liberarLockPontosSeDono (1 chave: GET==token -> DEL) e
 // persistirEstadoPontosSeDono (2 chaves: GET(lock)==token -> SET(estado)).
-function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
+function defaultEvalImpl(_script: string, keys: string[], args: unknown[]) {
   if (keys.length === 1) {
     const [key] = keys;
     const [token] = args;
@@ -28,6 +28,7 @@ function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
   const [lockKey, estadoKey] = keys;
   const [token, estadoJson] = args;
   if (redisStore.get(lockKey) === token) {
+    if (typeof estadoJson !== "string") throw new TypeError("estado serializado invalido");
     redisStore.set(estadoKey, JSON.parse(estadoJson));
     return Promise.resolve(1);
   }

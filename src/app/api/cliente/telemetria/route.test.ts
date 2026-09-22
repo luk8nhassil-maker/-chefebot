@@ -43,7 +43,7 @@ describe("POST /api/cliente/telemetria — diagnostico temporario sem PII", () =
       motivo: "5599974000691",
       v: "5599974000691",
     }));
-    const texto = logSpy.mock.calls.map((c) => c.join(" ")).join(" | ");
+    const texto = logSpy.mock.calls.map((c: unknown[]) => c.join(" ")).join(" | ");
     expect(texto).toContain("evt=profile_loaded");
     expect(texto).not.toContain("5599974000691");
     expect(texto).not.toContain("123456");
@@ -53,12 +53,12 @@ describe("POST /api/cliente/telemetria — diagnostico temporario sem PII", () =
 
   test("trace valido e registrado; trace com PII e descartado (vira '-')", async () => {
     await POST(requestTelemetria({ evt: "otp_verified", trace: "P3-XY12AB", status: 401 }));
-    const texto = logSpy.mock.calls.map((c) => c.join(" ")).join(" | ");
+    const texto = logSpy.mock.calls.map((c: unknown[]) => c.join(" ")).join(" | ");
     expect(texto).toContain("trace=P3-XY12AB");
     expect(texto).toContain("status=401");
     logSpy.mockClear();
     await POST(requestTelemetria({ evt: "otp_verified", trace: "5599974000691" }));
-    const texto2 = logSpy.mock.calls.map((c) => c.join(" ")).join(" | ");
+    const texto2 = logSpy.mock.calls.map((c: unknown[]) => c.join(" ")).join(" | ");
     expect(texto2).toContain("trace=-");
     expect(texto2).not.toContain("5599974000691");
   });

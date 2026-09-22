@@ -147,7 +147,7 @@ describe("5. bot pausado quando conversa está em atendimento humano", () => {
 
   it("bot continua com step e escalado preservados após envio de mensagem humana", () => {
     const sessao = createInitialSession();
-    sessao.step = "payment" as any;
+    sessao.step = "payment";
     sessao.escalado = true;
 
     // Enviar mensagem humana não altera a sessão do bot — apenas registra
@@ -203,7 +203,7 @@ describe("6. Evolution API — response.ok determina se mensagem é salva", () =
 
   it("erro de rede (fetch lança exceção) também impede registrarMensagem", async () => {
     // Simula catch de rede — a rota retorna 502 antes de registrarMensagem
-    let registrouMensagem = false;
+    const registrouMensagem = false;
     try {
       throw new Error("Network error");
       // eslint-disable-next-line @typescript-eslint/no-unused-vars

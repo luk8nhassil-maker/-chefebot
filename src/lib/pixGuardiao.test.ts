@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { PedidoComPix, PixMetadata } from "./pix";
 
 const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
@@ -38,7 +39,15 @@ vi.mock("./whatsappMensagem", () => ({ enviarTextoWhatsApp: vi.fn(async () => ({
 
 import { avaliarSaudePix, executarGuardiaoPix } from "./pixGuardiao";
 
-function pedidoMP(overrides: Record<string, unknown> = {}) {
+type PedidoGuardiaoTeste = PedidoComPix & {
+  id: string;
+  total: number;
+  status: string;
+  pix: PixMetadata;
+  pixConfirmado?: boolean;
+};
+
+function pedidoMP(overrides: Record<string, unknown> = {}): PedidoGuardiaoTeste {
   return {
     id: "ped-1",
     total: 50,
@@ -221,7 +230,7 @@ describe("executarGuardiaoPix — orquestração (recuperação segura, sem dupl
     expect(buscarPagamentoMock).toHaveBeenCalledTimes(1);
     const pedidos = store.get("pedidos") as Array<{ id: string; pixConfirmado?: boolean; pix?: { status?: string; confirmadoPor?: string } }>;
     expect(pedidos[0].pixConfirmado).toBe(true);
-    expect(pedidos[0].pix.confirmadoPor).toBe("conciliador_mercadopago");
+    expect(pedidos[0].pix?.confirmadoPor).toBe("conciliador_mercadopago");
   });
 
   test("recuperação por paymentId funciona (fluxo feliz, reaproveita reconciliarPixMercadoPago)", async () => {
@@ -322,6 +331,6 @@ describe("executarGuardiaoPix — orquestração (recuperação segura, sem dupl
 
     const pedidos = store.get("pedidos") as Array<{ id: string; pixConfirmado?: boolean; pix?: { status?: string; confirmadoPor?: string } }>;
     expect(pedidos).toHaveLength(1);
-    expect(pedidos[0].pix.confirmadoPor).toBe("webhook");
+    expect(pedidos[0].pix?.confirmadoPor).toBe("webhook");
   });
 });

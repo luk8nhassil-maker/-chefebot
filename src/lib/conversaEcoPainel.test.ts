@@ -4,8 +4,9 @@ const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
     get: vi.fn(async (key: string) => (store.has(key) ? store.get(key) : null)),
-    set: vi.fn(async (key: string, value: unknown) => {
+    set: vi.fn(async (key: string, value: unknown, options?: { ex: number }) => {
       store.set(key, value);
+      void options;
       return "OK";
     }),
     del: vi.fn(async (key: string) => (store.delete(key) ? 1 : 0)),
@@ -86,10 +87,10 @@ describe("extrairMessageIdEnvio", () => {
 describe("marcarEcoPainel / ehEcoPainel", () => {
   it("marca a chave com TTL entre 5 e 10 minutos e valor true, sem dados pessoais", async () => {
     await marcarEcoPainel("MSG-1");
-    const call = redisMock.set.mock.calls.find(([k]: [string]) => k === "conversa:echo-painel:MSG-1");
+    const call = redisMock.set.mock.calls.find(([key]) => key === "conversa:echo-painel:MSG-1");
     expect(call).toBeDefined();
-    expect(call[1]).toBe(true);
-    expect(call[2]).toEqual({ ex: CONVERSA_ECO_PAINEL_TTL_SEGUNDOS });
+    expect(call?.[1]).toBe(true);
+    expect(call?.[2]).toEqual({ ex: CONVERSA_ECO_PAINEL_TTL_SEGUNDOS });
     expect(CONVERSA_ECO_PAINEL_TTL_SEGUNDOS).toBeGreaterThanOrEqual(300);
     expect(CONVERSA_ECO_PAINEL_TTL_SEGUNDOS).toBeLessThanOrEqual(600);
   });

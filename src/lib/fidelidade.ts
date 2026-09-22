@@ -2,6 +2,7 @@ import { redis } from "./redis";
 import { calcularEstrelasPorValorElegivel, META_ESTRELAS_V1, REGRA_ESTRELAS_V1 } from "./estrelas";
 import { sanitizeTelefoneCliente, clienteIdDoTelefone } from "./clientes";
 import type { PedidoSnapshotOficial } from "./pedidoSnapshot";
+import { obterRecomendacaoPresente, type RecomendacaoPresente } from "./recompensaInteligente";
 
 export type TipoRecompensa = "pizza_gratis" | "desconto_fixo" | "desconto_percentual";
 
@@ -732,6 +733,10 @@ export type RecompensaPontosDesbloqueada = {
   /** Estado da notificação — "pendente" até uma etapa futura efetivamente enviar a mensagem (ver `notificacaoRecompensaHabilitada`). */
   notificacaoStatus: "pendente" | "enviada";
   createdAt: string;
+  /** Descrição congelada no desbloqueio; a regra comercial base nunca é alterada retroativamente. */
+  descricaoRecompensa?: string;
+  /** Auditoria não sensível da recomendação baseada apenas em pedidos entregues. */
+  recomendacao?: Omit<RecomendacaoPresente, "descricao">;
 };
 
 export async function obterRecompensasPontos(clienteId: string): Promise<RecompensaPontosDesbloqueada[]> {
@@ -1028,7 +1033,7 @@ function aplicarDeteccaoRecompensa(
   clienteId: string,
   recompensasAtuais: RecompensaPontosDesbloqueada[],
   meta: number,
-  params: { saldoAnterior: number; saldoAtual: number; pedidoId?: string }
+  params: { saldoAnterior: number; saldoAtual: number; pedidoId?: string; recomendacao?: RecomendacaoPresente }
 ): RecompensaPontosDesbloqueada[] {
   if (meta <= 0) return recompensasAtuais;
   if (params.saldoAnterior >= meta) return recompensasAtuais; // ja tinha cruzado antes (ciclo ja aberto ou nao resolvido)
@@ -1046,6 +1051,17 @@ function aplicarDeteccaoRecompensa(
     status: "disponivel",
     notificacaoStatus: "pendente",
     createdAt: new Date().toISOString(),
+    ...(params.recomendacao ? {
+      descricaoRecompensa: params.recomendacao.descricao,
+      recomendacao: {
+        produtoBase: params.recomendacao.produtoBase,
+        sabor: params.recomendacao.sabor,
+        pedidosConsiderados: params.recomendacao.pedidosConsiderados,
+        ocorrencias: params.recomendacao.ocorrencias,
+        confianca: params.recomendacao.confianca,
+        algoritmoVersao: params.recomendacao.algoritmoVersao,
+      },
+    } : {}),
   };
   return [...recompensasAtuais, recompensa];
 }
@@ -1152,11 +1168,15 @@ export async function registrarMovimentoPontosIdempotente(
     const meta = usaEstrelas ? metaEstrelasDaConfig(config) : calcularMetaPontos(config);
     let novasRecompensas = estado.recompensas;
     const podeLiberarBeneficio = !usaEstrelas || config.coberturaEconomicaAprovada === true;
+    const recomendacao = podeLiberarBeneficio && saldoAnterior < meta && saldoApos >= meta
+      ? await obterRecomendacaoPresente(clienteId, config.descricaoRecompensa)
+      : undefined;
     if (podeLiberarBeneficio && saldoApos > saldoAnterior) {
       novasRecompensas = aplicarDeteccaoRecompensa(clienteId, novasRecompensas, meta, {
         saldoAnterior,
         saldoAtual: saldoApos,
         pedidoId: evento.pedidoId,
+        recomendacao,
       });
     }
     if (podeLiberarBeneficio) novasRecompensas = aplicarQuedaAbaixoDaMeta(novasRecompensas, meta, saldoApos);

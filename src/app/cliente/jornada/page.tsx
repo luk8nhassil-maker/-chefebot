@@ -127,7 +127,7 @@ export default function JornadaDoChefPage() {
     setCarregando(false)
   }
 
-  useEffect(() => { carregar() }, [])
+  useEffect(() => { queueMicrotask(() => { void carregar() }) }, [])
 
   // Reconciliação da reserva do servidor com o carrinho real do navegador:
   // o card "presente está no carrinho" só pode existir se a referência local
@@ -145,11 +145,11 @@ export default function JornadaDoChefPage() {
     if (!reservada) return
     const decisao = reconciliarReservaComReferencia(reservada, lerReferenciaRecompensa(localStorage))
     if (decisao.acao === 'manter') {
-      setReservaConfirmadaId(reservada.recompensaId)
+      queueMicrotask(() => setReservaConfirmadaId(reservada.recompensaId))
       return
     }
     if (decisao.acao === 'reconstruir' && gravarReferenciaRecompensa(localStorage, decisao.referencia)) {
-      setReservaConfirmadaId(reservada.recompensaId)
+      queueMicrotask(() => setReservaConfirmadaId(reservada.recompensaId))
       return
     }
     // "liberar" (pizza sem o sabor escolhido) ou storage bloqueado: devolve a
@@ -173,7 +173,7 @@ export default function JornadaDoChefPage() {
       } catch {}
       setAvisoReserva('Não conseguimos confirmar seu presente na sacola agora. Atualize a página para tentar de novo.')
     })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [jornada])
 
   async function abrirCaixa(recompensaId: string) {
@@ -239,7 +239,7 @@ export default function JornadaDoChefPage() {
           return
         }
         try { sessionStorage.setItem(CF_OPEN_CART_KEY, '1') } catch {}
-        window.location.href = '/pedido'
+        window.location.assign('/pedido')
         return
       }
     } catch {}

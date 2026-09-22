@@ -161,13 +161,13 @@ export default function ConversasPage() {
   const router = useRouter()
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [loading, setLoading] = useState(true)
-  const [now, setNow] = useState(Date.now())
+  const [now, setNow] = useState(0)
   const [confirmando, setConfirmando] = useState<Pedido | null>(null)
   const [finalizando, setFinalizando] = useState<string | null>(null)
   const [devolvendoBot, setDevolvendoBot] = useState<string | null>(null)
   const [toast, setToast] = useState("")
   const [busca, setBusca] = useState("")
-  const toastTimer = useRef<any>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Chat state
   const [conversaSelecionada, setConversaSelecionada] = useState<string | null>(null)
@@ -201,56 +201,6 @@ export default function ConversasPage() {
       .catch(() => setLoading(false))
   }
 
-  useEffect(() => {
-    carregar()
-    // Atualiza a lista só enquanto a aba está visível, e imediatamente ao
-    // voltar para ela — mesmo padrão de src/app/cliente/pedidos/page.tsx.
-    function talvezCarregar() {
-      if (document.visibilityState === 'visible') carregar()
-    }
-    const ivData = setInterval(talvezCarregar, 15000)
-    const ivTime = setInterval(() => setNow(Date.now()), 30000)
-    document.addEventListener('visibilitychange', talvezCarregar)
-    return () => { clearInterval(ivData); clearInterval(ivTime); document.removeEventListener('visibilitychange', talvezCarregar) }
-  }, [router])
-
-  useEffect(() => {
-    carregarRecentes()
-    function talvezCarregarRecentes() {
-      if (document.visibilityState === 'visible') carregarRecentes()
-    }
-    const iv = setInterval(talvezCarregarRecentes, 8000)
-    document.addEventListener('visibilitychange', talvezCarregarRecentes)
-    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', talvezCarregarRecentes) }
-  }, [])
-
-  // Poll history for selected conversation. A conversa permanece aberta enquanto
-  // selecionada — mesmo que saia da lista de recentes (ex.: finalizada ou após 30 min),
-  // garantindo leitura do histórico sem fechar sozinha. Só consulta com a aba
-  // visível, e atualiza imediatamente ao voltar para ela.
-  useEffect(() => {
-    if (!conversaSelecionada) { setHistoricoMsgs([]); setHistoricoErro(false); return }
-    const phone = conversaSelecionada
-    setHistoricoErro(false)
-    carregarHistorico(phone)
-    function talvezCarregarHistorico() {
-      if (document.visibilityState === 'visible') carregarHistorico(phone)
-    }
-    const iv = setInterval(talvezCarregarHistorico, 3000)
-    document.addEventListener('visibilitychange', talvezCarregarHistorico)
-    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', talvezCarregarHistorico) }
-  }, [conversaSelecionada])
-
-  // Auto-scroll to newest message
-  useEffect(() => {
-    historicoBottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [historicoMsgs])
-
-  function showToast(msg: string) {
-    setToast(msg); clearTimeout(toastTimer.current)
-    toastTimer.current = setTimeout(() => setToast(""), 3500)
-  }
-
   async function carregarHistorico(phone: string) {
     try {
       const r = await fetch(`/api/pedido-combinado?phone=${encodeURIComponent(phone)}`)
@@ -265,6 +215,59 @@ export default function ConversasPage() {
     } catch {
       setHistoricoErro(true)
     }
+  }
+
+  useEffect(() => {
+    carregar()
+    queueMicrotask(() => setNow(Date.now()))
+    // Atualiza a lista só enquanto a aba está visível, e imediatamente ao
+    // voltar para ela — mesmo padrão de src/app/cliente/pedidos/page.tsx.
+    function talvezCarregar() {
+      if (document.visibilityState === 'visible') carregar()
+    }
+    const ivData = setInterval(talvezCarregar, 15000)
+    const ivTime = setInterval(() => setNow(Date.now()), 30000)
+    document.addEventListener('visibilitychange', talvezCarregar)
+    return () => { clearInterval(ivData); clearInterval(ivTime); document.removeEventListener('visibilitychange', talvezCarregar) }
+  }, [router])
+
+  useEffect(() => {
+    queueMicrotask(() => { void carregarRecentes() })
+    function talvezCarregarRecentes() {
+      if (document.visibilityState === 'visible') carregarRecentes()
+    }
+    const iv = setInterval(talvezCarregarRecentes, 8000)
+    document.addEventListener('visibilitychange', talvezCarregarRecentes)
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', talvezCarregarRecentes) }
+  }, [])
+
+  // Poll history for selected conversation. A conversa permanece aberta enquanto
+  // selecionada — mesmo que saia da lista de recentes (ex.: finalizada ou após 30 min),
+  // garantindo leitura do histórico sem fechar sozinha. Só consulta com a aba
+  // visível, e atualiza imediatamente ao voltar para ela.
+  useEffect(() => {
+    if (!conversaSelecionada) {
+      queueMicrotask(() => { setHistoricoMsgs([]); setHistoricoErro(false) })
+      return
+    }
+    const phone = conversaSelecionada
+    queueMicrotask(() => { setHistoricoErro(false); void carregarHistorico(phone) })
+    function talvezCarregarHistorico() {
+      if (document.visibilityState === 'visible') carregarHistorico(phone)
+    }
+    const iv = setInterval(talvezCarregarHistorico, 3000)
+    document.addEventListener('visibilitychange', talvezCarregarHistorico)
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', talvezCarregarHistorico) }
+  }, [conversaSelecionada])
+
+  // Auto-scroll to newest message
+  useEffect(() => {
+    historicoBottomRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [historicoMsgs])
+
+  function showToast(msg: string) {
+    setToast(msg); if (toastTimer.current) clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(""), 3500)
   }
 
   async function enviarMensagem() {
@@ -852,7 +855,7 @@ export default function ConversasPage() {
                   {busca ? (
                     <>
                       <div style={{ fontSize: 26, marginBottom: 8 }}>🔍</div>
-                      <div style={{ fontSize: 13, fontWeight: 800, color: "var(--foreground-secondary)" }}>Nenhum resultado para "{busca}"</div>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: "var(--foreground-secondary)" }}>Nenhum resultado para &quot;{busca}&quot;</div>
                     </>
                   ) : (
                     <>

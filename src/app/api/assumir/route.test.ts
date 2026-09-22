@@ -7,7 +7,8 @@ const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
     get: vi.fn(async (key: string) => store.get(key) ?? null),
-    set: vi.fn(async (key: string, value: unknown) => {
+    set: vi.fn(async (key: string, value: unknown, opts?: { ex?: number }) => {
+      void opts;
       store.set(key, value);
       return "OK";
     }),
@@ -50,12 +51,12 @@ describe("POST /api/assumir — TTL 7200", () => {
     const res = await POST(postReq({ telefone: PHONE }, token));
     expect(res.status).toBe(200);
 
-    const manualCall = redisMock.set.mock.calls.find(([k]: [string]) =>
+    const manualCall = redisMock.set.mock.calls.find(([k]) =>
       k === `manual:${PHONE}`
     );
     expect(manualCall).toBeDefined();
-    expect(manualCall[1]).toBe(true);
-    expect(manualCall[2]).toEqual({ ex: 7200 });
+    expect(manualCall?.[1]).toBe(true);
+    expect(manualCall?.[2]).toEqual({ ex: 7200 });
   });
 
   it("renova session:{phone} com TTL 7200 quando sessão existe", async () => {
@@ -65,19 +66,19 @@ describe("POST /api/assumir — TTL 7200", () => {
     const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
     await POST(postReq({ telefone: PHONE }, token));
 
-    const sessionCall = redisMock.set.mock.calls.find(([k]: [string]) =>
+    const sessionCall = redisMock.set.mock.calls.find(([k]) =>
       k === `session:${PHONE}`
     );
     expect(sessionCall).toBeDefined();
-    expect(sessionCall[1]).toEqual(sessao);
-    expect(sessionCall[2]).toEqual({ ex: 7200 });
+    expect(sessionCall?.[1]).toEqual(sessao);
+    expect(sessionCall?.[2]).toEqual({ ex: 7200 });
   });
 
   it("não toca session:{phone} quando sessão não existe", async () => {
     const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
     await POST(postReq({ telefone: PHONE }, token));
 
-    const sessionCall = redisMock.set.mock.calls.find(([k]: [string]) =>
+    const sessionCall = redisMock.set.mock.calls.find(([k]) =>
       k === `session:${PHONE}`
     );
     expect(sessionCall).toBeUndefined();
@@ -88,10 +89,10 @@ describe("POST /api/assumir — TTL 7200", () => {
     const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
     await POST(postReq({ telefone: semDDI }, token));
 
-    const manualCall = redisMock.set.mock.calls.find(([k]: [string]) =>
+    const manualCall = redisMock.set.mock.calls.find(([k]) =>
       k === `manual:${PHONE}`
     );
     expect(manualCall).toBeDefined();
-    expect(manualCall[2]).toEqual({ ex: 7200 });
+    expect(manualCall?.[2]).toEqual({ ex: 7200 });
   });
 });

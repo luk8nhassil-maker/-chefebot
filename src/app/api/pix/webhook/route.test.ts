@@ -74,6 +74,16 @@ const pedidoPix = {
   pix: { txid: "tx-1", valorEsperado: 50, status: "pendente" },
 };
 
+type PedidoWebhookTeste = Omit<typeof pedidoPix, "pix"> & {
+  status?: string;
+  pixConfirmado?: boolean;
+  pix: typeof pedidoPix.pix & {
+    confirmadoPor?: string;
+    confirmadoEm?: string;
+    providerPaymentId?: string;
+  };
+};
+
 beforeEach(() => {
   store.clear();
   vi.clearAllMocks();
@@ -113,7 +123,7 @@ describe("POST /api/pix/webhook", () => {
       { "x-pix-webhook-secret": "secret-ok" }
     ));
     const body = await json(res);
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoWebhookTeste[];
 
     expect(body).toMatchObject({ passive: false, wouldConfirm: true, confirmed: true, pedidoId: "pedido-1" });
     expect(pedidos[0].pixConfirmado).toBe(true);
@@ -246,7 +256,7 @@ describe("POST /api/pix/webhook", () => {
       { txid: "tx-hibrido", valor: 30, status: "liquidado" },
       { "x-pix-webhook-secret": "secret-ok" }
     )));
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoWebhookTeste[];
 
     expect(body).toMatchObject({
       wouldConfirm: true,
@@ -303,7 +313,7 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
 
     const res = await POST(postReq(mpBody, mpHeaders));
     const body = await json(res);
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoWebhookTeste[];
 
     expect(body).toMatchObject({ passive: false, wouldConfirm: true, confirmed: true, pedidoId: "pedido-1", txid: "tx-1" });
     expect(pedidos[0].pixConfirmado).toBe(true);
@@ -396,7 +406,7 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
 
     expect(body).toMatchObject({ wouldConfirm: false, reason: "cobranca_substituida", pedidoId: "pedido-1" });
     expect(pedidosFoiEscrito()).toBe(false);
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoWebhookTeste[];
     expect(pedidos[0].pixConfirmado).toBeFalsy();
   });
 
@@ -411,7 +421,7 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
     const body = await json(await POST(postReq(mpBody, mpHeaders)));
 
     expect(body).toMatchObject({ confirmed: true, wouldConfirm: true });
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoWebhookTeste[];
     expect(pedidos[0].pixConfirmado).toBe(true);
   });
 });

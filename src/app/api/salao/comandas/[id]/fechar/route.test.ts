@@ -19,6 +19,12 @@ const { store, redisMock } = vi.hoisted(() => {
       return next;
     }),
     expire: vi.fn(async () => 1),
+    eval: vi.fn(async (_script: string, keys: string[], args: unknown[]) => {
+      const key = keys[0];
+      if (!key || store.get(key) !== args[0]) return 0;
+      store.delete(key);
+      return 1;
+    }),
   };
   return { store, redisMock };
 });
@@ -26,7 +32,7 @@ const { store, redisMock } = vi.hoisted(() => {
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 
 import { POST } from "./route";
-import { abrirComanda, marcarComandaEnviada, type Comanda } from "@/lib/comandas";
+import { abrirComanda, type Comanda } from "@/lib/comandas";
 import { SALAO_COOKIE, criarTokenSalao } from "@/lib/salaoAuth";
 
 function paramsFor(id: string) {
@@ -52,21 +58,42 @@ describe("POST /api/salao/comandas/[id]/fechar", () => {
     expect(res.status).toBe(401);
   });
 
-  it("recusa fechar uma comanda ainda aberta (sem pedido enviado)", async () => {
+  it("recusa pedir a conta de uma comanda sem envio ativo", async () => {
     const token = await criarTokenSalao();
     const comanda = await abrirComandaOk("5");
     const res = await POST(req(token), paramsFor(comanda.id));
     expect(res.status).toBe(409);
   });
 
-  it("fecha uma comanda já enviada", async () => {
+  it("solicita a conta de uma comanda com todos os envios servidos", async () => {
     const token = await criarTokenSalao();
     const comanda = await abrirComandaOk("5");
-    await marcarComandaEnviada(comanda.id, "ped_1", 1);
+    const agora = new Date().toISOString();
+    store.set("salao:comandas", [{
+      ...comanda,
+      status: "enviada",
+      pedidoId: "ped_1",
+      pedidoNumero: 1,
+      enviadaEm: agora,
+      rodadas: [{
+        id: "rodada_1",
+        numero: 1,
+        status: "enviada",
+        itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }],
+        subtotal: 12,
+        criadaEm: agora,
+        atualizadaEm: agora,
+        enviadaEm: agora,
+        pedidoId: "ped_1",
+        pedidoNumero: 1,
+      }],
+    }]);
+    store.set("pedidos", [{ id: "ped_1", total: 12, status: "entregue" }]);
     const res = await POST(req(token), paramsFor(comanda.id));
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.comanda.status).toBe("fechada");
+    expect(data.contaSolicitada).toBe(true);
+    expect(data.estado.status).toBe("conta_solicitada");
   });
 
   it("404 para comanda inexistente", async () => {

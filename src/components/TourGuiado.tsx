@@ -42,7 +42,9 @@ export default function TourGuiado({ passos, storageKey, onClose }: Props) {
   function playClick(freq=700, dur=0.06) {
     try {
       if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
+        const AudioContextCtor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+        if (!AudioContextCtor) return
+        audioCtxRef.current = new AudioContextCtor()
       }
       if (audioCtxRef.current.state === 'suspended') {
         audioCtxRef.current.resume()
@@ -134,12 +136,14 @@ export default function TourGuiado({ passos, storageKey, onClose }: Props) {
         if (p.particles && r) spawnParticles(r.left + r.w/2 - 3, r.top + r.h/2 - 3, p.accent)
       }, 150)
     } else {
-      setSplRect(null)
-      clearParticles()
+      queueMicrotask(() => {
+        setSplRect(null)
+        clearParticles()
+      })
     }
     if (p.arrowId) {
       setTimeout(() => setArrowRect(getPos(p.arrowId!)), 150)
-    } else setArrowRect(null)
+    } else queueMicrotask(() => setArrowRect(null))
     setTimeout(() => typeText(p.text), 200)
     playClick(360 + cur * 60, 0.07)
   }, [cur])

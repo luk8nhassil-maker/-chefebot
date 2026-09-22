@@ -473,9 +473,7 @@ describe("Hipóteses alternativas descartadas pela auditoria", () => {
     await PATCH(patchRequest({ id: "5001", status: "saiu_entrega" }));
 
     const mensagens = envios();
-    expect(mensagens).toHaveLength(1);
-    expect(mensagens[0].numero).not.toBe("5571234567890");
-    expect(mensagens[0].numero).toBe("55"); // sanitizePhone("") -> só o prefixo do país
+    expect(mensagens).toHaveLength(0);
   });
 });
 
