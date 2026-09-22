@@ -324,12 +324,10 @@ type FidelidadeRankingScreenProps = {
 /** Pódio detalhado: scores são reais; nomes, fotos e variações de terceiros
  * não são expostos porque a API do cliente deliberadamente não fornece PII. */
 function FidelidadeRankingScreen({ ranking, temporada, onClose }: FidelidadeRankingScreenProps) {
-  const [aba, setAba] = useState<'top10' | 'minha' | 'todos'>('top10')
+  const [aba, setAba] = useState<'top10' | 'minha'>('top10')
   const lista = ranking.lista
   const podium = lista.filter((entrada) => entrada.posicao <= 3)
-  const linhas = aba === 'minha'
-    ? lista.filter((entrada) => entrada.eVoce)
-    : lista
+  const linhas = aba === 'minha' ? lista.filter((entrada) => entrada.eVoce) : lista
   const nomeSeguro = (entrada: { eVoce: boolean; posicao: number }) => entrada.eVoce ? 'Você' : `Participante ${entrada.posicao}`
 
   return (
@@ -364,7 +362,7 @@ function FidelidadeRankingScreen({ ranking, temporada, onClose }: FidelidadeRank
       </section>
 
       <div className="cf-ranking-tabs" role="tablist" aria-label="Filtro do ranking">
-        {([['top10', 'Top 10'], ['minha', 'Minha posição'], ['todos', 'Todos']] as const).map(([id, label]) => (
+        {([['top10', 'Top 10'], ['minha', 'Minha posição']] as const).map(([id, label]) => (
           <button key={id} type="button" role="tab" aria-selected={aba === id} className={aba === id ? 'ativo' : ''} onClick={() => setAba(id)}>{label}</button>
         ))}
       </div>
@@ -375,10 +373,9 @@ function FidelidadeRankingScreen({ ranking, temporada, onClose }: FidelidadeRank
             <strong>{entrada.posicao}</strong>
             <span className="cf-ranking-row-avatar">{entrada.eVoce ? 'V' : '★'}</span>
             <span className="cf-ranking-row-name">{nomeSeguro(entrada)}</span>
-            <b>{entrada.score} Estrelas</b>
+            <b className="cf-ranking-row-score"><Star size={14} aria-hidden="true" /> {entrada.score}</b>
           </div>
         ))}
-        {aba === 'todos' && <p className="cf-ranking-footnote">Mostrando os participantes disponíveis no ranking desta temporada.</p>}
       </section>
 
       <section className="cf-ranking-note">
@@ -965,7 +962,7 @@ export default function ClientePage() {
         style={{
           flex: 1,
           padding: '28px 20px calc(env(safe-area-inset-bottom) + 96px)',
-          maxWidth: modoPreview || step === 'perfil' ? 430 : 1180,
+          maxWidth: modoPreview ? 430 : step === 'perfil' ? 760 : 1180,
           width: '100%',
           margin: '0 auto',
           boxSizing: 'border-box',
@@ -1500,9 +1497,9 @@ export default function ClientePage() {
       />
 
       <style>{`
-        .cliente-conteudo-fidelidade { padding: 18px 16px calc(env(safe-area-inset-bottom) + 102px)!important; max-width: 422px!important; }
+        .cliente-conteudo-fidelidade { padding: 18px 16px calc(env(safe-area-inset-bottom) + 102px)!important; max-width: 760px!important; }
         .cliente-conteudo-fidelidade .cf-preview-phone { max-width: 390px; }
-        .cf-ranking-screen { width: 100%; max-width: 390px; margin: -4px auto 0; color: #1e2a3b; }
+        .cf-ranking-screen { width: 100%; max-width: 720px; margin: -4px auto 0; color: #1e2a3b; }
         .cf-ranking-header { display: grid; grid-template-columns: 52px 1fr auto; align-items: start; gap: 8px; margin-bottom: 16px; }
         .cf-ranking-header>button { width: 48px; height: 48px; border: 0; border-radius: 50%; background: rgba(255,255,255,.9); color: #182337; font-size: 39px; line-height: 38px; cursor: pointer; box-shadow: 0 8px 20px rgba(39,68,100,.08); }
         .cf-ranking-header h1 { margin: 4px 0 3px; font-size: 28px; line-height: 1.1; letter-spacing: -.7px; text-align: center; }
@@ -1517,8 +1514,8 @@ export default function ClientePage() {
         .cf-ranking-podium-item strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }.cf-ranking-podium-item b { margin-top: 4px; color: #ae7109; font-size: 11px; }
         .cf-ranking-current { display: grid; grid-template-columns: .78fr 1.15fr 1.15fr; align-items: center; gap: 10px; margin-top: -1px; padding: 16px 15px; border: 1px solid rgba(107,164,245,.32); border-radius: 22px; background: linear-gradient(110deg, rgba(247,252,255,.98), rgba(230,243,255,.95)); box-shadow: 0 10px 22px rgba(62,117,180,.08); }
         .cf-ranking-current small { display: block; color: #69798d; font-size: 10px; line-height: 1.25; }.cf-ranking-current>div>strong { display: block; margin-top: 3px; color: #17263d; font-size: 30px; line-height: 1; }.cf-ranking-current-user { display: flex; align-items: center; gap: 8px; border-left: 1px solid rgba(88,133,192,.22); border-right: 1px solid rgba(88,133,192,.22); padding: 0 8px; }.cf-ranking-current-user>span { width: 37px; height: 37px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #4f86ed; color: white; font-weight: 800; }.cf-ranking-current-user b { display: flex; flex-direction: column; font-size: 14px; }.cf-ranking-current-user em { margin-top: 3px; color: #b27108; font-size: 11px; font-style: normal; white-space: nowrap; }.cf-ranking-current>div:last-child strong { font-size: 15px; color: #40536f; }
-        .cf-ranking-tabs { display: grid; grid-template-columns: repeat(3,1fr); gap: 2px; margin: 17px 0 11px; padding: 3px; border-radius: 24px; background: rgba(222,227,234,.75); }.cf-ranking-tabs button { min-height: 39px; border: 0; border-radius: 21px; background: transparent; color: #687488; font: 700 12px inherit; cursor: pointer; }.cf-ranking-tabs button.ativo { color: #1f63d6; background: rgba(255,255,255,.98); box-shadow: 0 3px 10px rgba(48,75,108,.1); }
-        .cf-ranking-list { display: flex; flex-direction: column; gap: 7px; }.cf-ranking-row { display: grid; grid-template-columns: 30px 34px 1fr auto; align-items: center; gap: 7px; min-height: 48px; padding: 6px 11px; border: 1px solid rgba(255,255,255,.85); border-radius: 24px; background: rgba(255,255,255,.84); box-shadow: 0 5px 14px rgba(58,78,101,.05); }.cf-ranking-row.voce { border-color: rgba(88,151,247,.4); background: linear-gradient(90deg, rgba(234,244,255,.98), rgba(248,252,255,.9)); }.cf-ranking-row>strong { font-size: 17px; text-align: center; }.cf-ranking-row-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #e8eef5; color: #61738a; font-size: 12px; font-weight: 800; }.cf-ranking-row.voce .cf-ranking-row-avatar { background: #4f86ed; color: #fff; }.cf-ranking-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }.cf-ranking-row>b { color: #ae7109; font-size: 12px; white-space: nowrap; }.cf-ranking-empty,.cf-ranking-footnote { margin: 7px 2px; color: #6d7a8c; font-size: 12px; line-height: 1.45; text-align: center; }.cf-ranking-note { display: flex; gap: 12px; align-items: center; margin-top: 17px; padding: 14px 15px; border: 1px solid rgba(226,180,55,.38); border-radius: 18px; background: linear-gradient(110deg, rgba(255,252,239,.96), rgba(255,247,218,.75)); }.cf-ranking-note>span { font-size: 25px; }.cf-ranking-note strong { font-size: 13px; }.cf-ranking-note p { margin: 4px 0 0; color: #697588; font-size: 11.5px; line-height: 1.35; }
+        .cf-ranking-tabs { display: grid; grid-template-columns: repeat(2,1fr); gap: 2px; margin: 17px 0 11px; padding: 3px; border-radius: 24px; background: rgba(222,227,234,.75); }.cf-ranking-tabs button { min-height: 39px; border: 0; border-radius: 21px; background: transparent; color: #687488; font: 700 12px inherit; cursor: pointer; }.cf-ranking-tabs button.ativo { color: #1f63d6; background: rgba(255,255,255,.98); box-shadow: 0 3px 10px rgba(48,75,108,.1); }
+        .cf-ranking-list { display: flex; flex-direction: column; gap: 7px; }.cf-ranking-row { display: grid; grid-template-columns: 30px 34px 1fr auto; align-items: center; gap: 7px; min-height: 48px; padding: 6px 11px; border: 1px solid rgba(255,255,255,.85); border-radius: 24px; background: rgba(255,255,255,.84); box-shadow: 0 5px 14px rgba(58,78,101,.05); }.cf-ranking-row.voce { border-color: rgba(88,151,247,.4); background: linear-gradient(90deg, rgba(234,244,255,.98), rgba(248,252,255,.9)); }.cf-ranking-row>strong { font-size: 17px; text-align: center; }.cf-ranking-row-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #e8eef5; color: #61738a; font-size: 12px; font-weight: 800; }.cf-ranking-row.voce .cf-ranking-row-avatar { background: #4f86ed; color: #fff; }.cf-ranking-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }.cf-ranking-row-score { display: inline-flex; align-items: center; gap: 4px; color: #ae7109; font-size: 12px; white-space: nowrap; }.cf-ranking-empty { margin: 7px 2px; color: #6d7a8c; font-size: 12px; line-height: 1.45; text-align: center; }.cf-ranking-note { display: flex; gap: 12px; align-items: center; margin-top: 17px; padding: 14px 15px; border: 1px solid rgba(226,180,55,.38); border-radius: 18px; background: linear-gradient(110deg, rgba(255,252,239,.96), rgba(255,247,218,.75)); }.cf-ranking-note>span { font-size: 25px; }.cf-ranking-note strong { font-size: 13px; }.cf-ranking-note p { margin: 4px 0 0; color: #697588; font-size: 11.5px; line-height: 1.35; }
         .cf-mobile-empty { width: 100%; box-sizing: border-box; padding: 18px; border-radius: 19px; background: rgba(255,255,255,.75); border: 1px solid rgba(255,255,255,.82); color: #697588; font-size: 14px; text-align: center; }
         .cf-mobile-empty button { margin-top: 10px; border: 0; border-radius: 12px; padding: 10px 14px; background: #ffc900; color: #252a30; font-weight: 700; cursor: pointer; }
         .cf-mobile-sheet-backdrop { position: fixed; inset: 0; z-index: 80; display: flex; align-items: flex-end; justify-content: center; padding: 18px; background: rgba(20,27,37,.38); }
@@ -1592,7 +1589,8 @@ export default function ClientePage() {
         .cf-preview-referral{position:relative;overflow:hidden;padding:19px 17px 17px;background:rgba(255,255,255,.56);min-height:188px}.cf-preview-referral h2{position:relative;z-index:2;font-size:18px;font-weight:800;line-height:1.2;margin:0 0 7px;max-width:88%}.cf-preview-referral>p:not(.cf-preview-kicker){position:relative;z-index:2;font-size:12.5px;line-height:1.45;color:#737d8b;max-width:86%;margin:0 0 17px}.cf-preview-referral>button{position:relative;z-index:3;width:100%;min-height:46px;border:1px solid rgba(255,255,255,.38);border-radius:13px;background:linear-gradient(135deg,rgba(67,134,247,.82),rgba(31,91,204,.8));color:#fff;font:700 15px inherit;backdrop-filter:blur(18px) saturate(1.45);box-shadow:0 8px 22px rgba(31,91,204,.18),inset 0 1px 0 rgba(255,255,255,.4);cursor:pointer}
         .cf-preview-gift{position:absolute;right:-36px;top:48%;transform:translateY(-50%) rotate(-7deg) scale(2.2);font-size:54px;opacity:.9;z-index:1;filter:drop-shadow(0 15px 22px rgba(233,80,126,.22))}
         .cf-preview-modal-backdrop{position:fixed;inset:0;z-index:80;background:rgba(20,27,37,.38);display:flex;align-items:flex-end;justify-content:center;padding:18px}.cf-preview-modal{width:100%;max-width:390px;background:#fff;border-radius:22px;padding:20px;box-shadow:0 24px 60px rgba(0,0,0,.22)}.cf-preview-modal h2{margin:0 0 5px;font-size:20px}.cf-preview-modal p{margin:0 0 14px;font-size:12.5px;line-height:1.4;color:#6d7684}.cf-preview-modal button{width:100%;min-height:42px;border:0;border-top:1px solid #edf0f4;background:#fff;color:#285fb9;font:700 14px inherit;cursor:pointer}.cf-preview-modal .cf-preview-modal-cancel{margin-top:7px;border-radius:11px;border:0;background:#f2f4f7;color:#59616a}
-        @media (max-width:420px){.cliente-conteudo{padding:14px 12px calc(env(safe-area-inset-bottom) + 102px)!important}.cf-preview-phone{max-width:390px}}
+        @media (max-width:420px){.cliente-conteudo{padding:14px 12px calc(env(safe-area-inset-bottom) + 102px)!important}.cliente-conteudo-fidelidade{max-width:430px!important}.cf-preview-phone,.cf-ranking-screen{max-width:390px}}
+        @media (min-width:421px){.cf-ranking-podium{min-height:270px;padding-left:24px;padding-right:24px}.cf-ranking-podium-1{min-height:230px}.cf-ranking-podium-2,.cf-ranking-podium-3{min-height:190px}.cf-ranking-current{padding-left:24px;padding-right:24px}.cf-ranking-list{max-width:680px;margin-left:auto;margin-right:auto}}
       `}</style>
     </div>
   )
