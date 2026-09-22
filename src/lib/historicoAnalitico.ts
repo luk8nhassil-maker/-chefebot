@@ -66,6 +66,17 @@ export type MetricasAnaliticas = {
   estrelasDistribuidas: number;
   cohortePorPedidos: Record<string, number>;
   percentualReceitaRecorrentes: number;
+  clientesComSegundoPedido: number;
+  percentualClientesComSegundoPedido: number;
+  pedidosMediosPorCliente: number;
+  receitaMediaPorClienteCents: number;
+  serieDiaria: Array<{
+    data: string;
+    pedidos: number;
+    receitaCents: number;
+    clientesUnicos: number;
+  }>;
+  porCanal: Record<CanalPedido, { pedidos: number; receitaCents: number }>;
 };
 
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
@@ -338,6 +349,17 @@ export function calcularMetricas(
       estrelasDistribuidas: 0,
       cohortePorPedidos: {},
       percentualReceitaRecorrentes: 0,
+      clientesComSegundoPedido: 0,
+      percentualClientesComSegundoPedido: 0,
+      pedidosMediosPorCliente: 0,
+      receitaMediaPorClienteCents: 0,
+      serieDiaria: [],
+      porCanal: {
+        app: { pedidos: 0, receitaCents: 0 },
+        whatsapp: { pedidos: 0, receitaCents: 0 },
+        salao: { pedidos: 0, receitaCents: 0 },
+        desconhecido: { pedidos: 0, receitaCents: 0 },
+      },
     };
   }
 
@@ -365,6 +387,31 @@ export function calcularMetricas(
     .filter(([cId]) => (pedidosPorCliente.get(cId) ?? 0) >= 2)
     .reduce((s, [, v]) => s + v, 0);
 
+  const clientesComSegundoPedido = [...pedidosPorCliente.values()].filter((count) => count >= 2).length;
+  const porDia = new Map<string, { pedidos: number; receitaCents: number; clientes: Set<string> }>();
+  const porCanal: MetricasAnaliticas["porCanal"] = {
+    app: { pedidos: 0, receitaCents: 0 },
+    whatsapp: { pedidos: 0, receitaCents: 0 },
+    salao: { pedidos: 0, receitaCents: 0 },
+    desconhecido: { pedidos: 0, receitaCents: 0 },
+  };
+
+  for (const ev of validos) {
+    const data = new Date(ev.criadoEmMs).toISOString().slice(0, 10);
+    const dia = porDia.get(data) ?? { pedidos: 0, receitaCents: 0, clientes: new Set<string>() };
+    dia.pedidos += 1;
+    dia.receitaCents += ev.valorElegivelCents;
+    dia.clientes.add(ev.clienteId);
+    porDia.set(data, dia);
+
+    porCanal[ev.canal].pedidos += 1;
+    porCanal[ev.canal].receitaCents += ev.valorElegivelCents;
+  }
+
+  const serieDiaria = [...porDia.entries()]
+    .sort(([dataA], [dataB]) => dataA.localeCompare(dataB))
+    .map(([data, dia]) => ({ data, pedidos: dia.pedidos, receitaCents: dia.receitaCents, clientesUnicos: dia.clientes.size }));
+
   return {
     pedidosValidos: validos.length,
     clientesUnicos: receitaPorCliente.size,
@@ -379,5 +426,12 @@ export function calcularMetricas(
     cohortePorPedidos,
     percentualReceitaRecorrentes:
       receitaTotal > 0 ? Math.round((receitaRecorrentes / receitaTotal) * 100) : 0,
+    clientesComSegundoPedido,
+    percentualClientesComSegundoPedido:
+      receitaPorCliente.size > 0 ? Math.round((clientesComSegundoPedido / receitaPorCliente.size) * 100) : 0,
+    pedidosMediosPorCliente: receitaPorCliente.size > 0 ? Number((validos.length / receitaPorCliente.size).toFixed(2)) : 0,
+    receitaMediaPorClienteCents: receitaPorCliente.size > 0 ? Math.round(receitaTotal / receitaPorCliente.size) : 0,
+    serieDiaria,
+    porCanal,
   };
 }

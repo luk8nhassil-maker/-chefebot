@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import PanelShell from '@/components/PanelShell'
+import FidelidadeAnalyticsDashboard from '@/components/FidelidadeAnalyticsDashboard'
 
 type EstrelasStatus = {
   ativa: boolean
@@ -56,6 +57,15 @@ type AnalyticsData = {
     clientesNovos: number
     clientesRecorrentes: number
     percentualClientesRecorrentes: number
+    clientesComSegundoPedido: number
+    percentualClientesComSegundoPedido: number
+    pedidosMediosPorCliente: number
+    receitaMediaPorClienteCents: number
+    serieDiaria: Array<{ data: string; pedidos: number; receitaCents: number; clientesUnicos: number }>
+    porCanal: Record<string, { pedidos: number; receitaCents: number }>
+    cohortePorPedidos: Record<string, number>
+    percentualReceitaRecorrentes: number
+    estrelasDistribuidas: number
   }
   periodosDias?: PeriodoAnalytics
   totalEventosNoIndice?: number
@@ -75,10 +85,6 @@ function diasRestantes(fimEm: string | null): number | null {
   if (!fimEm) return null
   const diff = new Date(fimEm).getTime() - Date.now()
   return Math.max(0, Math.ceil(diff / 86400000))
-}
-
-function formatarReais(centavos: number): string {
-  return (centavos / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
 // Gera identificador anonimizado para exibição no ranking
@@ -491,23 +497,7 @@ export default function FidelidadePage() {
                   <div style={{ fontSize: 13, color: 'var(--foreground-muted)', fontStyle: 'italic', padding: '8px 0' }}>
                     Histórico insuficiente para o período de {periodo} dias. Os dados aparecerão aqui conforme os pedidos forem registrados.
                   </div>
-                ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
-                    {[
-                      { label: 'Pedidos', valor: String(analytics.metricas?.pedidosValidos ?? 0) },
-                      { label: 'Receita', valor: formatarReais(analytics.metricas?.receitaElegivelCents ?? 0) },
-                      { label: 'Ticket médio', valor: formatarReais(analytics.metricas?.ticketMedioCents ?? 0) },
-                      { label: 'Clientes únicos', valor: String(analytics.metricas?.clientesUnicos ?? 0) },
-                      { label: 'Clientes novos', valor: String(analytics.metricas?.clientesNovos ?? 0) },
-                      { label: 'Clientes recorrentes', valor: `${analytics.metricas?.clientesRecorrentes ?? 0} (${analytics.metricas?.percentualClientesRecorrentes ?? 0}%)` },
-                    ].map(({ label, valor }) => (
-                      <div key={label} style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--background)', border: '1px solid var(--border)' }}>
-                        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.4px', textTransform: 'uppercase', color: 'var(--foreground-muted)', marginBottom: 4 }}>{label}</div>
-                        <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{valor}</div>
-                      </div>
-                    ))}
-                  </div>
-                )
+                ) : analytics.metricas ? <FidelidadeAnalyticsDashboard metricas={analytics.metricas} periodo={periodo} /> : null
               )}
             </div>
 

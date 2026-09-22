@@ -662,6 +662,23 @@ describe("calcularMetricas", () => {
     expect(calcularMetricas(eventos).clientesUnicos).toBe(2);
   });
 
+  test("separa segunda compra dentro do período e cria série diária/canais", () => {
+    const eventos = [
+      makeEvento({ pedidoId: "p1", clienteId: "cid_A", criadoEmMs: AGORA, canal: "whatsapp", valorElegivelCents: 5000 }),
+      makeEvento({ pedidoId: "p2", clienteId: "cid_A", criadoEmMs: AGORA + 86400000, canal: "whatsapp", valorElegivelCents: 6000 }),
+      makeEvento({ pedidoId: "p3", clienteId: "cid_B", criadoEmMs: AGORA + 86400000, canal: "salao", valorElegivelCents: 7000 }),
+    ];
+    const m = calcularMetricas(eventos);
+    expect(m.clientesComSegundoPedido).toBe(1);
+    expect(m.percentualClientesComSegundoPedido).toBe(50);
+    expect(m.pedidosMediosPorCliente).toBe(1.5);
+    expect(m.receitaMediaPorClienteCents).toBe(9000);
+    expect(m.serieDiaria).toHaveLength(2);
+    expect(m.serieDiaria[1]).toMatchObject({ pedidos: 2, receitaCents: 13000, clientesUnicos: 2 });
+    expect(m.porCanal.whatsapp).toEqual({ pedidos: 2, receitaCents: 11000 });
+    expect(m.porCanal.salao).toEqual({ pedidos: 1, receitaCents: 7000 });
+  });
+
   test("cohorte por pedidos: categoriza 1/2/3/4/5+", () => {
     const eventos = [
       // cid_A: 1 pedido
