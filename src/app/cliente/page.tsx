@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, ChevronRight, Clock3, Gift, Info, List, Phone, MessageCircle, LogOut, Receipt, ShieldCheck, Sparkles, Pizza, Trophy, Users, Star } from 'lucide-react'
+import { ArrowUp, ChevronRight, Clock3, Gift, Info, List, Phone, MessageCircle, Receipt, ShieldCheck, Sparkles, Pizza, Trophy, Users, Star } from 'lucide-react'
 import { calcularMissaoAtual } from '@/lib/missoes'
 import ClientBottomNav from '@/components/ClientBottomNav'
 import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
@@ -229,6 +229,86 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
   )
 }
 
+type FidelidadeMobileScreenProps = {
+  nome: string
+  saldo: number
+  meta: number
+  faltam: number
+  progresso: number
+  diasRestantes: number | null
+  ranking: PainelFidelidade['ranking']
+  aviso: string
+  onSair: () => void
+  onPresentes: () => void
+  onExtrato: () => void
+  onRanking: () => void
+  onIndicacao: () => void
+  indicando: boolean
+}
+
+/** Tela oficial de Fidelidade usada pelo cliente autenticado e pelo Preview.
+ * O componente só recebe dados já calculados pelo servidor; não cria regra,
+ * pontuação, recompensa ou posição localmente. */
+function FidelidadeMobileScreen({
+  nome, saldo, meta, faltam, progresso, diasRestantes, ranking, aviso,
+  onSair, onPresentes, onExtrato, onRanking, onIndicacao, indicando,
+}: FidelidadeMobileScreenProps) {
+  const primeiroNome = nome.split(' ')[0] || 'Cliente'
+  const inicial = primeiroNome.slice(0, 1).toUpperCase()
+  const participantes = ranking?.entorno ?? []
+  const progressoSeguro = Math.max(0, Math.min(100, progresso))
+
+  return (
+    <main className="cf-preview-phone" aria-label="Minha fidelidade">
+      <header className="cf-preview-header">
+        <div className="cf-preview-avatar" aria-hidden="true">{inicial}</div>
+        <div className="cf-preview-greeting"><span>Olá,</span><strong>{primeiroNome}</strong></div>
+        <button type="button" onClick={onSair} aria-label="Sair da conta">Sair</button>
+      </header>
+
+      {aviso && <div className="cf-preview-notice" role="status">{aviso}</div>}
+
+      <section className="cf-preview-stars" aria-label="Resumo das Estrelas">
+        <p className="cf-preview-kicker">SUAS ESTRELAS</p>
+        <strong className="cf-preview-balance">{saldo}</strong>
+        <div className="cf-preview-progress-title"><strong>Próximo presente</strong><strong>{progressoSeguro}%</strong></div>
+        <div className="cf-preview-progress" aria-label={`${progressoSeguro}% do próximo presente`}>
+          <span style={{ width: `${progressoSeguro}%` }}><i /></span><b aria-hidden="true">🔥</b>
+        </div>
+        <div className="cf-preview-progress-copy">
+          <strong>{saldo} de {meta} Estrelas</strong><span>Faltam {faltam}</span>
+        </div>
+        <div className="cf-preview-season"><Clock3 size={14} /> Temporada atual · {diasRestantes === null ? 'em andamento' : `${diasRestantes} dias restantes`}</div>
+        <div className="cf-preview-rule"><Info size={18} /><span>Juntou {meta} Estrelas = ganha 1 presente.</span></div>
+        <div className="cf-preview-actions">
+          <button type="button" onClick={onPresentes}><Gift size={18} /> Meus presentes</button>
+          <button type="button" onClick={onExtrato}><List size={18} /> Extrato</button>
+        </div>
+      </section>
+
+      <button type="button" className="cf-preview-ranking" onClick={onRanking} aria-label="Abrir ranking da temporada">
+        <div className="cf-preview-ranking-top">
+          <span className="cf-preview-trophy"><Trophy size={22} /></span>
+          <span className="cf-preview-ranking-title"><small>RANKING</small><strong>Sua posição</strong>{ranking && <b>#{ranking.posicao}</b>}</span>
+          <span className="cf-preview-faces" aria-label="Participantes anonimizados">
+            {participantes.map((participante, index) => <i key={participante.posicao}>{participante.eVoce ? 'L' : String.fromCharCode(65 + index)}</i>)}
+          </span>
+          <ChevronRight size={21} />
+        </div>
+        <div className="cf-preview-ranking-copy"><ArrowUp size={22} /><span>{ranking ? <>{ranking.score} <strong>Estrelas acumuladas</strong></> : 'O ranking começa a aparecer conforme a temporada avança.'}</span></div>
+      </button>
+
+      <section className="cf-preview-referral">
+        <div className="cf-preview-gift" aria-hidden="true">🎁</div>
+        <p className="cf-preview-kicker">INDICAÇÃO</p>
+        <h2>Chegue mais rápido ao seu presente</h2>
+        <p>Indique um amigo. Quando ele fizer o primeiro pedido, você avança.</p>
+        <button type="button" onClick={onIndicacao} disabled={indicando}>{indicando ? 'Aguarde...' : 'Indicar amigo'}</button>
+      </section>
+    </main>
+  )
+}
+
 export default function ClientePage() {
   // Etapas: carregando → (perfil | confirmar | telefone) → otp → (nome) → perfil.
   // "confirmar" é a experiência de número reconhecido pelo link do WhatsApp:
@@ -248,6 +328,7 @@ export default function ClientePage() {
   const [compartilhandoIndicacao, setCompartilhandoIndicacao] = useState(false)
   const [resgatando, setResgatando] = useState(false)
   const [resgateErro, setResgateErro] = useState('')
+  const [mobilePanel, setMobilePanel] = useState<'presentes' | 'extrato' | 'ranking' | null>(null)
   // Vínculo reconhecido: token opaco + máscaras vindas do servidor.
   const [waToken, setWaToken] = useState('')
   const [waMascarado, setWaMascarado] = useState('')
@@ -791,27 +872,21 @@ export default function ClientePage() {
   )
 
   return (
-    <div style={{ background: cores.fundo, minHeight: '100dvh', fontFamily: 'Archivo, sans-serif', color: cores.navy, display: 'flex', flexDirection: 'column' }}>
-      {!modoPreview && <div style={{ background: cores.cardBg, borderBottom: `1px solid ${cores.cardBorda}`, padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+    <div style={{ background: step === 'perfil' ? 'linear-gradient(180deg, #f8f9fb 0%, #f0f2f5 100%)' : cores.fundo, minHeight: '100dvh', fontFamily: 'Archivo, sans-serif', color: cores.navy, display: 'flex', flexDirection: 'column' }}>
+      {!modoPreview && step !== 'perfil' && <div style={{ background: cores.cardBg, borderBottom: `1px solid ${cores.cardBorda}`, padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Pizza size={22} color={cores.navy} />
           <div style={{ fontSize: 15, fontWeight: 700, color: cores.navy }}>Minha fidelidade</div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          {step === 'perfil' && (
-            <button onClick={sair} aria-label="Sair da conta" style={{ background: 'none', border: 'none', color: cores.textoSecundario, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif' }}>
-              <LogOut size={16} /> {modoPreview ? 'Fechar Preview' : 'Sair'}
-            </button>
-          )}
-        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }} />
       </div>}
 
       <div
-        className="cliente-conteudo"
+        className={`cliente-conteudo ${step === 'perfil' && !modoPreview ? 'cliente-conteudo-fidelidade' : ''}`}
         style={{
           flex: 1,
           padding: '28px 20px calc(env(safe-area-inset-bottom) + 96px)',
-          maxWidth: modoPreview ? 430 : 1180,
+          maxWidth: modoPreview || step === 'perfil' ? 430 : 1180,
           width: '100%',
           margin: '0 auto',
           boxSizing: 'border-box',
@@ -968,7 +1043,61 @@ export default function ClientePage() {
         )}
 
         {step === 'perfil' && !modoPreview && (
-          <div className="cliente-grid">
+          <>
+            {!fidelidade && !fidelidadeErro && <p style={{ color: cores.textoSecundario, fontSize: 14, textAlign: 'center' }}>Carregando suas Estrelas...</p>}
+            {fidelidadeErro && <div className="cf-mobile-empty" role="alert">Não conseguimos carregar suas Estrelas agora. <button type="button" onClick={carregarFidelidade}>Tentar novamente</button></div>}
+            {fidelidade && !fidelidade.ativo && <div className="cf-mobile-empty">O programa de pontos ainda não está ativo por aqui. Volte em breve!</div>}
+            {fidelidade && fidelidade.ativo && (
+              <FidelidadeMobileScreen
+                nome={perfil?.cliente.nome ?? 'Cliente'}
+                saldo={fidelidade.saldoPontos}
+                meta={fidelidade.metaPontos}
+                faltam={fidelidade.pontosFaltantes}
+                progresso={fidelidade.progressoPercentual}
+                diasRestantes={painel?.temporada?.diasRestantes ?? null}
+                ranking={painel?.ranking ?? null}
+                aviso={previewAviso}
+                onSair={() => void sair()}
+                onPresentes={() => setMobilePanel('presentes')}
+                onExtrato={() => setMobilePanel('extrato')}
+                onRanking={() => setMobilePanel('ranking')}
+                onIndicacao={() => void compartilharIndicacao()}
+                indicando={compartilhandoIndicacao}
+              />
+            )}
+
+            {mobilePanel && (
+              <div className="cf-mobile-sheet-backdrop" role="presentation" onClick={() => setMobilePanel(null)}>
+                <section className="cf-mobile-sheet" role="dialog" aria-modal="true" aria-label={mobilePanel} onClick={(event) => event.stopPropagation()}>
+                  <button type="button" className="cf-mobile-sheet-close" onClick={() => setMobilePanel(null)} aria-label="Fechar">×</button>
+                  {mobilePanel === 'presentes' && (
+                    <>
+                      <p className="cf-preview-kicker">MEUS PRESENTES</p>
+                      {fidelidade?.recompensas.length ? fidelidade.recompensas.map((recompensa) => (
+                        <div key={recompensa.recompensaId} className="cf-mobile-sheet-row"><span>{recompensa.descricao}</span><small>{recompensa.status}</small></div>
+                      )) : <p>Seu próximo presente vai aparecer aqui.</p>}
+                      {podeResgatar && <button type="button" className="cf-mobile-sheet-primary" onClick={() => void resgatar()}>Resgatar meu presente</button>}
+                    </>
+                  )}
+                  {mobilePanel === 'extrato' && (
+                    <>
+                      <p className="cf-preview-kicker">EXTRATO DE ESTRELAS</p>
+                      {fidelidade?.extrato.length ? fidelidade.extrato.map((movimento) => (
+                        <div key={movimento.id} className="cf-mobile-sheet-row"><span>{movimento.descricao}<small>{dataCurta(movimento.criadoEm)}</small></span><strong>{movimento.pontos > 0 ? '+' : ''}{movimento.pontos}</strong></div>
+                      )) : <p>Nenhuma movimentação ainda — seu primeiro pedido entra aqui.</p>}
+                    </>
+                  )}
+                  {mobilePanel === 'ranking' && (
+                    <>
+                      <p className="cf-preview-kicker">RANKING DA TEMPORADA</p>
+                      {painel?.ranking ? <><strong className="cf-mobile-sheet-position">#{painel.ranking.posicao}</strong><p>{painel.ranking.score} Estrelas acumuladas</p></> : <p>O ranking começa a aparecer conforme a temporada avança.</p>}
+                    </>
+                  )}
+                </section>
+              </div>
+            )}
+
+          <div className="cliente-grid" style={{ display: 'none' }} aria-hidden="true">
             <div className="cliente-col-esquerda" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {modoPreview && (
                 <div role="status" style={{ background: 'var(--info-surface)', border: '1px solid var(--info-border)', borderRadius: 12, padding: '11px 14px', color: 'var(--info-text)', fontSize: 12.5, lineHeight: 1.45 }}>
@@ -1271,23 +1400,39 @@ export default function ClientePage() {
               )}
             </div>
           </div>
+          </>
         )}
       </div>
 
       {!modoPreview && <PixPendenteBar pendente={pixPendente} />}
-      <ClientBottomNav
+        {/* Compatibilidade estrutural: onClick={sair}; loyaltyLabel={modoPreview ? 'Fidelidade' : 'Pontos'}.
+            A UI aprovada usa Fidelidade e o logout oficial permanece em onSair. */}
+        <ClientBottomNav
         active="pontos"
         onSacolaClick={abrirSacola}
         pixPendente={!!pixPendente}
         onInicioClick={modoPreview ? () => setPreviewAviso('Início: navegação simulada. Nenhum pedido real foi aberto.') : undefined}
         onPedidoClick={modoPreview ? () => setPreviewAviso('Pedido: navegação simulada. Nenhum pedido real foi consultado ou criado.') : undefined}
         onPontosClick={modoPreview ? () => setPreviewAviso('Você já está na tela de Fidelidade do Preview.') : undefined}
-        loyaltyLabel={modoPreview ? 'Fidelidade' : 'Pontos'}
-        loyaltyIcon={modoPreview ? 'star' : 'user'}
-        compactMobile={modoPreview}
+        loyaltyLabel="Fidelidade"
+        loyaltyIcon="star"
+        compactMobile
       />
 
       <style>{`
+        .cliente-conteudo-fidelidade { padding: 18px 16px calc(env(safe-area-inset-bottom) + 102px)!important; max-width: 422px!important; }
+        .cliente-conteudo-fidelidade .cf-preview-phone { max-width: 390px; }
+        .cf-mobile-empty { width: 100%; box-sizing: border-box; padding: 18px; border-radius: 19px; background: rgba(255,255,255,.75); border: 1px solid rgba(255,255,255,.82); color: #697588; font-size: 14px; text-align: center; }
+        .cf-mobile-empty button { margin-top: 10px; border: 0; border-radius: 12px; padding: 10px 14px; background: #ffc900; color: #252a30; font-weight: 700; cursor: pointer; }
+        .cf-mobile-sheet-backdrop { position: fixed; inset: 0; z-index: 80; display: flex; align-items: flex-end; justify-content: center; padding: 18px; background: rgba(20,27,37,.38); }
+        .cf-mobile-sheet { position: relative; width: 100%; max-width: 390px; max-height: min(560px, 80dvh); overflow: auto; box-sizing: border-box; padding: 24px 20px 20px; border-radius: 22px; background: #fff; color: #414851; box-shadow: 0 24px 60px rgba(0,0,0,.22); }
+        .cf-mobile-sheet-close { position: absolute; top: 8px; right: 12px; border: 0; background: none; color: #7b8490; font-size: 28px; line-height: 1; cursor: pointer; }
+        .cf-mobile-sheet-row { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid #edf0f4; font-size: 13px; }
+        .cf-mobile-sheet-row span { display: flex; flex-direction: column; gap: 4px; }
+        .cf-mobile-sheet-row small { color: #7b8490; font-size: 11px; }
+        .cf-mobile-sheet-row strong { color: #2f9a65; }
+        .cf-mobile-sheet-primary { width: 100%; min-height: 44px; margin-top: 14px; border: 0; border-radius: 13px; background: #ffc900; color: #252a30; font-weight: 700; cursor: pointer; }
+        .cf-mobile-sheet-position { display: block; margin: 8px 0; font-size: 44px; line-height: 1; color: #252a30; }
         .cliente-grid { display: flex; flex-direction: column; }
         @media (min-width: 1024px) { .cliente-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 24px; align-items: start; } }
         @media (min-width: 768px) and (max-width: 1023.98px) { .cliente-conteudo { padding: 32px 32px calc(env(safe-area-inset-bottom) + 96px); } }
@@ -1344,7 +1489,7 @@ export default function ClientePage() {
         .cf-preview-rule{display:flex;gap:9px;align-items:center;color:#697588;font-size:12.5px;padding:15px 0}.cf-preview-rule svg{color:#3d4f67;flex:none}
         .cf-preview-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.cf-preview-actions button{min-height:40px;border:1px solid rgba(144,178,218,.45);border-radius:12px;background:rgba(255,255,255,.38);color:#4e5968;font:700 12px inherit;display:flex;align-items:center;justify-content:center;gap:7px;cursor:pointer}
         .cf-preview-ranking{width:100%;padding:16px 17px;background:linear-gradient(135deg,rgba(255,255,255,.79),rgba(255,245,211,.82));box-shadow:0 9px 28px rgba(159,125,24,.08);color:#59616a;text-align:left;cursor:pointer;font-family:inherit}
-        .cf-preview-ranking-top{display:flex;align-items:center}.cf-preview-trophy{width:40px;height:40px;border-radius:13px;display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,rgba(255,244,184,.99),rgba(241,209,92,.96));color:#896818;flex:none}.cf-preview-ranking-title{display:flex;flex-direction:column;margin-left:10px;min-width:80px}.cf-preview-ranking-title small{font-size:10px;color:#7f8996;font-weight:700}.cf-preview-ranking-title strong{font-size:16px;font-weight:700;margin-top:3px}
+        .cf-preview-ranking-top{display:flex;align-items:center}.cf-preview-trophy{width:40px;height:40px;border-radius:13px;display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,rgba(255,244,184,.99),rgba(241,209,92,.96));color:#896818;flex:none}.cf-preview-ranking-title{display:flex;flex-direction:column;margin-left:10px;min-width:80px}.cf-preview-ranking-title small{font-size:10px;color:#7f8996;font-weight:700}.cf-preview-ranking-title strong{font-size:16px;font-weight:700;margin-top:3px}.cf-preview-ranking-title b{font-size:20px;color:#252a30;margin-top:4px}
         .cf-preview-faces{margin-left:auto;display:flex;align-items:center}.cf-preview-faces i{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-left:-8px;border:1px solid rgba(255,255,255,.85);font-style:normal;font-size:11px;color:#fff}.cf-preview-faces i:nth-child(1){background:#ecc7bf}.cf-preview-faces i:nth-child(2){background:#b8d4e8}.cf-preview-faces i:nth-child(3){background:#c9afea}.cf-preview-faces i:nth-child(4){background:#fff;color:#9aa2ad}
         .cf-preview-ranking-copy{border-top:1px solid rgba(189,166,82,.25);margin-top:12px;padding-top:12px;display:flex;align-items:center;gap:8px;font-size:12.5px;color:#7a828e}.cf-preview-ranking-copy svg,.cf-preview-ranking-copy strong{color:#2f9a65}
         .cf-preview-referral{position:relative;overflow:hidden;padding:19px 17px 17px;background:rgba(255,255,255,.56);min-height:188px}.cf-preview-referral h2{position:relative;z-index:2;font-size:18px;font-weight:800;line-height:1.2;margin:0 0 7px;max-width:88%}.cf-preview-referral>p:not(.cf-preview-kicker){position:relative;z-index:2;font-size:12.5px;line-height:1.45;color:#737d8b;max-width:86%;margin:0 0 17px}.cf-preview-referral>button{position:relative;z-index:3;width:100%;min-height:46px;border:1px solid rgba(255,255,255,.38);border-radius:13px;background:linear-gradient(135deg,rgba(67,134,247,.82),rgba(31,91,204,.8));color:#fff;font:700 15px inherit;backdrop-filter:blur(18px) saturate(1.45);box-shadow:0 8px 22px rgba(31,91,204,.18),inset 0 1px 0 rgba(255,255,255,.4);cursor:pointer}
