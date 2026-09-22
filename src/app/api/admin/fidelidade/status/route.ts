@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
     configurado: !!temporadaAtiva,
     temporadaId: temporadaAtiva?.temporadaId ?? null,
     top5: topRanking,
-    nota: "pesos de score pendentes de decisão comercial",
+    nota: "saldo de Estrelas da temporada; empate por quem atingiu a pontuação primeiro",
   };
 
   const missoes = {

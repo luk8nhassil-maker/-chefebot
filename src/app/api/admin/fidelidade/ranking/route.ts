@@ -1,7 +1,7 @@
 // GET /api/admin/fidelidade/ranking — top ranking da temporada ativa.
 //
 // Somente roles admin/dev. Sem PII: clienteId é ID interno anonimizado (não nome/telefone).
-// Pesos de ranking PENDENTES de decisão comercial (ver rankingClientes.ts).
+// Score: saldo de Estrelas V1 da temporada; empate por primeira pontuação atingida.
 
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
@@ -43,6 +43,6 @@ export async function GET(req: NextRequest) {
     temporadaId: temporada.temporadaId,
     temporadaNome: temporada.nome ?? null,
     ranking: entradas.map((e) => ({ posicao: e.posicao, score: e.score })),
-    nota: "pesos de score pendentes de decisão comercial",
+    nota: "saldo de Estrelas da temporada; empate por quem atingiu a pontuação primeiro",
   });
 }

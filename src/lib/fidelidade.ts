@@ -3,6 +3,8 @@ import { calcularEstrelasPorValorElegivel, META_ESTRELAS_V1, REGRA_ESTRELAS_V1 }
 import { sanitizeTelefoneCliente, clienteIdDoTelefone } from "./clientes";
 import type { PedidoSnapshotOficial } from "./pedidoSnapshot";
 import { obterRecomendacaoPresente, type RecomendacaoPresente } from "./recompensaInteligente";
+import { obterTemporadaAtiva } from "./temporadas";
+import { atualizarScoreRanking, calcularScoreDaTemporada } from "./rankingClientes";
 
 export type TipoRecompensa = "pizza_gratis" | "desconto_fixo" | "desconto_percentual";
 
@@ -704,6 +706,22 @@ export async function obterExtratoPontos(clienteId: string): Promise<MovimentoPo
   return (await obterEstadoPontos(clienteId)).extrato;
 }
 
+/** Atualiza a projeção do ranking sem deixar a infraestrutura de ranking
+ * bloquear o crédito ou o estorno do cliente. */
+async function sincronizarRankingCliente(clienteId: string): Promise<void> {
+  try {
+    const temporada = await obterTemporadaAtiva("default");
+    if (!temporada?.ativadaEm) return;
+    const inicioMs = new Date(temporada.ativadaEm).getTime();
+    const fimMs = temporada.fimEm ? new Date(temporada.fimEm).getTime() : Date.now();
+    if (!Number.isFinite(inicioMs) || !Number.isFinite(fimMs)) return;
+    const resultado = calcularScoreDaTemporada(await obterExtratoPontos(clienteId), inicioMs, Math.min(fimMs, Date.now()));
+    await atualizarScoreRanking(temporada.tenantId, temporada.temporadaId, clienteId, resultado.score, resultado.primeiroAtingidoEm ?? Date.now());
+  } catch (erro) {
+    console.warn("[ChefeBot] Não foi possível atualizar a projeção do ranking", erro);
+  }
+}
+
 export async function obterSaldoPontos(clienteId: string): Promise<SaldoPontos> {
   const { extrato } = await obterEstadoPontos(clienteId);
   return { disponivel: calcularSaldoDoExtrato(extrato) };
@@ -920,6 +938,7 @@ export async function confirmarResgatePontos(
     });
     if (!persistiu) throw new Error("Fidelidade por pontos: lock expirou antes de confirmar o resgate — tente novamente");
 
+    await sincronizarRankingCliente(clienteId);
     return registro;
   });
 }
@@ -1191,6 +1210,7 @@ export async function registrarMovimentoPontosIdempotente(
       throw new Error(`Fidelidade por pontos: lock de ${clienteId} expirou antes da escrita — reprocessar depois`);
     }
 
+    await sincronizarRankingCliente(clienteId);
     return registro;
   });
 }
