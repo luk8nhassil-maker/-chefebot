@@ -53,6 +53,9 @@ type AnalyticsData = {
     receitaElegivelCents: number
     ticketMedioCents: number
     clientesUnicos: number
+    clientesNovos: number
+    clientesRecorrentes: number
+    percentualClientesRecorrentes: number
   }
   periodosDias?: PeriodoAnalytics
   totalEventosNoIndice?: number
@@ -469,7 +472,7 @@ export default function FidelidadePage() {
               </div>
 
               <div style={{ color: 'var(--foreground-muted)', fontSize: 12, lineHeight: 1.45, marginBottom: 12 }}>
-                Considera pedidos entregues no período selecionado. Cada cliente é contado uma única vez.
+                Considera pedidos entregues no período selecionado. Cada cliente é contado uma única vez; novos e recorrentes usam o histórico analítico disponível.
               </div>
 
               {erroAnalytics && (
@@ -495,6 +498,8 @@ export default function FidelidadePage() {
                       { label: 'Receita', valor: formatarReais(analytics.metricas?.receitaElegivelCents ?? 0) },
                       { label: 'Ticket médio', valor: formatarReais(analytics.metricas?.ticketMedioCents ?? 0) },
                       { label: 'Clientes únicos', valor: String(analytics.metricas?.clientesUnicos ?? 0) },
+                      { label: 'Clientes novos', valor: String(analytics.metricas?.clientesNovos ?? 0) },
+                      { label: 'Clientes recorrentes', valor: `${analytics.metricas?.clientesRecorrentes ?? 0} (${analytics.metricas?.percentualClientesRecorrentes ?? 0}%)` },
                     ].map(({ label, valor }) => (
                       <div key={label} style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--background)', border: '1px solid var(--border)' }}>
                         <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.4px', textTransform: 'uppercase', color: 'var(--foreground-muted)', marginBottom: 4 }}>{label}</div>

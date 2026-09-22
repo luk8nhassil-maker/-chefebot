@@ -13,14 +13,16 @@ vi.mock("@/lib/historicoAnalitico", async (importOriginal) => {
   return {
     ...original,
     consultarEventosPorPeriodo: vi.fn(async () => []),
+    consultarEventosAntesDe: vi.fn(async () => []),
   };
 });
 
 import { verifyToken } from "@/lib/auth";
-import { consultarEventosPorPeriodo } from "@/lib/historicoAnalitico";
+import { consultarEventosPorPeriodo, consultarEventosAntesDe } from "@/lib/historicoAnalitico";
 
 const mockVerify = verifyToken as ReturnType<typeof vi.fn>;
 const mockConsultar = consultarEventosPorPeriodo as ReturnType<typeof vi.fn>;
+const mockConsultarAntes = consultarEventosAntesDe as ReturnType<typeof vi.fn>;
 
 function makeReq(params: Record<string, string> = {}, cookie = "auth-token=tok") {
   const url = new URL("http://localhost/api/admin/analytics/pedidos");
@@ -46,6 +48,8 @@ beforeEach(() => {
   mockVerify.mockReset();
   mockConsultar.mockReset();
   mockConsultar.mockResolvedValue([]);
+  mockConsultarAntes.mockReset();
+  mockConsultarAntes.mockResolvedValue([]);
 });
 
 describe("GET /api/admin/analytics/pedidos", () => {
@@ -131,6 +135,22 @@ describe("GET /api/admin/analytics/pedidos", () => {
     expect(body.metricas.pedidosValidos).toBe(1);
     expect(body.metricas.receitaElegivelCents).toBe(5000);
     expect(body.totalEventosNoIndice).toBe(1);
+  });
+
+  it("separa clientes novos e recorrentes usando o histórico anterior", async () => {
+    mockVerify.mockResolvedValue({ role: "admin" });
+    mockConsultar.mockResolvedValue([
+      eventoBase,
+      { ...eventoBase, pedidoId: "p2", clienteId: "c2" },
+    ]);
+    mockConsultarAntes.mockResolvedValue([{ ...eventoBase, pedidoId: "p0", criadoEmMs: Date.now() - 86400000 }]);
+
+    const res = await GET(makeReq());
+    const body = await res.json();
+    expect(body.metricas.clientesUnicos).toBe(2);
+    expect(body.metricas.clientesNovos).toBe(1);
+    expect(body.metricas.clientesRecorrentes).toBe(1);
+    expect(body.metricas.percentualClientesRecorrentes).toBe(50);
   });
 
   it("nao expoe PII — resposta nao contem telefone, clienteId, nome", async () => {

@@ -115,6 +115,7 @@ import {
   chaveIndiceCliente,
   chaveIndiceGlobal,
   consultarEventosCliente,
+  consultarEventosAntesDe,
   consultarEventosPorPeriodo,
   estornarEventoAnalitico,
   periodo30Dias,
@@ -420,6 +421,14 @@ describe("estornarEventoAnalitico", () => {
 // ── consultarEventosPorPeriodo ────────────────────────────────────────────────
 
 describe("consultarEventosPorPeriodo", () => {
+  test("consulta o histórico anterior ao início do período", async () => {
+    await registrarEventoEntregue({ ...pedidoBase, id: "p_old" }, AGORA - 1000);
+    await registrarEventoEntregue({ ...pedidoBase, id: "p_current" }, AGORA + 1000);
+    const resultado = await consultarEventosAntesDe(TENANT, AGORA);
+    expect(resultado.some((ev) => ev.pedidoId === "p_old")).toBe(true);
+    expect(resultado.some((ev) => ev.pedidoId === "p_current")).toBe(false);
+  });
+
   test("retorna eventos dentro do período", async () => {
     await registrarEventoEntregue({ ...pedidoBase, id: "p_inside" }, AGORA + 1000);
     const resultado = await consultarEventosPorPeriodo(TENANT, AGORA, AGORA + 5000);
@@ -594,6 +603,22 @@ describe("calcularMetricas", () => {
     expect(m.estrelasDistribuidas).toBe(7);
     expect(m.cohortePorPedidos).toEqual({ "1": 1 });
     expect(m.percentualReceitaRecorrentes).toBe(0);
+    expect(m.clientesNovos).toBe(1);
+    expect(m.clientesRecorrentes).toBe(0);
+    expect(m.percentualClientesRecorrentes).toBe(0);
+  });
+
+  test("classifica clientes novos e recorrentes pelo histórico anterior", () => {
+    const eventos = [
+      makeEvento({ pedidoId: "p1", clienteId: "cid_A" }),
+      makeEvento({ pedidoId: "p2", clienteId: "cid_B" }),
+      makeEvento({ pedidoId: "p3", clienteId: "cid_B" }),
+    ];
+    const m = calcularMetricas(eventos, new Set(["cid_A"]));
+    expect(m.clientesUnicos).toBe(2);
+    expect(m.clientesNovos).toBe(1);
+    expect(m.clientesRecorrentes).toBe(1);
+    expect(m.percentualClientesRecorrentes).toBe(50);
   });
 
   test("estornados são excluídos de todas as métricas", () => {
@@ -684,6 +709,8 @@ describe("calcularMetricas", () => {
     expect(m.pedidosValidos).toBe(0);
     expect(m.ticketMedioCents).toBe(0);
     expect(m.percentualReceitaRecorrentes).toBe(0);
+    expect(m.clientesNovos).toBe(0);
+    expect(m.clientesRecorrentes).toBe(0);
   });
 });
 

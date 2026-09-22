@@ -57,6 +57,9 @@ export type PedidoParaHistorico = {
 export type MetricasAnaliticas = {
   pedidosValidos: number;
   clientesUnicos: number;
+  clientesNovos: number;
+  clientesRecorrentes: number;
+  percentualClientesRecorrentes: number;
   ticketMedioCents: number;
   ticketMedianoCents: number;
   receitaElegivelCents: number;
@@ -260,6 +263,18 @@ export async function consultarEventosPorPeriodo(
 }
 
 /**
+ * Returns the analytics history before a selected period.
+ * Used only to classify current-period clients as new or returning.
+ */
+export async function consultarEventosAntesDe(
+  tenantId: string,
+  antesDeMs: number
+): Promise<EventoAnalitico[]> {
+  if (antesDeMs <= 0) return [];
+  return lerTodosEventosDaChave(chaveIndiceGlobal(tenantId), tenantId, 0, antesDeMs - 1);
+}
+
+/**
  * Returns analytics events for a single client in [inicioMs, fimMs].
  * Paginates per-client sorted set — no SCAN, no cross-client data.
  */
@@ -304,13 +319,19 @@ function mediana(valores: number[]): number {
  * Pure function — computes all analytics metrics from a list of events.
  * Excludes estornados from all revenue/ticket/recurrence metrics.
  */
-export function calcularMetricas(eventos: EventoAnalitico[]): MetricasAnaliticas {
+export function calcularMetricas(
+  eventos: EventoAnalitico[],
+  clientesComHistoricoAnterior: ReadonlySet<string> = new Set()
+): MetricasAnaliticas {
   const validos = eventos.filter((ev) => ev.statusAnalitico === "entregue");
 
   if (validos.length === 0) {
     return {
       pedidosValidos: 0,
       clientesUnicos: 0,
+      clientesNovos: 0,
+      clientesRecorrentes: 0,
+      percentualClientesRecorrentes: 0,
       ticketMedioCents: 0,
       ticketMedianoCents: 0,
       receitaElegivelCents: 0,
@@ -331,6 +352,8 @@ export function calcularMetricas(eventos: EventoAnalitico[]): MetricasAnaliticas
   const tickets = validos.map((ev) => ev.valorElegivelCents);
   const receitaTotal = tickets.reduce((s, v) => s + v, 0);
   const estrelasTotal = validos.reduce((s, ev) => s + ev.estrelasGeradas, 0);
+  const clientesRecorrentes = [...receitaPorCliente.keys()].filter((clienteId) => clientesComHistoricoAnterior.has(clienteId)).length;
+  const clientesNovos = receitaPorCliente.size - clientesRecorrentes;
 
   const cohortePorPedidos: Record<string, number> = {};
   for (const count of pedidosPorCliente.values()) {
@@ -345,6 +368,10 @@ export function calcularMetricas(eventos: EventoAnalitico[]): MetricasAnaliticas
   return {
     pedidosValidos: validos.length,
     clientesUnicos: receitaPorCliente.size,
+    clientesNovos,
+    clientesRecorrentes,
+    percentualClientesRecorrentes:
+      receitaPorCliente.size > 0 ? Math.round((clientesRecorrentes / receitaPorCliente.size) * 100) : 0,
     ticketMedioCents: Math.round(receitaTotal / validos.length),
     ticketMedianoCents: mediana(tickets),
     receitaElegivelCents: receitaTotal,

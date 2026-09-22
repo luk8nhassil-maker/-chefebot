@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import {
   consultarEventosPorPeriodo,
+  consultarEventosAntesDe,
   calcularMetricas,
   periodo7Dias,
   periodo30Dias,
@@ -59,8 +60,16 @@ export async function GET(req: NextRequest) {
   const { inicioMs, fimMs } = resolverPeriodo(dias, agora);
 
   try {
-    const eventos = await consultarEventosPorPeriodo(tenantId, inicioMs, fimMs);
-    const metricas = calcularMetricas(eventos);
+    const [eventos, eventosAnteriores] = await Promise.all([
+      consultarEventosPorPeriodo(tenantId, inicioMs, fimMs),
+      consultarEventosAntesDe(tenantId, inicioMs),
+    ]);
+    const clientesComHistoricoAnterior = new Set(
+      eventosAnteriores
+        .filter((evento) => evento.statusAnalitico === "entregue")
+        .map((evento) => evento.clienteId)
+    );
+    const metricas = calcularMetricas(eventos, clientesComHistoricoAnterior);
 
     return NextResponse.json(
       {
