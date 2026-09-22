@@ -37,7 +37,8 @@ const { zset, redisMock } = vi.hoisted(() => {
 
 vi.mock("./redis", () => ({ redis: redisMock }));
 
-import { atualizarScoreRanking, obterTopRanking, posicaoClienteRanking } from "./rankingClientes";
+import { atualizarScoreRanking, calcularScoreDaTemporada, obterTopRanking, posicaoClienteRanking } from "./rankingClientes";
+import type { MovimentoPontos } from "./fidelidade";
 
 const TENANT = "default";
 const TEMPORADA = "t2026-1";
@@ -93,10 +94,19 @@ describe("obterTopRanking", () => {
   });
 
   test("limita ao máximo permitido (50)", async () => {
-    const top = await obterTopRanking(TENANT, TEMPORADA, 999);
+    await obterTopRanking(TENANT, TEMPORADA, 999);
     expect(redisMock.zrange).toHaveBeenCalledWith(
-      expect.any(String), 0, 49, { rev: true }
+      expect.any(String), 0, -1, { rev: true }
     );
+  });
+
+  test("desempata pela primeira pontuação atingida", async () => {
+    await atualizarScoreRanking(TENANT, TEMPORADA, "cli_depois", 50, 200);
+    await atualizarScoreRanking(TENANT, TEMPORADA, "cli_primeiro", 50, 100);
+
+    const top = await obterTopRanking(TENANT, TEMPORADA, 2);
+    expect(top).toHaveLength(2);
+    expect(top.map((e) => e.clienteId)).toEqual(["cli_primeiro", "cli_depois"]);
   });
 
   test("retorna vazio para tenant/temporada sem dados", async () => {
@@ -126,5 +136,18 @@ describe("posicaoClienteRanking", () => {
   test("retorna null para parâmetros vazios", async () => {
     expect(await posicaoClienteRanking("", TEMPORADA, "cli_a")).toBeNull();
     expect(await posicaoClienteRanking(TENANT, TEMPORADA, "")).toBeNull();
+  });
+});
+
+describe("calcularScoreDaTemporada", () => {
+  test("considera somente Estrelas dentro da janela e informa o primeiro crédito", () => {
+    const movimentos: MovimentoPontos[] = [
+      { movimentoId: "1", clienteId: "cli", pedidoId: "p0", tipo: "confirmado", pontos: 99, motivo: "fora", createdAt: "2026-08-31T00:00:00.000Z", regraVersao: "estrelas-faixas-v1" },
+      { movimentoId: "2", clienteId: "cli", pedidoId: "p1", tipo: "confirmado", pontos: 4, motivo: "pedido", createdAt: "2026-09-02T00:00:00.000Z", regraVersao: "estrelas-faixas-v1" },
+      { movimentoId: "3", clienteId: "cli", pedidoId: "p2", tipo: "confirmado", pontos: 6, motivo: "pedido", createdAt: "2026-09-03T00:00:00.000Z", regraVersao: "outra-regra" },
+      { movimentoId: "4", clienteId: "cli", pedidoId: "p3", tipo: "confirmado", pontos: 5, motivo: "pedido", createdAt: "2026-09-04T00:00:00.000Z", regraVersao: "estrelas-faixas-v1" },
+    ];
+    const resultado = calcularScoreDaTemporada(movimentos, Date.parse("2026-09-01T00:00:00.000Z"), Date.parse("2026-09-30T00:00:00.000Z"));
+    expect(resultado).toEqual({ score: 9, primeiroAtingidoEm: Date.parse("2026-09-02T00:00:00.000Z") });
   });
 });

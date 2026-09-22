@@ -207,6 +207,23 @@ export default function FidelidadePage() {
     }
   }
 
+  async function reconstruirRanking() {
+    if (acaoEmCurso || !status?.ranking.configurado) return
+    setAcaoEmCurso(true)
+    setMensagemAcao(null)
+    try {
+      const r = await fetch('/api/admin/fidelidade/ranking/reconstruir', { method: 'POST' })
+      const data = await r.json()
+      if (!r.ok || !data.ok) throw new Error(data.error ?? 'Erro ao reconstruir ranking')
+      setMensagemAcao(`Ranking atualizado com ${data.clientesProcessados} clientes da temporada.`)
+      await carregarStatus()
+    } catch (e: unknown) {
+      setMensagemAcao(`Falha: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setAcaoEmCurso(false)
+    }
+  }
+
   const badgeEstilo = (on: boolean) => ({
     display: 'inline-flex' as const,
     alignItems: 'center' as const,
@@ -391,8 +408,13 @@ export default function FidelidadePage() {
                     Aguardando configuração — nenhuma temporada ativa.
                   </div>
                 ) : status.ranking.top5.length === 0 ? (
-                  <div style={{ fontSize: 13, color: 'var(--foreground-muted)', fontStyle: 'italic' }}>
-                    Sem dados de ranking ainda para esta temporada.
+                  <div style={{ fontSize: 13, color: 'var(--foreground-muted)' }}>
+                    <div style={{ fontStyle: 'italic', marginBottom: 10 }}>
+                      O ranking ainda não foi carregado para os pedidos já entregues desta temporada.
+                    </div>
+                    <button type="button" onClick={reconstruirRanking} disabled={acaoEmCurso} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', fontWeight: 700, cursor: acaoEmCurso ? 'wait' : 'pointer' }}>
+                      {acaoEmCurso ? 'Atualizando…' : 'Atualizar ranking'}
+                    </button>
                   </div>
                 ) : (
                   <div>
@@ -402,7 +424,7 @@ export default function FidelidadePage() {
                           <span style={{ fontWeight: 700, marginRight: 6 }}>#{e.posicao}</span>
                           {labelAnonimo(e.posicao)}
                         </span>
-                        <span style={{ fontWeight: 700 }}>{e.score} pts</span>
+                        <span style={{ fontWeight: 700 }}>{e.score} Estrelas</span>
                       </div>
                     ))}
                     <div style={{ marginTop: 8, fontSize: 11, color: 'var(--foreground-muted)' }}>
