@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 let temporadaAtiva: Record<string, unknown> | null = null;
 let posicaoPorCliente = new Map<string, { posicao: number; score: number } | null>();
 let topRanking: Array<{ clienteId: string; score: number; posicao: number }> = [];
+let identidadesPublicas = new Map<string, { nomePublico: string | null; telefoneMascarado: string | null; fotoPerfilUrl: null }>();
 
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
@@ -45,6 +46,10 @@ vi.mock("@/lib/rankingClientes", () => ({
   obterTopRanking: vi.fn(async () => topRanking),
 }));
 
+vi.mock("@/lib/rankingPrivacidade", () => ({
+  projetarIdentidadesPublicasRanking: vi.fn(async () => identidadesPublicas),
+}));
+
 import { GET } from "./route";
 
 function req(token?: string) {
@@ -57,6 +62,7 @@ beforeEach(() => {
   temporadaAtiva = null;
   posicaoPorCliente = new Map();
   topRanking = [];
+  identidadesPublicas = new Map();
 });
 
 describe("GET /api/cliente/fidelidade/painel", () => {
@@ -137,6 +143,31 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     const voce = entorno.find((e) => (e as { eVoce: boolean }).eVoce === true);
     expect(voce).toBeDefined();
     expect((voce as { posicao: number }).posicao).toBe(3);
+  });
+
+  test("identidade opcional vem somente da projecao server-side e nunca inclui clienteId", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 2, score: 150 });
+    topRanking = [
+      { clienteId: "outro_1", score: 200, posicao: 1 },
+      { clienteId, score: 150, posicao: 2 },
+    ];
+    identidadesPublicas.set("outro_1", {
+      nomePublico: "Ana",
+      telefoneMascarado: "(11) 9••••-1234",
+      fotoPerfilUrl: null,
+    });
+
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.ranking.lista[0]).toEqual({
+      posicao: 1,
+      score: 200,
+      eVoce: false,
+      nomePublico: "Ana",
+      telefoneMascarado: "(11) 9••••-1234",
+    });
+    expect(JSON.stringify(body)).not.toContain("outro_1");
   });
 
   test("ranking null quando cliente não está no ranking", async () => {

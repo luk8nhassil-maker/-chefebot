@@ -309,6 +309,18 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
     expect(fonte).toContain("Ranking da temporada");
   });
 
+  test("preferencias do ranking usam texto vindo do servidor e permitem revogacao total", () => {
+    expect(fonte).toContain("/api/cliente/privacidade/ranking");
+    expect(fonte).toContain("<span>{opcao.texto}</span>");
+    expect(fonte).toContain("method: 'DELETE'");
+    expect(fonte).toContain("Revogar todas as autorizações do ranking");
+  });
+
+  test("foto permanece indisponivel sem fonte oficial autorizada", () => {
+    expect(fonte).toContain("A foto de perfil não é utilizada enquanto não existir uma fonte oficial autorizada e integrada.");
+    expect(fonte).not.toContain("profilePictureUrl");
+  });
+
   test("indicação nunca expõe telefone no link compartilhado", () => {
     const blocoCompartilhar = fonte.slice(
       fonte.indexOf("async function compartilharIndicacao"),

@@ -57,8 +57,28 @@ type PainelFidelidade = {
     posicao: number
     score: number
     entorno: { posicao: number; eVoce: boolean }[]
-    lista: { posicao: number; score: number; eVoce: boolean }[]
+    lista: {
+      posicao: number
+      score: number
+      eVoce: boolean
+      nomePublico?: string
+      telefoneMascarado?: string
+    }[]
   } | null
+}
+
+type FinalidadePrivacidadeRanking = 'ranking_primeiro_nome' | 'ranking_telefone_mascarado' | 'ranking_foto_perfil'
+
+type PreferenciasPrivacidadeRanking = {
+  finalidades: Array<{
+    finalidade: FinalidadePrivacidadeRanking
+    texto: string | null
+    textoVersao: string | null
+    disponivel: boolean
+    motivoIndisponivel: 'texto_nao_aprovado' | 'infraestrutura_nao_configurada' | 'fonte_oficial_indisponivel' | null
+    estado: 'concedido' | 'revogado'
+    atualizadoEm: string | null
+  }>
 }
 
 type PedidoResumo = {
@@ -318,19 +338,42 @@ function FidelidadeMobileScreen({
 type FidelidadeRankingScreenProps = {
   ranking: NonNullable<PainelFidelidade['ranking']>
   temporada: PainelFidelidade['temporada']
+  privacidade: PreferenciasPrivacidadeRanking | null
+  privacidadeCarregando: boolean
+  privacidadeSalvando: FinalidadePrivacidadeRanking | 'todas' | null
+  privacidadeErro: string
+  onAlterarPrivacidade: (
+    finalidade: FinalidadePrivacidadeRanking,
+    estado: 'concedido' | 'revogado',
+    textoVersao: string | null,
+  ) => void
+  onRevogarTodas: () => void
   onClose: () => void
 }
 
-/** Pódio detalhado: scores são reais; nomes, fotos e variações de terceiros
- * não são expostos porque a API do cliente deliberadamente não fornece PII. */
-function FidelidadeRankingScreen({ ranking, temporada, onClose }: FidelidadeRankingScreenProps) {
+/** Pódio detalhado: scores são reais; a identidade opcional ja chega como um
+ * DTO minimo produzido pela protecao server-side. */
+function FidelidadeRankingScreen({
+  ranking,
+  temporada,
+  privacidade,
+  privacidadeCarregando,
+  privacidadeSalvando,
+  privacidadeErro,
+  onAlterarPrivacidade,
+  onRevogarTodas,
+  onClose,
+}: FidelidadeRankingScreenProps) {
   const [aba, setAba] = useState<'top10' | 'minha' | 'todos'>('top10')
   const lista = ranking.lista
   const podium = lista.filter((entrada) => entrada.posicao <= 3)
   const linhas = aba === 'minha'
     ? lista.filter((entrada) => entrada.eVoce)
     : lista
-  const nomeSeguro = (entrada: { eVoce: boolean; posicao: number }) => entrada.eVoce ? 'Você' : `Participante ${entrada.posicao}`
+  const nomeSeguro = (entrada: { eVoce: boolean; posicao: number; nomePublico?: string }) =>
+    entrada.eVoce ? 'Você' : entrada.nomePublico || `Participante ${entrada.posicao}`
+  const avatarSeguro = (entrada: { eVoce: boolean; nomePublico?: string } | undefined) =>
+    entrada?.eVoce ? 'V' : entrada?.nomePublico?.slice(0, 1).toUpperCase() || '★'
 
   return (
     <main className="cf-ranking-screen" aria-label="Pódio Chefe">
@@ -349,7 +392,7 @@ function FidelidadeRankingScreen({ ranking, temporada, onClose }: FidelidadeRank
           return (
             <div key={posicao} className={`cf-ranking-podium-item cf-ranking-podium-${posicao}`}>
               <div className="cf-ranking-medal">{posicao}</div>
-              <div className="cf-ranking-avatar">{entrada?.eVoce ? 'Você'.slice(0, 1) : '★'}</div>
+              <div className="cf-ranking-avatar">{avatarSeguro(entrada)}</div>
               <strong>{entrada ? nomeSeguro(entrada) : `Posição ${posicao}`}</strong>
               <b>{entrada ? `${entrada.score} Estrelas` : 'Aguardando dados'}</b>
             </div>
@@ -373,8 +416,11 @@ function FidelidadeRankingScreen({ ranking, temporada, onClose }: FidelidadeRank
         {linhas.length === 0 ? <p className="cf-ranking-empty">Sua posição ainda não apareceu no ranking desta temporada.</p> : linhas.map((entrada) => (
           <div key={entrada.posicao} className={`cf-ranking-row ${entrada.eVoce ? 'voce' : ''}`}>
             <strong>{entrada.posicao}</strong>
-            <span className="cf-ranking-row-avatar">{entrada.eVoce ? 'V' : '★'}</span>
-            <span className="cf-ranking-row-name">{nomeSeguro(entrada)}</span>
+            <span className="cf-ranking-row-avatar">{avatarSeguro(entrada)}</span>
+            <span className="cf-ranking-row-name">
+              {nomeSeguro(entrada)}
+              {entrada.telefoneMascarado && <small>{entrada.telefoneMascarado}</small>}
+            </span>
             <b>{entrada.score} Estrelas</b>
           </div>
         ))}
@@ -384,7 +430,66 @@ function FidelidadeRankingScreen({ ranking, temporada, onClose }: FidelidadeRank
       <section className="cf-ranking-note">
         <span>🏆</span><div><strong>Acumule Estrelas para subir</strong><p>A posição considera apenas as Estrelas válidas da temporada atual.</p></div>
       </section>
+
+      <PrivacidadeRankingControls
+        privacidade={privacidade}
+        carregando={privacidadeCarregando}
+        salvando={privacidadeSalvando}
+        erro={privacidadeErro}
+        onAlterar={onAlterarPrivacidade}
+        onRevogarTodas={onRevogarTodas}
+      />
     </main>
+  )
+}
+
+type PrivacidadeRankingControlsProps = {
+  privacidade: PreferenciasPrivacidadeRanking | null
+  carregando: boolean
+  salvando: FinalidadePrivacidadeRanking | 'todas' | null
+  erro: string
+  onAlterar: (
+    finalidade: FinalidadePrivacidadeRanking,
+    estado: 'concedido' | 'revogado',
+    textoVersao: string | null,
+  ) => void
+  onRevogarTodas: () => void
+}
+
+function PrivacidadeRankingControls({ privacidade, carregando, salvando, erro, onAlterar, onRevogarTodas }: PrivacidadeRankingControlsProps) {
+  const opcoesDisponiveis = privacidade?.finalidades.filter((item) => item.disponivel && item.texto && item.textoVersao) ?? []
+  const haConsentimentoAtivo = privacidade?.finalidades.some((item) => item.estado === 'concedido') ?? false
+
+  return (
+    <section className="cf-ranking-privacy" aria-label="Privacidade no ranking">
+      <h2>Privacidade no ranking</h2>
+      {carregando && <p>Carregando suas preferências…</p>}
+      {!carregando && opcoesDisponiveis.length === 0 && (
+        <p>O ranking permanece anônimo enquanto não houver textos aprovados e publicados.</p>
+      )}
+      {opcoesDisponiveis.map((opcao) => (
+        <label key={opcao.finalidade}>
+          <input
+            type="checkbox"
+            checked={opcao.estado === 'concedido'}
+            disabled={salvando !== null}
+            onChange={(event) => onAlterar(
+              opcao.finalidade,
+              event.target.checked ? 'concedido' : 'revogado',
+              opcao.textoVersao,
+            )}
+          />
+          <span>{opcao.texto}</span>
+        </label>
+      ))}
+      <p>A foto de perfil não é utilizada enquanto não existir uma fonte oficial autorizada e integrada.</p>
+      {haConsentimentoAtivo && (
+        <button type="button" disabled={salvando !== null} onClick={onRevogarTodas}>
+          {salvando === 'todas' ? 'Revogando…' : 'Revogar todas as autorizações do ranking'}
+        </button>
+      )}
+      {erro && <p role="alert">{erro}</p>}
+    </section>
   )
 }
 
@@ -403,6 +508,10 @@ export default function ClientePage() {
   const [fidelidade, setFidelidade] = useState<Fidelidade | null>(null)
   const [jornada, setJornada] = useState<Jornada | null>(null)
   const [painel, setPainel] = useState<PainelFidelidade | null>(null)
+  const [privacidadeRanking, setPrivacidadeRanking] = useState<PreferenciasPrivacidadeRanking | null>(null)
+  const [privacidadeCarregando, setPrivacidadeCarregando] = useState(false)
+  const [privacidadeSalvando, setPrivacidadeSalvando] = useState<FinalidadePrivacidadeRanking | 'todas' | null>(null)
+  const [privacidadeErro, setPrivacidadeErro] = useState('')
   const [indicacaoToken, setIndicacaoToken] = useState<string | null>(null)
   const [compartilhandoIndicacao, setCompartilhandoIndicacao] = useState(false)
   const [resgatando, setResgatando] = useState(false)
@@ -519,6 +628,62 @@ export default function ClientePage() {
     } catch {}
   }
 
+  async function carregarPrivacidadeRanking(): Promise<void> {
+    setPrivacidadeCarregando(true)
+    setPrivacidadeErro('')
+    try {
+      const res = await fetchCliente('/api/cliente/privacidade/ranking', { cache: 'no-store' }, sessaoMemRef.current)
+      if (res.ok) setPrivacidadeRanking(await res.json())
+      else setPrivacidadeErro('Não conseguimos carregar suas preferências agora.')
+    } catch {
+      setPrivacidadeErro('Não conseguimos carregar suas preferências agora.')
+    }
+    setPrivacidadeCarregando(false)
+  }
+
+  function abrirRanking() {
+    setMobilePanel('ranking')
+    void carregarPrivacidadeRanking()
+  }
+
+  async function alterarPrivacidadeRanking(
+    finalidade: FinalidadePrivacidadeRanking,
+    estado: 'concedido' | 'revogado',
+    textoVersao: string | null,
+  ) {
+    setPrivacidadeSalvando(finalidade)
+    setPrivacidadeErro('')
+    try {
+      const res = await fetchCliente('/api/cliente/privacidade/ranking', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ finalidade, estado, textoVersao }),
+      }, sessaoMemRef.current)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.finalidades) throw new Error('preferencia_nao_salva')
+      setPrivacidadeRanking({ finalidades: data.finalidades })
+      await carregarPainel()
+    } catch {
+      setPrivacidadeErro('Não conseguimos salvar. O ranking continua sem ampliar a exposição.')
+    }
+    setPrivacidadeSalvando(null)
+  }
+
+  async function revogarTodasPrivacidadesRanking() {
+    setPrivacidadeSalvando('todas')
+    setPrivacidadeErro('')
+    try {
+      const res = await fetchCliente('/api/cliente/privacidade/ranking', { method: 'DELETE' }, sessaoMemRef.current)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.finalidades) throw new Error('preferencias_nao_revogadas')
+      setPrivacidadeRanking({ finalidades: data.finalidades })
+      await carregarPainel()
+    } catch {
+      setPrivacidadeErro('Não conseguimos concluir a revogação. Tente novamente.')
+    }
+    setPrivacidadeSalvando(null)
+  }
+
   async function compartilharIndicacao() {
     if (modoPreview) {
       setPreviewAviso('O compartilhamento foi simulado. Nenhum link real foi criado ou enviado.')
@@ -553,6 +718,7 @@ export default function ClientePage() {
     carregarFidelidade()
     carregarJornada()
     carregarPainel()
+    carregarPrivacidadeRanking()
     // Processa indicação capturada antes do login (cf_ref)
     try {
       const ref = sessionStorage.getItem('cf_ref')
@@ -834,6 +1000,7 @@ export default function ClientePage() {
       setFidelidade(null)
       setJornada(null)
       setPainel(null)
+      setPrivacidadeRanking(null)
       setIndicacaoToken(null)
       setStep('telefone')
       return
@@ -846,6 +1013,7 @@ export default function ClientePage() {
     setFidelidade(null)
     setJornada(null)
     setPainel(null)
+    setPrivacidadeRanking(null)
     setIndicacaoToken(null)
     setPerfilErro(false)
     setFidelidadeErro(false)
@@ -1130,26 +1298,42 @@ export default function ClientePage() {
               <FidelidadeRankingScreen
                 ranking={painel.ranking}
                 temporada={painel.temporada}
+                privacidade={privacidadeRanking}
+                privacidadeCarregando={privacidadeCarregando}
+                privacidadeSalvando={privacidadeSalvando}
+                privacidadeErro={privacidadeErro}
+                onAlterarPrivacidade={(finalidade, estado, textoVersao) => void alterarPrivacidadeRanking(finalidade, estado, textoVersao)}
+                onRevogarTodas={() => void revogarTodasPrivacidadesRanking()}
                 onClose={() => setMobilePanel(null)}
               />
             )}
             {fidelidade && fidelidade.ativo && mobilePanel !== 'ranking' && (
-              <FidelidadeMobileScreen
-                nome={perfil?.cliente.nome ?? 'Cliente'}
-                saldo={fidelidade.saldoPontos}
-                meta={fidelidade.metaPontos}
-                faltam={fidelidade.pontosFaltantes}
-                progresso={fidelidade.progressoPercentual}
-                diasRestantes={painel?.temporada?.diasRestantes ?? null}
-                ranking={painel?.ranking ?? null}
-                aviso={previewAviso}
-                onSair={() => void sair()}
-                onPresentes={() => setMobilePanel('presentes')}
-                onExtrato={() => setMobilePanel('extrato')}
-                onRanking={() => setMobilePanel('ranking')}
-                onIndicacao={() => void compartilharIndicacao()}
-                indicando={compartilhandoIndicacao}
-              />
+              <>
+                <FidelidadeMobileScreen
+                  nome={perfil?.cliente.nome ?? 'Cliente'}
+                  saldo={fidelidade.saldoPontos}
+                  meta={fidelidade.metaPontos}
+                  faltam={fidelidade.pontosFaltantes}
+                  progresso={fidelidade.progressoPercentual}
+                  diasRestantes={painel?.temporada?.diasRestantes ?? null}
+                  ranking={painel?.ranking ?? null}
+                  aviso={previewAviso}
+                  onSair={() => void sair()}
+                  onPresentes={() => setMobilePanel('presentes')}
+                  onExtrato={() => setMobilePanel('extrato')}
+                  onRanking={abrirRanking}
+                  onIndicacao={() => void compartilharIndicacao()}
+                  indicando={compartilhandoIndicacao}
+                />
+                <PrivacidadeRankingControls
+                  privacidade={privacidadeRanking}
+                  carregando={privacidadeCarregando}
+                  salvando={privacidadeSalvando}
+                  erro={privacidadeErro}
+                  onAlterar={(finalidade, estado, textoVersao) => void alterarPrivacidadeRanking(finalidade, estado, textoVersao)}
+                  onRevogarTodas={() => void revogarTodasPrivacidadesRanking()}
+                />
+              </>
             )}
 
             {mobilePanel && mobilePanel !== 'ranking' && (
@@ -1518,7 +1702,7 @@ export default function ClientePage() {
         .cf-ranking-current { display: grid; grid-template-columns: .78fr 1.15fr 1.15fr; align-items: center; gap: 10px; margin-top: -1px; padding: 16px 15px; border: 1px solid rgba(107,164,245,.32); border-radius: 22px; background: linear-gradient(110deg, rgba(247,252,255,.98), rgba(230,243,255,.95)); box-shadow: 0 10px 22px rgba(62,117,180,.08); }
         .cf-ranking-current small { display: block; color: #69798d; font-size: 10px; line-height: 1.25; }.cf-ranking-current>div>strong { display: block; margin-top: 3px; color: #17263d; font-size: 30px; line-height: 1; }.cf-ranking-current-user { display: flex; align-items: center; gap: 8px; border-left: 1px solid rgba(88,133,192,.22); border-right: 1px solid rgba(88,133,192,.22); padding: 0 8px; }.cf-ranking-current-user>span { width: 37px; height: 37px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #4f86ed; color: white; font-weight: 800; }.cf-ranking-current-user b { display: flex; flex-direction: column; font-size: 14px; }.cf-ranking-current-user em { margin-top: 3px; color: #b27108; font-size: 11px; font-style: normal; white-space: nowrap; }.cf-ranking-current>div:last-child strong { font-size: 15px; color: #40536f; }
         .cf-ranking-tabs { display: grid; grid-template-columns: repeat(3,1fr); gap: 2px; margin: 17px 0 11px; padding: 3px; border-radius: 24px; background: rgba(222,227,234,.75); }.cf-ranking-tabs button { min-height: 39px; border: 0; border-radius: 21px; background: transparent; color: #687488; font: 700 12px inherit; cursor: pointer; }.cf-ranking-tabs button.ativo { color: #1f63d6; background: rgba(255,255,255,.98); box-shadow: 0 3px 10px rgba(48,75,108,.1); }
-        .cf-ranking-list { display: flex; flex-direction: column; gap: 7px; }.cf-ranking-row { display: grid; grid-template-columns: 30px 34px 1fr auto; align-items: center; gap: 7px; min-height: 48px; padding: 6px 11px; border: 1px solid rgba(255,255,255,.85); border-radius: 24px; background: rgba(255,255,255,.84); box-shadow: 0 5px 14px rgba(58,78,101,.05); }.cf-ranking-row.voce { border-color: rgba(88,151,247,.4); background: linear-gradient(90deg, rgba(234,244,255,.98), rgba(248,252,255,.9)); }.cf-ranking-row>strong { font-size: 17px; text-align: center; }.cf-ranking-row-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #e8eef5; color: #61738a; font-size: 12px; font-weight: 800; }.cf-ranking-row.voce .cf-ranking-row-avatar { background: #4f86ed; color: #fff; }.cf-ranking-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }.cf-ranking-row>b { color: #ae7109; font-size: 12px; white-space: nowrap; }.cf-ranking-empty,.cf-ranking-footnote { margin: 7px 2px; color: #6d7a8c; font-size: 12px; line-height: 1.45; text-align: center; }.cf-ranking-note { display: flex; gap: 12px; align-items: center; margin-top: 17px; padding: 14px 15px; border: 1px solid rgba(226,180,55,.38); border-radius: 18px; background: linear-gradient(110deg, rgba(255,252,239,.96), rgba(255,247,218,.75)); }.cf-ranking-note>span { font-size: 25px; }.cf-ranking-note strong { font-size: 13px; }.cf-ranking-note p { margin: 4px 0 0; color: #697588; font-size: 11.5px; line-height: 1.35; }
+        .cf-ranking-list { display: flex; flex-direction: column; gap: 7px; }.cf-ranking-row { display: grid; grid-template-columns: 30px 34px 1fr auto; align-items: center; gap: 7px; min-height: 48px; padding: 6px 11px; border: 1px solid rgba(255,255,255,.85); border-radius: 24px; background: rgba(255,255,255,.84); box-shadow: 0 5px 14px rgba(58,78,101,.05); }.cf-ranking-row.voce { border-color: rgba(88,151,247,.4); background: linear-gradient(90deg, rgba(234,244,255,.98), rgba(248,252,255,.9)); }.cf-ranking-row>strong { font-size: 17px; text-align: center; }.cf-ranking-row-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #e8eef5; color: #61738a; font-size: 12px; font-weight: 800; }.cf-ranking-row.voce .cf-ranking-row-avatar { background: #4f86ed; color: #fff; }.cf-ranking-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }.cf-ranking-row-name small{display:block;margin-top:2px;color:#758296;font-size:10px}.cf-ranking-row>b { color: #ae7109; font-size: 12px; white-space: nowrap; }.cf-ranking-empty,.cf-ranking-footnote { margin: 7px 2px; color: #6d7a8c; font-size: 12px; line-height: 1.45; text-align: center; }.cf-ranking-note { display: flex; gap: 12px; align-items: center; margin-top: 17px; padding: 14px 15px; border: 1px solid rgba(226,180,55,.38); border-radius: 18px; background: linear-gradient(110deg, rgba(255,252,239,.96), rgba(255,247,218,.75)); }.cf-ranking-note>span { font-size: 25px; }.cf-ranking-note strong { font-size: 13px; }.cf-ranking-note p { margin: 4px 0 0; color: #697588; font-size: 11.5px; line-height: 1.35; }.cf-ranking-privacy{margin-top:17px;padding:15px;border:1px solid rgba(93,115,145,.2);border-radius:18px;background:rgba(255,255,255,.76)}.cf-ranking-privacy h2{margin:0 0 10px;font-size:14px}.cf-ranking-privacy>p{margin:8px 0;color:#697588;font-size:11.5px;line-height:1.4}.cf-ranking-privacy label{display:flex;align-items:flex-start;gap:9px;margin:10px 0;color:#33445b;font-size:12px;line-height:1.4}.cf-ranking-privacy input{margin-top:2px}.cf-ranking-privacy button{width:100%;margin-top:8px;padding:10px;border:1px solid rgba(191,73,73,.28);border-radius:12px;background:#fff8f8;color:#a33b3b;font-weight:700;cursor:pointer}.cf-ranking-privacy button:disabled{opacity:.55;cursor:wait}
         .cf-mobile-empty { width: 100%; box-sizing: border-box; padding: 18px; border-radius: 19px; background: rgba(255,255,255,.75); border: 1px solid rgba(255,255,255,.82); color: #697588; font-size: 14px; text-align: center; }
         .cf-mobile-empty button { margin-top: 10px; border: 0; border-radius: 12px; padding: 10px 14px; background: #ffc900; color: #252a30; font-weight: 700; cursor: pointer; }
         .cf-mobile-sheet-backdrop { position: fixed; inset: 0; z-index: 80; display: flex; align-items: flex-end; justify-content: center; padding: 18px; background: rgba(20,27,37,.38); }

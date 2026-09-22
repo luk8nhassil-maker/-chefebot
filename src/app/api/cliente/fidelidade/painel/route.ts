@@ -10,6 +10,7 @@ import { buscarClientePorId } from "@/lib/clientes";
 import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
 import { posicaoClienteRanking, obterTopRanking } from "@/lib/rankingClientes";
+import { projetarIdentidadesPublicasRanking } from "@/lib/rankingPrivacidade";
 
 const TENANT_PADRAO = "default";
 
@@ -36,7 +37,13 @@ export async function GET(req: NextRequest) {
     posicao: number;
     score: number;
     entorno: { posicao: number; eVoce: boolean }[];
-    lista: { posicao: number; score: number; eVoce: boolean }[];
+    lista: {
+      posicao: number;
+      score: number;
+      eVoce: boolean;
+      nomePublico?: string;
+      telefoneMascarado?: string;
+    }[];
   } | null = null;
 
   if (temporada) {
@@ -50,11 +57,20 @@ export async function GET(req: NextRequest) {
       );
       // clienteId NUNCA exposto — apenas posicao e eVoce
       const entorno = vizinhos.map((e) => ({ posicao: e.posicao, eVoce: e.clienteId === clienteId }));
-      const lista = top.slice(0, 10).map((e) => ({
-        posicao: e.posicao,
-        score: e.score,
-        eVoce: e.clienteId === clienteId,
-      }));
+      // A decisao de exposicao fica na DAL server-only. A rota nunca recebe
+      // consentimento bruto nem o perfil inteiro, e omite campos ausentes.
+      const top10 = top.slice(0, 10);
+      const identidades = await projetarIdentidadesPublicasRanking(top10.map((e) => e.clienteId));
+      const lista = top10.map((e) => {
+        const identidade = identidades.get(e.clienteId);
+        return {
+          posicao: e.posicao,
+          score: e.score,
+          eVoce: e.clienteId === clienteId,
+          ...(identidade?.nomePublico ? { nomePublico: identidade.nomePublico } : {}),
+          ...(identidade?.telefoneMascarado ? { telefoneMascarado: identidade.telefoneMascarado } : {}),
+        };
+      });
       ranking = { posicao: pos.posicao, score: pos.score, entorno, lista };
     }
   }
