@@ -32,6 +32,7 @@ beforeEach(() => {
 describe("projecao publica do ranking", () => {
   test("nao consulta perfil e retorna anonimo sem consentimento", async () => {
     await expect(projetarIdentidadePublicaRanking("cli_5511998765432")).resolves.toEqual({
+      participaCampanha: false,
       nomePublico: null,
       telefoneMascarado: null,
       fotoPerfilUrl: null,
@@ -42,6 +43,7 @@ describe("projecao publica do ranking", () => {
   test("libera somente o primeiro nome quando essa finalidade esta ativa", async () => {
     ativas.add("ranking_primeiro_nome");
     await expect(projetarIdentidadePublicaRanking("cli_5511998765432")).resolves.toEqual({
+      participaCampanha: true,
       nomePublico: "Ana",
       telefoneMascarado: null,
       fotoPerfilUrl: null,
@@ -61,6 +63,7 @@ describe("projecao publica do ranking", () => {
     ativas.add("ranking_primeiro_nome");
     buscarCliente.mockRejectedValueOnce(new Error("redis indisponivel"));
     await expect(projetarIdentidadePublicaRanking("cli_5511998765432")).resolves.toEqual({
+      participaCampanha: false,
       nomePublico: null,
       telefoneMascarado: null,
       fotoPerfilUrl: null,

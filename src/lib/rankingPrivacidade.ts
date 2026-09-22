@@ -5,12 +5,14 @@ import { buscarClientePorId, normalizarNomeCliente } from "./clientes";
 import { obterFinalidadesAtivasRanking, obterFinalidadesAtivasRankingParaClientes } from "./consentimentoRanking";
 
 export type IdentidadePublicaRanking = {
+  participaCampanha: boolean;
   nomePublico: string | null;
   telefoneMascarado: string | null;
   fotoPerfilUrl: null;
 };
 
 const IDENTIDADE_ANONIMA: IdentidadePublicaRanking = {
+  participaCampanha: false,
   nomePublico: null,
   telefoneMascarado: null,
   fotoPerfilUrl: null,
@@ -31,12 +33,14 @@ export async function projetarIdentidadePublicaRanking(clienteId: string): Promi
     const finalidades = await obterFinalidadesAtivasRanking(clienteId);
     const permiteNome = finalidades.has("ranking_primeiro_nome");
     const permiteTelefone = finalidades.has("ranking_telefone_mascarado");
-    if (!permiteNome && !permiteTelefone) return { ...IDENTIDADE_ANONIMA };
+    const participaCampanha = permiteNome || permiteTelefone;
+    if (!participaCampanha) return { ...IDENTIDADE_ANONIMA };
 
     const cliente = await buscarClientePorId(clienteId);
     if (!cliente) return { ...IDENTIDADE_ANONIMA };
 
     return {
+      participaCampanha,
       nomePublico: permiteNome ? primeiroNome(cliente.nome) : null,
       telefoneMascarado: permiteTelefone ? mascararTelefoneExibicao(cliente.telefone) || null : null,
       // Bloqueado ate existir fonte oficial/autorizada e adaptador revisado.
@@ -59,11 +63,13 @@ export async function projetarIdentidadesPublicasRanking(
       const finalidades = finalidadesPorCliente.get(clienteId) ?? new Set();
       const permiteNome = finalidades.has("ranking_primeiro_nome");
       const permiteTelefone = finalidades.has("ranking_telefone_mascarado");
-      if (!permiteNome && !permiteTelefone) return [clienteId, { ...IDENTIDADE_ANONIMA }] as const;
+      const participaCampanha = permiteNome || permiteTelefone;
+      if (!participaCampanha) return [clienteId, { ...IDENTIDADE_ANONIMA }] as const;
       try {
         const cliente = await buscarClientePorId(clienteId);
         if (!cliente) return [clienteId, { ...IDENTIDADE_ANONIMA }] as const;
         return [clienteId, {
+          participaCampanha,
           nomePublico: permiteNome ? primeiroNome(cliente.nome) : null,
           telefoneMascarado: permiteTelefone ? mascararTelefoneExibicao(cliente.telefone) || null : null,
           fotoPerfilUrl: null,

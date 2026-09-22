@@ -4,7 +4,7 @@ import { NextRequest } from "next/server";
 let temporadaAtiva: Record<string, unknown> | null = null;
 let posicaoPorCliente = new Map<string, { posicao: number; score: number } | null>();
 let topRanking: Array<{ clienteId: string; score: number; posicao: number }> = [];
-let identidadesPublicas = new Map<string, { nomePublico: string | null; telefoneMascarado: string | null; fotoPerfilUrl: null }>();
+let identidadesPublicas = new Map<string, { participaCampanha: boolean; nomePublico: string | null; telefoneMascarado: string | null; fotoPerfilUrl: null }>();
 
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
@@ -154,6 +154,7 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       { clienteId, score: 150, posicao: 2 },
     ];
     identidadesPublicas.set("outro_1", {
+      participaCampanha: true,
       nomePublico: "Ana",
       telefoneMascarado: "(11) 9••••-1234",
       fotoPerfilUrl: null,
@@ -164,6 +165,7 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       posicao: 1,
       score: 200,
       eVoce: false,
+      participaCampanha: true,
       nomePublico: "Ana",
       telefoneMascarado: "(11) 9••••-1234",
     });

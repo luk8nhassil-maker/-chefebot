@@ -56,11 +56,13 @@ type PainelFidelidade = {
   ranking: {
     posicao: number
     score: number
+    participaCampanha: boolean
     entorno: { posicao: number; eVoce: boolean }[]
     lista: {
       posicao: number
       score: number
       eVoce: boolean
+      participaCampanha: boolean
       nomePublico?: string
       telefoneMascarado?: string
     }[]
@@ -157,15 +159,16 @@ const PAINEL_PREVIEW: PainelFidelidade = {
   ranking: {
     posicao: 8,
     score: 20,
+    participaCampanha: true,
     entorno: [
       { posicao: 7, eVoce: false },
       { posicao: 8, eVoce: true },
       { posicao: 9, eVoce: false },
     ],
     lista: [
-      { posicao: 7, score: 22, eVoce: false },
-      { posicao: 8, score: 20, eVoce: true },
-      { posicao: 9, score: 18, eVoce: false },
+      { posicao: 7, score: 22, eVoce: false, participaCampanha: true },
+      { posicao: 8, score: 20, eVoce: true, participaCampanha: true },
+      { posicao: 9, score: 18, eVoce: false, participaCampanha: true },
     ],
   },
 }
@@ -364,14 +367,19 @@ function FidelidadeRankingScreen({
   onRevogarTodas,
   onClose,
 }: FidelidadeRankingScreenProps) {
-  const [aba, setAba] = useState<'top10' | 'minha' | 'todos'>('top10')
+  const [aba, setAba] = useState<'participantes' | 'minha' | 'geral'>('participantes')
   const lista = ranking.lista
-  const podium = lista.filter((entrada) => entrada.posicao <= 3)
+  const listaSemPodio = lista.filter((entrada) => entrada.posicao > 3)
+  const participantes = lista.filter((entrada) => entrada.participaCampanha)
+  const podium = participantes.filter((entrada) => entrada.posicao <= 3)
   const linhas = aba === 'minha'
     ? lista.filter((entrada) => entrada.eVoce)
-    : lista
-  const nomeSeguro = (entrada: { eVoce: boolean; posicao: number; nomePublico?: string }) =>
-    entrada.eVoce ? 'Você' : entrada.nomePublico || `Participante ${entrada.posicao}`
+    : aba === 'geral' ? listaSemPodio : participantes.filter((entrada) => entrada.posicao > 3)
+  const nomeSeguro = (entrada: { eVoce: boolean; participaCampanha: boolean; posicao: number; nomePublico?: string }) => {
+    if (entrada.eVoce && !entrada.participaCampanha) return 'Você — não participa do prêmio'
+    if (!entrada.participaCampanha) return 'Não participa do prêmio'
+    return entrada.eVoce ? 'Você' : entrada.nomePublico || `Participante ${entrada.posicao}`
+  }
   const avatarSeguro = (entrada: { eVoce: boolean; nomePublico?: string } | undefined) =>
     entrada?.eVoce ? 'V' : entrada?.nomePublico?.slice(0, 1).toUpperCase() || '★'
 
@@ -401,13 +409,13 @@ function FidelidadeRankingScreen({
       </section>
 
       <section className="cf-ranking-current" aria-label="Minha posição no ranking">
-        <div><small>Sua posição</small><strong>{ranking.posicao}º</strong></div>
+        <div><small>{ranking.participaCampanha ? 'Sua posição' : 'Sua posição geral'}</small><strong>{ranking.posicao}º</strong></div>
         <div className="cf-ranking-current-user"><span>{'Você'.slice(0, 1)}</span><b>Você<em>{ranking.score} Estrelas</em></b></div>
-        <div><small>{ranking.posicao > 1 ? 'Continue acumulando Estrelas' : 'Você está no topo'}</small><strong>{ranking.posicao > 1 ? 'para subir' : 'parabéns!'}</strong></div>
+        <div><small>{ranking.participaCampanha ? (ranking.posicao > 1 ? 'Continue acumulando Estrelas' : 'Você está no topo') : 'Você ainda não participa'}</small><strong>{ranking.participaCampanha ? (ranking.posicao > 1 ? 'para subir' : 'parabéns!') : 'autorize para concorrer'}</strong></div>
       </section>
 
       <div className="cf-ranking-tabs" role="tablist" aria-label="Filtro do ranking">
-        {([['top10', 'Top 10'], ['minha', 'Minha posição'], ['todos', 'Todos']] as const).map(([id, label]) => (
+        {([['participantes', 'Valendo prêmio'], ['minha', 'Minha posição'], ['geral', 'Visão geral']] as const).map(([id, label]) => (
           <button key={id} type="button" role="tab" aria-selected={aba === id} className={aba === id ? 'ativo' : ''} onClick={() => setAba(id)}>{label}</button>
         ))}
       </div>
@@ -424,7 +432,8 @@ function FidelidadeRankingScreen({
             <b>{entrada.score} Estrelas</b>
           </div>
         ))}
-        {aba === 'todos' && <p className="cf-ranking-footnote">Mostrando os participantes disponíveis no ranking desta temporada.</p>}
+        {aba === 'participantes' && <p className="cf-ranking-footnote">Aqui aparecem apenas os clientes que autorizaram a participação e concorrem ao prêmio.</p>}
+        {aba === 'geral' && <p className="cf-ranking-footnote">A visão geral mostra as estrelas de todos. Quem não autorizou não participa do prêmio.</p>}
       </section>
 
       <section className="cf-ranking-note">
@@ -493,6 +502,74 @@ function PrivacidadeRankingControls({ privacidade, carregando, salvando, erro, o
   )
 }
 
+type RankingConsentModalProps = {
+  privacidade: PreferenciasPrivacidadeRanking | null
+  carregando: boolean
+  salvando: FinalidadePrivacidadeRanking | 'todas' | null
+  erro: string
+  onAceitar: (finalidades: Array<{ finalidade: FinalidadePrivacidadeRanking; textoVersao: string }>) => void
+  onRecusar: () => void
+}
+
+function RankingConsentModal({ privacidade, carregando, salvando, erro, onAceitar, onRecusar }: RankingConsentModalProps) {
+  const opcoesDisponiveis = privacidade?.finalidades.filter((item) => item.disponivel && item.texto && item.textoVersao) ?? []
+  const [selecionadas, setSelecionadas] = useState<FinalidadePrivacidadeRanking[]>([])
+
+  useEffect(() => {
+    setSelecionadas([])
+  }, [privacidade])
+
+  const nomeSelecionado = selecionadas.includes('ranking_primeiro_nome')
+  const telefoneSelecionado = selecionadas.includes('ranking_telefone_mascarado')
+  const podeAceitar = selecionadas.length > 0 && salvando === null
+
+  function alternar(finalidade: FinalidadePrivacidadeRanking) {
+    setSelecionadas((atuais) => atuais.includes(finalidade)
+      ? atuais.filter((item) => item !== finalidade)
+      : [...atuais, finalidade])
+  }
+
+  return (
+    <div className="cf-ranking-consent-backdrop" role="presentation">
+      <section className="cf-ranking-consent-modal" role="dialog" aria-modal="true" aria-labelledby="ranking-consent-title">
+        <span className="cf-ranking-consent-emoji" aria-hidden="true">🍕</span>
+        <h2 id="ranking-consent-title">Suas estrelas podem valer prêmios</h2>
+        <p>Quer acompanhar sua evolução no placar? Para participar, vamos usar seu primeiro nome e, se você escolher, seu telefone com alguns números escondidos.</p>
+        {carregando && <p>Carregando sua autorização…</p>}
+        {!carregando && opcoesDisponiveis.length === 0 && (
+          <p>O ranking ainda não está disponível para autorização. Você pode voltar para sua página de Fidelidade.</p>
+        )}
+        {!carregando && opcoesDisponiveis.map((opcao) => (
+          <label key={opcao.finalidade} className="cf-ranking-consent-option">
+            <input
+              type="checkbox"
+              checked={selecionadas.includes(opcao.finalidade)}
+              onChange={() => alternar(opcao.finalidade)}
+              disabled={salvando !== null}
+            />
+            <span>{opcao.finalidade === 'ranking_primeiro_nome' ? 'Mostrar meu primeiro nome no placar' : opcao.finalidade === 'ranking_telefone_mascarado' ? 'Mostrar meu telefone com alguns números escondidos' : opcao.texto}</span>
+          </label>
+        ))}
+        {erro && <p className="cf-ranking-consent-error" role="alert">{erro}</p>}
+        {opcoesDisponiveis.length > 0 && (
+          <button
+            type="button"
+            className="cf-ranking-consent-primary"
+            disabled={!podeAceitar}
+            onClick={() => onAceitar(opcoesDisponiveis
+              .filter((opcao) => selecionadas.includes(opcao.finalidade))
+              .map((opcao) => ({ finalidade: opcao.finalidade, textoVersao: opcao.textoVersao as string })))}
+          >
+            {salvando ? 'Salvando…' : (nomeSelecionado || telefoneSelecionado) ? 'Aceitar e ver o ranking' : 'Escolha uma opção'}
+          </button>
+        )}
+        <button type="button" className="cf-ranking-consent-secondary" onClick={onRecusar} disabled={salvando !== null}>Agora não</button>
+        <small>Você pode mudar essa escolha depois.</small>
+      </section>
+    </div>
+  )
+}
+
 export default function ClientePage() {
   // Etapas: carregando → (perfil | confirmar | telefone) → otp → (nome) → perfil.
   // "confirmar" é a experiência de número reconhecido pelo link do WhatsApp:
@@ -517,6 +594,7 @@ export default function ClientePage() {
   const [resgatando, setResgatando] = useState(false)
   const [resgateErro, setResgateErro] = useState('')
   const [mobilePanel, setMobilePanel] = useState<'presentes' | 'extrato' | 'ranking' | null>(null)
+  const [rankingConsentModal, setRankingConsentModal] = useState(false)
   // Vínculo reconhecido: token opaco + máscaras vindas do servidor.
   const [waToken, setWaToken] = useState('')
   const [waMascarado, setWaMascarado] = useState('')
@@ -628,29 +706,40 @@ export default function ClientePage() {
     } catch {}
   }
 
-  async function carregarPrivacidadeRanking(): Promise<void> {
+  async function carregarPrivacidadeRanking(): Promise<PreferenciasPrivacidadeRanking | null> {
     setPrivacidadeCarregando(true)
     setPrivacidadeErro('')
     try {
       const res = await fetchCliente('/api/cliente/privacidade/ranking', { cache: 'no-store' }, sessaoMemRef.current)
-      if (res.ok) setPrivacidadeRanking(await res.json())
-      else setPrivacidadeErro('Não conseguimos carregar suas preferências agora.')
+      if (res.ok) {
+        const data = await res.json() as PreferenciasPrivacidadeRanking
+        setPrivacidadeRanking(data)
+        setPrivacidadeCarregando(false)
+        return data
+      }
+      setPrivacidadeErro('Não conseguimos carregar suas preferências agora.')
     } catch {
       setPrivacidadeErro('Não conseguimos carregar suas preferências agora.')
     }
     setPrivacidadeCarregando(false)
+    return null
   }
 
-  function abrirRanking() {
-    setMobilePanel('ranking')
-    void carregarPrivacidadeRanking()
+  async function abrirRanking() {
+    setRankingConsentModal(true)
+    const preferencias = await carregarPrivacidadeRanking()
+    const jaParticipa = preferencias?.finalidades.some((item) => item.estado === 'concedido') ?? false
+    if (jaParticipa) {
+      setRankingConsentModal(false)
+      setMobilePanel('ranking')
+    }
   }
 
   async function alterarPrivacidadeRanking(
     finalidade: FinalidadePrivacidadeRanking,
     estado: 'concedido' | 'revogado',
     textoVersao: string | null,
-  ) {
+  ): Promise<boolean> {
     setPrivacidadeSalvando(finalidade)
     setPrivacidadeErro('')
     try {
@@ -663,10 +752,24 @@ export default function ClientePage() {
       if (!res.ok || !data.finalidades) throw new Error('preferencia_nao_salva')
       setPrivacidadeRanking({ finalidades: data.finalidades })
       await carregarPainel()
+      setPrivacidadeSalvando(null)
+      return true
     } catch {
       setPrivacidadeErro('Não conseguimos salvar. O ranking continua sem ampliar a exposição.')
+      setPrivacidadeSalvando(null)
+      return false
     }
-    setPrivacidadeSalvando(null)
+  }
+
+  async function aceitarRanking(finalidades: Array<{ finalidade: FinalidadePrivacidadeRanking; textoVersao: string }>) {
+    setPrivacidadeErro('')
+    for (const item of finalidades) {
+      const salvou = await alterarPrivacidadeRanking(item.finalidade, 'concedido', item.textoVersao)
+      if (!salvou) return
+    }
+    setRankingConsentModal(false)
+    setMobilePanel('ranking')
+    await carregarPrivacidadeRanking()
   }
 
   async function revogarTodasPrivacidadesRanking() {
@@ -678,6 +781,7 @@ export default function ClientePage() {
       if (!res.ok || !data.finalidades) throw new Error('preferencias_nao_revogadas')
       setPrivacidadeRanking({ finalidades: data.finalidades })
       await carregarPainel()
+      setMobilePanel(null)
     } catch {
       setPrivacidadeErro('Não conseguimos concluir a revogação. Tente novamente.')
     }
@@ -1325,15 +1429,18 @@ export default function ClientePage() {
                   onIndicacao={() => void compartilharIndicacao()}
                   indicando={compartilhandoIndicacao}
                 />
-                <PrivacidadeRankingControls
-                  privacidade={privacidadeRanking}
-                  carregando={privacidadeCarregando}
-                  salvando={privacidadeSalvando}
-                  erro={privacidadeErro}
-                  onAlterar={(finalidade, estado, textoVersao) => void alterarPrivacidadeRanking(finalidade, estado, textoVersao)}
-                  onRevogarTodas={() => void revogarTodasPrivacidadesRanking()}
-                />
               </>
+            )}
+
+            {rankingConsentModal && (
+              <RankingConsentModal
+                privacidade={privacidadeRanking}
+                carregando={privacidadeCarregando}
+                salvando={privacidadeSalvando}
+                erro={privacidadeErro}
+                onAceitar={(finalidades) => void aceitarRanking(finalidades)}
+                onRecusar={() => { setRankingConsentModal(false); setMobilePanel(null); setPrivacidadeErro('') }}
+              />
             )}
 
             {mobilePanel && mobilePanel !== 'ranking' && (
@@ -1713,6 +1820,7 @@ export default function ClientePage() {
         .cf-mobile-sheet-row small { color: #7b8490; font-size: 11px; }
         .cf-mobile-sheet-row strong { color: #2f9a65; }
         .cf-mobile-sheet-primary { width: 100%; min-height: 44px; margin-top: 14px; border: 0; border-radius: 13px; background: #ffc900; color: #252a30; font-weight: 700; cursor: pointer; }
+        .cf-ranking-consent-backdrop{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(24,35,55,.52);backdrop-filter:blur(4px)}.cf-ranking-consent-modal{width:min(100%,370px);padding:24px 20px;border:1px solid rgba(255,255,255,.8);border-radius:24px;background:#fff;box-shadow:0 24px 70px rgba(25,39,65,.28);color:#1e2a3b}.cf-ranking-consent-emoji{display:block;margin-bottom:5px;font-size:30px;text-align:center}.cf-ranking-consent-modal h2{margin:0;text-align:center;font-size:22px;line-height:1.15}.cf-ranking-consent-modal>p{margin:13px 0;color:#607086;font-size:13px;line-height:1.5}.cf-ranking-consent-option{display:flex;align-items:flex-start;gap:9px;margin:11px 0;color:#33445b;font-size:13px;line-height:1.4}.cf-ranking-consent-option input{margin-top:3px;accent-color:#4f86ed}.cf-ranking-consent-primary,.cf-ranking-consent-secondary{width:100%;padding:12px;border-radius:14px;font:700 13px inherit;cursor:pointer}.cf-ranking-consent-primary{margin-top:8px;border:0;background:#4f86ed;color:#fff}.cf-ranking-consent-primary:disabled{opacity:.5;cursor:not-allowed}.cf-ranking-consent-secondary{margin-top:8px;border:1px solid rgba(94,112,138,.25);background:#fff;color:#53647a}.cf-ranking-consent-modal>small{display:block;margin-top:12px;color:#8792a1;font-size:10px;text-align:center}.cf-ranking-consent-error{color:#b33e3e!important;font-size:12px!important}
         .cf-mobile-sheet-position { display: block; margin: 8px 0; font-size: 44px; line-height: 1; color: #252a30; }
         .cliente-grid { display: flex; flex-direction: column; }
         @media (min-width: 1024px) { .cliente-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 24px; align-items: start; } }

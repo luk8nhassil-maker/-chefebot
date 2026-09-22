@@ -36,11 +36,13 @@ export async function GET(req: NextRequest) {
   let ranking: {
     posicao: number;
     score: number;
+    participaCampanha: boolean;
     entorno: { posicao: number; eVoce: boolean }[];
     lista: {
       posicao: number;
       score: number;
       eVoce: boolean;
+      participaCampanha: boolean;
       nomePublico?: string;
       telefoneMascarado?: string;
     }[];
@@ -49,7 +51,7 @@ export async function GET(req: NextRequest) {
   if (temporada) {
     const [pos, top] = await Promise.all([
       posicaoClienteRanking(tenantId, temporada.temporadaId, clienteId),
-      obterTopRanking(tenantId, temporada.temporadaId, 20),
+      obterTopRanking(tenantId, temporada.temporadaId, 50),
     ]);
     if (pos) {
       const vizinhos = top.filter(
@@ -59,19 +61,28 @@ export async function GET(req: NextRequest) {
       const entorno = vizinhos.map((e) => ({ posicao: e.posicao, eVoce: e.clienteId === clienteId }));
       // A decisao de exposicao fica na DAL server-only. A rota nunca recebe
       // consentimento bruto nem o perfil inteiro, e omite campos ausentes.
-      const top10 = top.slice(0, 10);
-      const identidades = await projetarIdentidadesPublicasRanking(top10.map((e) => e.clienteId));
-      const lista = top10.map((e) => {
+      const identidades = await projetarIdentidadesPublicasRanking([
+        ...top.map((e) => e.clienteId),
+        clienteId,
+      ]);
+      const lista = top.map((e) => {
         const identidade = identidades.get(e.clienteId);
         return {
           posicao: e.posicao,
           score: e.score,
           eVoce: e.clienteId === clienteId,
+          participaCampanha: identidade?.participaCampanha ?? false,
           ...(identidade?.nomePublico ? { nomePublico: identidade.nomePublico } : {}),
           ...(identidade?.telefoneMascarado ? { telefoneMascarado: identidade.telefoneMascarado } : {}),
         };
       });
-      ranking = { posicao: pos.posicao, score: pos.score, entorno, lista };
+      ranking = {
+        posicao: pos.posicao,
+        score: pos.score,
+        participaCampanha: identidades.get(clienteId)?.participaCampanha ?? false,
+        entorno,
+        lista,
+      };
     }
   }
 
