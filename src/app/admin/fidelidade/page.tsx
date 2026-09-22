@@ -49,12 +49,13 @@ type StatusData = {
 
 type AnalyticsData = {
   metricas?: {
-    totalPedidos: number
-    totalReceita: number
-    ticketMedio: number
+    pedidosValidos: number
+    receitaElegivelCents: number
+    ticketMedioCents: number
     clientesUnicos: number
   }
-  meta?: { periodo: number; totalEventos: number }
+  periodosDias?: PeriodoAnalytics
+  totalEventosNoIndice?: number
   error?: string
 }
 
@@ -467,6 +468,10 @@ export default function FidelidadePage() {
                 </div>
               </div>
 
+              <div style={{ color: 'var(--foreground-muted)', fontSize: 12, lineHeight: 1.45, marginBottom: 12 }}>
+                Considera pedidos entregues no período selecionado. Cada cliente é contado uma única vez.
+              </div>
+
               {erroAnalytics && (
                 <div style={{ color: 'var(--danger)', fontSize: 13 }}>
                   {erroAnalytics}
@@ -479,16 +484,16 @@ export default function FidelidadePage() {
               {!analyticsCarregado ? (
                 <div style={{ color: 'var(--foreground-muted)', fontSize: 13, padding: '16px 0', textAlign: 'center' }}>Carregando…</div>
               ) : analytics && !erroAnalytics && (
-                analytics.meta?.totalEventos === 0 ? (
+                (analytics.totalEventosNoIndice ?? analytics.metricas?.pedidosValidos ?? 0) === 0 ? (
                   <div style={{ fontSize: 13, color: 'var(--foreground-muted)', fontStyle: 'italic', padding: '8px 0' }}>
                     Histórico insuficiente para o período de {periodo} dias. Os dados aparecerão aqui conforme os pedidos forem registrados.
                   </div>
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
                     {[
-                      { label: 'Pedidos', valor: String(analytics.metricas?.totalPedidos ?? 0) },
-                      { label: 'Receita', valor: formatarReais(analytics.metricas?.totalReceita ?? 0) },
-                      { label: 'Ticket médio', valor: formatarReais(analytics.metricas?.ticketMedio ?? 0) },
+                      { label: 'Pedidos', valor: String(analytics.metricas?.pedidosValidos ?? 0) },
+                      { label: 'Receita', valor: formatarReais(analytics.metricas?.receitaElegivelCents ?? 0) },
+                      { label: 'Ticket médio', valor: formatarReais(analytics.metricas?.ticketMedioCents ?? 0) },
                       { label: 'Clientes únicos', valor: String(analytics.metricas?.clientesUnicos ?? 0) },
                     ].map(({ label, valor }) => (
                       <div key={label} style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--background)', border: '1px solid var(--border)' }}>
