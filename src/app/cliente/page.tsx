@@ -166,9 +166,13 @@ const PAINEL_PREVIEW: PainelFidelidade = {
       { posicao: 9, eVoce: false },
     ],
     lista: [
-      { posicao: 7, score: 22, eVoce: false, participaCampanha: true },
-      { posicao: 8, score: 20, eVoce: true, participaCampanha: true },
-      { posicao: 9, score: 18, eVoce: false, participaCampanha: true },
+      { posicao: 4, score: 28, eVoce: false, participaCampanha: true, nomePublico: 'Ana', telefoneMascarado: '(11) 98888-**42' },
+      { posicao: 5, score: 26, eVoce: false, participaCampanha: true, nomePublico: 'Carlos', telefoneMascarado: '(21) 97777-**18' },
+      { posicao: 6, score: 24, eVoce: false, participaCampanha: true, nomePublico: 'Marina', telefoneMascarado: '(31) 96666-**07' },
+      { posicao: 7, score: 22, eVoce: false, participaCampanha: true, nomePublico: 'Rafael', telefoneMascarado: '(41) 95555-**63' },
+      { posicao: 8, score: 20, eVoce: true, participaCampanha: true, nomePublico: 'Lucas', telefoneMascarado: '(99) 99999-**91' },
+      { posicao: 9, score: 18, eVoce: false, participaCampanha: true, nomePublico: 'Julia', telefoneMascarado: '(51) 94444-**26' },
+      { posicao: 10, score: 16, eVoce: false, participaCampanha: false },
     ],
   },
 }
@@ -182,10 +186,30 @@ type PreviewFidelidadeMobileProps = {
 function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeMobileProps) {
   const [modalCompartilhar, setModalCompartilhar] = useState(false)
   const [modalRankingConsentimento, setModalRankingConsentimento] = useState(false)
+  const [mostrarRanking, setMostrarRanking] = useState(false)
   const progresso = Math.max(0, Math.min(100, FIDELIDADE_PREVIEW.progressoPercentual))
   const nome = PERFIL_PREVIEW.cliente.nome ?? 'Cliente'
   const primeiroNome = nome.split(' ')[0]
   const inicial = primeiroNome.slice(0, 1).toUpperCase()
+
+  // No Preview, o aviso confirma a participação simulada no mesmo ciclo em
+  // que o estado local libera o ranking. Usar os dois sinais evita que uma
+  // atualização do contêiner do Preview esconda a tela recém-liberada.
+  if ((mostrarRanking || aviso.startsWith('Participação simulada no Preview')) && PAINEL_PREVIEW.ranking) {
+    return (
+      <FidelidadeRankingScreen
+        ranking={PAINEL_PREVIEW.ranking}
+        temporada={PAINEL_PREVIEW.temporada}
+        privacidade={null}
+        privacidadeCarregando={false}
+        privacidadeSalvando={null}
+        privacidadeErro=""
+        onAlterarPrivacidade={() => undefined}
+        onRevogarTodas={() => undefined}
+        onClose={() => setMostrarRanking(false)}
+      />
+    )
+  }
 
   function simularCompartilhamento(canal: string) {
     setModalCompartilhar(false)
@@ -267,7 +291,11 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
           carregando={false}
           salvando={null}
           erro=""
-          onAceitar={() => { setModalRankingConsentimento(false); onAviso('Participação simulada no Preview. Nenhuma autorização real foi salva.') }}
+          onAceitar={() => {
+            setModalRankingConsentimento(false)
+            setMostrarRanking(true)
+            onAviso('Participação simulada no Preview. Nenhuma autorização real foi salva.')
+          }}
           onRecusar={() => setModalRankingConsentimento(false)}
         />
       )}
@@ -385,7 +413,7 @@ function FidelidadeRankingScreen({
   onClose,
 }: FidelidadeRankingScreenProps) {
   const [aba, setAba] = useState<'participantes' | 'minha' | 'geral'>('participantes')
-  const lista = ranking.lista
+  const lista = [...ranking.lista].sort((a, b) => a.posicao - b.posicao)
   const listaSemPodio = lista.filter((entrada) => entrada.posicao > 3)
   const participantes = lista.filter((entrada) => entrada.participaCampanha)
   const podium = participantes.filter((entrada) => entrada.posicao <= 3)
@@ -394,21 +422,23 @@ function FidelidadeRankingScreen({
     : aba === 'geral' ? listaSemPodio : participantes.filter((entrada) => entrada.posicao > 3)
   const nomeSeguro = (entrada: { eVoce: boolean; participaCampanha: boolean; posicao: number; nomePublico?: string }) => {
     if (entrada.eVoce && !entrada.participaCampanha) return 'Você — não participa do prêmio'
-    if (!entrada.participaCampanha) return 'Não participa do prêmio'
+    if (!entrada.participaCampanha) return 'Fora da disputa'
     return entrada.eVoce ? 'Você' : entrada.nomePublico || `Participante ${entrada.posicao}`
   }
   const avatarSeguro = (entrada: { eVoce: boolean; nomePublico?: string } | undefined) =>
-    entrada?.eVoce ? 'V' : entrada?.nomePublico?.slice(0, 1).toUpperCase() || '★'
+    entrada?.eVoce ? 'V' : entrada?.nomePublico?.slice(0, 1).toUpperCase() || null
+  const scoreSeguro = (score: number) => (
+    <span className="cf-ranking-score"><Star size={16} fill="currentColor" strokeWidth={1.8} aria-hidden="true" />{score}</span>
+  )
 
   return (
     <main className="cf-ranking-screen" aria-label="Pódio Chefe">
       <header className="cf-ranking-header">
         <button type="button" onClick={onClose} aria-label="Voltar para Fidelidade">‹</button>
         <div>
-          <h1>Pódio Chefe</h1>
-          <p>Os clientes que mais brilham nesta temporada!</p>
+          <h1>Rank</h1>
+          <p>Suba com suas estrelas e ganhe presentes.</p>
         </div>
-        <span className="cf-ranking-season"><strong>♛ Temporada atual</strong><small>{temporada?.diasRestantes == null ? 'em andamento' : `${temporada.diasRestantes} dias restantes`}</small></span>
       </header>
 
       <section className="cf-ranking-podium" aria-label="Melhores posições">
@@ -417,22 +447,16 @@ function FidelidadeRankingScreen({
           return (
             <div key={posicao} className={`cf-ranking-podium-item cf-ranking-podium-${posicao}`}>
               <div className="cf-ranking-medal">{posicao}</div>
-              <div className="cf-ranking-avatar">{avatarSeguro(entrada)}</div>
+              <div className="cf-ranking-avatar">{avatarSeguro(entrada) ?? <Star size={16} fill="currentColor" strokeWidth={1.8} aria-hidden="true" />}</div>
               <strong>{entrada ? nomeSeguro(entrada) : `Posição ${posicao}`}</strong>
-              <b>{entrada ? `${entrada.score} Estrelas` : 'Aguardando dados'}</b>
+              <b>{entrada ? scoreSeguro(entrada.score) : 'Prêmio em breve'}</b>
             </div>
           )
         })}
       </section>
 
-      <section className="cf-ranking-current" aria-label="Minha posição no ranking">
-        <div><small>{ranking.participaCampanha ? 'Sua posição' : 'Sua posição geral'}</small><strong>{ranking.posicao}º</strong></div>
-        <div className="cf-ranking-current-user"><span>{'Você'.slice(0, 1)}</span><b>Você<em>{ranking.score} Estrelas</em></b></div>
-        <div><small>{ranking.participaCampanha ? (ranking.posicao > 1 ? 'Continue acumulando Estrelas' : 'Você está no topo') : 'Você ainda não participa'}</small><strong>{ranking.participaCampanha ? (ranking.posicao > 1 ? 'para subir' : 'parabéns!') : 'autorize para concorrer'}</strong></div>
-      </section>
-
       <div className="cf-ranking-tabs" role="tablist" aria-label="Filtro do ranking">
-        {([['participantes', 'Valendo prêmio'], ['minha', 'Minha posição'], ['geral', 'Visão geral']] as const).map(([id, label]) => (
+        {([['participantes', 'Participando'], ['minha', 'Minha posição'], ['geral', 'Todos']] as const).map(([id, label]) => (
           <button key={id} type="button" role="tab" aria-selected={aba === id} className={aba === id ? 'ativo' : ''} onClick={() => setAba(id)}>{label}</button>
         ))}
       </div>
@@ -441,30 +465,32 @@ function FidelidadeRankingScreen({
         {linhas.length === 0 ? <p className="cf-ranking-empty">Sua posição ainda não apareceu no ranking desta temporada.</p> : linhas.map((entrada) => (
           <div key={entrada.posicao} className={`cf-ranking-row ${entrada.eVoce ? 'voce' : ''}`}>
             <strong>{entrada.posicao}</strong>
-            <span className="cf-ranking-row-avatar">{avatarSeguro(entrada)}</span>
+            <span className="cf-ranking-row-avatar">{avatarSeguro(entrada) ?? <Star size={15} fill="currentColor" strokeWidth={1.8} aria-hidden="true" />}</span>
             <span className="cf-ranking-row-name">
               {nomeSeguro(entrada)}
               {entrada.telefoneMascarado && <small>{entrada.telefoneMascarado}</small>}
             </span>
-            <b>{entrada.score} Estrelas</b>
+            <b>{scoreSeguro(entrada.score)}</b>
           </div>
         ))}
-        {aba === 'participantes' && <p className="cf-ranking-footnote">Aqui aparecem apenas os clientes que autorizaram a participação e concorrem ao prêmio.</p>}
-        {aba === 'geral' && <p className="cf-ranking-footnote">A visão geral mostra as estrelas de todos. Quem não autorizou não participa do prêmio.</p>}
+        {aba === 'participantes' && <p className="cf-ranking-footnote">Mostrando posições próximas a você.</p>}
+        {aba === 'geral' && <p className="cf-ranking-footnote">Quem não autorizou não concorre ao prêmio.</p>}
       </section>
 
       <section className="cf-ranking-note">
-        <span>🏆</span><div><strong>Acumule Estrelas para subir</strong><p>A posição considera apenas as Estrelas válidas da temporada atual.</p></div>
+        <span>🏆</span><div><strong>Acumule estrelas para subir</strong><p>As estrelas desta temporada contam para sua posição.</p></div>
       </section>
 
-      <PrivacidadeRankingControls
-        privacidade={privacidade}
-        carregando={privacidadeCarregando}
-        salvando={privacidadeSalvando}
-        erro={privacidadeErro}
-        onAlterar={onAlterarPrivacidade}
-        onRevogarTodas={onRevogarTodas}
-      />
+      {privacidade !== null && (
+        <PrivacidadeRankingControls
+          privacidade={privacidade}
+          carregando={privacidadeCarregando}
+          salvando={privacidadeSalvando}
+          erro={privacidadeErro}
+          onAlterar={onAlterarPrivacidade}
+          onRevogarTodas={onRevogarTodas}
+        />
+      )}
     </main>
   )
 }
@@ -488,10 +514,11 @@ function PrivacidadeRankingControls({ privacidade, carregando, salvando, erro, o
 
   return (
     <section className="cf-ranking-privacy" aria-label="Privacidade no ranking">
-      <h2>Privacidade no ranking</h2>
+      <h2>Suas autorizações</h2>
+      <p className="cf-ranking-privacy-hint">Você pode alterar sua participação quando quiser.</p>
       {carregando && <p>Carregando suas preferências…</p>}
       {!carregando && opcoesDisponiveis.length === 0 && (
-        <p>O ranking permanece anônimo enquanto não houver textos aprovados e publicados.</p>
+        <p>Você controla como aparece no ranking.</p>
       )}
       {opcoesDisponiveis.map((opcao) => (
         <label key={opcao.finalidade}>
@@ -508,7 +535,7 @@ function PrivacidadeRankingControls({ privacidade, carregando, salvando, erro, o
           <span>{opcao.texto}</span>
         </label>
       ))}
-      <p>A foto de perfil não é utilizada enquanto não existir uma fonte oficial autorizada e integrada.</p>
+      <p>Foto de perfil não utilizada.</p>
       {haConsentimentoAtivo && (
         <button type="button" disabled={salvando !== null} onClick={onRevogarTodas}>
           {salvando === 'todas' ? 'Revogando…' : 'Revogar todas as autorizações do ranking'}
@@ -538,11 +565,11 @@ function RankingConsentModal({ privacidade, carregando, salvando, erro, onAceita
         <div className="cf-ranking-consent-visual" aria-hidden="true">
           <div className="cf-ranking-consent-icon-row">
             <span className="cf-ranking-consent-spark cf-ranking-consent-spark-one">✦</span>
-            <img className="cf-ranking-consent-emoji" src="/assets/ranking/pizza-3d.png" alt="" aria-hidden="true" />
+            <img className="cf-ranking-consent-emoji" src="/assets/ranking/pizza-3d.webp" alt="" aria-hidden="true" />
             <span className="cf-ranking-consent-spark cf-ranking-consent-spark-two">✦</span>
-            <img className="cf-ranking-consent-gift" src="/assets/ranking/presente-3d.png" alt="" aria-hidden="true" />
-            <img className="cf-ranking-consent-burger" src="/assets/ranking/hamburguer-3d.png" alt="" aria-hidden="true" />
-            <img className="cf-ranking-consent-soda" src="/assets/ranking/refrigerante-3d.png" alt="" aria-hidden="true" />
+            <img className="cf-ranking-consent-gift" src="/assets/ranking/presente-3d.webp" alt="" aria-hidden="true" />
+            <img className="cf-ranking-consent-burger" src="/assets/ranking/hamburguer-3d.webp" alt="" aria-hidden="true" />
+            <img className="cf-ranking-consent-soda" src="/assets/ranking/refrigerante-3d.webp" alt="" aria-hidden="true" />
           </div>
           <span className="cf-ranking-consent-people">
             <i className="cf-ranking-consent-person person-one">👩🏻</i>
@@ -1927,6 +1954,30 @@ export default function ClientePage() {
         .cf-preview-gift{position:absolute;right:-36px;top:48%;transform:translateY(-50%) rotate(-7deg) scale(2.2);font-size:54px;opacity:.9;z-index:1;filter:drop-shadow(0 15px 22px rgba(233,80,126,.22))}
         .cf-preview-modal-backdrop{position:fixed;inset:0;z-index:80;background:rgba(20,27,37,.38);display:flex;align-items:flex-end;justify-content:center;padding:18px}.cf-preview-modal{width:100%;max-width:390px;background:#fff;border-radius:22px;padding:20px;box-shadow:0 24px 60px rgba(0,0,0,.22)}.cf-preview-modal h2{margin:0 0 5px;font-size:20px}.cf-preview-modal p{margin:0 0 14px;font-size:12.5px;line-height:1.4;color:#6d7684}.cf-preview-modal button{width:100%;min-height:42px;border:0;border-top:1px solid #edf0f4;background:#fff;color:#285fb9;font:700 14px inherit;cursor:pointer}.cf-preview-modal .cf-preview-modal-cancel{margin-top:7px;border-radius:11px;border:0;background:#f2f4f7;color:#59616a}
         @media (max-width:420px){.cliente-conteudo{padding:14px 12px calc(env(safe-area-inset-bottom) + 102px)!important}.cf-preview-phone{max-width:390px}}
+        /* Ranking: hierarquia curta e foco no progresso do cliente. */
+        .cf-ranking-screen{max-width:390px;margin:0 auto;color:#1d2b42}
+        .cf-ranking-header{grid-template-columns:44px 1fr;gap:7px;margin-bottom:12px;align-items:center}
+        .cf-ranking-header>button{width:42px;height:42px;font-size:34px;line-height:34px}
+        .cf-ranking-header h1{margin:0;font-size:23px;letter-spacing:-.5px}
+        .cf-ranking-header p{margin-top:4px;font-size:11px;white-space:normal;line-height:1.25}
+        .cf-ranking-season{min-width:98px;padding:8px 9px;border-radius:16px;font-size:10px}
+        .cf-ranking-season small{font-size:11px;margin-top:2px}
+        .cf-ranking-podium{min-height:174px;padding:12px 4px 0;gap:4px;border-radius:20px 20px 0 0}
+        .cf-ranking-podium-item{padding:0 3px 11px;border-radius:15px 15px 0 0}
+        .cf-ranking-podium-1{min-height:145px}.cf-ranking-podium-2,.cf-ranking-podium-3{min-height:116px}
+        .cf-ranking-medal{width:25px;height:25px;margin-top:-12px;font-size:13px}
+        .cf-ranking-avatar{width:44px;height:44px;margin:5px 0;border-width:3px;font-size:15px}
+        .cf-ranking-podium-1 .cf-ranking-avatar{width:56px;height:56px}
+        .cf-ranking-podium-item strong{font-size:12px}.cf-ranking-podium-item b{margin-top:3px;font-size:11px}
+        .cf-ranking-current{grid-template-columns:.72fr 1.08fr 1.2fr;gap:7px;padding:12px 11px;border-radius:17px}
+        .cf-ranking-current small{font-size:11px}.cf-ranking-current>div>strong{font-size:27px}
+        .cf-ranking-current-user{gap:6px;padding:0 6px}.cf-ranking-current-user>span{width:33px;height:33px}.cf-ranking-current-user b{font-size:13px}.cf-ranking-current-user em{font-size:11px}
+        .cf-ranking-current>div:last-child strong{font-size:13px;line-height:1.15}
+        .cf-ranking-tabs{margin:12px 0 9px;padding:2px;border-radius:19px}.cf-ranking-tabs button{min-height:35px;font-size:12px}
+        .cf-ranking-current{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:13px 12px}.cf-ranking-current-main{display:grid;grid-template-columns:.8fr 1.2fr;align-items:center;gap:8px}.cf-ranking-current-next{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:10px;border-top:1px solid rgba(107,164,245,.24)}.cf-ranking-current-next strong{font-size:13px;color:#2d609f;text-align:right}.cf-ranking-score{display:inline-flex;align-items:center;justify-content:flex-end;gap:4px;white-space:nowrap}.cf-ranking-list{gap:5px}.cf-ranking-row{grid-template-columns:27px 30px 1fr auto;gap:6px;min-height:43px;padding:12px;border-radius:18px}.cf-ranking-row>strong{font-size:15px}.cf-ranking-row-avatar{width:29px;height:29px;font-size:12px}.cf-ranking-row-name{display:flex;flex-direction:column;justify-content:center;align-self:stretch;font-size:13px;line-height:1.15}.cf-ranking-row-name small{font-size:10px;line-height:1.15}.cf-ranking-row>b{align-self:center;font-size:11px}.cf-ranking-row>b .cf-ranking-score{min-height:32px;font-size:15px}.cf-ranking-current-user em.cf-ranking-score{justify-content:flex-start}
+        .cf-ranking-empty,.cf-ranking-footnote{margin:6px 2px;font-size:12px;line-height:1.35}
+        .cf-ranking-note{gap:9px;margin-top:12px;padding:11px 12px;border-radius:15px}.cf-ranking-note>span{font-size:22px}.cf-ranking-note strong{font-size:12px}.cf-ranking-note p{margin-top:3px;font-size:11px}
+        .cf-ranking-privacy{margin-top:12px;padding:12px;border-radius:15px}.cf-ranking-privacy h2{margin-bottom:7px;font-size:13px}.cf-ranking-privacy>p{margin:6px 0;font-size:11px}.cf-ranking-privacy label{gap:7px;margin:8px 0;font-size:12px}.cf-ranking-privacy button{margin-top:6px;padding:8px;font-size:12px}
       `}</style>
     </div>
   )
