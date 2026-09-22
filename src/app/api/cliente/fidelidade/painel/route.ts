@@ -32,7 +32,12 @@ export async function GET(req: NextRequest) {
 
   const temporada = await obterTemporadaAtiva(tenantId);
 
-  let ranking: { posicao: number; score: number; entorno: { posicao: number; eVoce: boolean }[] } | null = null;
+  let ranking: {
+    posicao: number;
+    score: number;
+    entorno: { posicao: number; eVoce: boolean }[];
+    lista: { posicao: number; score: number; eVoce: boolean }[];
+  } | null = null;
 
   if (temporada) {
     const [pos, top] = await Promise.all([
@@ -45,7 +50,12 @@ export async function GET(req: NextRequest) {
       );
       // clienteId NUNCA exposto — apenas posicao e eVoce
       const entorno = vizinhos.map((e) => ({ posicao: e.posicao, eVoce: e.clienteId === clienteId }));
-      ranking = { posicao: pos.posicao, score: pos.score, entorno };
+      const lista = top.slice(0, 10).map((e) => ({
+        posicao: e.posicao,
+        score: e.score,
+        eVoce: e.clienteId === clienteId,
+      }));
+      ranking = { posicao: pos.posicao, score: pos.score, entorno, lista };
     }
   }
 
