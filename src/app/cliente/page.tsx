@@ -206,7 +206,10 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
         privacidadeErro=""
         onAlterarPrivacidade={() => undefined}
         onRevogarTodas={() => undefined}
-        onClose={() => setMostrarRanking(false)}
+        onClose={() => {
+          setMostrarRanking(false)
+          onAviso('')
+        }}
       />
     )
   }
