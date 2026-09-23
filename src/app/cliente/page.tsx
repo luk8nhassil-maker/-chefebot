@@ -206,7 +206,10 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
         privacidadeErro=""
         onAlterarPrivacidade={() => undefined}
         onRevogarTodas={() => undefined}
-        onClose={() => setMostrarRanking(false)}
+        onClose={() => {
+          setMostrarRanking(false)
+          onAviso('')
+        }}
       />
     )
   }
@@ -525,7 +528,7 @@ function PrivacidadeRankingControls({ privacidade, carregando, salvando, erro, o
           <span>{opcao.texto}</span>
         </label>
       ))}
-      <p>Foto de perfil não utilizada.</p>
+      <p>A foto de perfil não é utilizada enquanto não existir uma fonte oficial autorizada e integrada.</p>
       {haConsentimentoAtivo && (
         <button type="button" disabled={salvando !== null} onClick={onRevogarTodas}>
           {salvando === 'todas' ? 'Revogando…' : 'Revogar todas as autorizações do ranking'}

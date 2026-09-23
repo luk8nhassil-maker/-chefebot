@@ -273,6 +273,10 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
     expect(fonte).not.toContain("'LinkedIn'");
   });
 
+  test("ranking do Preview permite voltar para a fidelidade depois da participação simulada", () => {
+    expect(fonte).toMatch(/onClose=\{\(\) => \{\s*setMostrarRanking\(false\)\s*onAviso\(''\)\s*\}\}/);
+  });
+
   test("carrega dados de painel (temporada + ranking) via endpoint dedicado", () => {
     expect(fonte).toContain("async function carregarPainel");
     expect(fonte).toContain("/api/cliente/fidelidade/painel");
