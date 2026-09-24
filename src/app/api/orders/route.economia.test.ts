@@ -30,4 +30,13 @@ describe("GET /api/orders — leitura econômica com escrita protegida", () => {
     expect(getRoute).toContain("persistir: true");
     expect(getRoute).toContain("pedidos: arquivamentoAtual.pedidos");
   });
+  test("revisao=true lê somente a chave minúscula antes do caminho pesado", () => {
+    expect(getRoute).toContain("url.searchParams.get('revisao') === 'true'");
+    expect(getRoute).toContain("redis.get<number>(CHAVE_REVISAO_PEDIDOS)");
+    const fastPath = getRoute.indexOf("url.searchParams.get('revisao') === 'true'");
+    const fullRead = getRoute.indexOf("redis.get<Pedido[]>('pedidos')");
+    expect(fastPath).toBeGreaterThan(-1);
+    expect(fullRead).toBeGreaterThan(fastPath);
+  });
+
 });
