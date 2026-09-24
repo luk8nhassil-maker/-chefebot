@@ -1,6 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventoAnalitico } from "@/lib/historicoAnalitico";
 
+const { mockJwtVerify } = vi.hoisted(() => ({
+  mockJwtVerify: vi.fn(),
+}));
+
+vi.mock("jose", () => ({
+  createRemoteJWKSet: vi.fn(() => "jwks-teste"),
+  jwtVerify: mockJwtVerify,
+}));
+
 vi.mock("@/lib/historicoAnalitico", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/historicoAnalitico")>();
   return {
@@ -49,6 +58,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockPeriodo.mockResolvedValue([]);
   mockAntes.mockResolvedValue([]);
+  mockJwtVerify.mockRejectedValue(new Error("token oidc invalido"));
   process.env.CRON_SECRET = SEGREDO;
   process.env.VERCEL_GIT_COMMIT_SHA = "sha-teste";
 });
@@ -62,6 +72,49 @@ describe("GET /api/cron/pesquisa-preferencia-auditoria", () => {
   it("rejeita mesmo Bearer literal quando CRON_SECRET está ausente", async () => {
     delete process.env.CRON_SECRET;
     const res = await GET(req("Bearer undefined"));
+    expect(res.status).toBe(401);
+  });
+
+  it("aceita GitHub Actions OIDC somente com claims exatas da main e do workflow", async () => {
+    delete process.env.CRON_SECRET;
+    mockJwtVerify.mockResolvedValue({
+      payload: {
+        repository: "luk8nhassil-maker/-chefebot",
+        repository_id: "1257327044",
+        ref: "refs/heads/main",
+        workflow_ref:
+          "luk8nhassil-maker/-chefebot/.github/workflows/pesquisa-preferencia-auditoria-producao.yml@refs/heads/main",
+        event_name: "push",
+      },
+    });
+
+    const res = await GET(req("Bearer oidc-valido"));
+    expect(res.status).toBe(200);
+    expect(mockJwtVerify).toHaveBeenCalledWith(
+      "oidc-valido",
+      "jwks-teste",
+      expect.objectContaining({
+        issuer: "https://token.actions.githubusercontent.com",
+        audience: "chefebot-research-audit",
+        algorithms: ["RS256"],
+      })
+    );
+  });
+
+  it("rejeita OIDC de outro ref ou workflow", async () => {
+    delete process.env.CRON_SECRET;
+    mockJwtVerify.mockResolvedValue({
+      payload: {
+        repository: "luk8nhassil-maker/-chefebot",
+        repository_id: "1257327044",
+        ref: "refs/heads/outra",
+        workflow_ref:
+          "luk8nhassil-maker/-chefebot/.github/workflows/pesquisa-preferencia-auditoria-producao.yml@refs/heads/outra",
+        event_name: "push",
+      },
+    });
+
+    const res = await GET(req("Bearer oidc-ref-errada"));
     expect(res.status).toBe(401);
   });
 

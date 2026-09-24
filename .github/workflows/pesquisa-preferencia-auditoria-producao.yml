@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: pesquisa-preferencia-auditoria-producao
@@ -24,24 +25,41 @@ jobs:
     steps:
       - name: Ler agregados reais depois do deployment correto
         env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
           EXPECTED_SHA: ${{ github.sha }}
           AUDIT_URL: https://chefedapizza.com.br/api/cron/pesquisa-preferencia-auditoria
+          OIDC_AUDIENCE: chefebot-research-audit
         shell: bash
         run: |
           set +x
-          echo "::add-mask::${CRON_SECRET}"
 
-          if [ -z "${CRON_SECRET}" ]; then
-            echo "::error::CRON_SECRET não configurado no GitHub Actions."
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "::error::GitHub Actions OIDC não foi disponibilizado para este job."
             exit 1
           fi
+
+          obter_token_oidc() {
+            local resposta token
+            resposta=$(curl -fsS --max-time 15               -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}"               "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${OIDC_AUDIENCE}")
+            token=$(printf '%s' "${resposta}" | jq -r '.value // empty')
+            if [ -z "${token}" ]; then
+              echo "::error::GitHub Actions não retornou token OIDC."
+              return 1
+            fi
+            echo "::add-mask::${token}"
+            OIDC_TOKEN="${token}"
+          }
+
+          obter_token_oidc
 
           rm -f /tmp/research-audit.json /tmp/research-audit-headers.txt
           pronto=0
 
           for tentativa in $(seq 1 36); do
-            status=$(curl -sS               -o /tmp/research-audit.json               -D /tmp/research-audit-headers.txt               -w '%{http_code}'               --max-time 20               -H "Authorization: Bearer ${CRON_SECRET}"               -H "Accept: application/json"               "${AUDIT_URL}" || true)
+            if [ "${tentativa}" = "13" ] || [ "${tentativa}" = "25" ]; then
+              obter_token_oidc
+            fi
+
+            status=$(curl -sS               -o /tmp/research-audit.json               -D /tmp/research-audit-headers.txt               -w '%{http_code}'               --max-time 20               -H "Authorization: Bearer ${OIDC_TOKEN}"               -H "Accept: application/json"               "${AUDIT_URL}" || true)
 
             if [ "${status}" = "200" ]; then
               commit=$(jq -r '.deploymentCommitSha // ""' /tmp/research-audit.json 2>/dev/null || true)
