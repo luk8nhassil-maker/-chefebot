@@ -1,6 +1,5 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import PanelShell from '@/components/PanelShell'
 import FidelidadeAnalyticsDashboard from '@/components/FidelidadeAnalyticsDashboard'
 
@@ -93,7 +92,6 @@ function labelAnonimo(posicao: number): string {
 }
 
 export default function FidelidadePage() {
-  const router = useRouter()
   const [status, setStatus] = useState<StatusData | null>(null)
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
   const [periodo, setPeriodo] = useState<PeriodoAnalytics>(30)
@@ -309,12 +307,6 @@ export default function FidelidadePage() {
                 <div style={{ fontSize: 13, color: 'var(--foreground-secondary)', lineHeight: 1.6 }}>
                   <div>Regra: <strong>{status.estrelas.regraVersao ?? '—'}</strong></div>
                   <div>Meta: <strong>{status.estrelas.metaEstrelas} estrelas</strong></div>
-                </div>
-                <div style={{ marginTop: 12, fontSize: 12, color: 'var(--foreground-muted)', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-                  Configuração de estrelas em{' '}
-                  <button onClick={() => router.push('/admin/jornada-chef')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--primary-text, var(--primary))', fontWeight: 600, fontSize: 12, textDecoration: 'underline' }}>
-                    Jornada do Chef
-                  </button>
                 </div>
               </div>
 

@@ -9,6 +9,7 @@ import {
   derivarFaseAtual,
   calcularMensagemProgresso,
   jornadaAtivaParaCliente,
+  JORNADA_CHEF_DESCONTINUADA,
 } from "@/lib/jornadaChef";
 
 // GET /api/cliente/jornada-chef — progresso da trilha e presentes do cliente
@@ -26,6 +27,10 @@ export async function GET(req: NextRequest) {
 
   const cliente = await buscarClientePorId(payload.clienteId);
   if (!cliente) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+
+  // Jornada do Chef descontinuada (Fase 1): nunca expõe a trilha ao cliente,
+  // independentemente do rollout salvo. O card só aparece com `ativo: true`.
+  if (JORNADA_CHEF_DESCONTINUADA) return NextResponse.json({ ativo: false });
 
   const clienteIdJornada = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
   const config = await obterConfigJornadaChef();

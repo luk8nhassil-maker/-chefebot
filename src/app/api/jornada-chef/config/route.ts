@@ -36,7 +36,10 @@ export async function POST(req: NextRequest) {
   // rota nunca confia em nada do body além de repassar bruto para lá. A
   // lista canário NÃO é editável por aqui (rota dedicada /canario).
   const resultado = await salvarConfigJornadaChef({
-    modoRollout: body?.modoRollout,
+    // Jornada do Chef descontinuada (Fase 1): o rollout nunca pode ser
+    // reativado por aqui — qualquer tentativa de "canary"/"on" é ignorada e
+    // forçada para "off". A remoção definitiva vem na Fase 2.
+    modoRollout: "off",
     metaPizzas: Number(body?.metaPizzas),
     limitePizzasPorPedido: Number(body?.limitePizzasPorPedido),
     validadeRecompensaDias: Number(body?.validadeRecompensaDias),

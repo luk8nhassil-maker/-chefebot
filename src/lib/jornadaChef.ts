@@ -25,6 +25,17 @@ export const TENANT_PADRAO = "default";
 
 const VERSAO_REGRA_ATUAL = 1;
 
+/**
+ * Kill-switch de descontinuação (Fase 1). A Jornada do Chef foi substituída
+ * pelo sistema único de Pontos/Estrelas + Ranking. Enquanto o código não é
+ * removido de vez (Fase 2), nenhuma superfície voltada ao usuário deve mais
+ * ativá-la: as rotas de cliente/admin consultam esta flag para nunca expor a
+ * trilha, e a rota de configuração nunca reativa o rollout. O núcleo de
+ * regras (crédito/rollout) permanece intacto para não quebrar dados ou testes
+ * até a remoção definitiva.
+ */
+export const JORNADA_CHEF_DESCONTINUADA = true;
+
 function chaveConfig(tenantId: string): string {
   return `jornada:config:${tenantId}`;
 }

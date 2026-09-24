@@ -32,7 +32,11 @@ export async function POST(req: NextRequest) {
     : CONFIG_FIDELIDADE_PADRAO.tipoRecompensa;
 
   const config: ConfigFidelidade = {
-    ativo: Boolean(body?.ativo),
+    // Modelo legado de fidelidade por pizza descontinuado (Fase 1): nunca pode
+    // ser reativado — o campo `ativo` é forçado para `false`, independentemente
+    // do body. Sistema único agora é Pontos/Estrelas + Ranking. Remoção
+    // definitiva (função + rota) vem na Fase 2.
+    ativo: false,
     pizzasParaPremio: Math.max(1, Number(body?.pizzasParaPremio) || CONFIG_FIDELIDADE_PADRAO.pizzasParaPremio),
     tipoRecompensa,
     descricaoRecompensa: (body?.descricaoRecompensa || CONFIG_FIDELIDADE_PADRAO.descricaoRecompensa).toString().slice(0, 120),

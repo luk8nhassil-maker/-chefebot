@@ -37,7 +37,6 @@ export default function PanelShell({
   const onConfiguracoes = pathname.startsWith("/configuracoes")
   const onFinanceiro = pathname.startsWith("/financeiro")
   const onRelatorios = pathname.startsWith("/relatorios")
-  const onJornadaChef = pathname.startsWith("/admin/jornada-chef")
   const onFidelidade = pathname.startsWith("/admin/fidelidade")
   const onSalaoAcesso = pathname.startsWith("/admin/salao")
 
@@ -157,10 +156,6 @@ export default function PanelShell({
             <button className={`ps-sidebar-btn${onRelatorios ? " ps-active" : ""}`} onClick={() => router.push("/relatorios")}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><line x1="5" y1="20" x2="5" y2="12" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/><line x1="12" y1="20" x2="12" y2="6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/><line x1="19" y1="20" x2="19" y2="15" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></svg>
               Relatórios
-            </button>
-            <button className={`ps-sidebar-btn${onJornadaChef ? " ps-active" : ""}`} onClick={() => router.push("/admin/jornada-chef")}>
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 3l2.4 4.9L20 9l-4 4 1 5.5L12 16l-5 2.5 1-5.5-4-4 5.6-1.1L12 3z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>
-              Jornada do Chef
             </button>
             <button className={`ps-sidebar-btn${onFidelidade ? " ps-active" : ""}`} onClick={() => router.push("/admin/fidelidade")}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
