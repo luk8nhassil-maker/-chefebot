@@ -99,6 +99,20 @@ export async function registrarPesquisaPendente(params: {
   return true;
 }
 
+
+/**
+ * Leitura usada pelo gate para impedir novo contato enquanto uma pergunta
+ * anterior ainda está aguardando resposta.
+ */
+export async function clienteTemPesquisaPendente(
+  telefone?: string
+): Promise<boolean> {
+  const customerKey = derivarResearchCustomerKey(telefone);
+  if (!customerKey) return false;
+  const pendente = await redis.get<PesquisaPendente>(chavePendente(customerKey));
+  return !!pendente;
+}
+
 /**
  * Intercepta a resposta ANTES do fluxo normal do bot.
  *
