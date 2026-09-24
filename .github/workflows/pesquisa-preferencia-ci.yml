@@ -11,6 +11,10 @@ on:
       - "src/lib/pesquisaPreferenciaContatosRedis.test.ts"
       - "src/lib/pesquisaPreferenciaElegibilidade.server.ts"
       - "src/lib/pesquisaPreferenciaElegibilidade.server.test.ts"
+      - "src/lib/pesquisaPreferenciaElegibilidadeCompleta.server.ts"
+      - "src/lib/pesquisaPreferenciaElegibilidadeCompleta.server.test.ts"
+      - "src/lib/pesquisaPreferenciaOptOutRedis.ts"
+      - "src/lib/pesquisaPreferenciaOptOutRedis.test.ts"
       - "src/lib/pesquisaPreferenciaRegistro.ts"
       - "src/lib/pesquisaPreferenciaRegistro.test.ts"
       - "src/lib/pesquisaPreferenciaHistorico.ts"
@@ -19,6 +23,8 @@ on:
       - "src/lib/pesquisaPreferenciaHistoricoRedis.test.ts"
       - "src/app/api/admin/pesquisa-preferencia/dry-run/route.ts"
       - "src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts"
+      - "src/app/api/admin/pesquisa-preferencia/elegibilidade-controlada/route.ts"
+      - "src/app/api/admin/pesquisa-preferencia/elegibilidade-controlada/route.test.ts"
       - "src/app/api/cron/pesquisa-preferencia-auditoria/route.ts"
       - "src/app/api/cron/pesquisa-preferencia-auditoria/route.test.ts"
       - "src/app/api/orders/route.ts"
@@ -63,10 +69,19 @@ jobs:
           src/lib/pesquisaPreferenciaContato.test.ts
           src/lib/pesquisaPreferenciaContatosRedis.test.ts
           src/lib/pesquisaPreferenciaElegibilidade.server.test.ts
+          src/lib/pesquisaPreferenciaElegibilidadeCompleta.server.ts
+          src/lib/pesquisaPreferenciaElegibilidadeCompleta.server.test.ts
+          src/lib/pesquisaPreferenciaOptOutRedis.ts
+          src/lib/pesquisaPreferenciaOptOutRedis.test.ts
+          src/lib/pesquisaPreferenciaElegibilidadeCompleta.server.test.ts
+          src/lib/pesquisaPreferenciaOptOutRedis.test.ts
           src/lib/pesquisaPreferenciaRegistro.test.ts
           src/lib/pesquisaPreferenciaHistorico.test.ts
           src/lib/pesquisaPreferenciaHistoricoRedis.test.ts
           src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts
+          src/app/api/admin/pesquisa-preferencia/elegibilidade-controlada/route.ts
+          src/app/api/admin/pesquisa-preferencia/elegibilidade-controlada/route.test.ts
+          src/app/api/admin/pesquisa-preferencia/elegibilidade-controlada/route.test.ts
           src/app/api/cron/pesquisa-preferencia-auditoria/route.test.ts
           src/lib/historicoAnalitico.test.ts
           src/app/api/admin/analytics/pedidos/route.test.ts
