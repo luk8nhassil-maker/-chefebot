@@ -39,6 +39,14 @@ vi.mock("@/lib/auth", async () => {
   };
 });
 
+const { registrarContatoPesquisaConfirmadoMock } = vi.hoisted(() => ({
+  registrarContatoPesquisaConfirmadoMock: vi.fn(async () => true),
+}));
+
+vi.mock("@/lib/pesquisaPreferenciaContatosRedis", () => ({
+  registrarContatoPesquisaConfirmado: registrarContatoPesquisaConfirmadoMock,
+}));
+
 vi.mock("@/lib/evolutionApi", () => ({
   obterConfigEvolution: vi.fn(() => ({
     baseUrl: "https://evolution.test",
@@ -95,7 +103,9 @@ function textoEnviado(): string | undefined {
 
 beforeEach(() => {
   redisStore.clear();
-  fetchMock.mockClear();
+  fetchMock.mockReset();
+  fetchMock.mockResolvedValue({ ok: true, json: async () => ({}) });
+  registrarContatoPesquisaConfirmadoMock.mockClear();
 });
 
 function nenhumaMensagemEnviada(): boolean {
@@ -155,6 +165,37 @@ describe("PATCH /api/orders — cliente recebe a sequência completa de status",
     expect(res.status).toBe(200);
     expect(textoEnviado()).toBe("*Wesley*, seu pedido está pronto! 🍽️\n\nBom apetite!");
     expect(textoEnviado()).not.toContain("saiu para entrega");
+  });
+
+  test("avaliação pós-entrega confirmada entra no orçamento de pesquisa sem mudar a copy", async () => {
+    seedPedido({ tipoEntrega: "delivery", endereco: "Rua das Flores, 123", status: "saiu_entrega" });
+    const res = await PATCH(patchRequest({ id: "ped_notif_1", status: "entregue" }));
+
+    expect(res.status).toBe(200);
+    const pesquisa = textosEnviados().find((texto) => texto.includes("Avalia nossa pizza de 1 a 5"));
+    expect(pesquisa).toContain("*Wesley*, como foi sua experiência hoje?");
+    expect(registrarContatoPesquisaConfirmadoMock).toHaveBeenCalledTimes(1);
+    expect(registrarContatoPesquisaConfirmadoMock).toHaveBeenCalledWith({
+      telefone: "86999998888",
+      origem: "avaliacao_pos_entrega",
+      eventId: "ped_notif_1",
+    });
+  });
+
+  test("falha no envio da avaliação não cria exposição falsa no orçamento", async () => {
+    fetchMock.mockImplementation(async (_url, opts) => {
+      const texto = JSON.parse(String(opts?.body ?? "{}")).text ?? "";
+      if (String(texto).includes("Avalia nossa pizza de 1 a 5")) {
+        return { ok: false, status: 500, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    seedPedido({ tipoEntrega: "delivery", endereco: "Rua das Flores, 123", status: "saiu_entrega" });
+    const res = await PATCH(patchRequest({ id: "ped_notif_1", status: "entregue" }));
+
+    expect(res.status).toBe(200);
+    expect(registrarContatoPesquisaConfirmadoMock).not.toHaveBeenCalled();
   });
 
   test("delivery e retirada em 'entregue' avisam que o pedido foi finalizado", async () => {

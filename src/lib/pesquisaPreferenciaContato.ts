@@ -64,7 +64,7 @@ function dentroDaJanela(timestamp: number, agoraMs: number, dias: number): boole
 export function avaliarElegibilidadeContatoPesquisa(params: {
   agoraMs: number;
   contexto: ContextoSupressaoPesquisa;
-  historicoContatos: readonly ContatoPesquisaRegistrado[];
+  historicoContatos: readonly Pick<ContatoPesquisaRegistrado, "sentAtMs">[];
 }): ResultadoElegibilidadeContatoPesquisa {
   const { agoraMs, contexto, historicoContatos } = params;
   const motivos: MotivoSupressaoPesquisa[] = [];
