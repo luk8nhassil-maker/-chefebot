@@ -5,7 +5,7 @@ import { gerarIdPedidoUnico, proximoNumeroPedido } from '@/lib/numeracao'
 import { criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
 import type { EntregadorCadastro, PedidoEntregador } from '@/types/entregador'
 import { processarEfeitosPedidoEntregue, processarEfeitosPedidoCancelado } from '@/lib/fidelidadeEfeitos'
-import { registrarContatoPesquisaBestEffort } from "@/lib/pesquisaPreferenciaContatosRedis";
+import { registrarAvaliacaoPosEntregaEnviada } from "@/lib/pesquisaPreferenciaContatosRedis";
 import type { ItemElegibilidadeJornada } from '@/lib/jornadaChef'
 import type { ItemApp } from '@/lib/pedidoAppItens'
 import type { PedidoSnapshotOficial } from '@/lib/pedidoSnapshot'
@@ -782,15 +782,9 @@ export async function PATCH(req: NextRequest) {
           }),
         })
         if (respostaAvaliacao.ok) {
-          await registrarContatoPesquisaBestEffort({
+          await registrarAvaliacaoPosEntregaEnviada({
             telefone: phone,
-            registro: {
-              exposureId: `avaliacao-pos-entrega:${id}`,
-              questionId: "legacy-avaliacao-pos-entrega-v1",
-              momentId: null,
-              sentAtMs: Date.now(),
-              origem: "avaliacao_pos_entrega_legada",
-            },
+            pedidoId: id,
           })
         }
       } catch (err) {
