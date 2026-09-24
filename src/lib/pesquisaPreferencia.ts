@@ -362,7 +362,7 @@ export function analisarPesquisaPreferencia(
       "M1 e M2 significam primeira e segunda compras observadas no histórico analítico disponível, não necessariamente na vida inteira do cliente.",
       "M5 e S6 usam quantis do próprio histórico observado; não existem cortes fixos de dias codificados.",
       "Momentos dependentes de checkout, problemas, indicação, teste moderado ou painel longitudinal permanecem não calculados até suas fontes seguras existirem.",
-      "A resposta agregada não expõe clienteId, telefone, nome, endereço ou dados de pagamento.",
+      "A resposta agregada não expõe identificadores individuais nem dados pessoais ou de pagamento.",
     ],
   };
 }
