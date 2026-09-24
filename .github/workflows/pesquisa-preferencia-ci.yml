@@ -21,6 +21,8 @@ on:
       - "src/lib/pesquisaPreferenciaCandidato.test.ts"
       - "src/lib/pesquisaPreferenciaEnvioControlado.server.ts"
       - "src/lib/pesquisaPreferenciaEnvioControlado.server.test.ts"
+      - "src/lib/pesquisaPreferenciaRelease.ts"
+      - "src/lib/pesquisaPreferenciaRelease.test.ts"
       - "src/lib/pesquisaPreferenciaRegistro.ts"
       - "src/lib/pesquisaPreferenciaRegistro.test.ts"
       - "src/lib/pesquisaPreferenciaHistorico.ts"
@@ -85,6 +87,7 @@ jobs:
           src/lib/pesquisaPreferenciaRespostaRedis.test.ts
           src/lib/pesquisaPreferenciaCandidato.test.ts
           src/lib/pesquisaPreferenciaEnvioControlado.server.test.ts
+          src/lib/pesquisaPreferenciaRelease.test.ts
           src/lib/pesquisaPreferenciaRegistro.test.ts
           src/lib/pesquisaPreferenciaHistorico.test.ts
           src/lib/pesquisaPreferenciaHistoricoRedis.test.ts
@@ -122,6 +125,8 @@ jobs:
           src/lib/pesquisaPreferenciaCandidato.test.ts
           src/lib/pesquisaPreferenciaEnvioControlado.server.ts
           src/lib/pesquisaPreferenciaEnvioControlado.server.test.ts
+          src/lib/pesquisaPreferenciaRelease.ts
+          src/lib/pesquisaPreferenciaRelease.test.ts
           src/lib/pesquisaPreferenciaRegistro.ts
           src/lib/pesquisaPreferenciaRegistro.test.ts
           src/lib/pesquisaPreferenciaHistorico.ts
