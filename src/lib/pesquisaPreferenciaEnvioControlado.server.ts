@@ -125,16 +125,20 @@ async function reconciliarEnvioConfirmado(params: {
     throw new Error("research_contact_budget_not_persisted");
   }
 
-  const pendenciaOk = await registrarPesquisaPendente({
-    telefone: params.telefone,
-    exposureId: params.exposureId,
-    momentId: params.estado.momentId,
-    questionId: params.estado.questionId,
-    questionVersion: params.estado.questionVersion,
-    sentAtMs: params.estado.sentAtMs,
-  });
-  if (!pendenciaOk) {
-    throw new Error("research_pending_response_not_persisted");
+  const agoraMs = Date.now();
+  if (agoraMs < params.estado.sentAtMs + 60 * 60 * 1000) {
+    const pendenciaOk = await registrarPesquisaPendente({
+      telefone: params.telefone,
+      exposureId: params.exposureId,
+      momentId: params.estado.momentId,
+      questionId: params.estado.questionId,
+      questionVersion: params.estado.questionVersion,
+      sentAtMs: params.estado.sentAtMs,
+      agoraMs,
+    });
+    if (!pendenciaOk) {
+      throw new Error("research_pending_response_not_persisted");
+    }
   }
 }
 
@@ -170,7 +174,36 @@ export async function executarEnvioPesquisaControlado(params: {
   }
 
   try {
-    // Revalida tudo dentro do lock, imediatamente antes do envio.
+    const expId = exposureId({
+      customerKey,
+      momentId: params.momentId,
+      triggerEventId: params.triggerEventId,
+      questionId: instrumento.questionId,
+      questionVersion: instrumento.version,
+    });
+    const estadoKey = chaveEstado(expId);
+    const estadoExistente = await redis.get<EstadoEnvioControlado>(estadoKey);
+
+    // Retry de uma exposição já confirmada nunca é um novo envio. Reconcilia
+    // somente os efeitos locais faltantes, mesmo que o cooldown já esteja
+    // ativo justamente por causa deste envio.
+    if (estadoExistente?.status === "enviado") {
+      await reconciliarEnvioConfirmado({
+        telefone: params.telefone,
+        exposureId: expId,
+        estado: estadoExistente,
+      });
+      return { status: "ja_enviado_reconciliado", exposureId: expId };
+    }
+    if (estadoExistente?.status === "preparando") {
+      return {
+        status: "em_processamento",
+        motivos: ["exposicao_ja_reivindicada"],
+      };
+    }
+
+    // Só uma exposição ainda inexistente passa por candidato + gate.
+    // A revalidação acontece dentro do lock, imediatamente antes do provider.
     const { inicioMs, fimMs } = periodo90Dias(agoraMs);
     const [janela90Dias, historicoAnterior] = await Promise.all([
       consultarEventosPorPeriodo(TENANT_PADRAO_ANALYTICS, inicioMs, fimMs),
@@ -201,31 +234,6 @@ export async function executarEnvioPesquisaControlado(params: {
       return {
         status: "suprimido",
         motivos: gate.elegibilidade.motivos,
-      };
-    }
-
-    const expId = exposureId({
-      customerKey,
-      momentId: params.momentId,
-      triggerEventId: params.triggerEventId,
-      questionId: instrumento.questionId,
-      questionVersion: instrumento.version,
-    });
-    const estadoKey = chaveEstado(expId);
-    const estadoExistente = await redis.get<EstadoEnvioControlado>(estadoKey);
-
-    if (estadoExistente?.status === "enviado") {
-      await reconciliarEnvioConfirmado({
-        telefone: params.telefone,
-        exposureId: expId,
-        estado: estadoExistente,
-      });
-      return { status: "ja_enviado_reconciliado", exposureId: expId };
-    }
-    if (estadoExistente?.status === "preparando") {
-      return {
-        status: "em_processamento",
-        motivos: ["exposicao_ja_reivindicada"],
       };
     }
 
