@@ -1,0 +1,74 @@
+name: redis-pedidos-economia-ci
+
+# Gate hermético da otimização de polling da chave Redis "pedidos".
+# Não recebe segredos, não acessa Redis real, WhatsApp, Pix ou impressão.
+on:
+  pull_request:
+    paths:
+      - "src/lib/pedidosConcorrencia.ts"
+      - "src/lib/pedidosConcorrencia.test.ts"
+      - "src/lib/pedidosConcorrencia.crossRoute.test.ts"
+      - "src/lib/redisTelemetry.ts"
+      - "src/app/api/orders/route.ts"
+      - "src/app/api/orders/route.economia.test.ts"
+      - "src/app/api/orders/route.entregador.test.ts"
+      - "src/app/api/orders/route.lostUpdateAuditoria.test.ts"
+      - "src/app/api/entregador-pedidos/route.ts"
+      - "src/app/api/entregador-pedidos/route.test.ts"
+      - "src/app/pedidos/page.tsx"
+      - "src/app/pedidos/pollingEconomia.page.test.ts"
+      - "src/app/api/internal/limpeza-pedidos-teste-20260820/route.ts"
+      - ".github/workflows/redis-pedidos-economia-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: redis-pedidos-economia-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout do SHA validado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados
+        run: >-
+          npm test --
+          src/lib/pedidosConcorrencia.test.ts
+          src/lib/pedidosConcorrencia.crossRoute.test.ts
+          src/app/api/orders/route.economia.test.ts
+          src/app/api/orders/route.entregador.test.ts
+          src/app/api/orders/route.lostUpdateAuditoria.test.ts
+          src/app/api/entregador-pedidos/route.test.ts
+          src/app/pedidos/pollingEconomia.page.test.ts
+
+      - name: Lint do patch
+        run: >-
+          npm run lint --
+          src/lib/pedidosConcorrencia.ts
+          src/lib/pedidosConcorrencia.test.ts
+          src/lib/redisTelemetry.ts
+          src/app/api/orders/route.ts
+          src/app/api/orders/route.economia.test.ts
+          src/app/api/entregador-pedidos/route.ts
+          src/app/api/entregador-pedidos/route.test.ts
+          src/app/pedidos/page.tsx
+          src/app/pedidos/pollingEconomia.page.test.ts
+          src/app/api/internal/limpeza-pedidos-teste-20260820/route.ts
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build de produção
+        run: npm run build
