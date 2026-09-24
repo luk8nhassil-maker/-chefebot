@@ -67,11 +67,15 @@ export async function registrarPesquisaPendente(params: {
   questionId: string;
   questionVersion: number;
   sentAtMs?: number;
+  agoraMs?: number;
 }): Promise<boolean> {
   const customerKey = derivarResearchCustomerKey(params.telefone);
   const exposureId = normalizarId(params.exposureId);
   const questionId = normalizarId(params.questionId);
-  const sentAtMs = params.sentAtMs ?? Date.now();
+  const agoraMs = params.agoraMs ?? Date.now();
+  const sentAtMs = params.sentAtMs ?? agoraMs;
+  const expiraEmMs = sentAtMs + TTL_PENDENTE_SEGUNDOS * 1000;
+  const ttlRestanteSegundos = Math.ceil((expiraEmMs - agoraMs) / 1000);
 
   if (
     !customerKey ||
@@ -80,7 +84,10 @@ export async function registrarPesquisaPendente(params: {
     !Number.isInteger(params.questionVersion) ||
     params.questionVersion <= 0 ||
     !Number.isFinite(sentAtMs) ||
-    sentAtMs <= 0
+    sentAtMs <= 0 ||
+    !Number.isFinite(agoraMs) ||
+    agoraMs <= 0 ||
+    ttlRestanteSegundos <= 0
   ) {
     return false;
   }
@@ -94,7 +101,7 @@ export async function registrarPesquisaPendente(params: {
   };
 
   await redis.set(chavePendente(customerKey), pendente, {
-    ex: TTL_PENDENTE_SEGUNDOS,
+    ex: Math.min(TTL_PENDENTE_SEGUNDOS, ttlRestanteSegundos),
   });
   return true;
 }
