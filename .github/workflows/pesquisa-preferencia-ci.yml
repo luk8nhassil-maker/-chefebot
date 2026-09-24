@@ -5,8 +5,13 @@ on:
     paths:
       - "src/lib/pesquisaPreferencia.ts"
       - "src/lib/pesquisaPreferencia.test.ts"
+      - "src/lib/pesquisaPreferenciaContato.ts"
+      - "src/lib/pesquisaPreferenciaContato.test.ts"
+      - "src/lib/pesquisaPreferenciaRegistro.ts"
+      - "src/lib/pesquisaPreferenciaRegistro.test.ts"
       - "src/app/api/admin/pesquisa-preferencia/dry-run/route.ts"
       - "src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts"
+      - "src/app/dev/pesquisa-preferencia/page.tsx"
       - ".github/workflows/pesquisa-preferencia-ci.yml"
   workflow_dispatch:
 
@@ -34,6 +39,8 @@ jobs:
         run: >-
           npm test --
           src/lib/pesquisaPreferencia.test.ts
+          src/lib/pesquisaPreferenciaContato.test.ts
+          src/lib/pesquisaPreferenciaRegistro.test.ts
           src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts
           src/lib/historicoAnalitico.test.ts
           src/app/api/admin/analytics/pedidos/route.test.ts
@@ -43,8 +50,13 @@ jobs:
           npm run lint --
           src/lib/pesquisaPreferencia.ts
           src/lib/pesquisaPreferencia.test.ts
+          src/lib/pesquisaPreferenciaContato.ts
+          src/lib/pesquisaPreferenciaContato.test.ts
+          src/lib/pesquisaPreferenciaRegistro.ts
+          src/lib/pesquisaPreferenciaRegistro.test.ts
           src/app/api/admin/pesquisa-preferencia/dry-run/route.ts
           src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts
+          src/app/dev/pesquisa-preferencia/page.tsx
 
       - name: Typecheck comparado com a main
         shell: bash
