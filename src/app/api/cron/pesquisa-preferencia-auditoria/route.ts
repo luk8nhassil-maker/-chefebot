@@ -20,6 +20,7 @@ import { analisarPesquisaPreferencia } from "@/lib/pesquisaPreferencia";
 import { resumoSegurancaContatoDryRun } from "@/lib/pesquisaPreferenciaContato";
 import { auditarHistoricoAnteriorPreferencia } from "@/lib/pesquisaPreferenciaHistorico";
 import { carregarEvidenciasHistoricasFidelidade } from "@/lib/pesquisaPreferenciaHistoricoRedis";
+import { resumirPrimeiroEnvioM5 } from "@/lib/pesquisaPreferenciaPrimeiroEnvio.server";
 
 const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
 const GITHUB_OIDC_AUDIENCE = "chefebot-research-audit";
@@ -87,12 +88,19 @@ export async function GET(req: Request): Promise<NextResponse> {
       agoraMs,
       janelaInicioMs: inicioMs,
     });
-    const historicoAnteriorComprovado = await auditarHistoricoAnteriorPreferencia({
-      eventos,
-      janelaInicioMs: inicioMs,
-      carregarEvidencias: carregarEvidenciasHistoricasFidelidade,
-      concorrencia: 10,
-    });
+    const [historicoAnteriorComprovado, primeiroEnvioM5] = await Promise.all([
+      auditarHistoricoAnteriorPreferencia({
+        eventos,
+        janelaInicioMs: inicioMs,
+        carregarEvidencias: carregarEvidenciasHistoricasFidelidade,
+        concorrencia: 10,
+      }),
+      resumirPrimeiroEnvioM5({
+        agoraMs,
+        tenantId,
+        eventos,
+      }),
+    ]);
 
     const quantidadesMomentos = Object.fromEntries(
       Object.entries(resumo.momentos).map(([id, momento]) => [
@@ -118,6 +126,13 @@ export async function GET(req: Request): Promise<NextResponse> {
         estadosAtuais: resumo.estadosAtuais,
         momentos: quantidadesMomentos,
         historicoAnteriorComprovado,
+        primeiroEnvioM5: {
+          candidatosComportamentais: primeiroEnvioM5.candidatosComportamentais,
+          candidatosSemBloqueioAutomatico:
+            primeiroEnvioM5.candidatosSemBloqueioAutomatico,
+          prontoParaConfirmacaoManual:
+            primeiroEnvioM5.prontoParaConfirmacaoManual,
+        },
         segurancaContato: resumoSegurancaContatoDryRun(),
       },
       {
