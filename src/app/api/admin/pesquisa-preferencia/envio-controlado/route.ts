@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import type { MomentoPesquisaId } from "@/lib/pesquisaPreferencia";
 import { executarEnvioPesquisaControlado } from "@/lib/pesquisaPreferenciaEnvioControlado.server";
+import { envioControladoLiberadoNestaVersao } from "@/lib/pesquisaPreferenciaRelease";
 
 const CONFIRMACAO_EXATA = "ENVIAR_PESQUISA_CONTROLADA";
 const MOMENTOS_PERMITIDOS = new Set<MomentoPesquisaId>(["M1", "M2", "M5"]);
@@ -35,6 +36,13 @@ export async function POST(req: NextRequest) {
   if (process.env.VERCEL_ENV !== "production") {
     return NextResponse.json(
       { error: "Envio real bloqueado fora de producao" },
+      { status: 403 }
+    );
+  }
+
+  if (!envioControladoLiberadoNestaVersao()) {
+    return NextResponse.json(
+      { error: "Envio controlado ainda nao liberado nesta versao" },
       { status: 403 }
     );
   }
