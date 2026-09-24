@@ -14,6 +14,8 @@ on:
       - "src/app/dev/pesquisa-preferencia/page.tsx"
       - "src/lib/auth.ts"
       - "src/lib/auth.test.ts"
+      - "src/lib/assinaturaChefeBotUi.ts"
+      - "src/lib/assinaturaChefeBotUi.test.ts"
       - "scripts/e2e-pesquisa-preferencia-preview.mjs"
       - ".github/workflows/pesquisa-preferencia-preview-seguro.yml"
       - ".github/workflows/pesquisa-preferencia-ci.yml"
@@ -49,6 +51,7 @@ jobs:
           src/lib/historicoAnalitico.test.ts
           src/app/api/admin/analytics/pedidos/route.test.ts
           src/lib/auth.test.ts
+          src/lib/assinaturaChefeBotUi.test.ts
 
       - name: Lint do patch
         run: >-
@@ -64,6 +67,8 @@ jobs:
           src/app/dev/pesquisa-preferencia/page.tsx
           src/lib/auth.ts
           src/lib/auth.test.ts
+          src/lib/assinaturaChefeBotUi.ts
+          src/lib/assinaturaChefeBotUi.test.ts
           scripts/e2e-pesquisa-preferencia-preview.mjs
 
       - name: Typecheck comparado com a main
