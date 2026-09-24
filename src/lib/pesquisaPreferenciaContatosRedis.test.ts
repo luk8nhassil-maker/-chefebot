@@ -35,6 +35,7 @@ import {
   customerKeyPesquisaDoTelefone,
   listarContatosPesquisa,
   obterInicioLedgerContatosPesquisa,
+  registrarAvaliacaoPosEntregaEnviada,
   registrarContatoPesquisa,
   registrarContatoPesquisaBestEffort,
 } from "./pesquisaPreferenciaContatosRedis";
@@ -97,6 +98,32 @@ describe("ledger de contatos", () => {
     expect(keys.join(" ")).not.toContain(PHONE);
     expect(args.join(" ")).not.toContain(PHONE);
     expect(args[1]).toContain("legacy-avaliacao-pos-entrega-v1");
+  });
+
+  test("avaliação pós-entrega usa ID estável por pedido e entra no orçamento", async () => {
+    await registrarAvaliacaoPosEntregaEnviada({
+      telefone: PHONE,
+      pedidoId: "pedido-123",
+      agoraMs: AGORA,
+    });
+    await registrarAvaliacaoPosEntregaEnviada({
+      telefone: PHONE,
+      pedidoId: "pedido-123",
+      agoraMs: AGORA + 1000,
+    });
+
+    const contatos = await listarContatosPesquisa({
+      telefone: PHONE,
+      agoraMs: AGORA + DIA,
+    });
+
+    expect(contatos).toEqual([
+      {
+        momentId: null,
+        questionId: "legacy-avaliacao-pos-entrega-v1",
+        sentAtMs: AGORA,
+      },
+    ]);
   });
 
   test("lista apenas contatos dos últimos 90 dias para o mesmo pseudônimo", async () => {
