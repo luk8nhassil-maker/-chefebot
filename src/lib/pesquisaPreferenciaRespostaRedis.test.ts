@@ -27,6 +27,7 @@ vi.mock("./pesquisaPreferenciaOptOutRedis", () => ({
 }));
 
 import {
+  clienteTemPesquisaPendente,
   consumirRespostaPesquisaPendente,
   registrarPesquisaPendente,
 } from "./pesquisaPreferenciaRespostaRedis";
@@ -74,6 +75,20 @@ describe("registrarPesquisaPendente", () => {
       })
     ).resolves.toBe(false);
     expect(redisMock.set).not.toHaveBeenCalled();
+  });
+});
+
+describe("clienteTemPesquisaPendente", () => {
+  test("retorna true somente quando existe contexto pendente", async () => {
+    expect(await clienteTemPesquisaPendente(PHONE)).toBe(false);
+    store.set(PENDING_KEY, {
+      exposureId: "exp-1",
+      momentId: "M1",
+      questionId: "research-m1-main",
+      questionVersion: 1,
+      sentAtMs: 1000,
+    });
+    expect(await clienteTemPesquisaPendente(PHONE)).toBe(true);
   });
 });
 
