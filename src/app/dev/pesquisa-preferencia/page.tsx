@@ -243,7 +243,7 @@ export default function PesquisaPreferenciaDevPage() {
                 <div>
                   <p style={{ margin: '0 0 4px', fontWeight: 800, color: 'var(--foreground)' }}>Primeiro envio controlado · M5</p>
                   <p style={{ margin: 0, fontSize: 12, color: 'var(--foreground-secondary)', lineHeight: 1.5 }}>
-                    O servidor escolhe o candidato. Telefone e momento não podem ser digitados manualmente.
+                    O servidor escolhe o candidato. Identidade e momento não podem ser digitados manualmente.
                   </p>
                 </div>
                 <span style={{ borderRadius: 999, padding: '4px 10px', fontSize: 11, fontWeight: 800, background: data.primeiroEnvioM5.envioLiberadoNestaVersao ? 'var(--success-soft)' : 'var(--attention-soft)', color: data.primeiroEnvioM5.envioLiberadoNestaVersao ? 'var(--success)' : 'var(--attention)' }}>
