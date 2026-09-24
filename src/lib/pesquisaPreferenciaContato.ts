@@ -13,6 +13,7 @@ export type MotivoSupressaoPesquisa =
   | "checkout_em_andamento"
   | "pagamento_pendente"
   | "pedido_em_producao_ou_entrega"
+  | "atendimento_humano_ou_bot_pausado"
   | "problema_aberto"
   | "disputa_ou_estorno_aberto"
   | "opt_out"
@@ -27,6 +28,7 @@ export type ContextoSupressaoPesquisa = {
   checkoutEmAndamento?: boolean;
   pagamentoPendente?: boolean;
   pedidoEmProducaoOuEntrega?: boolean;
+  atendimentoHumanoOuBotPausado?: boolean;
   problemaAberto?: boolean;
   disputaOuEstornoAberto?: boolean;
   optOut?: boolean;
@@ -73,6 +75,7 @@ export function avaliarElegibilidadeContatoPesquisa(params: {
   if (contexto.checkoutEmAndamento) motivos.push("checkout_em_andamento");
   if (contexto.pagamentoPendente) motivos.push("pagamento_pendente");
   if (contexto.pedidoEmProducaoOuEntrega) motivos.push("pedido_em_producao_ou_entrega");
+  if (contexto.atendimentoHumanoOuBotPausado) motivos.push("atendimento_humano_ou_bot_pausado");
   if (contexto.problemaAberto) motivos.push("problema_aberto");
   if (contexto.disputaOuEstornoAberto) motivos.push("disputa_ou_estorno_aberto");
   if (contexto.optOut) motivos.push("opt_out");
@@ -120,6 +123,7 @@ export function resumoSegurancaContatoDryRun() {
       "pagamento_ou_pix_pendente",
       "problema_operacional_aberto",
       "checkout_whatsapp_em_andamento",
+      "estado_bot_e_atendimento_manual",
       "opt_out",
       "identidade_confirmada_por_canal",
     ],
