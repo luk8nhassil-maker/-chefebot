@@ -109,7 +109,10 @@ describe("POST /api/admin/pesquisa-preferencia/envio-controlado", () => {
   });
 
   test("exige os dois sinais controlados como booleanos", async () => {
-    const { checkoutWebEmAndamento: _omitido, ...body } = bodyValido();
+    const body = {
+      ...bodyValido(),
+      checkoutWebEmAndamento: undefined,
+    };
 
     const res = await POST(req(body));
 
