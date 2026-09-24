@@ -5,6 +5,7 @@ import { gerarIdPedidoUnico, proximoNumeroPedido } from '@/lib/numeracao'
 import { criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
 import type { EntregadorCadastro, PedidoEntregador } from '@/types/entregador'
 import { processarEfeitosPedidoEntregue, processarEfeitosPedidoCancelado } from '@/lib/fidelidadeEfeitos'
+import { registrarContatoPesquisaBestEffort } from "@/lib/pesquisaPreferenciaContatosRedis";
 import type { ItemElegibilidadeJornada } from '@/lib/jornadaChef'
 import type { ItemApp } from '@/lib/pedidoAppItens'
 import type { PedidoSnapshotOficial } from '@/lib/pedidoSnapshot'
@@ -769,7 +770,7 @@ export async function PATCH(req: NextRequest) {
         console.error('[ChefeBot] Provider de WhatsApp não configurado — pesquisa de avaliação não enviada.')
       } else {
       try {
-        await fetch(`${configAvaliacao.baseUrl}/message/sendText/${configAvaliacao.instanceName}`, {
+        const respostaAvaliacao = await fetch(`${configAvaliacao.baseUrl}/message/sendText/${configAvaliacao.instanceName}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -780,6 +781,18 @@ export async function PATCH(req: NextRequest) {
             text: `*${firstName}*, como foi sua experiência hoje? 😊\n\nAvalia nossa pizza de 1 a 5:\n\n  ⭐ 1 — Ruim\n  ⭐⭐ 2 — Regular\n  ⭐⭐⭐ 3 — Bom\n  ⭐⭐⭐⭐ 4 — Muito bom\n  ⭐⭐⭐⭐⭐ 5 — Excelente\n\nÉ só digitar o número! 😄`,
           }),
         })
+        if (respostaAvaliacao.ok) {
+          await registrarContatoPesquisaBestEffort({
+            telefone: phone,
+            registro: {
+              exposureId: `avaliacao-pos-entrega:${id}`,
+              questionId: "legacy-avaliacao-pos-entrega-v1",
+              momentId: null,
+              sentAtMs: Date.now(),
+              origem: "avaliacao_pos_entrega_legada",
+            },
+          })
+        }
       } catch (err) {
         console.error('[ChefeBot] Erro ao enviar pesquisa:', err)
       }
