@@ -223,7 +223,7 @@ export default function PesquisaPreferenciaDevPage() {
             <div style={card}>
               <p style={{ margin: '0 0 8px', fontWeight: 800, color: 'var(--foreground)' }}>Fontes que ainda faltam antes de qualquer piloto</p>
               <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--foreground-secondary)', fontSize: 13, lineHeight: 1.7 }}>
-                {data.segurancaContato.fontesPendentes.map((fonte) => <li key={fonte}>{fonte.replaceAll('_', ' ')}</li>)}
+                {data.segurancaContato.fontesPendentes.map((fonte) => <li key={fonte}>{fonte.split('_').join(' ')}</li>)}
               </ul>
             </div>
 
