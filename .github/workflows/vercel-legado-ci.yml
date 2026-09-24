@@ -1,0 +1,53 @@
+name: vercel-legado-ci
+
+# Gate hermético da aposentadoria dos projetos Vercel duplicados.
+# Não recebe segredos e não chama Redis, WhatsApp, Pix ou Vercel real.
+on:
+  pull_request:
+    paths:
+      - "src/lib/vercelProjeto.ts"
+      - "src/lib/vercelProjeto.test.ts"
+      - "src/app/api/cron/route.ts"
+      - "src/app/api/cron/pix-pendente/route.ts"
+      - "src/app/api/cron/vercelLegado.guard.test.ts"
+      - ".github/workflows/vercel-legado-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vercel-legado-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout do SHA validado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados
+        run: >-
+          npm test --
+          src/lib/vercelProjeto.test.ts
+          src/app/api/cron/vercelLegado.guard.test.ts
+
+      - name: Lint do patch
+        run: >-
+          npm run lint --
+          src/lib/vercelProjeto.ts
+          src/lib/vercelProjeto.test.ts
+          src/app/api/cron/route.ts
+          src/app/api/cron/pix-pendente/route.ts
+          src/app/api/cron/vercelLegado.guard.test.ts
+
+      - name: Build de produção
+        run: npm run build
