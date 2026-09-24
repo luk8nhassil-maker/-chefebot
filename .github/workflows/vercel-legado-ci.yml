@@ -10,6 +10,9 @@ on:
       - "src/app/api/cron/route.ts"
       - "src/app/api/cron/pix-pendente/route.ts"
       - "src/app/api/cron/vercelLegado.guard.test.ts"
+      - "scripts/vercel-ignore-legacy.mjs"
+      - "scripts/vercel-ignore-legacy.test.mjs"
+      - "vercel.json"
       - ".github/workflows/vercel-legado-ci.yml"
   workflow_dispatch:
 
@@ -34,11 +37,16 @@ jobs:
       - name: Instalar dependências
         run: npm ci
 
+      - name: Validar ignored build step
+        run: node --test scripts/vercel-ignore-legacy.test.mjs
+
       - name: Testes focados
         run: >-
           npm test --
           src/lib/vercelProjeto.test.ts
           src/app/api/cron/vercelLegado.guard.test.ts
+          scripts/vercel-ignore-legacy.mjs
+          scripts/vercel-ignore-legacy.test.mjs
 
       - name: Lint do patch
         run: >-
