@@ -81,6 +81,15 @@ const fixture = {
     M13: { id: "M13", nome: "Compra atípica", tipo: "nao_calculado", quantidade: 0, perguntaPrincipal: "fixture", objetivo: "Descobrir ocasiões atípicas.", calculavelComAnalytics: false },
     M14: { id: "M14", nome: "Entrevista de aprofundamento", tipo: "nao_calculado", quantidade: 0, perguntaPrincipal: null, objetivo: "Aprofundar padrões.", calculavelComAnalytics: false },
   },
+  primeiroEnvioM5: {
+    candidatosComportamentais: 1,
+    candidatosSemBloqueioAutomatico: 1,
+    prontoParaConfirmacaoManual: true,
+    candidateRef: "a".repeat(64),
+    identidadeMascarada: "…0002",
+    pergunta: "Percebi que faz um tempo desde seu último pedido. O que mudou nesse período?",
+    envioLiberadoNestaVersao: false,
+  },
   segurancaContato: {
     envioAutomaticoAtivo: false,
     elegibilidadeFinalCalculada: false,
@@ -172,6 +181,14 @@ async function validar(viewport, fileName) {
   await page.getByRole("heading", { name: "Motor de Preferência" }).waitFor();
   await page.getByText("DRY-RUN · SEM ENVIO", { exact: true }).waitFor();
   await page.getByText("Contato real permanece bloqueado", { exact: true }).waitFor();
+  await page.getByText("Primeiro envio controlado · M5", { exact: true }).waitFor();
+  await page.getByText("TRAVADO NESTA VERSÃO", { exact: true }).waitFor();
+  await page.getByText("…0002", { exact: true }).waitFor();
+  const botaoEnvio = page.getByRole("button", { name: "Enviar primeira pesquisa M5" });
+  await botaoEnvio.waitFor();
+  if (!(await botaoEnvio.isDisabled())) {
+    throw new Error("Preview exibiu envio M5 habilitado com release gate fechado.");
+  }
   await page.getByText("101", { exact: true }).waitFor();
   await page.getByText("96", { exact: true }).waitFor();
   await page.getByText("77", { exact: true }).first().waitFor();
