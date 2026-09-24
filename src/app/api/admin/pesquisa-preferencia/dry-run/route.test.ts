@@ -3,7 +3,29 @@ import { NextRequest } from "next/server";
 import { GET } from "./route";
 import type { EventoAnalitico } from "@/lib/historicoAnalitico";
 
+const { resumoM5Mock, releaseGateMock, instrumentoMock } = vi.hoisted(() => ({
+  resumoM5Mock: vi.fn(),
+  releaseGateMock: vi.fn(),
+  instrumentoMock: vi.fn(),
+}));
+
 vi.mock("@/lib/auth", () => ({ verifyToken: vi.fn() }));
+
+vi.mock("@/lib/pesquisaPreferenciaPrimeiroEnvio.server", () => ({
+  resumirPrimeiroEnvioM5: resumoM5Mock,
+}));
+
+vi.mock("@/lib/pesquisaPreferenciaRelease", () => ({
+  envioControladoLiberadoNestaVersao: releaseGateMock,
+}));
+
+vi.mock("@/lib/pesquisaPreferenciaRegistro", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/pesquisaPreferenciaRegistro")>();
+  return {
+    ...original,
+    obterInstrumentoPesquisa: instrumentoMock,
+  };
+});
 
 vi.mock("@/lib/historicoAnalitico", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/historicoAnalitico")>();
@@ -54,6 +76,27 @@ beforeEach(() => {
   mockAntes.mockReset();
   mockPeriodo.mockResolvedValue([]);
   mockAntes.mockResolvedValue([]);
+  resumoM5Mock.mockResolvedValue({
+    candidatosComportamentais: 1,
+    candidatosSemBloqueioAutomatico: 1,
+    prontoParaConfirmacaoManual: true,
+    primeiroCandidato: {
+      candidateRef: "a".repeat(64),
+      telefoneMascarado: "…0002",
+      triggerEventId: "p2",
+      ultimaCompraEmMs: Date.now() - 3 * 86400000,
+    },
+  });
+  releaseGateMock.mockReturnValue(false);
+  instrumentoMock.mockReturnValue({
+    questionId: "research-m5-main",
+    version: 1,
+    momentId: "M5",
+    pergunta: "Percebi que faz um tempo desde seu último pedido. O que mudou nesse período?",
+    objetivo: "teste",
+    tipoResposta: "texto_livre",
+    habilitadaParaEnvio: false,
+  });
 });
 
 describe("GET /api/admin/pesquisa-preferencia/dry-run", () => {
@@ -91,6 +134,15 @@ describe("GET /api/admin/pesquisa-preferencia/dry-run", () => {
       cooldownDias: 14,
       maxContatosEm90Dias: 3,
     });
+    expect(body.primeiroEnvioM5).toMatchObject({
+      candidatosComportamentais: 1,
+      candidatosSemBloqueioAutomatico: 1,
+      prontoParaConfirmacaoManual: true,
+      candidateRef: "a".repeat(64),
+      identidadeMascarada: "…0002",
+      envioLiberadoNestaVersao: false,
+    });
+    expect(body.primeiroEnvioM5.pergunta).toMatch(/faz um tempo/i);
     expect(res.headers.get("x-chefebot-research-mode")).toBe("dry-run");
     expect(res.headers.get("cache-control")).toContain("no-store");
     expect(mockPeriodo).toHaveBeenCalledTimes(1);
