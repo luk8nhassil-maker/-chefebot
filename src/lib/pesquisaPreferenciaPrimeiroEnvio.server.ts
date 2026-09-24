@@ -71,16 +71,22 @@ function ultimoEventoEntreguePorCliente(
 export async function resumirPrimeiroEnvioM5(params: {
   agoraMs?: number;
   tenantId?: string;
+  eventos?: readonly EventoAnalitico[];
 } = {}): Promise<ResumoPrimeiroEnvioM5> {
   const agoraMs = params.agoraMs ?? Date.now();
   const tenantId = params.tenantId ?? TENANT_PADRAO_ANALYTICS;
-  const { inicioMs, fimMs } = periodo90Dias(agoraMs);
 
-  const [janela90Dias, historicoAnterior] = await Promise.all([
-    consultarEventosPorPeriodo(tenantId, inicioMs, fimMs),
-    consultarEventosAntesDe(tenantId, inicioMs),
-  ]);
-  const eventos = [...historicoAnterior, ...janela90Dias];
+  let eventos: readonly EventoAnalitico[];
+  if (params.eventos) {
+    eventos = params.eventos;
+  } else {
+    const { inicioMs, fimMs } = periodo90Dias(agoraMs);
+    const [janela90Dias, historicoAnterior] = await Promise.all([
+      consultarEventosPorPeriodo(tenantId, inicioMs, fimMs),
+      consultarEventosAntesDe(tenantId, inicioMs),
+    ]);
+    eventos = [...historicoAnterior, ...janela90Dias];
+  }
 
   const ultimos = ultimoEventoEntreguePorCliente(eventos);
   const comportamentais: CandidatoPrimeiroEnvioM5[] = [];
