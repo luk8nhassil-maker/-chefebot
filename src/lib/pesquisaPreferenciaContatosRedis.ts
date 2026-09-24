@@ -54,13 +54,25 @@ function segredoPseudonimo(): string | null {
   return segredo || null;
 }
 
-export function customerKeyPesquisaDoTelefone(telefone: string): string | null {
+function telefoneCanonicoPesquisa(telefone: string): string | null {
   const digitos = String(telefone || "").replace(/\D/g, "");
+  if (digitos.length === 10 || digitos.length === 11) return "55" + digitos;
+  if (
+    (digitos.length === 12 || digitos.length === 13) &&
+    digitos.startsWith("55")
+  ) {
+    return digitos;
+  }
+  return null;
+}
+
+export function customerKeyPesquisaDoTelefone(telefone: string): string | null {
+  const canonico = telefoneCanonicoPesquisa(telefone);
   const segredo = segredoPseudonimo();
-  if (digitos.length < 10 || !segredo) return null;
+  if (!canonico || !segredo) return null;
 
   return createHmac("sha256", segredo)
-    .update("research-contact:v1:" + digitos)
+    .update("research-contact:v1:" + canonico)
     .digest("hex");
 }
 
