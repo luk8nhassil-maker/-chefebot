@@ -59,7 +59,7 @@ describe("customerKeyPesquisaDoTelefone", () => {
     expect(a).not.toBeNull();
     expect(a).not.toContain("86999990001");
     expect(a).not.toContain("5586999990001");
-    expect(a).not.toBe(b);
+    expect(a).toBe(b);
     expect(customerKeyPesquisaDoTelefone("(86) 99999-0001")).toBe(a);
   });
 
