@@ -5,10 +5,13 @@ on:
     paths:
       - "src/app/dev/pesquisa-preferencia/page.tsx"
       - "src/app/api/admin/pesquisa-preferencia/dry-run/route.ts"
+      - "src/app/api/admin/pesquisa-preferencia/elegibilidade-controlada/route.ts"
       - "src/lib/auth.ts"
       - "src/lib/pesquisaPreferenciaContato.ts"
       - "src/lib/pesquisaPreferenciaContatosRedis.ts"
       - "src/lib/pesquisaPreferenciaElegibilidade.server.ts"
+      - "src/lib/pesquisaPreferenciaElegibilidadeCompleta.server.ts"
+      - "src/lib/pesquisaPreferenciaOptOutRedis.ts"
       - "src/proxy.ts"
       - "scripts/e2e-pesquisa-preferencia-preview.mjs"
       - ".github/workflows/pesquisa-preferencia-preview-seguro.yml"
