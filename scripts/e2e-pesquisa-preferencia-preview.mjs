@@ -162,6 +162,9 @@ async function validar(viewport, fileName) {
   await page.getByText("M1 · Primeira compra observada", { exact: true }).waitFor();
   await page.getByText("M2 · Segunda compra observada", { exact: true }).waitFor();
   await page.getByText("M5 · Queda de frequência", { exact: true }).waitFor();
+  if (await page.getByText("Assinatura do ChefeBot", { exact: true }).count()) {
+    throw new Error("Gate de assinatura sobrepôs o painel interno de pesquisa.");
+  }
 
   const bodyText = await page.locator("body").innerText();
   if (!bodyText.includes("1 contato a cada 14 dias") || !bodyText.includes("no máximo 3 em 90 dias")) {
