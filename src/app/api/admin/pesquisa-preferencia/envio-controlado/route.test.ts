@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { verifyTokenMock, envioMock, releaseGateMock } = vi.hoisted(() => ({
+const { verifyTokenMock, envioMock, releaseGateMock, resolverMock } = vi.hoisted(() => ({
   verifyTokenMock: vi.fn(),
   envioMock: vi.fn(),
   releaseGateMock: vi.fn(),
+  resolverMock: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -17,6 +18,10 @@ vi.mock("@/lib/pesquisaPreferenciaEnvioControlado.server", () => ({
 
 vi.mock("@/lib/pesquisaPreferenciaRelease", () => ({
   envioControladoLiberadoNestaVersao: releaseGateMock,
+}));
+
+vi.mock("@/lib/pesquisaPreferenciaPrimeiroEnvio.server", () => ({
+  resolverCandidatoPrimeiroEnvioM5: resolverMock,
 }));
 
 import { POST } from "./route";
@@ -37,9 +42,7 @@ function req(body: unknown, cookie = "auth-token=test") {
 
 function bodyValido() {
   return {
-    telefone: "5599999999999",
-    momentId: "M1",
-    triggerEventId: "pedido-1",
+    candidateRef: "b".repeat(64),
     checkoutWebEmAndamento: false,
     disputaOuEstornoExternoAberto: false,
     confirmacao: "ENVIAR_PESQUISA_CONTROLADA",
@@ -52,6 +55,10 @@ beforeEach(() => {
   vi.stubEnv("PESQUISA_PREFERENCIA_ENVIO_CONTROLADO_ENABLED", "true");
   verifyTokenMock.mockResolvedValue({ role: "admin" });
   releaseGateMock.mockReturnValue(true);
+  resolverMock.mockResolvedValue({
+    telefone: "5599999999999",
+    triggerEventId: "pedido-m5",
+  });
   envioMock.mockResolvedValue({
     status: "enviado",
     exposureId: "a".repeat(64),
@@ -120,10 +127,29 @@ describe("POST /api/admin/pesquisa-preferencia/envio-controlado", () => {
     expect(envioMock).not.toHaveBeenCalled();
   });
 
-  test("restringe piloto a M1 M2 M5", async () => {
-    const res = await POST(req({ ...bodyValido(), momentId: "M3" }));
+  test("não aceita telefone ou momento escolhidos externamente sem candidateRef válido", async () => {
+    const res = await POST(
+      req({
+        telefone: "5599999999999",
+        momentId: "M5",
+        triggerEventId: "pedido-arbitrario",
+        checkoutWebEmAndamento: false,
+        disputaOuEstornoExternoAberto: false,
+        confirmacao: "ENVIAR_PESQUISA_CONTROLADA",
+      })
+    );
 
     expect(res.status).toBe(400);
+    expect(resolverMock).not.toHaveBeenCalled();
+    expect(envioMock).not.toHaveBeenCalled();
+  });
+
+  test("candidato expirado ou não elegível não chega ao provider", async () => {
+    resolverMock.mockResolvedValue(null);
+
+    const res = await POST(req(bodyValido()));
+
+    expect(res.status).toBe(409);
     expect(envioMock).not.toHaveBeenCalled();
   });
 
@@ -138,10 +164,13 @@ describe("POST /api/admin/pesquisa-preferencia/envio-controlado", () => {
       "controlled-one-shot"
     );
     expect(envioMock).toHaveBeenCalledTimes(1);
+    expect(resolverMock).toHaveBeenCalledWith({
+      candidateRef: "b".repeat(64),
+    });
     expect(envioMock).toHaveBeenCalledWith({
       telefone: "5599999999999",
-      momentId: "M1",
-      triggerEventId: "pedido-1",
+      momentId: "M5",
+      triggerEventId: "pedido-m5",
       checkoutWebEmAndamento: false,
       disputaOuEstornoExternoAberto: false,
     });
