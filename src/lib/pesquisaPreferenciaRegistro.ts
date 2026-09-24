@@ -21,7 +21,7 @@ export type ResearchExposure = {
   questionVersion: number;
   variantId: string;
   channel: CanalPesquisa;
-  sentAtMs: number;
+  sentAtMs: number | null;
   answeredAtMs: number | null;
   skippedAtMs: number | null;
   suppressionReason: MotivoSupressaoPesquisa | null;
