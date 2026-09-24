@@ -88,15 +88,23 @@ function pedidoPixConfirmado(pedido: PedidoPesquisaOperacional): boolean {
   return pedido.pixConfirmado === true || pedido.pix?.status === "confirmado";
 }
 
-function timestampContatoPotencial(pedido: PedidoPesquisaOperacional): number {
+function timestampContatoPotencialPreLedger(
+  pedido: PedidoPesquisaOperacional
+): number | null {
   const statusAtualizado = Date.parse(String(pedido.statusAtualizadoEm || ""));
   if (Number.isFinite(statusAtualizado) && statusAtualizado > 0) {
+    // Depois do início prospectivo, ausência de exposição significa ausência
+    // de envio confirmado. O ledger já é a fonte da verdade e não deve ser
+    // substituído por uma suposição conservadora.
+    if (statusAtualizado >= CONTATOS_PESQUISA_PROSPECTIVOS_DESDE_MS) {
+      return null;
+    }
     return statusAtualizado;
   }
 
-  // Para pedido legado sem carimbo confiável, usar o instante imediatamente
-  // anterior ao início prospectivo é propositalmente conservador:
-  // bloqueia 14 dias e conta no orçamento de 90 dias, depois envelhece sozinho.
+  // Pedido legado sem carimbo confiável: só aqui usamos o instante
+  // imediatamente anterior ao início prospectivo. Isso protege a lacuna
+  // histórica sem contaminar o período em que já existe telemetria confiável.
   return CONTATOS_PESQUISA_PROSPECTIVOS_DESDE_MS - 1;
 }
 
@@ -119,7 +127,9 @@ export function montarContatosBootstrapConservador(params: {
       if (!statusTerminal(pedido.status)) return false;
       return clienteIdDoPedido(pedido) === params.clienteId;
     })
-    .map((pedido) => ({ sentAtMs: timestampContatoPotencial(pedido) }))
+    .map((pedido) => timestampContatoPotencialPreLedger(pedido))
+    .filter((sentAtMs): sentAtMs is number => sentAtMs !== null)
+    .map((sentAtMs) => ({ sentAtMs }))
     .filter(
       (contato) =>
         contato.sentAtMs > inicio90 && contato.sentAtMs <= params.agoraMs
