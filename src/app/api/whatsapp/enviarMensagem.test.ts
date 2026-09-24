@@ -60,7 +60,8 @@ beforeEach(() => {
 
 describe("enviarMensagem — envio confirmado registra exatamente uma mensagem bot", () => {
   test("chama enviarTextoWhatsApp e registra a mensagem como bot", async () => {
-    await enviarMensagem(PHONE, "Olá! Como posso ajudar?");
+    const enviado = await enviarMensagem(PHONE, "Olá! Como posso ajudar?");
+    expect(enviado).toBe(true);
     expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(1);
     expect(enviarTextoWhatsAppMock.mock.calls[0][0]).toBe(PHONE);
     expect(registrarMensagemMock).toHaveBeenCalledTimes(1);
@@ -71,7 +72,8 @@ describe("enviarMensagem — envio confirmado registra exatamente uma mensagem b
 describe("enviarMensagem — falha da Evolution não registra mensagem falsa", () => {
   test("resultado ok:false (erro HTTP) não chama registrarMensagem", async () => {
     enviarTextoWhatsAppMock.mockResolvedValue({ ok: false, motivo: "http_500" });
-    await enviarMensagem(PHONE, "Pagamento confirmado!");
+    const enviado = await enviarMensagem(PHONE, "Pagamento confirmado!");
+    expect(enviado).toBe(false);
     expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(1);
     expect(registrarMensagemMock).not.toHaveBeenCalled();
   });
@@ -90,7 +92,8 @@ describe("enviarMensagem — falha da Evolution não registra mensagem falsa", (
 describe("enviarMensagem — provider não configurado não registra mensagem falsa", () => {
   test("resultado provider_not_configured não chama registrarMensagem", async () => {
     enviarTextoWhatsAppMock.mockResolvedValue({ ok: false, motivo: "provider_not_configured" });
-    await enviarMensagem(PHONE, "oi");
+    const enviado = await enviarMensagem(PHONE, "oi");
+    expect(enviado).toBe(false);
     expect(registrarMensagemMock).not.toHaveBeenCalled();
   });
 });
