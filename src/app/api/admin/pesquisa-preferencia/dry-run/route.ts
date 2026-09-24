@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
             primeiroEnvioM5.prontoParaConfirmacaoManual,
           candidateRef:
             primeiroEnvioM5.primeiroCandidato?.candidateRef ?? null,
-          telefoneMascarado:
+          identidadeMascarada:
             primeiroEnvioM5.primeiroCandidato?.telefoneMascarado ?? null,
           pergunta: instrumentoM5?.pergunta ?? null,
           envioLiberadoNestaVersao: envioControladoLiberadoNestaVersao(),
