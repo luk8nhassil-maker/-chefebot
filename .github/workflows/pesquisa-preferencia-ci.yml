@@ -20,6 +20,7 @@ on:
       - "src/lib/assinaturaChefeBotUi.test.ts"
       - "scripts/e2e-pesquisa-preferencia-preview.mjs"
       - ".github/workflows/pesquisa-preferencia-preview-seguro.yml"
+      - ".github/workflows/pesquisa-preferencia-auditoria-producao.yml"
       - ".github/workflows/pesquisa-preferencia-ci.yml"
   workflow_dispatch:
 
