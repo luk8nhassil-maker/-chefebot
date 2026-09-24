@@ -59,6 +59,8 @@ export type DiagnosticoElegibilidadePesquisa = {
   checkoutWhatsappEmAndamento: boolean;
   checkoutWebSinalInformado: boolean;
   disputaExternaSinalInformado: boolean;
+  botAtivo: boolean;
+  atendimentoManualAtivo: boolean;
 };
 
 export type ResultadoElegibilidadePesquisaCompleta = {
@@ -195,22 +197,32 @@ export async function avaliarElegibilidadeContatoPesquisaCompleta(params: {
         disputaExternaSinalInformado:
           typeof params.sinaisControlados?.disputaOuEstornoExternoAberto ===
           "boolean",
+        botAtivo: false,
+        atendimentoManualAtivo: false,
       },
     };
   }
 
   try {
     const telefoneCanonico = clienteId.slice("cli_".length);
-    const [pedidos, sessaoWhatsapp, optOut, historicoPersistido] =
-      await Promise.all([
-        redis.get<PedidoPesquisaOperacional[]>("pedidos"),
-        redis.get<SessaoWhatsappPesquisa>(`session:${telefoneCanonico}`),
-        clienteTemOptOutPesquisa(params.telefone),
-        listarContatosPesquisaPorTelefone({
-          telefone: params.telefone,
-          agoraMs,
-        }),
-      ]);
+    const [
+      pedidos,
+      sessaoWhatsapp,
+      botAtivo,
+      atendimentoManualAtivo,
+      optOut,
+      historicoPersistido,
+    ] = await Promise.all([
+      redis.get<PedidoPesquisaOperacional[]>("pedidos"),
+      redis.get<SessaoWhatsappPesquisa>(`session:${telefoneCanonico}`),
+      redis.get<boolean>("bot_ativo"),
+      redis.get<boolean>(`manual:${telefoneCanonico}`),
+      clienteTemOptOutPesquisa(params.telefone),
+      listarContatosPesquisaPorTelefone({
+        telefone: params.telefone,
+        agoraMs,
+      }),
+    ]);
 
     const todosPedidos = pedidos || [];
     const pedidosCorrespondentes = todosPedidos.filter(
@@ -249,6 +261,8 @@ export async function avaliarElegibilidadeContatoPesquisaCompleta(params: {
         (pedido) => pedidoTemPix(pedido) && !pedidoPixConfirmado(pedido)
       ),
       pedidoEmProducaoOuEntrega: ativos.length > 0,
+      atendimentoHumanoOuBotPausado:
+        botAtivo === false || atendimentoManualAtivo === true,
       problemaAberto: ativos.some(
         (pedido) => !!pedido.entregaProblema || pedido.escalonado === true
       ),
@@ -275,6 +289,8 @@ export async function avaliarElegibilidadeContatoPesquisaCompleta(params: {
         checkoutWhatsappEmAndamento,
         checkoutWebSinalInformado,
         disputaExternaSinalInformado,
+        botAtivo: botAtivo !== false,
+        atendimentoManualAtivo: atendimentoManualAtivo === true,
       },
     };
   } catch {
@@ -297,6 +313,8 @@ export async function avaliarElegibilidadeContatoPesquisaCompleta(params: {
         disputaExternaSinalInformado:
           typeof params.sinaisControlados?.disputaOuEstornoExternoAberto ===
           "boolean",
+        botAtivo: false,
+        atendimentoManualAtivo: false,
       },
     };
   }
