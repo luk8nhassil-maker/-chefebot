@@ -31,9 +31,18 @@ const fixture = {
   },
   cobertura: {
     pedidosValidosObservados: 101,
+    ocasioesCompraObservadas: 96,
     clientesObservados: 77,
-    intervalosEntreComprasObservados: 33,
+    intervalosEntreComprasObservados: 29,
+    intervalosEntreOcasioesObservados: 29,
+    clientesComHistoricoSuficienteParaQueda: 18,
+    clientesSemHistoricoSuficienteParaQueda: 59,
     primeiraCompraObservadaNaoEquivaleAPrimeiraCompraVitalicia: true,
+  },
+  segmentacaoQueda: {
+    minimoOcasioesParaCompararRitmo: 3,
+    minimoIntervalosHistoricosPorCliente: 2,
+    regra: "gap_atual_supera_quantil_do_cliente_e_da_populacao",
   },
   calibracao: {
     medianaIntervaloDias: 6,
@@ -158,7 +167,11 @@ async function validar(viewport, fileName) {
   await page.getByText("DRY-RUN · SEM ENVIO", { exact: true }).waitFor();
   await page.getByText("Contato real permanece bloqueado", { exact: true }).waitFor();
   await page.getByText("101", { exact: true }).waitFor();
+  await page.getByText("96", { exact: true }).waitFor();
   await page.getByText("77", { exact: true }).first().waitFor();
+  await page.getByText("Histórico suficiente", { exact: true }).waitFor();
+  await page.getByText("Histórico insuficiente", { exact: true }).waitFor();
+  await page.getByText("Não entram em M5/S6", { exact: true }).waitFor();
   await page.getByText("M1 · Primeira compra observada", { exact: true }).waitFor();
   await page.getByText("M2 · Segunda compra observada", { exact: true }).waitFor();
   await page.getByText("M5 · Queda de frequência", { exact: true }).waitFor();
