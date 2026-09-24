@@ -14,7 +14,7 @@ export type ContatoPesquisaPersistido = {
   sentAtMs: number;
 };
 
-type RedisContatoPesquisa = typeof redis & {
+type RedisContatoPesquisa = {
   zadd: (
     key: string,
     entry: { score: number; member: string }
@@ -34,7 +34,7 @@ type RedisContatoPesquisa = typeof redis & {
   expire: (key: string, seconds: number) => Promise<number>;
 };
 
-const rredis = redis as RedisContatoPesquisa;
+const rredis = redis as unknown as RedisContatoPesquisa;
 
 function normalizarEventId(eventId: string): string | null {
   const valor = eventId.trim();
