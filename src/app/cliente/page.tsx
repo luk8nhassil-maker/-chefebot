@@ -1311,7 +1311,7 @@ export default function ClientePage() {
         style={{
           flex: 1,
           padding: '28px 20px calc(env(safe-area-inset-bottom) + 96px)',
-          maxWidth: modoPreview || step === 'perfil' ? 430 : 1180,
+          maxWidth: modoPreview ? 430 : step === 'perfil' ? 760 : 1180,
           width: '100%',
           margin: '0 auto',
           boxSizing: 'border-box',
@@ -1865,9 +1865,9 @@ export default function ClientePage() {
       />
 
       <style>{`
-        .cliente-conteudo-fidelidade { padding: 18px 16px calc(env(safe-area-inset-bottom) + 102px)!important; max-width: 422px!important; }
+        .cliente-conteudo-fidelidade { padding: 18px 16px calc(env(safe-area-inset-bottom) + 102px)!important; max-width: 760px!important; }
         .cliente-conteudo-fidelidade .cf-preview-phone { max-width: 390px; }
-        .cf-ranking-screen { width: 100%; max-width: 390px; margin: -4px auto 0; color: #1e2a3b; }
+        .cf-ranking-screen { width: 100%; max-width: 720px; margin: -4px auto 0; color: #1e2a3b; }
         .cf-ranking-header { display: grid; grid-template-columns: 52px 1fr auto; align-items: start; gap: 8px; margin-bottom: 16px; }
         .cf-ranking-header>button { width: 48px; height: 48px; border: 0; border-radius: 50%; background: rgba(255,255,255,.9); color: #182337; font-size: 39px; line-height: 38px; cursor: pointer; box-shadow: 0 8px 20px rgba(39,68,100,.08); }
         .cf-ranking-header h1 { margin: 4px 0 3px; font-size: 28px; line-height: 1.1; letter-spacing: -.7px; text-align: center; }
@@ -1958,8 +1958,11 @@ export default function ClientePage() {
         .cf-preview-referral{position:relative;overflow:hidden;padding:19px 17px 17px;background:rgba(255,255,255,.56);min-height:188px}.cf-preview-referral h2{position:relative;z-index:2;font-size:18px;font-weight:800;line-height:1.2;margin:0 0 7px;max-width:88%}.cf-preview-referral>p:not(.cf-preview-kicker){position:relative;z-index:2;font-size:12.5px;line-height:1.45;color:#737d8b;max-width:86%;margin:0 0 17px}.cf-preview-referral>button{position:relative;z-index:3;width:100%;min-height:46px;border:1px solid rgba(255,255,255,.38);border-radius:13px;background:linear-gradient(135deg,rgba(67,134,247,.82),rgba(31,91,204,.8));color:#fff;font:700 15px inherit;backdrop-filter:blur(18px) saturate(1.45);box-shadow:0 8px 22px rgba(31,91,204,.18),inset 0 1px 0 rgba(255,255,255,.4);cursor:pointer}
         .cf-preview-gift{position:absolute;right:-36px;top:48%;transform:translateY(-50%) rotate(-7deg) scale(2.2);font-size:54px;opacity:.9;z-index:1;filter:drop-shadow(0 15px 22px rgba(233,80,126,.22))}
         .cf-preview-modal-backdrop{position:fixed;inset:0;z-index:80;background:rgba(20,27,37,.38);display:flex;align-items:flex-end;justify-content:center;padding:18px}.cf-preview-modal{width:100%;max-width:390px;background:#fff;border-radius:22px;padding:20px;box-shadow:0 24px 60px rgba(0,0,0,.22)}.cf-preview-modal h2{margin:0 0 5px;font-size:20px}.cf-preview-modal p{margin:0 0 14px;font-size:12.5px;line-height:1.4;color:#6d7684}.cf-preview-modal button{width:100%;min-height:42px;border:0;border-top:1px solid #edf0f4;background:#fff;color:#285fb9;font:700 14px inherit;cursor:pointer}.cf-preview-modal .cf-preview-modal-cancel{margin-top:7px;border-radius:11px;border:0;background:#f2f4f7;color:#59616a}
-        @media (max-width:420px){.cliente-conteudo{padding:14px 12px calc(env(safe-area-inset-bottom) + 102px)!important}.cf-preview-phone{max-width:390px}}
-        /* Ranking: hierarquia curta e foco no progresso do cliente. */
+        /* Ranking: hierarquia curta e foco no progresso do cliente (mobile-first). */
+        @media (max-width:420px){
+        .cliente-conteudo{padding:14px 12px calc(env(safe-area-inset-bottom) + 102px)!important}
+        .cliente-conteudo-fidelidade{max-width:430px!important}
+        .cf-preview-phone{max-width:390px}
         .cf-ranking-screen{max-width:390px;margin:0 auto;color:#1d2b42}
         .cf-ranking-header{grid-template-columns:44px 1fr;gap:7px;margin-bottom:12px;align-items:center}
         .cf-ranking-header>button{width:42px;height:42px;font-size:34px;line-height:34px}
@@ -1983,6 +1986,8 @@ export default function ClientePage() {
         .cf-ranking-empty,.cf-ranking-footnote{margin:6px 2px;font-size:12px;line-height:1.35}
         .cf-ranking-note{gap:9px;margin-top:12px;padding:11px 12px;border-radius:15px}.cf-ranking-note>span{font-size:22px}.cf-ranking-note strong{font-size:12px}.cf-ranking-note p{margin-top:3px;font-size:11px}
         .cf-ranking-privacy{margin-top:12px;padding:12px;border-radius:15px}.cf-ranking-privacy h2{margin-bottom:7px;font-size:13px}.cf-ranking-privacy>p{margin:6px 0;font-size:11px}.cf-ranking-privacy label{gap:7px;margin:8px 0;font-size:12px}.cf-ranking-privacy button{margin-top:6px;padding:8px;font-size:12px}
+        }
+        @media (min-width:421px){.cf-ranking-podium{min-height:270px;padding-left:24px;padding-right:24px}.cf-ranking-podium-1{min-height:230px}.cf-ranking-podium-2,.cf-ranking-podium-3{min-height:190px}.cf-ranking-current{padding-left:24px;padding-right:24px}.cf-ranking-list{max-width:680px;margin-left:auto;margin-right:auto}}
       `}</style>
     </div>
   )
