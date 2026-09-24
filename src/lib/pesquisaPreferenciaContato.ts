@@ -108,20 +108,24 @@ export function resumoSegurancaContatoDryRun() {
     elegibilidadeFinalCalculada: false as const,
     candidatosComportamentaisNaoSaoElegiveisFinais: true as const,
     motivo:
-      "O histórico prospectivo de exposições já está conectado ao gate, mas os sinais operacionais e opt-out ainda não estão completos; por segurança nenhum candidato é tratado como elegível final.",
+      "O gate operacional controlado já conecta pedidos, Pix, problemas, opt-out, identidade e histórico de contatos. Checkout web e disputa externa ainda exigem confirmação explícita no piloto; envio automático continua desligado.",
     politica: {
       cooldownDias: POLITICA_CONTATO_PESQUISA.cooldownDias,
       maxContatosEm90Dias: POLITICA_CONTATO_PESQUISA.maxContatosEm90Dias,
     },
     fontesConectadas: [
       "historico_de_exposicoes_de_pesquisa",
-    ],
-    fontesPendentes: [
+      "bootstrap_conservador_de_contatos_pre_ledger",
       "estado_operacional_do_pedido",
       "pagamento_ou_pix_pendente",
-      "problema_ou_disputa_aberta",
+      "problema_operacional_aberto",
+      "checkout_whatsapp_em_andamento",
       "opt_out",
-      "identidade_confirmada",
+      "identidade_confirmada_por_canal",
+    ],
+    fontesPendentes: [
+      "checkout_web_em_andamento_confirmacao_controlada",
+      "disputa_ou_estorno_externo_confirmacao_controlada",
     ],
   };
 }
