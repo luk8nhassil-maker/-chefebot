@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
-import { adquirirMutexPedidos, liberarMutexPedidos } from "@/lib/pedidosConcorrencia";
+import { CHAVE_REVISAO_PEDIDOS, adquirirMutexPedidos, liberarMutexPedidos } from "@/lib/pedidosConcorrencia";
 import { autenticarEntregador, pedidoIdValido } from "@/lib/entregadorAuth";
 import type { PedidoEntregador } from "@/types/entregador";
 import { processarEfeitosPedidoEntregue } from "@/lib/fidelidadeEfeitos";
@@ -26,7 +26,7 @@ type PedidoMain = {
 
 const ACAO_PATTERN = /^(iniciar|entregar)$/;
 
-const CONCLUIR_ENTREGA_LUA = `redis.call("SET", KEYS[1], ARGV[1]); redis.call("SET", KEYS[2], ARGV[2], "EX", 86400); return 1`;
+const CONCLUIR_ENTREGA_LUA = `redis.call("SET", KEYS[1], ARGV[1]); redis.call("INCR", KEYS[3]); redis.call("SET", KEYS[2], ARGV[2], "EX", 86400); return 1`;
 
 type ResultadoConcluirEntrega =
   | { tipo: "nao_encontrado" }
@@ -87,7 +87,7 @@ async function concluirEntregaAtomico(
     // fica fila entregue com pedido principal ainda em rota (ou vice-versa).
     await redis.eval(
       CONCLUIR_ENTREGA_LUA,
-      ["pedidos", filaKey],
+      ["pedidos", filaKey, CHAVE_REVISAO_PEDIDOS],
       [JSON.stringify(principaisAtualizados), JSON.stringify(filaAtualizada)]
     );
 
