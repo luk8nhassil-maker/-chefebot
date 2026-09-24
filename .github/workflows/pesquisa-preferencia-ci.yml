@@ -7,6 +7,8 @@ on:
       - "src/lib/pesquisaPreferencia.test.ts"
       - "src/lib/pesquisaPreferenciaContato.ts"
       - "src/lib/pesquisaPreferenciaContato.test.ts"
+      - "src/lib/pesquisaPreferenciaContatosRedis.ts"
+      - "src/lib/pesquisaPreferenciaContatosRedis.test.ts"
       - "src/lib/pesquisaPreferenciaRegistro.ts"
       - "src/lib/pesquisaPreferenciaRegistro.test.ts"
       - "src/lib/pesquisaPreferenciaHistorico.ts"
@@ -17,6 +19,10 @@ on:
       - "src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts"
       - "src/app/api/cron/pesquisa-preferencia-auditoria/route.ts"
       - "src/app/api/cron/pesquisa-preferencia-auditoria/route.test.ts"
+      - "src/app/api/orders/route.ts"
+      - "src/app/api/orders/route.notificacaoStatus.test.ts"
+      - "src/app/api/whatsapp/route.ts"
+      - "src/app/api/whatsapp/enviarMensagem.test.ts"
       - "src/app/dev/pesquisa-preferencia/page.tsx"
       - "src/lib/auth.ts"
       - "src/lib/auth.test.ts"
@@ -53,6 +59,7 @@ jobs:
           npm test --
           src/lib/pesquisaPreferencia.test.ts
           src/lib/pesquisaPreferenciaContato.test.ts
+          src/lib/pesquisaPreferenciaContatosRedis.test.ts
           src/lib/pesquisaPreferenciaRegistro.test.ts
           src/lib/pesquisaPreferenciaHistorico.test.ts
           src/lib/pesquisaPreferenciaHistoricoRedis.test.ts
@@ -62,6 +69,8 @@ jobs:
           src/app/api/admin/analytics/pedidos/route.test.ts
           src/lib/auth.test.ts
           src/lib/assinaturaChefeBotUi.test.ts
+          src/app/api/orders/route.notificacaoStatus.test.ts
+          src/app/api/whatsapp/enviarMensagem.test.ts
 
       - name: Lint do patch
         run: >-
@@ -70,6 +79,8 @@ jobs:
           src/lib/pesquisaPreferencia.test.ts
           src/lib/pesquisaPreferenciaContato.ts
           src/lib/pesquisaPreferenciaContato.test.ts
+          src/lib/pesquisaPreferenciaContatosRedis.ts
+          src/lib/pesquisaPreferenciaContatosRedis.test.ts
           src/lib/pesquisaPreferenciaRegistro.ts
           src/lib/pesquisaPreferenciaRegistro.test.ts
           src/lib/pesquisaPreferenciaHistorico.ts
@@ -85,6 +96,8 @@ jobs:
           src/lib/auth.test.ts
           src/lib/assinaturaChefeBotUi.ts
           src/lib/assinaturaChefeBotUi.test.ts
+          src/app/api/orders/route.notificacaoStatus.test.ts
+          src/app/api/whatsapp/enviarMensagem.test.ts
           scripts/e2e-pesquisa-preferencia-preview.mjs
 
       - name: Typecheck comparado com a main
