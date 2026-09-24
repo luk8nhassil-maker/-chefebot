@@ -9,6 +9,7 @@ import {
   type ContatoPesquisaPersistido,
 } from "./pesquisaPreferenciaContatosRedis";
 import { clienteTemOptOutPesquisa } from "./pesquisaPreferenciaOptOutRedis";
+import { clienteTemPesquisaPendente } from "./pesquisaPreferenciaRespostaRedis";
 import { redis } from "./redis";
 
 /**
@@ -221,6 +222,7 @@ export async function avaliarElegibilidadeContatoPesquisaCompleta(params: {
       botAtivo,
       atendimentoManualAtivo,
       optOut,
+      pesquisaPendente,
       historicoPersistido,
     ] = await Promise.all([
       redis.get<PedidoPesquisaOperacional[]>("pedidos"),
@@ -228,6 +230,7 @@ export async function avaliarElegibilidadeContatoPesquisaCompleta(params: {
       redis.get<boolean>("bot_ativo"),
       redis.get<boolean>(`manual:${telefoneCanonico}`),
       clienteTemOptOutPesquisa(params.telefone),
+      clienteTemPesquisaPendente(params.telefone),
       listarContatosPesquisaPorTelefone({
         telefone: params.telefone,
         agoraMs,
@@ -267,6 +270,7 @@ export async function avaliarElegibilidadeContatoPesquisaCompleta(params: {
       checkoutEmAndamento:
         checkoutWhatsappEmAndamento ||
         params.sinaisControlados?.checkoutWebEmAndamento === true,
+      pesquisaPendenteResposta: pesquisaPendente,
       pagamentoPendente: ativos.some(
         (pedido) => pedidoTemPix(pedido) && !pedidoPixConfirmado(pedido)
       ),
