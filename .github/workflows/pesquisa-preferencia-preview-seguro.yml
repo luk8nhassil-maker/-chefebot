@@ -17,6 +17,7 @@ on:
       - "src/lib/pesquisaPreferenciaCandidato.ts"
       - "src/lib/pesquisaPreferenciaEnvioControlado.server.ts"
       - "src/lib/pesquisaPreferenciaRelease.ts"
+      - "src/lib/pesquisaPreferenciaPrimeiroEnvio.server.ts"
       - "src/app/api/whatsapp/route.ts"
       - "src/proxy.ts"
       - "scripts/e2e-pesquisa-preferencia-preview.mjs"
