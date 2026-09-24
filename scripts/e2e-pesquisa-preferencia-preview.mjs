@@ -1,7 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { chromium } from "playwright";
+import { pathToFileURL } from "node:url";
 import { SignJWT } from "jose";
+
+const playwrightModulePath = process.env.PLAYWRIGHT_MODULE_PATH;
+if (!playwrightModulePath) {
+  throw new Error("PLAYWRIGHT_MODULE_PATH ausente no Preview hermético.");
+}
+const { chromium } = await import(pathToFileURL(playwrightModulePath).href);
 
 const baseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3000";
 const authSecret = process.env.AUTH_SECRET;
