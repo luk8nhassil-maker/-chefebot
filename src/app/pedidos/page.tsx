@@ -21,6 +21,8 @@ import {
 } from "@/lib/limpezaOperacionalPedidos"
 import { mapearFamiliasVisiveis, selecionarPedidosPainel, selecionarProximaAcaoFamilia } from "@/lib/pedidoComandaPainel"
 import { iniciarPollingVisivel } from "@/lib/pollingVisivel"
+import { ESCALONAMENTO_TTL_MS } from "@/lib/escalonamento"
+import { chaveExpedienteOperacional } from "@/lib/expedienteOperacional"
 import { calcularMediaPreparoMinutos, contarPedidosOperacionais, contarPizzasVendidas } from "@/lib/pedidosMetricas"
 import {
   interpretarRespostaPedidos,
@@ -97,6 +99,21 @@ type Pedido = {
   // Limpeza operacional (ver src/lib/limpezaOperacionalPedidos.ts).
   statusAtualizadoEm?: string
   limpezaOperacional?: RegistroLimpeza
+}
+
+function pedidoPrecisaAtualizacaoTemporal(
+  pedido: Pick<Pedido, "editStatus" | "editExpiresAt" | "escalonado" | "horarioEscalonado">,
+  agora: number,
+): boolean {
+  if (pedido.editStatus === "editing" && pedido.editExpiresAt) {
+    const expiraEm = Date.parse(pedido.editExpiresAt)
+    if (Number.isFinite(expiraEm) && expiraEm <= agora) return true
+  }
+  return Boolean(
+    pedido.escalonado &&
+    pedido.horarioEscalonado &&
+    agora - pedido.horarioEscalonado >= ESCALONAMENTO_TTL_MS
+  )
 }
 
 type SessaoAtiva = {
@@ -596,6 +613,8 @@ export default function PedidosPage() {
 
   const prevIdsRef = useRef<string[]>([])
   const pedidosRef = useRef<Pedido[]>([])
+  const revisaoPedidosRef = useRef<number | null>(null)
+  const expedientePedidosRef = useRef<string | null>(null)
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
   const somRepetidoRef = useRef<NodeJS.Timeout | null>(null)
   const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "Pedidos")
@@ -709,14 +728,11 @@ export default function PedidosPage() {
     try { const r = await fetch("/api/bot-status"); if (r.ok) { const d = await r.json(); setBotAtivo(d.ativo) } } catch {}
   }
 
-  // Carga da lista de pedidos.
-  //
-  // Toda resposta possível vira um desfecho classificado por
-  // interpretarRespostaPedidos (ver src/lib/pedidosPainelCarga.ts). O que este
-  // fluxo NUNCA pode voltar a fazer: engolir a falha num catch vazio e deixar
-  // `loading` em true para sempre — foi exatamente assim que /pedidos ficou
-  // preso em "Carregando..." com o backend fora do ar.
-  const carregarPedidos = async () => {
+  // O painel mantém a mesma cadência de 3s, mas o caminho ocioso lê apenas
+  // uma revisão minúscula do Redis. O array completo de pedidos só é baixado
+  // quando a revisão muda ou quando uma expiração local exige a limpeza
+  // preguiçosa já existente (edição/escalonamento/virada de expediente).
+  const carregarPedidosCompleto = async (revisaoLida: number | null) => {
     let resultado: ResultadoCargaPedidos<Pedido>
     try {
       resultado = await interpretarRespostaPedidos<Pedido>(await fetch("/api/orders"))
@@ -725,10 +741,7 @@ export default function PedidosPage() {
     }
 
     if (resultado.tipo === "nao_autenticado") {
-      // Sessão expirada: limpa o cookie e volta ao login, como sempre. O
-      // logout é aguardado só por um instante — se ele travar, a navegação
-      // acontece do mesmo jeito. Esperar sem limite aqui recriaria o
-      // spinner eterno por outro caminho.
+      revisaoPedidosRef.current = null
       try {
         await Promise.race([
           fetch("/api/auth/logout", { method: "POST" }),
@@ -740,12 +753,12 @@ export default function PedidosPage() {
     }
 
     if (resultado.tipo === "erro") {
-      // Detalhe técnico só no console; a tela mostra linguagem de operação.
+      // Falha da revisão ou da carga completa nunca se disfarça de lista vazia.
+      // Zeramos o baseline para o próximo ciclo voltar automaticamente ao GET
+      // completo, preservando o comportamento de recuperação anterior.
+      revisaoPedidosRef.current = null
       console.error("[pedidos] falha ao carregar a lista:", resultado.motivo, resultado.status ?? "sem status")
       setErroCarga(resultado)
-      // A correção central do incidente: o loading SEMPRE termina, mesmo no
-      // pior caminho. Note que `pedidos` NÃO é sobrescrito — uma falha jamais
-      // pode se disfarçar de "nenhum pedido".
       setLoading(false)
       return
     }
@@ -762,8 +775,48 @@ export default function PedidosPage() {
       data.forEach((p: Pedido) => { prevPixRef.current[p.id] = !!p.pixConfirmado })
     }
     prevIdsRef.current = novosIds
+    pedidosRef.current = data
+    revisaoPedidosRef.current = revisaoLida
+    try { expedientePedidosRef.current = chaveExpedienteOperacional(Date.now()) } catch { expedientePedidosRef.current = null }
     setPedidos(data); setLoading(false); setJaCarregouPedidos(true)
     if (!data.some((p: Pedido) => p.escalonado && p.status === "novo")) { pararPiscar(); pararSomRepetido() }
+  }
+
+  const carregarPedidos = async () => {
+    const agora = Date.now()
+    let revisaoAtual: number | null = null
+
+    try {
+      const respostaRevisao = await fetch("/api/orders?revisao=true", { cache: "no-store" })
+      if (respostaRevisao.ok) {
+        const payload: unknown = await respostaRevisao.json()
+        const valor = (payload as { revisao?: unknown } | null)?.revisao
+        if (typeof valor === "number" && Number.isFinite(valor)) revisaoAtual = valor
+      }
+    } catch {
+      // Fallback abaixo: se a sonda leve falhar, fazemos o GET completo.
+    }
+
+    const expiracaoPendente = pedidosRef.current.some((pedido) => pedidoPrecisaAtualizacaoTemporal(pedido, agora))
+    let virouExpediente = false
+    try {
+      virouExpediente = expedientePedidosRef.current !== null &&
+        expedientePedidosRef.current !== chaveExpedienteOperacional(agora)
+    } catch {}
+
+    const precisaCargaCompleta =
+      revisaoPedidosRef.current === null ||
+      revisaoAtual === null ||
+      revisaoAtual !== revisaoPedidosRef.current ||
+      expiracaoPendente ||
+      virouExpediente
+
+    if (!precisaCargaCompleta) return
+
+    // Guardamos exatamente a revisão lida ANTES da carga pesada. Se uma nova
+    // escrita acontecer durante o GET completo, a próxima sonda de 3s verá
+    // uma revisão maior e fará outra carga — nenhuma mudança fica mascarada.
+    await carregarPedidosCompleto(revisaoAtual)
   }
 
   useEffect(() => {
