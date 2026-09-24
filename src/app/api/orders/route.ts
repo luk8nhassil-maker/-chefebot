@@ -38,6 +38,7 @@ import { enriquecerPedidosComComanda } from '@/lib/pedidoComandaPainel.server'
 import { classificarFalhaDatastore } from '@/lib/datastoreDiagnostico'
 import { lerComRetry } from '@/lib/datastoreRetry'
 import { chaveExpedienteOperacional, chaveExpedienteDoPedido } from '@/lib/expedienteOperacional'
+import { registrarContatoPesquisaConfirmado } from '@/lib/pesquisaPreferenciaContatosRedis'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 
@@ -769,7 +770,7 @@ export async function PATCH(req: NextRequest) {
         console.error('[ChefeBot] Provider de WhatsApp não configurado — pesquisa de avaliação não enviada.')
       } else {
       try {
-        await fetch(`${configAvaliacao.baseUrl}/message/sendText/${configAvaliacao.instanceName}`, {
+        const respostaAvaliacao = await fetch(`${configAvaliacao.baseUrl}/message/sendText/${configAvaliacao.instanceName}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -780,6 +781,17 @@ export async function PATCH(req: NextRequest) {
             text: `*${firstName}*, como foi sua experiência hoje? 😊\n\nAvalia nossa pizza de 1 a 5:\n\n  ⭐ 1 — Ruim\n  ⭐⭐ 2 — Regular\n  ⭐⭐⭐ 3 — Bom\n  ⭐⭐⭐⭐ 4 — Muito bom\n  ⭐⭐⭐⭐⭐ 5 — Excelente\n\nÉ só digitar o número! 😄`,
           }),
         })
+        if (respostaAvaliacao.ok) {
+          try {
+            await registrarContatoPesquisaConfirmado({
+              telefone: pedidos[index].telefone,
+              origem: 'avaliacao_pos_entrega',
+              eventId: id,
+            })
+          } catch (err) {
+            console.error('[ChefeBot] Avaliação enviada, mas orçamento de pesquisa não foi registrado:', err)
+          }
+        }
       } catch (err) {
         console.error('[ChefeBot] Erro ao enviar pesquisa:', err)
       }
