@@ -18,6 +18,8 @@ import {
 } from "@/lib/historicoAnalitico";
 import { analisarPesquisaPreferencia } from "@/lib/pesquisaPreferencia";
 import { resumoSegurancaContatoDryRun } from "@/lib/pesquisaPreferenciaContato";
+import { auditarHistoricoAnteriorPreferencia } from "@/lib/pesquisaPreferenciaHistorico";
+import { carregarEvidenciasHistoricasFidelidade } from "@/lib/pesquisaPreferenciaHistoricoRedis";
 
 const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
 const GITHUB_OIDC_AUDIENCE = "chefebot-research-audit";
@@ -80,9 +82,16 @@ export async function GET(req: Request): Promise<NextResponse> {
       consultarEventosAntesDe(tenantId, inicioMs),
     ]);
 
-    const resumo = analisarPesquisaPreferencia([...historicoAnterior, ...janela90Dias], {
+    const eventos = [...historicoAnterior, ...janela90Dias];
+    const resumo = analisarPesquisaPreferencia(eventos, {
       agoraMs,
       janelaInicioMs: inicioMs,
+    });
+    const historicoAnteriorComprovado = await auditarHistoricoAnteriorPreferencia({
+      eventos,
+      janelaInicioMs: inicioMs,
+      carregarEvidencias: carregarEvidenciasHistoricasFidelidade,
+      concorrencia: 10,
     });
 
     const quantidadesMomentos = Object.fromEntries(
@@ -108,6 +117,7 @@ export async function GET(req: Request): Promise<NextResponse> {
         segmentacaoQueda: resumo.segmentacaoQueda,
         estadosAtuais: resumo.estadosAtuais,
         momentos: quantidadesMomentos,
+        historicoAnteriorComprovado,
         segurancaContato: resumoSegurancaContatoDryRun(),
       },
       {

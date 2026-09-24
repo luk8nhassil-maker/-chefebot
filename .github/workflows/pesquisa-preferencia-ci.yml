@@ -9,6 +9,10 @@ on:
       - "src/lib/pesquisaPreferenciaContato.test.ts"
       - "src/lib/pesquisaPreferenciaRegistro.ts"
       - "src/lib/pesquisaPreferenciaRegistro.test.ts"
+      - "src/lib/pesquisaPreferenciaHistorico.ts"
+      - "src/lib/pesquisaPreferenciaHistorico.test.ts"
+      - "src/lib/pesquisaPreferenciaHistoricoRedis.ts"
+      - "src/lib/pesquisaPreferenciaHistoricoRedis.test.ts"
       - "src/app/api/admin/pesquisa-preferencia/dry-run/route.ts"
       - "src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts"
       - "src/app/api/cron/pesquisa-preferencia-auditoria/route.ts"
@@ -50,6 +54,8 @@ jobs:
           src/lib/pesquisaPreferencia.test.ts
           src/lib/pesquisaPreferenciaContato.test.ts
           src/lib/pesquisaPreferenciaRegistro.test.ts
+          src/lib/pesquisaPreferenciaHistorico.test.ts
+          src/lib/pesquisaPreferenciaHistoricoRedis.test.ts
           src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts
           src/app/api/cron/pesquisa-preferencia-auditoria/route.test.ts
           src/lib/historicoAnalitico.test.ts
@@ -66,6 +72,10 @@ jobs:
           src/lib/pesquisaPreferenciaContato.test.ts
           src/lib/pesquisaPreferenciaRegistro.ts
           src/lib/pesquisaPreferenciaRegistro.test.ts
+          src/lib/pesquisaPreferenciaHistorico.ts
+          src/lib/pesquisaPreferenciaHistorico.test.ts
+          src/lib/pesquisaPreferenciaHistoricoRedis.ts
+          src/lib/pesquisaPreferenciaHistoricoRedis.test.ts
           src/app/api/admin/pesquisa-preferencia/dry-run/route.ts
           src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts
           src/app/api/cron/pesquisa-preferencia-auditoria/route.ts

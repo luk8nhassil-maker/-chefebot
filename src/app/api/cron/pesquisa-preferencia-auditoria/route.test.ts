@@ -19,6 +19,10 @@ vi.mock("@/lib/historicoAnalitico", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/pesquisaPreferenciaHistoricoRedis", () => ({
+  carregarEvidenciasHistoricasFidelidade: vi.fn(async () => []),
+}));
+
 import { consultarEventosAntesDe, consultarEventosPorPeriodo } from "@/lib/historicoAnalitico";
 import { GET } from "./route";
 
@@ -141,6 +145,17 @@ describe("GET /api/cron/pesquisa-preferencia-auditoria", () => {
     expect(body.cobertura.ocasioesCompraObservadas).toBe(4);
     expect(body.cobertura.clientesComHistoricoSuficienteParaQueda).toBe(1);
     expect(body.momentos.M1.quantidade).toBe(2);
+    expect(body.historicoAnteriorComprovado).toMatchObject({
+      fonte: "ledgers_fidelidade",
+      clientesAuditados: 2,
+      m1Observado: 2,
+      m1ComCompraAnteriorComprovada: 0,
+      m2Observado: 1,
+      m2ComCompraAnteriorAntesDaPrimeiraObservada: 0,
+    });
+    expect(body.historicoAnteriorComprovado.aviso).toMatch(
+      /não prova primeira compra vitalícia/i
+    );
     expect(body.segurancaContato.envioAutomaticoAtivo).toBe(false);
     expect(body.segurancaContato.elegibilidadeFinalCalculada).toBe(false);
     expect(res.headers.get("x-chefebot-audit-mode")).toBe("read-only");
