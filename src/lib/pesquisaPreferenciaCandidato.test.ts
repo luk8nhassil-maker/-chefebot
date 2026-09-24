@@ -97,9 +97,9 @@ describe("validarCandidatoMomentoControlado", () => {
       ev("cli_b", "b1", 0),
       ev("cli_b", "b2", 2),
       ev("cli_b", "b3", 4),
-      ev("cli_c", "c1", 0),
-      ev("cli_c", "c2", 3),
-      ev("cli_c", "c3", 6),
+      ev("cli_c", "c1", -8),
+      ev("cli_c", "c2", -6),
+      ev("cli_c", "c3", 4),
     ];
 
     const s5 = validarCandidatoMomentoControlado({
