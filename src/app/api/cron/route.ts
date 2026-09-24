@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import { timestampCriacaoPedido } from "@/lib/expedienteOperacional";
+import { ehProjetoVercelLegado } from "@/lib/vercelProjeto";
 
 type Pedido = {
   id: string;
@@ -17,6 +18,10 @@ export async function GET(req: Request) {
   const auth = req.headers.get("authorization");
   if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (ehProjetoVercelLegado()) {
+    return NextResponse.json({ ok: true, skipped: true, motivo: "projeto_vercel_legado" });
   }
 
   try {
