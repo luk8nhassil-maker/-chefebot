@@ -107,7 +107,6 @@ export default function PesquisaPreferenciaDevPage() {
   const [data, setData] = useState<DryRunResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
-  const [role, setRole] = useState<string | null>(null)
   const [confirmouCheckout, setConfirmouCheckout] = useState(false)
   const [confirmouDisputa, setConfirmouDisputa] = useState(false)
   const [enviando, setEnviando] = useState(false)
@@ -132,7 +131,6 @@ export default function PesquisaPreferenciaDevPage() {
 
   useEffect(() => {
     const papel = getUserRole()
-    setRole(papel)
     if (papel !== 'admin' && papel !== 'dev') {
       router.push('/login?callbackUrl=/dev/pesquisa-preferencia')
       return
@@ -152,8 +150,11 @@ export default function PesquisaPreferenciaDevPage() {
 
   const enviarPrimeiroM5 = async () => {
     const candidato = data?.primeiroEnvioM5
+    if (getUserRole() !== 'admin') {
+      setResultadoEnvio('Somente admin pode executar o primeiro envio.')
+      return
+    }
     if (
-      role !== 'admin' ||
       !candidato?.candidateRef ||
       !candidato.prontoParaConfirmacaoManual ||
       !candidato.envioLiberadoNestaVersao ||
@@ -284,7 +285,6 @@ export default function PesquisaPreferenciaDevPage() {
                   <button
                     onClick={enviarPrimeiroM5}
                     disabled={
-                      role !== 'admin' ||
                       !data.primeiroEnvioM5.envioLiberadoNestaVersao ||
                       !data.primeiroEnvioM5.prontoParaConfirmacaoManual ||
                       !confirmouCheckout ||
@@ -311,11 +311,9 @@ export default function PesquisaPreferenciaDevPage() {
                 </p>
               )}
 
-              {role === 'dev' && (
-                <p style={{ margin: '10px 0 0', fontSize: 11, color: 'var(--foreground-muted)' }}>
-                  Role dev pode observar, mas somente admin pode executar o envio.
-                </p>
-              )}
+              <p style={{ margin: '10px 0 0', fontSize: 11, color: 'var(--foreground-muted)' }}>
+                O painel pode ser observado por admin/dev, mas somente admin pode executar o envio.
+              </p>
               {resultadoEnvio && (
                 <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--foreground-secondary)' }}>{resultadoEnvio}</p>
               )}
