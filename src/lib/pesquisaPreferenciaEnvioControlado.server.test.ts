@@ -237,17 +237,59 @@ describe("executarEnvioPesquisaControlado", () => {
     expect(primeiro.status).toBe("enviado");
     expect(enviarMock).toHaveBeenCalledTimes(1);
 
-    // Simula perda parcial pós-envio: retry deve reconciliar, nunca reenviar.
+    // Simula perda parcial pós-envio. Mesmo que o gate agora estivesse
+    // suprimido pelo próprio cooldown, retry deve reconciliar e nunca reenviar.
     registrarContatoMock.mockClear();
     registrarPendenteMock.mockClear();
     enviarMock.mockClear();
+    gateMock.mockClear();
+    candidatoMock.mockClear();
+    eventosPeriodoMock.mockClear();
+    eventosAntesMock.mockClear();
+    gateMock.mockResolvedValue({
+      elegibilidade: {
+        status: "suprimido",
+        motivos: ["cooldown_14_dias"],
+        contatosUltimos14Dias: 1,
+        contatosUltimos90Dias: 1,
+      },
+      diagnostico: {},
+    });
 
     const segundo = await executar();
 
     expect(segundo.status).toBe("ja_enviado_reconciliado");
     expect(enviarMock).not.toHaveBeenCalled();
+    expect(gateMock).not.toHaveBeenCalled();
+    expect(candidatoMock).not.toHaveBeenCalled();
+    expect(eventosPeriodoMock).not.toHaveBeenCalled();
+    expect(eventosAntesMock).not.toHaveBeenCalled();
     expect(registrarContatoMock).toHaveBeenCalledTimes(1);
     expect(registrarPendenteMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("reconciliação tardia não reabre janela de resposta vencida", async () => {
+    const clock = vi.spyOn(Date, "now");
+    clock.mockReturnValue(AGORA);
+
+    const primeiro = await executar();
+    expect(primeiro.status).toBe("enviado");
+
+    registrarContatoMock.mockClear();
+    registrarPendenteMock.mockClear();
+    enviarMock.mockClear();
+    gateMock.mockClear();
+    candidatoMock.mockClear();
+
+    clock.mockReturnValue(AGORA + 2 * 60 * 60 * 1000);
+    const segundo = await executar();
+
+    expect(segundo.status).toBe("ja_enviado_reconciliado");
+    expect(enviarMock).not.toHaveBeenCalled();
+    expect(registrarContatoMock).toHaveBeenCalledTimes(1);
+    expect(registrarPendenteMock).not.toHaveBeenCalled();
+
+    clock.mockRestore();
   });
 
   test("lock por cliente impede dois disparos simultâneos", async () => {
