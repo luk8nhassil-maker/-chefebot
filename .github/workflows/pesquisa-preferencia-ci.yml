@@ -1,0 +1,90 @@
+name: pesquisa-preferencia-ci
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/pesquisaPreferencia.ts"
+      - "src/lib/pesquisaPreferencia.test.ts"
+      - "src/app/api/admin/pesquisa-preferencia/dry-run/route.ts"
+      - "src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts"
+      - ".github/workflows/pesquisa-preferencia-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pesquisa-preferencia-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do HEAD exato
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados de pesquisa e analytics
+        run: >-
+          npm test --
+          src/lib/pesquisaPreferencia.test.ts
+          src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts
+          src/lib/historicoAnalitico.test.ts
+          src/app/api/admin/analytics/pedidos/route.test.ts
+
+      - name: Lint do patch
+        run: >-
+          npm run lint --
+          src/lib/pesquisaPreferencia.ts
+          src/lib/pesquisaPreferencia.test.ts
+          src/app/api/admin/pesquisa-preferencia/dry-run/route.ts
+          src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts
+
+      - name: Typecheck comparado com a main
+        shell: bash
+        run: |
+          set +e
+          ./node_modules/.bin/tsc --noEmit > /tmp/typecheck-branch.log 2>&1
+          branch_status=$?
+          set -e
+
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base_sha" ]; then
+            git fetch --depth=1 origin main
+            base_sha="origin/main"
+          else
+            git fetch --depth=1 origin "$base_sha"
+          fi
+
+          git worktree add --detach /tmp/chefebot-main "$base_sha"
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/chefebot-main/node_modules
+
+          set +e
+          (cd /tmp/chefebot-main && "$GITHUB_WORKSPACE/node_modules/.bin/tsc" --noEmit) > /tmp/typecheck-main.log 2>&1
+          main_status=$?
+          set -e
+
+          sed -E 's#^([^(:]+\([^)]*\): error TS[0-9]+:).*#\1#' /tmp/typecheck-branch.log | grep 'error TS' | sort -u > /tmp/branch-errors.txt || true
+          sed -E 's#^([^(:]+\([^)]*\): error TS[0-9]+:).*#\1#' /tmp/typecheck-main.log | grep 'error TS' | sort -u > /tmp/main-errors.txt || true
+          comm -13 /tmp/main-errors.txt /tmp/branch-errors.txt > /tmp/new-errors.txt
+
+          if [ -s /tmp/new-errors.txt ]; then
+            echo "::error::A branch introduziu novos erros de typecheck em relação à main:"
+            cat /tmp/new-errors.txt
+            exit 1
+          fi
+
+          if [ "$branch_status" -ne 0 ]; then
+            echo "Typecheck global permanece vermelho somente por erros já presentes na main (main status=$main_status)."
+          else
+            echo "Typecheck da branch totalmente verde."
+          fi
+
+      - name: Build de produção
+        run: npm run build
