@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
+import { ehProjetoVercelLegado } from "@/lib/vercelProjeto";
 
 type SessaoPixPendente = {
   step?: string;
@@ -35,6 +36,10 @@ export async function GET(req: Request) {
   const auth = req.headers.get("authorization");
   if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (ehProjetoVercelLegado()) {
+    return NextResponse.json({ ok: true, skipped: true, motivo: "projeto_vercel_legado" });
   }
 
   try {
