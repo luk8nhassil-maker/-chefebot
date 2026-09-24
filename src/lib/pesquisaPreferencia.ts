@@ -182,7 +182,7 @@ export type ResumoPesquisaPreferencia = {
   segmentacaoQueda: {
     minimoOcasioesParaCompararRitmo: 3;
     minimoIntervalosHistoricosPorCliente: 2;
-    regra: "gap_atual_supera_quantill_do_cliente_e_da_populacao";
+    regra: "gap_atual_supera_quantil_do_cliente_e_da_populacao";
   };
   calibracao: {
     medianaIntervaloDias: number | null;
@@ -432,7 +432,7 @@ export function analisarPesquisaPreferencia(
     segmentacaoQueda: {
       minimoOcasioesParaCompararRitmo: 3,
       minimoIntervalosHistoricosPorCliente: 2,
-      regra: "gap_atual_supera_quantill_do_cliente_e_da_populacao",
+      regra: "gap_atual_supera_quantil_do_cliente_e_da_populacao",
     },
     calibracao: {
       medianaIntervaloDias: emDias(p50),
