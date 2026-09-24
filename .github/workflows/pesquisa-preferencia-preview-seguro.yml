@@ -12,6 +12,8 @@ on:
       - "src/lib/pesquisaPreferenciaElegibilidade.server.ts"
       - "src/lib/pesquisaPreferenciaElegibilidadeCompleta.server.ts"
       - "src/lib/pesquisaPreferenciaOptOutRedis.ts"
+      - "src/lib/pesquisaPreferenciaRespostaRedis.ts"
+      - "src/app/api/whatsapp/route.ts"
       - "src/proxy.ts"
       - "scripts/e2e-pesquisa-preferencia-preview.mjs"
       - ".github/workflows/pesquisa-preferencia-preview-seguro.yml"
