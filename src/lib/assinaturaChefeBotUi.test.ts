@@ -13,6 +13,8 @@ describe("assinatura ChefeBot — UI e permissões", () => {
     expect(ehRotaOperacionalAssinatura("/pedido")).toBe(false);
     expect(ehRotaOperacionalAssinatura("/login")).toBe(false);
     expect(ehRotaOperacionalAssinatura("/entregador")).toBe(false);
+    expect(ehRotaOperacionalAssinatura("/dev/pesquisa-preferencia")).toBe(false);
+    expect(ehRotaOperacionalAssinatura("/dev/redis-status")).toBe(true);
   });
 
   it("reconhece somente sessão de equipe operacional no cookie público", () => {
