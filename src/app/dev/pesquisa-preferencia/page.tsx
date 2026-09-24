@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 type MomentoResumo = {
@@ -90,7 +90,7 @@ export default function PesquisaPreferenciaDevPage() {
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
 
-  const buscar = () => {
+  const buscar = useCallback(() => {
     fetch('/api/admin/pesquisa-preferencia/dry-run', { cache: 'no-store' })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -114,7 +114,7 @@ export default function PesquisaPreferenciaDevPage() {
       return
     }
     buscar()
-  }, [router])
+  }, [buscar, router])
 
   const primeiraOnda = data
     ? ['M1', 'M2', 'M5'].map((id) => data.momentos[id]).filter(Boolean)
