@@ -135,6 +135,26 @@ export async function registrarContatoPesquisaBestEffort(params: {
   }
 }
 
+export async function registrarAvaliacaoPosEntregaEnviada(params: {
+  telefone: string;
+  pedidoId: string;
+  agoraMs?: number;
+}): Promise<void> {
+  const { telefone, pedidoId, agoraMs = Date.now() } = params;
+  if (!pedidoId) return;
+
+  await registrarContatoPesquisaBestEffort({
+    telefone,
+    registro: {
+      exposureId: "avaliacao-pos-entrega:" + pedidoId,
+      questionId: "legacy-avaliacao-pos-entrega-v1",
+      momentId: null,
+      sentAtMs: agoraMs,
+      origem: "avaliacao_pos_entrega_legada",
+    },
+  });
+}
+
 export async function listarContatosPesquisa(params: {
   telefone: string;
   agoraMs?: number;
