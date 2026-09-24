@@ -52,6 +52,7 @@ describe("registrarPesquisaPendente", () => {
       questionId: "research-m1-main",
       questionVersion: 1,
       sentAtMs: 1000,
+      agoraMs: 1000,
     });
 
     expect(ok).toBe(true);
@@ -60,6 +61,37 @@ describe("registrarPesquisaPendente", () => {
     expect(key).not.toContain(PHONE);
     expect(JSON.stringify(value)).not.toContain(PHONE);
     expect(opts).toEqual({ ex: 3600 });
+  });
+
+  test("retry usa apenas o TTL restante da janela original", async () => {
+    const ok = await registrarPesquisaPendente({
+      telefone: PHONE,
+      exposureId: "exp-1",
+      momentId: "M1",
+      questionId: "research-m1-main",
+      questionVersion: 1,
+      sentAtMs: 1000,
+      agoraMs: 1000 + 20 * 60 * 1000,
+    });
+
+    expect(ok).toBe(true);
+    const [, , opts] = redisMock.set.mock.calls[0];
+    expect(opts).toEqual({ ex: 2400 });
+  });
+
+  test("não reabre janela já expirada", async () => {
+    const ok = await registrarPesquisaPendente({
+      telefone: PHONE,
+      exposureId: "exp-1",
+      momentId: "M1",
+      questionId: "research-m1-main",
+      questionVersion: 1,
+      sentAtMs: 1000,
+      agoraMs: 1000 + 60 * 60 * 1000,
+    });
+
+    expect(ok).toBe(false);
+    expect(redisMock.set).not.toHaveBeenCalled();
   });
 
   test("identidade inválida não arma contexto", async () => {
