@@ -18,7 +18,7 @@ import {
   periodo90Dias,
   TENANT_PADRAO_ANALYTICS,
 } from "@/lib/historicoAnalitico";
-import { analisarPesquisaPreferencia } from "@/lib/pesquisaPreferencia";
+import { analisarPesquisaPreferencia } from "@/lib/pesquisaPreferencia";\nimport { resumoSegurancaContatoDryRun } from "@/lib/pesquisaPreferenciaContato";
 
 async function checkAuthAdmin(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
