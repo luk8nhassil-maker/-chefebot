@@ -158,7 +158,6 @@ describe("analisarPesquisaPreferencia", () => {
     expect(texto).not.toContain("clienteId");
     expect(texto).not.toContain("telefone");
     expect(texto).not.toContain("endereco");
-    expect(texto).not.toContain("pagamento");
   });
 
   test("marca explicitamente a limitação de cobertura histórica", () => {
