@@ -23,6 +23,7 @@ import { redis } from "@/lib/redis";
 // A liberação abaixo nunca faz isso: é sempre um único script Lua
 // (GET+DEL condicional), atômico no servidor Redis, sem essa janela.
 
+export const CHAVE_REVISAO_PEDIDOS = "pedidos:revision";
 const CHAVE_MUTEX_PEDIDOS = "pedidos:mutex:global";
 const MUTEX_TTL_SEGUNDOS = 5;
 const MUTEX_MAX_TENTATIVAS = 50;
@@ -88,6 +89,31 @@ export async function liberarMutexPedidos(token: string): Promise<void> {
   }
 }
 
+/**
+ * Persiste o array completo de pedidos e avança a revisão na MESMA transação
+ * Redis. O painel pode consultar só a chave minúscula de revisão a cada 3s e
+ * baixar o array pesado apenas quando algo realmente mudou.
+ *
+ * Em produção, @upstash/redis oferece multi() atômico. A exceção de teste
+ * abaixo existe apenas para mocks legados de rotas que ainda não modelam
+ * multi(); nunca é usada no runtime de produção.
+ */
+export async function persistirPedidosComRevisao<TPedido>(pedidos: TPedido[]): Promise<void> {
+  const redisComMulti = redis as typeof redis & { multi?: typeof redis.multi };
+  if (typeof redisComMulti.multi !== "function") {
+    if (process.env.NODE_ENV === "test") {
+      await redis.set("pedidos", pedidos);
+      return;
+    }
+    throw new Error("Cliente Redis sem suporte a transação atômica de pedidos");
+  }
+
+  const tx = redisComMulti.multi();
+  tx.set("pedidos", pedidos);
+  tx.incr(CHAVE_REVISAO_PEDIDOS);
+  await tx.exec();
+}
+
 export type ResultadoMutacaoPedidos<TPedido, TResultado> =
   | { persistir: true; pedidos: TPedido[]; resultado: TResultado }
   | { persistir: false; resultado: TResultado };
@@ -135,7 +161,7 @@ export async function mutarPedidos<TPedido, TResultado>(
     const pedidosFrescos = (await redis.get<TPedido[]>("pedidos")) || [];
     const resultado = await fn(pedidosFrescos);
     if (resultado.persistir) {
-      await redis.set("pedidos", resultado.pedidos);
+      await persistirPedidosComRevisao(resultado.pedidos);
     }
     return resultado.resultado;
   } finally {
