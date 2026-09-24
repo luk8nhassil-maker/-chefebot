@@ -40,10 +40,10 @@ jobs:
       - name: Instalar dependências do projeto
         run: npm ci
 
-      - name: Gerar credenciais efêmeras
+      - name: Registrar HEAD e gerar segredo efêmero
         run: |
+          echo "PREVIEW_GIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "AUTH_SECRET=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')" >> "$GITHUB_ENV"
-          echo "OMINIX_PASSWORD=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')" >> "$GITHUB_ENV"
 
       - name: Instalar Playwright apenas no runner
         run: |
