@@ -9,6 +9,8 @@ on:
       - "src/lib/pesquisaPreferenciaContato.test.ts"
       - "src/lib/pesquisaPreferenciaContatosRedis.ts"
       - "src/lib/pesquisaPreferenciaContatosRedis.test.ts"
+      - "src/lib/pesquisaPreferenciaElegibilidade.server.ts"
+      - "src/lib/pesquisaPreferenciaElegibilidade.server.test.ts"
       - "src/lib/pesquisaPreferenciaRegistro.ts"
       - "src/lib/pesquisaPreferenciaRegistro.test.ts"
       - "src/lib/pesquisaPreferenciaHistorico.ts"
@@ -60,6 +62,7 @@ jobs:
           src/lib/pesquisaPreferencia.test.ts
           src/lib/pesquisaPreferenciaContato.test.ts
           src/lib/pesquisaPreferenciaContatosRedis.test.ts
+          src/lib/pesquisaPreferenciaElegibilidade.server.test.ts
           src/lib/pesquisaPreferenciaRegistro.test.ts
           src/lib/pesquisaPreferenciaHistorico.test.ts
           src/lib/pesquisaPreferenciaHistoricoRedis.test.ts
@@ -81,6 +84,8 @@ jobs:
           src/lib/pesquisaPreferenciaContato.test.ts
           src/lib/pesquisaPreferenciaContatosRedis.ts
           src/lib/pesquisaPreferenciaContatosRedis.test.ts
+          src/lib/pesquisaPreferenciaElegibilidade.server.ts
+          src/lib/pesquisaPreferenciaElegibilidade.server.test.ts
           src/lib/pesquisaPreferenciaRegistro.ts
           src/lib/pesquisaPreferenciaRegistro.test.ts
           src/lib/pesquisaPreferenciaHistorico.ts
