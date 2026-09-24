@@ -32,7 +32,7 @@ import {
 } from '@/lib/pedidoEdicao'
 import { limparEscalonamentoExpiradoSeNecessario } from '@/lib/escalonamento'
 import { reivindicarImpressaoAutomatica } from '@/lib/impressaoAutomatica'
-import { adquirirMutexPedidos, liberarMutexPedidos, mutarPedidos } from '@/lib/pedidosConcorrencia'
+import { CHAVE_REVISAO_PEDIDOS, adquirirMutexPedidos, liberarMutexPedidos, mutarPedidos, persistirPedidosComRevisao } from '@/lib/pedidosConcorrencia'
 import { listarComandas, PAGAMENTO_COMANDA_EM_ABERTO } from '@/lib/comandas'
 import { enriquecerPedidosComComanda } from '@/lib/pedidoComandaPainel.server'
 import { classificarFalhaDatastore } from '@/lib/datastoreDiagnostico'
@@ -136,6 +136,7 @@ if mudouEntregador then
 end
 
 redis.call("SET", KEYS[1], ARGV[1])
+redis.call("INCR", KEYS[4])
 redis.call("SET", KEYS[2], encodeArray(filaAtual), "EX", ARGV[5])
 if mudouEntregador then
   redis.call("SET", KEYS[3], encodeArray(filaAnterior))
@@ -163,7 +164,7 @@ async function salvarAtribuicaoComFilas(
     : filaAtualKey
   await redis.eval(
     SALVAR_ATRIBUICAO_LUA,
-    ['pedidos', filaAtualKey, filaAnteriorKey],
+    ['pedidos', filaAtualKey, filaAnteriorKey, CHAVE_REVISAO_PEDIDOS],
     [
       JSON.stringify(pedidos),
       pedidoEntregador.pedidoId,
@@ -360,6 +361,14 @@ export async function GET(req: NextRequest) {
 }
 
 async function listarPedidosDoPainel(req: NextRequest) {
+  const url = new URL(req.url)
+  if (url.searchParams.get('revisao') === 'true') {
+    const revisao = (await redis.get<number>(CHAVE_REVISAO_PEDIDOS)) ?? 0
+    return NextResponse.json(
+      { revisao },
+      { headers: { 'Cache-Control': 'no-store, max-age=0' } }
+    )
+  }
 
   // Caminho quente do painel: leitura é barata e NÃO disputa o mutex global.
   // Só promovemos a requisição para leitura-modificação-escrita quando o
@@ -408,7 +417,6 @@ async function listarPedidosDoPainel(req: NextRequest) {
     }
   }
 
-  const url = new URL(req.url)
   const soArquivados = url.searchParams.get('arquivados') === 'true'
   const incluirHistorico = url.searchParams.get('historico') === 'true'
 
@@ -477,7 +485,7 @@ async function aplicarMudancaDeStatus(
     if (limpeza.mudou) pedidos[index] = limpeza.pedido as Pedido
 
     if (lockEdicaoAtivo(pedidos[index])) {
-      if (limpeza.mudou) await redis.set('pedidos', pedidos)
+      if (limpeza.mudou) await persistirPedidosComRevisao(pedidos)
       return {
         tipo: 'erro',
         resposta: NextResponse.json(
@@ -614,7 +622,7 @@ async function aplicarMudancaDeStatus(
         entregadorAnteriorId
       )
     } else {
-      await redis.set('pedidos', pedidos)
+      await persistirPedidosComRevisao(pedidos)
     }
 
     return { tipo: 'ok', pedidos, index, statusAnterior, entregadorCanonico, podeImprimirAutomaticamente }
