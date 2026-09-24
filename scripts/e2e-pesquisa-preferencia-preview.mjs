@@ -87,13 +87,15 @@ const fixture = {
     candidatosComportamentaisNaoSaoElegiveisFinais: true,
     motivo: "Fixture de Preview: contato real permanece bloqueado.",
     politica: { cooldownDias: 14, maxContatosEm90Dias: 3 },
+    fontesConectadas: [
+      "historico_de_exposicoes_de_pesquisa",
+    ],
     fontesPendentes: [
       "estado_operacional_do_pedido",
       "pagamento_ou_pix_pendente",
       "problema_ou_disputa_aberta",
       "opt_out",
       "identidade_confirmada",
-      "historico_de_exposicoes_de_pesquisa",
     ],
   },
   observacoes: [

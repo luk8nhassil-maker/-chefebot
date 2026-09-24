@@ -108,18 +108,20 @@ export function resumoSegurancaContatoDryRun() {
     elegibilidadeFinalCalculada: false as const,
     candidatosComportamentaisNaoSaoElegiveisFinais: true as const,
     motivo:
-      "Os sinais operacionais, opt-out e histórico de exposições ainda não estão conectados ao dry-run; por segurança nenhum candidato é tratado como elegível final.",
+      "O histórico prospectivo de exposições já está conectado ao gate, mas os sinais operacionais e opt-out ainda não estão completos; por segurança nenhum candidato é tratado como elegível final.",
     politica: {
       cooldownDias: POLITICA_CONTATO_PESQUISA.cooldownDias,
       maxContatosEm90Dias: POLITICA_CONTATO_PESQUISA.maxContatosEm90Dias,
     },
+    fontesConectadas: [
+      "historico_de_exposicoes_de_pesquisa",
+    ],
     fontesPendentes: [
       "estado_operacional_do_pedido",
       "pagamento_ou_pix_pendente",
       "problema_ou_disputa_aberta",
       "opt_out",
       "identidade_confirmada",
-      "historico_de_exposicoes_de_pesquisa",
     ],
   };
 }
