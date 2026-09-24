@@ -17,6 +17,10 @@ on:
       - "src/lib/pesquisaPreferenciaOptOutRedis.test.ts"
       - "src/lib/pesquisaPreferenciaRespostaRedis.ts"
       - "src/lib/pesquisaPreferenciaRespostaRedis.test.ts"
+      - "src/lib/pesquisaPreferenciaCandidato.ts"
+      - "src/lib/pesquisaPreferenciaCandidato.test.ts"
+      - "src/lib/pesquisaPreferenciaEnvioControlado.server.ts"
+      - "src/lib/pesquisaPreferenciaEnvioControlado.server.test.ts"
       - "src/lib/pesquisaPreferenciaRegistro.ts"
       - "src/lib/pesquisaPreferenciaRegistro.test.ts"
       - "src/lib/pesquisaPreferenciaHistorico.ts"
@@ -29,6 +33,8 @@ on:
       - "src/app/api/admin/pesquisa-preferencia/elegibilidade-controlada/route.test.ts"
       - "src/app/api/admin/pesquisa-preferencia/opt-out/route.ts"
       - "src/app/api/admin/pesquisa-preferencia/opt-out/route.test.ts"
+      - "src/app/api/admin/pesquisa-preferencia/envio-controlado/route.ts"
+      - "src/app/api/admin/pesquisa-preferencia/envio-controlado/route.test.ts"
       - "src/app/api/cron/pesquisa-preferencia-auditoria/route.ts"
       - "src/app/api/cron/pesquisa-preferencia-auditoria/route.test.ts"
       - "src/app/api/orders/route.ts"
@@ -77,12 +83,15 @@ jobs:
           src/lib/pesquisaPreferenciaElegibilidadeCompleta.server.test.ts
           src/lib/pesquisaPreferenciaOptOutRedis.test.ts
           src/lib/pesquisaPreferenciaRespostaRedis.test.ts
+          src/lib/pesquisaPreferenciaCandidato.test.ts
+          src/lib/pesquisaPreferenciaEnvioControlado.server.test.ts
           src/lib/pesquisaPreferenciaRegistro.test.ts
           src/lib/pesquisaPreferenciaHistorico.test.ts
           src/lib/pesquisaPreferenciaHistoricoRedis.test.ts
           src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts
           src/app/api/admin/pesquisa-preferencia/elegibilidade-controlada/route.test.ts
           src/app/api/admin/pesquisa-preferencia/opt-out/route.test.ts
+          src/app/api/admin/pesquisa-preferencia/envio-controlado/route.test.ts
           src/app/api/cron/pesquisa-preferencia-auditoria/route.test.ts
           src/lib/historicoAnalitico.test.ts
           src/app/api/admin/analytics/pedidos/route.test.ts
@@ -109,6 +118,10 @@ jobs:
           src/lib/pesquisaPreferenciaOptOutRedis.test.ts
           src/lib/pesquisaPreferenciaRespostaRedis.ts
           src/lib/pesquisaPreferenciaRespostaRedis.test.ts
+          src/lib/pesquisaPreferenciaCandidato.ts
+          src/lib/pesquisaPreferenciaCandidato.test.ts
+          src/lib/pesquisaPreferenciaEnvioControlado.server.ts
+          src/lib/pesquisaPreferenciaEnvioControlado.server.test.ts
           src/lib/pesquisaPreferenciaRegistro.ts
           src/lib/pesquisaPreferenciaRegistro.test.ts
           src/lib/pesquisaPreferenciaHistorico.ts
@@ -121,6 +134,8 @@ jobs:
           src/app/api/admin/pesquisa-preferencia/elegibilidade-controlada/route.test.ts
           src/app/api/admin/pesquisa-preferencia/opt-out/route.ts
           src/app/api/admin/pesquisa-preferencia/opt-out/route.test.ts
+          src/app/api/admin/pesquisa-preferencia/envio-controlado/route.ts
+          src/app/api/admin/pesquisa-preferencia/envio-controlado/route.test.ts
           src/app/api/cron/pesquisa-preferencia-auditoria/route.ts
           src/app/api/cron/pesquisa-preferencia-auditoria/route.test.ts
           src/app/dev/pesquisa-preferencia/page.tsx
