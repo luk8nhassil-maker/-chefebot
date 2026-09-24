@@ -24,6 +24,26 @@ vi.mock("./redis", () => ({
       return "OK";
     }),
     del: vi.fn(async (key: string) => (redisStore.delete(key) ? 1 : 0)),
+    multi: vi.fn(() => {
+      const operacoes: Array<{ tipo: "set"; key: string; value: unknown } | { tipo: "incr"; key: string }> = [];
+      const tx = {
+        set(key: string, value: unknown) { operacoes.push({ tipo: "set", key, value }); return tx; },
+        incr(key: string) { operacoes.push({ tipo: "incr", key }); return tx; },
+        async exec() {
+          if (falharProximosSets > 0) {
+            falharProximosSets -= 1;
+            throw new Error("Redis indisponível (simulado)");
+          }
+          // Aplica tudo só depois de validar a falha: simula a atomicidade do MULTI/EXEC.
+          for (const op of operacoes) {
+            if (op.tipo === "set") redisStore.set(op.key, deepClone(op.value));
+            else redisStore.set(op.key, Number(redisStore.get(op.key) ?? 0) + 1);
+          }
+          return operacoes.map(() => "OK");
+        },
+      };
+      return tx;
+    }),
     // Simula o Lua de liberação: GET+DEL condicional numa única "operação".
     eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
       if (falharProximosEvals > 0) {
@@ -138,6 +158,7 @@ describe("mutarPedidos", () => {
     });
     expect(resultado).toBe("ok");
     expect(redisStore.get("pedidos")).toEqual([{ id: "1", status: "em_preparo" }]);
+    expect(redisStore.get("pedidos:revision")).toBe(1);
     expect(redisStore.has("pedidos:mutex:global")).toBe(false);
   });
 
@@ -150,6 +171,7 @@ describe("mutarPedidos", () => {
     });
     expect(resultado).toBe("ja_estava_entregue");
     expect(redisStore.get("pedidos")).toEqual([{ id: "1", status: "entregue" }]);
+    expect(redisStore.has("pedidos:revision")).toBe(false);
   });
 
   test("lê SEMPRE fresco de dentro do lock — nunca reaproveita um array lido antes de adquirir", async () => {
@@ -186,8 +208,9 @@ describe("mutarPedidos", () => {
       })
     ).rejects.toThrow("Redis indisponível (simulado)");
     expect(redisStore.has("pedidos:mutex:global")).toBe(false);
-    // "pedidos" nunca foi sobrescrito por essa tentativa falha.
+    // MULTI/EXEC falhou atomicamente: nem pedidos nem revisão foram alterados.
     expect(redisStore.get("pedidos")).toEqual([{ id: "1", status: "novo" }]);
+    expect(redisStore.has("pedidos:revision")).toBe(false);
   });
 
   test("duas mutações concorrentes em mutarPedidos nunca se perdem (serializadas pelo lock global)", async () => {
