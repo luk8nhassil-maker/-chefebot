@@ -11,6 +11,7 @@ export const POLITICA_CONTATO_PESQUISA = {
 export type MotivoSupressaoPesquisa =
   | "fontes_operacionais_incompletas"
   | "checkout_em_andamento"
+  | "pesquisa_pendente_resposta"
   | "pagamento_pendente"
   | "pedido_em_producao_ou_entrega"
   | "atendimento_humano_ou_bot_pausado"
@@ -26,6 +27,7 @@ export type MotivoSupressaoPesquisa =
 export type ContextoSupressaoPesquisa = {
   fontesOperacionaisCompletas: boolean;
   checkoutEmAndamento?: boolean;
+  pesquisaPendenteResposta?: boolean;
   pagamentoPendente?: boolean;
   pedidoEmProducaoOuEntrega?: boolean;
   atendimentoHumanoOuBotPausado?: boolean;
@@ -73,6 +75,7 @@ export function avaliarElegibilidadeContatoPesquisa(params: {
 
   if (!contexto.fontesOperacionaisCompletas) motivos.push("fontes_operacionais_incompletas");
   if (contexto.checkoutEmAndamento) motivos.push("checkout_em_andamento");
+  if (contexto.pesquisaPendenteResposta) motivos.push("pesquisa_pendente_resposta");
   if (contexto.pagamentoPendente) motivos.push("pagamento_pendente");
   if (contexto.pedidoEmProducaoOuEntrega) motivos.push("pedido_em_producao_ou_entrega");
   if (contexto.atendimentoHumanoOuBotPausado) motivos.push("atendimento_humano_ou_bot_pausado");
@@ -118,6 +121,7 @@ export function resumoSegurancaContatoDryRun() {
     },
     fontesConectadas: [
       "historico_de_exposicoes_de_pesquisa",
+      "pesquisa_pendente_de_resposta",
       "bootstrap_conservador_de_contatos_pre_ledger",
       "estado_operacional_do_pedido",
       "pagamento_ou_pix_pendente",
