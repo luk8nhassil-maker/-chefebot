@@ -36,7 +36,7 @@ export type ContextoSupressaoPesquisa = {
 };
 
 export type ContatoPesquisaRegistrado = {
-  momentId: MomentoPesquisaId;
+  momentId: MomentoPesquisaId | null;
   questionId: string;
   sentAtMs: number;
   answeredAtMs?: number | null;
