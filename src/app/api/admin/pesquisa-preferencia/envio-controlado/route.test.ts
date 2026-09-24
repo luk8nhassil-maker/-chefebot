@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { verifyTokenMock, envioMock } = vi.hoisted(() => ({
+const { verifyTokenMock, envioMock, releaseGateMock } = vi.hoisted(() => ({
   verifyTokenMock: vi.fn(),
   envioMock: vi.fn(),
+  releaseGateMock: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -12,6 +13,10 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@/lib/pesquisaPreferenciaEnvioControlado.server", () => ({
   executarEnvioPesquisaControlado: envioMock,
+}));
+
+vi.mock("@/lib/pesquisaPreferenciaRelease", () => ({
+  envioControladoLiberadoNestaVersao: releaseGateMock,
 }));
 
 import { POST } from "./route";
@@ -46,6 +51,7 @@ beforeEach(() => {
   vi.stubEnv("VERCEL_ENV", "production");
   vi.stubEnv("PESQUISA_PREFERENCIA_ENVIO_CONTROLADO_ENABLED", "true");
   verifyTokenMock.mockResolvedValue({ role: "admin" });
+  releaseGateMock.mockReturnValue(true);
   envioMock.mockResolvedValue({
     status: "enviado",
     exposureId: "a".repeat(64),
@@ -59,6 +65,15 @@ afterEach(() => {
 describe("POST /api/admin/pesquisa-preferencia/envio-controlado", () => {
   test("Preview nunca pode disparar provider", async () => {
     vi.stubEnv("VERCEL_ENV", "preview");
+
+    const res = await POST(req(bodyValido()));
+
+    expect(res.status).toBe(403);
+    expect(envioMock).not.toHaveBeenCalled();
+  });
+
+  test("release gate fechado em produção bloqueia antes da flag", async () => {
+    releaseGateMock.mockReturnValue(false);
 
     const res = await POST(req(bodyValido()));
 
