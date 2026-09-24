@@ -44,6 +44,7 @@ import { marcarInboundRecebido, marcarOutboundConfirmado, marcarUpsertDescartado
 import { sanitizeErrorMessage } from "@/lib/sanitizeLog";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import { registrarContatoPesquisaConfirmado } from "@/lib/pesquisaPreferenciaContatosRedis";
+import { consumirRespostaPesquisaPendente } from "@/lib/pesquisaPreferenciaRespostaRedis";
 
 export const maxDuration = 30;
 
@@ -1495,6 +1496,18 @@ export async function POST(req: NextRequest) {
       } else {
         await enviarMensagem(phone, `Até a próxima! Foi um prazer te atender. 🍕😊`)
       }
+      return NextResponse.json({ ok: true })
+    }
+
+    // Resposta de pesquisa do Motor tem prioridade sobre o fluxo normal do bot.
+    // Este bloco só consome quando existe uma pendência pseudonimizada armada
+    // por um futuro envio confirmado. Sem pendência, o comportamento anterior
+    // continua exatamente igual.
+    const respostaPesquisa = await consumirRespostaPesquisaPendente({
+      telefone: phone,
+      resposta: messageText,
+    })
+    if (respostaPesquisa.consumida) {
       return NextResponse.json({ ok: true })
     }
 

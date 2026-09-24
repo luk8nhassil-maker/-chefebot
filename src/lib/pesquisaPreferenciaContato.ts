@@ -11,8 +11,10 @@ export const POLITICA_CONTATO_PESQUISA = {
 export type MotivoSupressaoPesquisa =
   | "fontes_operacionais_incompletas"
   | "checkout_em_andamento"
+  | "pesquisa_pendente_resposta"
   | "pagamento_pendente"
   | "pedido_em_producao_ou_entrega"
+  | "atendimento_humano_ou_bot_pausado"
   | "problema_aberto"
   | "disputa_ou_estorno_aberto"
   | "opt_out"
@@ -25,8 +27,10 @@ export type MotivoSupressaoPesquisa =
 export type ContextoSupressaoPesquisa = {
   fontesOperacionaisCompletas: boolean;
   checkoutEmAndamento?: boolean;
+  pesquisaPendenteResposta?: boolean;
   pagamentoPendente?: boolean;
   pedidoEmProducaoOuEntrega?: boolean;
+  atendimentoHumanoOuBotPausado?: boolean;
   problemaAberto?: boolean;
   disputaOuEstornoAberto?: boolean;
   optOut?: boolean;
@@ -71,8 +75,10 @@ export function avaliarElegibilidadeContatoPesquisa(params: {
 
   if (!contexto.fontesOperacionaisCompletas) motivos.push("fontes_operacionais_incompletas");
   if (contexto.checkoutEmAndamento) motivos.push("checkout_em_andamento");
+  if (contexto.pesquisaPendenteResposta) motivos.push("pesquisa_pendente_resposta");
   if (contexto.pagamentoPendente) motivos.push("pagamento_pendente");
   if (contexto.pedidoEmProducaoOuEntrega) motivos.push("pedido_em_producao_ou_entrega");
+  if (contexto.atendimentoHumanoOuBotPausado) motivos.push("atendimento_humano_ou_bot_pausado");
   if (contexto.problemaAberto) motivos.push("problema_aberto");
   if (contexto.disputaOuEstornoAberto) motivos.push("disputa_ou_estorno_aberto");
   if (contexto.optOut) motivos.push("opt_out");
@@ -108,20 +114,26 @@ export function resumoSegurancaContatoDryRun() {
     elegibilidadeFinalCalculada: false as const,
     candidatosComportamentaisNaoSaoElegiveisFinais: true as const,
     motivo:
-      "O histórico prospectivo de exposições já está conectado ao gate, mas os sinais operacionais e opt-out ainda não estão completos; por segurança nenhum candidato é tratado como elegível final.",
+      "O gate operacional controlado já conecta pedidos, Pix, problemas, opt-out, identidade e histórico de contatos. Checkout web e disputa externa ainda exigem confirmação explícita no piloto; envio automático continua desligado.",
     politica: {
       cooldownDias: POLITICA_CONTATO_PESQUISA.cooldownDias,
       maxContatosEm90Dias: POLITICA_CONTATO_PESQUISA.maxContatosEm90Dias,
     },
     fontesConectadas: [
       "historico_de_exposicoes_de_pesquisa",
-    ],
-    fontesPendentes: [
+      "pesquisa_pendente_de_resposta",
+      "bootstrap_conservador_de_contatos_pre_ledger",
       "estado_operacional_do_pedido",
       "pagamento_ou_pix_pendente",
-      "problema_ou_disputa_aberta",
+      "problema_operacional_aberto",
+      "checkout_whatsapp_em_andamento",
+      "estado_bot_e_atendimento_manual",
       "opt_out",
-      "identidade_confirmada",
+      "identidade_confirmada_por_canal",
+    ],
+    fontesPendentes: [
+      "checkout_web_em_andamento_confirmacao_controlada",
+      "disputa_ou_estorno_externo_confirmacao_controlada",
     ],
   };
 }

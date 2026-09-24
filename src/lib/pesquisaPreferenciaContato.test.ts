@@ -35,8 +35,10 @@ describe("avaliarElegibilidadeContatoPesquisa", () => {
       contexto: {
         fontesOperacionaisCompletas: true,
         checkoutEmAndamento: true,
+        pesquisaPendenteResposta: true,
         pagamentoPendente: true,
         pedidoEmProducaoOuEntrega: true,
+        atendimentoHumanoOuBotPausado: true,
         problemaAberto: true,
         optOut: true,
       },
@@ -47,8 +49,10 @@ describe("avaliarElegibilidadeContatoPesquisa", () => {
     expect(resultado.motivos).toEqual(
       expect.arrayContaining([
         "checkout_em_andamento",
+        "pesquisa_pendente_resposta",
         "pagamento_pendente",
         "pedido_em_producao_ou_entrega",
+        "atendimento_humano_ou_bot_pausado",
         "problema_aberto",
         "opt_out",
       ])
@@ -123,7 +127,17 @@ describe("resumoSegurancaContatoDryRun", () => {
     expect(resumo.elegibilidadeFinalCalculada).toBe(false);
     expect(resumo.candidatosComportamentaisNaoSaoElegiveisFinais).toBe(true);
     expect(resumo.fontesConectadas).toContain("historico_de_exposicoes_de_pesquisa");
+    expect(resumo.fontesConectadas).toContain("estado_operacional_do_pedido");
+    expect(resumo.fontesConectadas).toContain("pesquisa_pendente_de_resposta");
+    expect(resumo.fontesConectadas).toContain("opt_out");
+    expect(resumo.fontesConectadas).toContain("estado_bot_e_atendimento_manual");
+    expect(resumo.fontesConectadas).toContain("identidade_confirmada_por_canal");
     expect(resumo.fontesPendentes).not.toContain("historico_de_exposicoes_de_pesquisa");
-    expect(resumo.fontesPendentes).toContain("opt_out");
+    expect(resumo.fontesPendentes).toContain(
+      "checkout_web_em_andamento_confirmacao_controlada"
+    );
+    expect(resumo.fontesPendentes).toContain(
+      "disputa_ou_estorno_externo_confirmacao_controlada"
+    );
   });
 });
