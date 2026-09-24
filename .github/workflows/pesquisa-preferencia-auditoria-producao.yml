@@ -84,6 +84,7 @@ jobs:
 
           jq -e '.ok == true and .modo == "dry-run" and .somenteLeitura == true' /tmp/research-audit.json >/dev/null
           jq -e '.segurancaContato.envioAutomaticoAtivo == false and .segurancaContato.elegibilidadeFinalCalculada == false' /tmp/research-audit.json >/dev/null
+          jq -e '.primeiroEnvioM5.candidatosComportamentais >= 0 and .primeiroEnvioM5.candidatosSemBloqueioAutomatico >= 0' /tmp/research-audit.json >/dev/null
 
           if grep -Eqi '"(clienteId|telefone|endereco|cpf|email)"[[:space:]]*:' /tmp/research-audit.json; then
             echo "::error::A resposta agregada contém campo pessoal proibido."
@@ -104,6 +105,7 @@ jobs:
             estadosAtuais,
             momentos,
             historicoAnteriorComprovado,
+            primeiroEnvioM5,
             segurancaContato
           }' /tmp/research-audit.json
 

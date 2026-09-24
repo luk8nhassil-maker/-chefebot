@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventoAnalitico } from "@/lib/historicoAnalitico";
 
-const { mockJwtVerify } = vi.hoisted(() => ({
+const { mockJwtVerify, resumoM5Mock } = vi.hoisted(() => ({
   mockJwtVerify: vi.fn(),
+  resumoM5Mock: vi.fn(),
 }));
 
 vi.mock("jose", () => ({
@@ -21,6 +22,10 @@ vi.mock("@/lib/historicoAnalitico", async (importOriginal) => {
 
 vi.mock("@/lib/pesquisaPreferenciaHistoricoRedis", () => ({
   carregarEvidenciasHistoricasFidelidade: vi.fn(async () => []),
+}));
+
+vi.mock("@/lib/pesquisaPreferenciaPrimeiroEnvio.server", () => ({
+  resumirPrimeiroEnvioM5: resumoM5Mock,
 }));
 
 import { consultarEventosAntesDe, consultarEventosPorPeriodo } from "@/lib/historicoAnalitico";
@@ -63,6 +68,12 @@ beforeEach(() => {
   mockPeriodo.mockResolvedValue([]);
   mockAntes.mockResolvedValue([]);
   mockJwtVerify.mockRejectedValue(new Error("token oidc invalido"));
+  resumoM5Mock.mockResolvedValue({
+    candidatosComportamentais: 1,
+    candidatosSemBloqueioAutomatico: 0,
+    prontoParaConfirmacaoManual: false,
+    primeiroCandidato: null,
+  });
   process.env.CRON_SECRET = SEGREDO;
   process.env.VERCEL_GIT_COMMIT_SHA = "sha-teste";
 });
@@ -156,6 +167,11 @@ describe("GET /api/cron/pesquisa-preferencia-auditoria", () => {
     expect(body.historicoAnteriorComprovado.aviso).toMatch(
       /não prova primeira compra vitalícia/i
     );
+    expect(body.primeiroEnvioM5).toEqual({
+      candidatosComportamentais: 1,
+      candidatosSemBloqueioAutomatico: 0,
+      prontoParaConfirmacaoManual: false,
+    });
     expect(body.segurancaContato.envioAutomaticoAtivo).toBe(false);
     expect(body.segurancaContato.elegibilidadeFinalCalculada).toBe(false);
     expect(res.headers.get("x-chefebot-audit-mode")).toBe("read-only");

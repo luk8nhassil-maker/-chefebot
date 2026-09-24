@@ -6,18 +6,17 @@
 // - somente production;
 // - feature flag explícita;
 // - confirmação textual one-shot;
-// - apenas M1/M2/M5;
+// - primeiro envio restrito a um candidato M5 selecionado no servidor;
 // - os dois sinais ainda manuais precisam ser booleanos explícitos;
 // - o serviço revalida candidato + gate dentro de lock antes do provider.
 
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
-import type { MomentoPesquisaId } from "@/lib/pesquisaPreferencia";
 import { executarEnvioPesquisaControlado } from "@/lib/pesquisaPreferenciaEnvioControlado.server";
+import { resolverCandidatoPrimeiroEnvioM5 } from "@/lib/pesquisaPreferenciaPrimeiroEnvio.server";
 import { envioControladoLiberadoNestaVersao } from "@/lib/pesquisaPreferenciaRelease";
 
 const CONFIRMACAO_EXATA = "ENVIAR_PESQUISA_CONTROLADA";
-const MOMENTOS_PERMITIDOS = new Set<MomentoPesquisaId>(["M1", "M2", "M5"]);
 
 async function checkAdmin(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -62,9 +61,7 @@ export async function POST(req: NextRequest) {
   }
 
   const entrada = body as {
-    telefone?: unknown;
-    momentId?: unknown;
-    triggerEventId?: unknown;
+    candidateRef?: unknown;
     checkoutWebEmAndamento?: unknown;
     disputaOuEstornoExternoAberto?: unknown;
     confirmacao?: unknown;
@@ -77,22 +74,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (typeof entrada.telefone !== "string" || !entrada.telefone.trim()) {
-    return NextResponse.json({ error: "Telefone invalido" }, { status: 400 });
-  }
-
   if (
-    typeof entrada.momentId !== "string" ||
-    !MOMENTOS_PERMITIDOS.has(entrada.momentId as MomentoPesquisaId)
+    typeof entrada.candidateRef !== "string" ||
+    !/^[a-f0-9]{64}$/.test(entrada.candidateRef)
   ) {
-    return NextResponse.json({ error: "Momento invalido" }, { status: 400 });
-  }
-
-  if (
-    typeof entrada.triggerEventId !== "string" ||
-    !entrada.triggerEventId.trim()
-  ) {
-    return NextResponse.json({ error: "Gatilho invalido" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Referencia de candidato invalida" },
+      { status: 400 }
+    );
   }
 
   if (
@@ -105,10 +94,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const candidato = await resolverCandidatoPrimeiroEnvioM5({
+    candidateRef: entrada.candidateRef,
+  });
+  if (!candidato) {
+    return NextResponse.json(
+      { error: "Candidato M5 nao esta mais disponivel" },
+      { status: 409 }
+    );
+  }
+
   const resultado = await executarEnvioPesquisaControlado({
-    telefone: entrada.telefone,
-    momentId: entrada.momentId as MomentoPesquisaId,
-    triggerEventId: entrada.triggerEventId,
+    telefone: candidato.telefone,
+    momentId: "M5",
+    triggerEventId: candidato.triggerEventId,
     checkoutWebEmAndamento: entrada.checkoutWebEmAndamento,
     disputaOuEstornoExternoAberto: entrada.disputaOuEstornoExternoAberto,
   });

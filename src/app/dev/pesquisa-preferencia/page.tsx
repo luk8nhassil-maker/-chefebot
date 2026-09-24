@@ -46,6 +46,15 @@ type DryRunResponse = {
   }
   estadosAtuais: Record<string, number>
   momentos: Record<string, MomentoResumo>
+  primeiroEnvioM5: {
+    candidatosComportamentais: number
+    candidatosSemBloqueioAutomatico: number
+    prontoParaConfirmacaoManual: boolean
+    candidateRef: string | null
+    identidadeMascarada: string | null
+    pergunta: string | null
+    envioLiberadoNestaVersao: boolean
+  }
   segurancaContato: {
     envioAutomaticoAtivo: false
     elegibilidadeFinalCalculada: false
@@ -98,6 +107,10 @@ export default function PesquisaPreferenciaDevPage() {
   const [data, setData] = useState<DryRunResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
+  const [confirmouCheckout, setConfirmouCheckout] = useState(false)
+  const [confirmouDisputa, setConfirmouDisputa] = useState(false)
+  const [enviando, setEnviando] = useState(false)
+  const [resultadoEnvio, setResultadoEnvio] = useState<string | null>(null)
 
   const buscar = useCallback(() => {
     fetch('/api/admin/pesquisa-preferencia/dry-run', { cache: 'no-store' })
@@ -117,8 +130,8 @@ export default function PesquisaPreferenciaDevPage() {
   }
 
   useEffect(() => {
-    const role = getUserRole()
-    if (role !== 'admin' && role !== 'dev') {
+    const papel = getUserRole()
+    if (papel !== 'admin' && papel !== 'dev') {
       router.push('/login?callbackUrl=/dev/pesquisa-preferencia')
       return
     }
@@ -134,6 +147,50 @@ export default function PesquisaPreferenciaDevPage() {
   const estadosVisiveis = data
     ? ['S1', 'S2', 'S4', 'S5', 'S6'].map((id) => ({ id, quantidade: data.estadosAtuais[id] ?? 0 }))
     : []
+
+  const enviarPrimeiroM5 = async () => {
+    const candidato = data?.primeiroEnvioM5
+    if (getUserRole() !== 'admin') {
+      setResultadoEnvio('Somente admin pode executar o primeiro envio.')
+      return
+    }
+    if (
+      !candidato?.candidateRef ||
+      !candidato.prontoParaConfirmacaoManual ||
+      !candidato.envioLiberadoNestaVersao ||
+      !confirmouCheckout ||
+      !confirmouDisputa
+    ) return
+
+    setEnviando(true)
+    setResultadoEnvio(null)
+    try {
+      const res = await fetch('/api/admin/pesquisa-preferencia/envio-controlado', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          candidateRef: candidato.candidateRef,
+          checkoutWebEmAndamento: false,
+          disputaOuEstornoExternoAberto: false,
+          confirmacao: 'ENVIAR_PESQUISA_CONTROLADA',
+        }),
+      })
+      const body = await res.json()
+      if (!res.ok || body?.ok !== true) {
+        throw new Error(body?.error || body?.resultado?.status || `HTTP ${res.status}`)
+      }
+      setResultadoEnvio('Primeiro envio M5 confirmado pelo servidor.')
+      setConfirmouCheckout(false)
+      setConfirmouDisputa(false)
+      buscar()
+    } catch (e) {
+      setResultadoEnvio(
+        e instanceof Error ? `Envio não realizado: ${e.message}` : 'Envio não realizado.'
+      )
+    } finally {
+      setEnviando(false)
+    }
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--background)', padding: '24px 16px', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
@@ -180,6 +237,86 @@ export default function PesquisaPreferenciaDevPage() {
               <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--foreground-secondary)' }}>
                 Política preparada: 1 contato a cada {data.segurancaContato.politica.cooldownDias} dias e no máximo {data.segurancaContato.politica.maxContatosEm90Dias} em 90 dias.
               </p>
+            </div>
+
+            <div style={{ ...card, marginBottom: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <div>
+                  <p style={{ margin: '0 0 4px', fontWeight: 800, color: 'var(--foreground)' }}>Primeiro envio controlado · M5</p>
+                  <p style={{ margin: 0, fontSize: 12, color: 'var(--foreground-secondary)', lineHeight: 1.5 }}>
+                    O servidor escolhe o candidato. Identidade e momento não podem ser digitados manualmente.
+                  </p>
+                </div>
+                <span style={{ borderRadius: 999, padding: '4px 10px', fontSize: 11, fontWeight: 800, background: data.primeiroEnvioM5.envioLiberadoNestaVersao ? 'var(--success-soft)' : 'var(--attention-soft)', color: data.primeiroEnvioM5.envioLiberadoNestaVersao ? 'var(--success)' : 'var(--attention)' }}>
+                  {data.primeiroEnvioM5.envioLiberadoNestaVersao ? 'LIBERADO NESTA VERSÃO' : 'TRAVADO NESTA VERSÃO'}
+                </span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginTop: 14 }}>
+                <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 10 }}>
+                  <p style={{ margin: 0, fontSize: 11, color: 'var(--foreground-secondary)' }}>M5 comportamental</p>
+                  <strong style={{ fontSize: 22 }}>{data.primeiroEnvioM5.candidatosComportamentais}</strong>
+                </div>
+                <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 10 }}>
+                  <p style={{ margin: 0, fontSize: 11, color: 'var(--foreground-secondary)' }}>Sem bloqueio automático</p>
+                  <strong style={{ fontSize: 22 }}>{data.primeiroEnvioM5.candidatosSemBloqueioAutomatico}</strong>
+                </div>
+              </div>
+
+              {data.primeiroEnvioM5.candidateRef ? (
+                <>
+                  <div style={{ marginTop: 14, padding: 12, borderRadius: 10, background: 'var(--surface-secondary)' }}>
+                    <p style={{ margin: '0 0 5px', fontSize: 11, color: 'var(--foreground-secondary)' }}>Candidato selecionado</p>
+                    <strong style={{ color: 'var(--foreground)' }}>{data.primeiroEnvioM5.identidadeMascarada ?? 'Identidade protegida'}</strong>
+                    <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--foreground-secondary)', lineHeight: 1.55 }}>
+                      Pergunta: {data.primeiroEnvioM5.pergunta ?? 'Instrumento M5 indisponível'}
+                    </p>
+                  </div>
+
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 14, fontSize: 12, color: 'var(--foreground-secondary)' }}>
+                    <input type="checkbox" checked={confirmouCheckout} onChange={(e) => setConfirmouCheckout(e.target.checked)} />
+                    Confirmei que este cliente não está com checkout web em andamento.
+                  </label>
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 8, fontSize: 12, color: 'var(--foreground-secondary)' }}>
+                    <input type="checkbox" checked={confirmouDisputa} onChange={(e) => setConfirmouDisputa(e.target.checked)} />
+                    Confirmei que não existe disputa ou estorno externo aberto para este cliente.
+                  </label>
+
+                  <button
+                    onClick={enviarPrimeiroM5}
+                    disabled={
+                      !data.primeiroEnvioM5.envioLiberadoNestaVersao ||
+                      !data.primeiroEnvioM5.prontoParaConfirmacaoManual ||
+                      !confirmouCheckout ||
+                      !confirmouDisputa ||
+                      enviando
+                    }
+                    style={{
+                      marginTop: 14,
+                      border: '1px solid var(--border)',
+                      background: data.primeiroEnvioM5.envioLiberadoNestaVersao ? 'var(--foreground)' : 'var(--surface-secondary)',
+                      color: data.primeiroEnvioM5.envioLiberadoNestaVersao ? 'var(--background)' : 'var(--foreground-muted)',
+                      borderRadius: 9,
+                      padding: '10px 14px',
+                      fontWeight: 800,
+                      cursor: data.primeiroEnvioM5.envioLiberadoNestaVersao ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    {enviando ? 'Validando e enviando…' : 'Enviar primeira pesquisa M5'}
+                  </button>
+                </>
+              ) : (
+                <p style={{ margin: '14px 0 0', fontSize: 12, color: 'var(--foreground-secondary)' }}>
+                  Nenhum M5 está pronto para confirmação manual neste momento.
+                </p>
+              )}
+
+              <p style={{ margin: '10px 0 0', fontSize: 11, color: 'var(--foreground-muted)' }}>
+                O painel pode ser observado por admin/dev, mas somente admin pode executar o envio.
+              </p>
+              {resultadoEnvio && (
+                <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--foreground-secondary)' }}>{resultadoEnvio}</p>
+              )}
             </div>
 
             <h2 style={{ fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--foreground-secondary)', margin: '0 0 10px' }}>Cobertura observada</h2>

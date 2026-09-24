@@ -20,6 +20,9 @@ import {
 } from "@/lib/historicoAnalitico";
 import { analisarPesquisaPreferencia } from "@/lib/pesquisaPreferencia";
 import { resumoSegurancaContatoDryRun } from "@/lib/pesquisaPreferenciaContato";
+import { resumirPrimeiroEnvioM5 } from "@/lib/pesquisaPreferenciaPrimeiroEnvio.server";
+import { envioControladoLiberadoNestaVersao } from "@/lib/pesquisaPreferenciaRelease";
+import { obterInstrumentoPesquisa } from "@/lib/pesquisaPreferenciaRegistro";
 
 async function checkAuthAdmin(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -46,10 +49,17 @@ export async function GET(req: NextRequest) {
       consultarEventosAntesDe(tenantId, inicioMs),
     ]);
 
-    const resumo = analisarPesquisaPreferencia([...historicoAnterior, ...janela90Dias], {
+    const eventos = [...historicoAnterior, ...janela90Dias];
+    const resumo = analisarPesquisaPreferencia(eventos, {
       agoraMs,
       janelaInicioMs: inicioMs,
     });
+    const primeiroEnvioM5 = await resumirPrimeiroEnvioM5({
+      agoraMs,
+      tenantId,
+      eventos,
+    });
+    const instrumentoM5 = obterInstrumentoPesquisa("M5");
 
     return NextResponse.json(
       {
@@ -58,6 +68,19 @@ export async function GET(req: NextRequest) {
         periodoDias: 90,
         ...resumo,
         segurancaContato: resumoSegurancaContatoDryRun(),
+        primeiroEnvioM5: {
+          candidatosComportamentais: primeiroEnvioM5.candidatosComportamentais,
+          candidatosSemBloqueioAutomatico:
+            primeiroEnvioM5.candidatosSemBloqueioAutomatico,
+          prontoParaConfirmacaoManual:
+            primeiroEnvioM5.prontoParaConfirmacaoManual,
+          candidateRef:
+            primeiroEnvioM5.primeiroCandidato?.candidateRef ?? null,
+          identidadeMascarada:
+            primeiroEnvioM5.primeiroCandidato?.telefoneMascarado ?? null,
+          pergunta: instrumentoM5?.pergunta ?? null,
+          envioLiberadoNestaVersao: envioControladoLiberadoNestaVersao(),
+        },
       },
       {
         headers: {
