@@ -44,7 +44,7 @@ function pedido(overrides: Record<string, unknown> = {}) {
     id: "pedido-1",
     telefone: PHONE,
     status: "entregue",
-    statusAtualizadoEm: new Date(AGORA - 20 * DIA).toISOString(),
+    statusAtualizadoEm: "2026-09-20T12:00:00.000Z",
     origem: "whatsapp",
     ...overrides,
   };
@@ -136,7 +136,7 @@ describe("avaliarElegibilidadeContatoPesquisaCompleta", () => {
     });
   });
 
-  test("pedido entregue há 2 dias sem ledger ainda respeita cooldown pelo bootstrap", async () => {
+  test("pedido pós-ledger sem exposição confirmada não inventa contato", async () => {
     redisGetMock.mockImplementation(async (key: string) => {
       if (key === "pedidos") {
         return [
@@ -157,8 +157,9 @@ describe("avaliarElegibilidadeContatoPesquisaCompleta", () => {
       },
     });
 
-    expect(resultado.elegibilidade.status).toBe("suprimido");
-    expect(resultado.elegibilidade.motivos).toContain("cooldown_14_dias");
+    expect(resultado.elegibilidade.status).toBe("elegivel");
+    expect(resultado.elegibilidade.contatosUltimos14Dias).toBe(0);
+    expect(resultado.diagnostico.contatosBootstrapConservador).toBe(0);
   });
 
   test("três pedidos terminais legados sem ledger fecham o teto de 3 em 90", async () => {
