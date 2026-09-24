@@ -43,7 +43,7 @@ import {
 import { marcarInboundRecebido, marcarOutboundConfirmado, marcarUpsertDescartado, marcarWebhookRecebido } from "@/lib/whatsappDiag";
 import { sanitizeErrorMessage } from "@/lib/sanitizeLog";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
-import { registrarContatoPesquisaBestEffort } from "@/lib/pesquisaPreferenciaContatosRedis";
+import { registrarAvaliacaoPosEntregaEnviada } from "@/lib/pesquisaPreferenciaContatosRedis";
 
 export const maxDuration = 30;
 
@@ -1339,15 +1339,9 @@ export async function POST(req: NextRequest) {
             await redis.set(`avaliacao:${pedido.telefone}`, true, { ex: 3600 })
             const avaliacaoEnviada = await enviarMensagem(pedido.telefone, `*${firstName}*, como foi sua experiência hoje? 😊\n\nAvalia nossa pizza de 1 a 5:\n\n  ⭐ 1 — Ruim\n  ⭐⭐ 2 — Regular\n  ⭐⭐⭐ 3 — Bom\n  ⭐⭐⭐⭐ 4 — Muito bom\n  ⭐⭐⭐⭐⭐ 5 — Excelente\n\nÉ só digitar o número! 😄`)
             if (avaliacaoEnviada) {
-              await registrarContatoPesquisaBestEffort({
+              await registrarAvaliacaoPosEntregaEnviada({
                 telefone: pedido.telefone,
-                registro: {
-                  exposureId: `avaliacao-pos-entrega:${pedido.id}`,
-                  questionId: "legacy-avaliacao-pos-entrega-v1",
-                  momentId: null,
-                  sentAtMs: Date.now(),
-                  origem: "avaliacao_pos_entrega_legada",
-                },
+                pedidoId: pedido.id,
               })
             }
           }
