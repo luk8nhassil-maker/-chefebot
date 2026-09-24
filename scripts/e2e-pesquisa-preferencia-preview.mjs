@@ -1,11 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
+import { SignJWT } from "jose";
 
 const baseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3000";
-const password = process.env.OMINIX_PASSWORD;
-if (!password) {
-  throw new Error("OMINIX_PASSWORD ausente no Preview hermético.");
+const authSecret = process.env.AUTH_SECRET;
+if (!authSecret) {
+  throw new Error("AUTH_SECRET efêmero ausente no Preview hermético.");
 }
 
 const outputDir = process.env.PREVIEW_OUTPUT_DIR ?? "/tmp/research-preview";
@@ -106,12 +107,27 @@ async function validar(viewport, fileName) {
     }
   });
 
-  const login = await context.request.post(`${baseUrl}/api/auth/login`, {
-    data: { username: "ominix", password },
-  });
-  if (login.status() !== 200) {
-    throw new Error(`Login hermético falhou: HTTP ${login.status()}`);
-  }
+  const token = await new SignJWT({ username: "preview-research", name: "Preview Research", role: "dev" })
+    .setProtectedHeader({ alg: "HS256" })
+    .setExpirationTime("1h")
+    .sign(new TextEncoder().encode(authSecret));
+
+  await context.addCookies([
+    {
+      name: "auth-token",
+      value: token,
+      url: baseUrl,
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+    {
+      name: "auth-user",
+      value: JSON.stringify({ name: "Preview Research", role: "dev" }),
+      url: baseUrl,
+      httpOnly: false,
+      sameSite: "Lax",
+    },
+  ]);
 
   await page.route("**/api/admin/pesquisa-preferencia/dry-run**", async (route) => {
     await route.fulfill({
