@@ -87,6 +87,17 @@ describe("montarContatosBootstrapConservador", () => {
     ]);
   });
 
+  test("pedido cancelado nunca é presumido como pesquisa 1–5 enviada", () => {
+    const bootstrap = montarContatosBootstrapConservador({
+      pedidos: [pedido({ status: "cancelado" })],
+      clienteId: CLIENTE_ID,
+      historicoPersistido: [],
+      agoraMs: AGORA,
+    });
+
+    expect(bootstrap).toEqual([]);
+  });
+
   test("não duplica pedido que já possui exposição pós-entrega confirmada", () => {
     const bootstrap = montarContatosBootstrapConservador({
       pedidos: [pedido()],
