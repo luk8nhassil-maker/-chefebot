@@ -75,6 +75,6 @@ describe("contrato de registro de pesquisa", () => {
 
   test("detecta campo pessoal proibido antes de futura persistência", () => {
     expect(possuiCampoPessoalProibido({ telefone: "5599999999999" })).toBe(true);
-    expect(possuiCampoPessoalProibido({ nested: { endereco: "Rua X" } })).toBe(true);
+    expect(possuiCampoPessoalProibido({ nested: { endereco: "Rua X" } })).toBe(true);\n    expect(possuiCampoPessoalProibido({ cliente: "Fulano" })).toBe(true);
   });
 });
