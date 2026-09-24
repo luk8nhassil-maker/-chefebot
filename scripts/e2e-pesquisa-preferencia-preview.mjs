@@ -200,7 +200,7 @@ const report = {
   stockReal: false,
   loyaltyReal: false,
   fixture: "local-deterministic",
-  gitSha: process.env.GITHUB_SHA ?? null,
+  gitSha: process.env.PREVIEW_GIT_SHA ?? null,
   desktop,
   mobile,
 };
