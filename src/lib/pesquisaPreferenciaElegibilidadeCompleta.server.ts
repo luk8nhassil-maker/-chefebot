@@ -77,8 +77,10 @@ function statusAtivo(status?: string): boolean {
   return status === "novo" || status === "em_preparo" || status === "saiu_entrega";
 }
 
-function statusTerminal(status?: string): boolean {
-  return status === "entregue" || status === "cancelado";
+function statusPodeTerRecebidoAvaliacao(status?: string): boolean {
+  // A pesquisa 1–5 existente só é disparada quando o pedido chega a "entregue".
+  // Cancelado nunca entra no bootstrap de contato.
+  return status === "entregue";
 }
 
 function pedidoTemPix(pedido: PedidoPesquisaOperacional): boolean {
@@ -125,7 +127,7 @@ export function montarContatosBootstrapConservador(params: {
   return params.pedidos
     .filter((pedido) => {
       if (!pedido.id || exatos.has(pedido.id)) return false;
-      if (!statusTerminal(pedido.status)) return false;
+      if (!statusPodeTerRecebidoAvaliacao(pedido.status)) return false;
       return clienteIdDoPedido(pedido) === params.clienteId;
     })
     .map((pedido) => timestampContatoPotencialPreLedger(pedido))
