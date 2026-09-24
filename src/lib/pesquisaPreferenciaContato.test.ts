@@ -67,6 +67,17 @@ describe("avaliarElegibilidadeContatoPesquisa", () => {
     expect(resultado.motivos).toContain("cooldown_14_dias");
   });
 
+  test("libera exatamente quando 14 dias completos já passaram", () => {
+    const resultado = avaliarElegibilidadeContatoPesquisa({
+      agoraMs: AGORA,
+      contexto: { fontesOperacionaisCompletas: true },
+      historicoContatos: [contato(14)],
+    });
+
+    expect(resultado.status).toBe("elegivel");
+    expect(resultado.contatosUltimos14Dias).toBe(0);
+  });
+
   test("aplica orçamento máximo de 3 contatos em 90 dias", () => {
     const resultado = avaliarElegibilidadeContatoPesquisa({
       agoraMs: AGORA,
