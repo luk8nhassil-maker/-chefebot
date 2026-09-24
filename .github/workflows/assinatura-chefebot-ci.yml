@@ -19,8 +19,7 @@ on:
       - "src/components/AssinaturaChefeBotGate.tsx"
       - "src/app/api/assinatura/**"
       - "src/app/layout.tsx"
-      - "src/middleware.ts"
-      - "middleware.ts"
+      - "src/proxy.ts"
       - "middleware.assinatura-alias.test.ts"
       - ".env.example"
       - ".github/workflows/assinatura-chefebot-ci.yml"
@@ -75,6 +74,5 @@ jobs:
           src/app/api/assinatura/webhook/infinitepay/route.ts
           src/app/api/assinatura/operacao/route.ts
           src/app/layout.tsx
-          src/middleware.ts
-          middleware.ts
+          src/proxy.ts
           middleware.assinatura-alias.test.ts

@@ -19,6 +19,7 @@ import {
   TENANT_PADRAO_ANALYTICS,
 } from "@/lib/historicoAnalitico";
 import { analisarPesquisaPreferencia } from "@/lib/pesquisaPreferencia";
+import { resumoSegurancaContatoDryRun } from "@/lib/pesquisaPreferenciaContato";
 
 async function checkAuthAdmin(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -56,6 +57,7 @@ export async function GET(req: NextRequest) {
         tenantId,
         periodoDias: 90,
         ...resumo,
+        segurancaContato: resumoSegurancaContatoDryRun(),
       },
       {
         headers: {

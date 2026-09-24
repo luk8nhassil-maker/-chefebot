@@ -1,0 +1,96 @@
+name: pesquisa-preferencia-preview-seguro
+
+on:
+  pull_request:
+    paths:
+      - "src/app/dev/pesquisa-preferencia/page.tsx"
+      - "src/app/api/admin/pesquisa-preferencia/dry-run/route.ts"
+      - "src/lib/auth.ts"
+      - "src/proxy.ts"
+      - "scripts/e2e-pesquisa-preferencia-preview.mjs"
+      - ".github/workflows/pesquisa-preferencia-preview-seguro.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pesquisa-preferencia-preview-seguro-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  VERCEL_ENV: "preview"
+  CHEFEBOT_E2E: "1"
+  UPSTASH_DISABLE_TELEMETRY: "1"
+  KV_REST_API_URL: "http://127.0.0.1:9"
+  KV_REST_API_TOKEN: "preview-local-nao-real"
+  E2E_BASE_URL: "http://127.0.0.1:3000"
+  PREVIEW_OUTPUT_DIR: "/tmp/research-preview"
+
+jobs:
+  preview-hermetico:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do HEAD exato
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências do projeto
+        run: npm ci
+
+      - name: Registrar HEAD e gerar segredo efêmero mascarado
+        run: |
+          echo "PREVIEW_GIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          AUTH_SECRET_VALUE="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+          echo "::add-mask::$AUTH_SECRET_VALUE"
+          echo "AUTH_SECRET=$AUTH_SECRET_VALUE" >> "$GITHUB_ENV"
+
+      - name: Instalar Playwright isolado em diretório temporário
+        run: |
+          mkdir -p /tmp/playwright-node
+          cd /tmp/playwright-node
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0
+          npx playwright install --with-deps chromium
+          echo "PLAYWRIGHT_MODULE_PATH=/tmp/playwright-node/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
+
+      - name: Build de produção
+        run: npm run build
+
+      - name: Iniciar aplicação local isolada
+        run: |
+          npm run start -- -p 3000 -H 127.0.0.1 &
+          echo $! > /tmp/next-start.pid
+
+      - name: Aguardar aplicação
+        run: |
+          for i in $(seq 1 60); do
+            if node -e "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"; then
+              echo "Aplicação local pronta."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Aplicação local não respondeu." >&2
+          exit 1
+
+      - name: Validar painel em browser desktop e mobile
+        run: node scripts/e2e-pesquisa-preferencia-preview.mjs
+
+      - name: Publicar evidências visuais
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pesquisa-preferencia-preview-${{ github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/research-preview
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Encerrar aplicação
+        if: always()
+        run: |
+          if [ -f /tmp/next-start.pid ]; then
+            kill "$(cat /tmp/next-start.pid)" 2>/dev/null || true
+          fi
