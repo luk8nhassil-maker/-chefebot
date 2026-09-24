@@ -21,6 +21,7 @@ const ROLES_OPERACIONAIS_ASSINATURA = [
 ] as const;
 
 export function ehRotaOperacionalAssinatura(pathname: string) {
+  if (pathname === "/dev/pesquisa-preferencia" || pathname.startsWith("/dev/pesquisa-preferencia/")) return false;
   if (pathname === "/login" || pathname.startsWith("/entregador")) return false;
   return ROTAS_OPERACIONAIS_ASSINATURA.some(
     (rota) => pathname === rota || pathname.startsWith(`${rota}/`),
