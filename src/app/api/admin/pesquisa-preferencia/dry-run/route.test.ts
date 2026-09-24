@@ -72,7 +72,7 @@ describe("GET /api/admin/pesquisa-preferencia/dry-run", () => {
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(body.modo).toBe("dry-run");
-    expect(body.periodoDias).toBe(90);
+    expect(body.periodoDias).toBe(90);\n    expect(body.segurancaContato.envioAutomaticoAtivo).toBe(false);\n    expect(body.segurancaContato.elegibilidadeFinalCalculada).toBe(false);\n    expect(body.segurancaContato.politica).toEqual({ cooldownDias: 14, maxContatosEm90Dias: 3 });
     expect(res.headers.get("x-chefebot-research-mode")).toBe("dry-run");
     expect(res.headers.get("cache-control")).toContain("no-store");
     expect(mockPeriodo).toHaveBeenCalledTimes(1);
@@ -95,7 +95,7 @@ describe("GET /api/admin/pesquisa-preferencia/dry-run", () => {
     expect(texto).not.toContain("cid_interno_x");
     expect(texto).not.toContain("clienteId");
     expect(texto).not.toContain("telefone");
-    expect(texto).not.toContain("endereco");
+    expect(texto).not.toContain("endereco");\n    expect(texto).not.toContain("cid_interno_x");
   });
 
   it("combina histórico anterior e janela atual sem expor registros", async () => {
