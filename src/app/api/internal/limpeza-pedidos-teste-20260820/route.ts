@@ -1,7 +1,7 @@
 import { createHash, randomUUID, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
-import { adquirirMutexPedidos, liberarMutexPedidos } from "@/lib/pedidosConcorrencia";
+import { adquirirMutexPedidos, liberarMutexPedidos, persistirPedidosComRevisao } from "@/lib/pedidosConcorrencia";
 import {
   faturamentoDosPedidosEntregues,
   resumirRiscosLaterais,
@@ -251,19 +251,19 @@ export async function GET(req: NextRequest) {
       const comandasRestantes = comandas.filter((c) => !idsComandas.has(stringSegura(c.id)));
 
       try {
-        await redis.set("pedidos", pedidosRestantes);
+        await persistirPedidosComRevisao(pedidosRestantes);
         await redis.set(CHAVE_COMANDAS, comandasRestantes);
       } catch (err) {
         // Rollback imediato usando os snapshots frescos lidos sob os dois
         // locks. O backup continua preservado mesmo se a restauração falhar.
-        await redis.set("pedidos", pedidos).catch(() => null);
+        await persistirPedidosComRevisao(pedidos).catch(() => null);
         await redis.set(CHAVE_COMANDAS, comandas).catch(() => null);
         return NextResponse.json({ ok: false, error: "Falha durante a exclusão; rollback imediato solicitado." }, { status: 503 });
       }
 
       const pos = construirAlvos((await redis.get<Pedido[]>("pedidos")) || [], (await redis.get<Comanda[]>(CHAVE_COMANDAS)) || []);
       if (pos.pedidosTeste.length !== 0 || pos.comandasTeste.length !== 0) {
-        await redis.set("pedidos", pedidos).catch(() => null);
+        await persistirPedidosComRevisao(pedidos).catch(() => null);
         await redis.set(CHAVE_COMANDAS, comandas).catch(() => null);
         return NextResponse.json({ ok: false, error: "Verificação pós-exclusão falhou; rollback imediato solicitado." }, { status: 500 });
       }
@@ -305,7 +305,7 @@ export async function GET(req: NextRequest) {
       const restaurarPedidos = backup.pedidos.filter((p) => !idsPedidos.has(stringSegura(p.id)));
       const restaurarComandas = backup.comandas.filter((c) => !idsComandas.has(stringSegura(c.id)));
 
-      await redis.set("pedidos", [...pedidos, ...restaurarPedidos]);
+      await persistirPedidosComRevisao([...pedidos, ...restaurarPedidos]);
       await redis.set(CHAVE_COMANDAS, [...comandas, ...restaurarComandas]);
       await redis.del(MIGRATION_KEY).catch(() => null);
       await redis.set(ROLLBACK_KEY, { realizadoEm: new Date().toISOString(), pedidos: restaurarPedidos.length, comandas: restaurarComandas.length }, { ex: BACKUP_TTL }).catch(() => null);
