@@ -99,7 +99,7 @@ export default function PesquisaPreferenciaDevPage() {
       .then((body) => setData(body))
       .catch((e) => setErro(e instanceof Error ? e.message : 'Falha desconhecida'))
       .finally(() => setLoading(false))
-  }
+  }, [])
 
   const atualizar = () => {
     setLoading(true)
@@ -116,8 +116,10 @@ export default function PesquisaPreferenciaDevPage() {
     buscar()
   }, [buscar, router])
 
-  const primeiraOnda = data
-    ? ['M1', 'M2', 'M5'].map((id) => data.momentos[id]).filter(Boolean)
+  const primeiraOnda: MomentoResumo[] = data
+    ? ['M1', 'M2', 'M5']
+        .map((id) => data.momentos[id])
+        .filter((momento): momento is MomentoResumo => Boolean(momento))
     : []
 
   const estadosVisiveis = data
