@@ -51,7 +51,7 @@ export type ResultadoElegibilidadeContatoPesquisa = {
 
 function dentroDaJanela(timestamp: number, agoraMs: number, dias: number): boolean {
   const inicio = agoraMs - dias * MS_POR_DIA;
-  return timestamp >= inicio && timestamp <= agoraMs;
+  return timestamp > inicio && timestamp <= agoraMs;
 }
 
 /**
