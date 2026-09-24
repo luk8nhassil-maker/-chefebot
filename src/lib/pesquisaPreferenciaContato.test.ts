@@ -37,6 +37,7 @@ describe("avaliarElegibilidadeContatoPesquisa", () => {
         checkoutEmAndamento: true,
         pagamentoPendente: true,
         pedidoEmProducaoOuEntrega: true,
+        atendimentoHumanoOuBotPausado: true,
         problemaAberto: true,
         optOut: true,
       },
@@ -49,6 +50,7 @@ describe("avaliarElegibilidadeContatoPesquisa", () => {
         "checkout_em_andamento",
         "pagamento_pendente",
         "pedido_em_producao_ou_entrega",
+        "atendimento_humano_ou_bot_pausado",
         "problema_aberto",
         "opt_out",
       ])
@@ -125,6 +127,7 @@ describe("resumoSegurancaContatoDryRun", () => {
     expect(resumo.fontesConectadas).toContain("historico_de_exposicoes_de_pesquisa");
     expect(resumo.fontesConectadas).toContain("estado_operacional_do_pedido");
     expect(resumo.fontesConectadas).toContain("opt_out");
+    expect(resumo.fontesConectadas).toContain("estado_bot_e_atendimento_manual");
     expect(resumo.fontesConectadas).toContain("identidade_confirmada_por_canal");
     expect(resumo.fontesPendentes).not.toContain("historico_de_exposicoes_de_pesquisa");
     expect(resumo.fontesPendentes).toContain(
