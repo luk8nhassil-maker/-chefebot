@@ -5,11 +5,13 @@ const {
   derivarClienteIdMock,
   listarContatosMock,
   optOutMock,
+  pesquisaPendenteMock,
 } = vi.hoisted(() => ({
   redisGetMock: vi.fn(),
   derivarClienteIdMock: vi.fn(),
   listarContatosMock: vi.fn(),
   optOutMock: vi.fn(),
+  pesquisaPendenteMock: vi.fn(),
 }));
 
 vi.mock("./redis", () => ({
@@ -26,6 +28,10 @@ vi.mock("./pesquisaPreferenciaContatosRedis", () => ({
 
 vi.mock("./pesquisaPreferenciaOptOutRedis", () => ({
   clienteTemOptOutPesquisa: optOutMock,
+}));
+
+vi.mock("./pesquisaPreferenciaRespostaRedis", () => ({
+  clienteTemPesquisaPendente: pesquisaPendenteMock,
 }));
 
 import {
@@ -59,6 +65,7 @@ beforeEach(() => {
   );
   listarContatosMock.mockResolvedValue([]);
   optOutMock.mockResolvedValue(false);
+  pesquisaPendenteMock.mockResolvedValue(false);
   redisGetMock.mockImplementation(async (key: string) => {
     if (key === "pedidos") return [pedido()];
     if (key.startsWith("session:")) return null;
@@ -268,6 +275,24 @@ describe("avaliarElegibilidadeContatoPesquisaCompleta", () => {
       botAtivo: false,
       atendimentoManualAtivo: true,
     });
+  });
+
+  test("pesquisa pendente bloqueia novo contato", async () => {
+    pesquisaPendenteMock.mockResolvedValue(true);
+
+    const resultado = await avaliarElegibilidadeContatoPesquisaCompleta({
+      telefone: PHONE,
+      agoraMs: AGORA,
+      sinaisControlados: {
+        checkoutWebEmAndamento: false,
+        disputaOuEstornoExternoAberto: false,
+      },
+    });
+
+    expect(resultado.elegibilidade.status).toBe("suprimido");
+    expect(resultado.elegibilidade.motivos).toContain(
+      "pesquisa_pendente_resposta"
+    );
   });
 
   test("opt-out bloqueia contato", async () => {
