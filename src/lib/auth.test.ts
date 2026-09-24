@@ -11,6 +11,17 @@ async function carregarAuth() {
   return import("./auth");
 }
 
+describe("ROUTE_ROLES", () => {
+  it("permite admin e dev apenas no painel específico de pesquisa antes do prefixo /dev", async () => {
+    const { canAccess } = await carregarAuth();
+
+    expect(canAccess("admin", "/dev/pesquisa-preferencia")).toBe(true);
+    expect(canAccess("dev", "/dev/pesquisa-preferencia")).toBe(true);
+    expect(canAccess("admin", "/dev")).toBe(false);
+    expect(canAccess("admin", "/dev/redis-status")).toBe(false);
+  });
+});
+
 describe("validateCredentials", () => {
   it("normaliza espaços externos do usuário e da senha", async () => {
     const { validateCredentials } = await carregarAuth();
