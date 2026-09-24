@@ -89,13 +89,17 @@ const fixture = {
     politica: { cooldownDias: 14, maxContatosEm90Dias: 3 },
     fontesConectadas: [
       "historico_de_exposicoes_de_pesquisa",
-    ],
-    fontesPendentes: [
+      "bootstrap_conservador_de_contatos_pre_ledger",
       "estado_operacional_do_pedido",
       "pagamento_ou_pix_pendente",
-      "problema_ou_disputa_aberta",
+      "problema_operacional_aberto",
+      "checkout_whatsapp_em_andamento",
       "opt_out",
-      "identidade_confirmada",
+      "identidade_confirmada_por_canal",
+    ],
+    fontesPendentes: [
+      "checkout_web_em_andamento_confirmacao_controlada",
+      "disputa_ou_estorno_externo_confirmacao_controlada",
     ],
   },
   observacoes: [
