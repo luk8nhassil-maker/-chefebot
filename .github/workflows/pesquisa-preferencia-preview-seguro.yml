@@ -40,10 +40,12 @@ jobs:
       - name: Instalar dependências do projeto
         run: npm ci
 
-      - name: Registrar HEAD e gerar segredo efêmero
+      - name: Registrar HEAD e gerar segredo efêmero mascarado
         run: |
           echo "PREVIEW_GIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "AUTH_SECRET=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')" >> "$GITHUB_ENV"
+          AUTH_SECRET_VALUE="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+          echo "::add-mask::$AUTH_SECRET_VALUE"
+          echo "AUTH_SECRET=$AUTH_SECRET_VALUE" >> "$GITHUB_ENV"
 
       - name: Instalar Playwright isolado em diretório temporário
         run: |
