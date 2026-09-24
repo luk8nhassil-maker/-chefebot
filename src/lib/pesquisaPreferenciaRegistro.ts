@@ -89,6 +89,8 @@ const CAMPOS_PESSOAIS_PROIBIDOS = new Set([
   "telefone",
   "phone",
   "nome",
+  "cliente",
+  "customerName",
   "endereco",
   "address",
   "email",
@@ -96,6 +98,8 @@ const CAMPOS_PESSOAIS_PROIBIDOS = new Set([
   "documento",
   "dadosPagamento",
   "paymentData",
+  "pagamento",
+  "payment",
 ]);
 
 /**
