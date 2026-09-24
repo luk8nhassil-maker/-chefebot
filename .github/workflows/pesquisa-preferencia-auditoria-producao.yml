@@ -1,0 +1,97 @@
+name: pesquisa-preferencia-auditoria-producao
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/app/api/cron/pesquisa-preferencia-auditoria/route.ts"
+      - ".github/workflows/pesquisa-preferencia-auditoria-producao.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pesquisa-preferencia-auditoria-producao
+  cancel-in-progress: true
+
+jobs:
+  auditar:
+    name: auditar-distribuicao-real
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Ler agregados reais depois do deployment correto
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          EXPECTED_SHA: ${{ github.sha }}
+          AUDIT_URL: https://chefedapizza.com.br/api/cron/pesquisa-preferencia-auditoria
+        shell: bash
+        run: |
+          set +x
+          echo "::add-mask::${CRON_SECRET}"
+
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "::error::CRON_SECRET não configurado no GitHub Actions."
+            exit 1
+          fi
+
+          rm -f /tmp/research-audit.json /tmp/research-audit-headers.txt
+          pronto=0
+
+          for tentativa in $(seq 1 36); do
+            status=$(curl -sS               -o /tmp/research-audit.json               -D /tmp/research-audit-headers.txt               -w '%{http_code}'               --max-time 20               -H "Authorization: Bearer ${CRON_SECRET}"               -H "Accept: application/json"               "${AUDIT_URL}" || true)
+
+            if [ "${status}" = "200" ]; then
+              commit=$(jq -r '.deploymentCommitSha // ""' /tmp/research-audit.json 2>/dev/null || true)
+              if [ "${commit}" = "${EXPECTED_SHA}" ]; then
+                pronto=1
+                break
+              fi
+              echo "Deployment ainda não corresponde ao SHA esperado (tentativa ${tentativa}/36)."
+            else
+              echo "Endpoint ainda não pronto: HTTP ${status:-falha} (tentativa ${tentativa}/36)."
+            fi
+
+            sleep 10
+          done
+
+          if [ "${pronto}" != "1" ]; then
+            echo "::error::Não foi possível obter a auditoria do deployment correspondente ao SHA ${EXPECTED_SHA}."
+            echo "Último status/corpo higienizado:"
+            head -c 1200 /tmp/research-audit.json 2>/dev/null || true
+            exit 1
+          fi
+
+          jq -e '.ok == true and .modo == "dry-run" and .somenteLeitura == true' /tmp/research-audit.json >/dev/null
+          jq -e '.segurancaContato.envioAutomaticoAtivo == false and .segurancaContato.elegibilidadeFinalCalculada == false' /tmp/research-audit.json >/dev/null
+
+          if grep -Eqi '"(clienteId|telefone|endereco|cpf|email)"[[:space:]]*:' /tmp/research-audit.json; then
+            echo "::error::A resposta agregada contém campo pessoal proibido."
+            exit 1
+          fi
+
+          echo "=== AUDITORIA AGREGADA DO MOTOR DE PREFERÊNCIA ==="
+          jq '{
+            ok,
+            modo,
+            somenteLeitura,
+            periodoDias,
+            deploymentCommitSha,
+            janela,
+            cobertura,
+            calibracao,
+            segmentacaoQueda,
+            estadosAtuais,
+            momentos,
+            segurancaContato
+          }' /tmp/research-audit.json
+
+      - name: Guardar evidência agregada
+        uses: actions/upload-artifact@v4
+        with:
+          name: pesquisa-preferencia-auditoria-${{ github.sha }}
+          path: /tmp/research-audit.json
+          if-no-files-found: error
+          retention-days: 14
