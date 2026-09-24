@@ -242,6 +242,33 @@ describe("avaliarElegibilidadeContatoPesquisaCompleta", () => {
     expect(resultado.elegibilidade.motivos).toContain("checkout_em_andamento");
   });
 
+  test("bot pausado ou atendimento manual bloqueiam o piloto", async () => {
+    redisGetMock.mockImplementation(async (key: string) => {
+      if (key === "pedidos") return [pedido()];
+      if (key === "bot_ativo") return false;
+      if (key.startsWith("manual:")) return true;
+      return null;
+    });
+
+    const resultado = await avaliarElegibilidadeContatoPesquisaCompleta({
+      telefone: PHONE,
+      agoraMs: AGORA,
+      sinaisControlados: {
+        checkoutWebEmAndamento: false,
+        disputaOuEstornoExternoAberto: false,
+      },
+    });
+
+    expect(resultado.elegibilidade.status).toBe("suprimido");
+    expect(resultado.elegibilidade.motivos).toContain(
+      "atendimento_humano_ou_bot_pausado"
+    );
+    expect(resultado.diagnostico).toMatchObject({
+      botAtivo: false,
+      atendimentoManualAtivo: true,
+    });
+  });
+
   test("opt-out bloqueia contato", async () => {
     optOutMock.mockResolvedValue(true);
 
