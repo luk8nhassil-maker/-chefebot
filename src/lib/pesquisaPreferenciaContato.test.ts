@@ -123,7 +123,15 @@ describe("resumoSegurancaContatoDryRun", () => {
     expect(resumo.elegibilidadeFinalCalculada).toBe(false);
     expect(resumo.candidatosComportamentaisNaoSaoElegiveisFinais).toBe(true);
     expect(resumo.fontesConectadas).toContain("historico_de_exposicoes_de_pesquisa");
+    expect(resumo.fontesConectadas).toContain("estado_operacional_do_pedido");
+    expect(resumo.fontesConectadas).toContain("opt_out");
+    expect(resumo.fontesConectadas).toContain("identidade_confirmada_por_canal");
     expect(resumo.fontesPendentes).not.toContain("historico_de_exposicoes_de_pesquisa");
-    expect(resumo.fontesPendentes).toContain("opt_out");
+    expect(resumo.fontesPendentes).toContain(
+      "checkout_web_em_andamento_confirmacao_controlada"
+    );
+    expect(resumo.fontesPendentes).toContain(
+      "disputa_ou_estorno_externo_confirmacao_controlada"
+    );
   });
 });
