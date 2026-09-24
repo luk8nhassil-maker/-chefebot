@@ -45,10 +45,14 @@ jobs:
           echo "PREVIEW_GIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "AUTH_SECRET=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')" >> "$GITHUB_ENV"
 
-      - name: Instalar Playwright apenas no runner
+      - name: Instalar Playwright isolado em diretório temporário
         run: |
-          npm install --no-save --package-lock=false playwright@1.55.0
+          mkdir -p /tmp/playwright-node
+          cd /tmp/playwright-node
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0
           npx playwright install --with-deps chromium
+          echo "PLAYWRIGHT_MODULE_PATH=/tmp/playwright-node/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
 
       - name: Build de produção
         run: npm run build
@@ -74,7 +78,7 @@ jobs:
         run: node scripts/e2e-pesquisa-preferencia-preview.mjs
 
       - name: Publicar evidências visuais
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: pesquisa-preferencia-preview-${{ github.event.pull_request.head.sha || github.sha }}
