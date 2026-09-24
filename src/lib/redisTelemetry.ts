@@ -77,6 +77,7 @@ export function classifyKey(rawKey: unknown): RedisKeyGroup {
   if (key.startsWith('pedido:edit:mutex:')) return 'orders_lock'
   if (
     key === 'pedidos' ||
+    key === 'pedidos:revision' ||
     key === 'avaliacoes' ||
     key.startsWith('entregador:') ||
     key.startsWith('entregador_aguardando:') ||
