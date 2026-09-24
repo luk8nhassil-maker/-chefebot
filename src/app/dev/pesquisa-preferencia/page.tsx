@@ -25,9 +25,18 @@ type DryRunResponse = {
   }
   cobertura: {
     pedidosValidosObservados: number
+    ocasioesCompraObservadas: number
     clientesObservados: number
     intervalosEntreComprasObservados: number
+    intervalosEntreOcasioesObservados: number
+    clientesComHistoricoSuficienteParaQueda: number
+    clientesSemHistoricoSuficienteParaQueda: number
     primeiraCompraObservadaNaoEquivaleAPrimeiraCompraVitalicia: true
+  }
+  segmentacaoQueda: {
+    minimoOcasioesParaCompararRitmo: number
+    minimoIntervalosHistoricosPorCliente: number
+    regra: string
   }
   calibracao: {
     medianaIntervaloDias: number | null
@@ -180,12 +189,34 @@ export default function PesquisaPreferenciaDevPage() {
                 <strong style={{ fontSize: 26, color: 'var(--foreground)' }}>{data.cobertura.pedidosValidosObservados}</strong>
               </div>
               <div style={card}>
+                <p style={{ margin: 0, fontSize: 12, color: 'var(--foreground-secondary)' }}>Ocasiões de compra</p>
+                <strong style={{ fontSize: 26, color: 'var(--foreground)' }}>{data.cobertura.ocasioesCompraObservadas}</strong>
+              </div>
+              <div style={card}>
                 <p style={{ margin: 0, fontSize: 12, color: 'var(--foreground-secondary)' }}>Clientes observados</p>
                 <strong style={{ fontSize: 26, color: 'var(--foreground)' }}>{data.cobertura.clientesObservados}</strong>
               </div>
               <div style={card}>
-                <p style={{ margin: 0, fontSize: 12, color: 'var(--foreground-secondary)' }}>Intervalos observados</p>
-                <strong style={{ fontSize: 26, color: 'var(--foreground)' }}>{data.cobertura.intervalosEntreComprasObservados}</strong>
+                <p style={{ margin: 0, fontSize: 12, color: 'var(--foreground-secondary)' }}>Intervalos entre ocasiões</p>
+                <strong style={{ fontSize: 26, color: 'var(--foreground)' }}>{data.cobertura.intervalosEntreOcasioesObservados}</strong>
+              </div>
+            </div>
+
+            <h2 style={{ fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--foreground-secondary)', margin: '0 0 10px' }}>Qualidade do histórico para queda</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, marginBottom: 20 }}>
+              <div style={card}>
+                <p style={{ margin: 0, fontSize: 12, color: 'var(--foreground-secondary)' }}>Histórico suficiente</p>
+                <strong style={{ fontSize: 26, color: 'var(--foreground)' }}>{data.cobertura.clientesComHistoricoSuficienteParaQueda}</strong>
+                <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--foreground-muted)' }}>
+                  {data.segmentacaoQueda.minimoOcasioesParaCompararRitmo}+ ocasiões observadas
+                </p>
+              </div>
+              <div style={card}>
+                <p style={{ margin: 0, fontSize: 12, color: 'var(--foreground-secondary)' }}>Histórico insuficiente</p>
+                <strong style={{ fontSize: 26, color: 'var(--foreground)' }}>{data.cobertura.clientesSemHistoricoSuficienteParaQueda}</strong>
+                <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--foreground-muted)' }}>
+                  Não entram em M5/S6
+                </p>
               </div>
             </div>
 
@@ -230,7 +261,7 @@ export default function PesquisaPreferenciaDevPage() {
             </div>
 
             <p style={{ margin: '18px 0 0', color: 'var(--foreground-muted)', fontSize: 11, textAlign: 'center' }}>
-              Primeira/segunda compra significam ocorrências observadas no histórico analítico disponível, não necessariamente na vida inteira do cliente.
+              Primeira/segunda compra significam ocasiões observadas no histórico analítico disponível, não necessariamente na vida inteira do cliente. M5/S6 exigem histórico suficiente do próprio cliente.
             </p>
           </>
         )}
