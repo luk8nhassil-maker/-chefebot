@@ -27,13 +27,18 @@ function req(cookie = "auth-token=test") {
   });
 }
 
-function evento(clienteId: string, pedidoId: string, criadoEmMs: number): EventoAnalitico {
+function evento(
+  clienteId: string,
+  pedidoId: string,
+  criadoEmMs: number,
+  expedienteId: string = `exp-${pedidoId}`
+): EventoAnalitico {
   return {
     pedidoId,
     clienteId,
     tenantId: "default",
     criadoEmMs,
-    expedienteId: "exp",
+    expedienteId,
     valorElegivelCents: 5000,
     statusAnalitico: "entregue",
     canal: "app",
@@ -73,6 +78,12 @@ describe("GET /api/admin/pesquisa-preferencia/dry-run", () => {
     expect(body.ok).toBe(true);
     expect(body.modo).toBe("dry-run");
     expect(body.periodoDias).toBe(90);
+    expect(body.cobertura.ocasioesCompraObservadas).toBe(2);
+    expect(body.cobertura.clientesSemHistoricoSuficienteParaQueda).toBe(1);
+    expect(body.segmentacaoQueda).toMatchObject({
+      minimoOcasioesParaCompararRitmo: 3,
+      minimoIntervalosHistoricosPorCliente: 2,
+    });
     expect(body.segurancaContato.envioAutomaticoAtivo).toBe(false);
     expect(body.segurancaContato.elegibilidadeFinalCalculada).toBe(false);
     expect(body.segurancaContato.candidatosComportamentaisNaoSaoElegiveisFinais).toBe(true);
