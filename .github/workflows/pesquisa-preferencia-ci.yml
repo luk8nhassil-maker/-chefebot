@@ -25,6 +25,8 @@ on:
       - "src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts"
       - "src/app/api/admin/pesquisa-preferencia/elegibilidade-controlada/route.ts"
       - "src/app/api/admin/pesquisa-preferencia/elegibilidade-controlada/route.test.ts"
+      - "src/app/api/admin/pesquisa-preferencia/opt-out/route.ts"
+      - "src/app/api/admin/pesquisa-preferencia/opt-out/route.test.ts"
       - "src/app/api/cron/pesquisa-preferencia-auditoria/route.ts"
       - "src/app/api/cron/pesquisa-preferencia-auditoria/route.test.ts"
       - "src/app/api/orders/route.ts"
@@ -76,6 +78,7 @@ jobs:
           src/lib/pesquisaPreferenciaHistoricoRedis.test.ts
           src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts
           src/app/api/admin/pesquisa-preferencia/elegibilidade-controlada/route.test.ts
+          src/app/api/admin/pesquisa-preferencia/opt-out/route.test.ts
           src/app/api/cron/pesquisa-preferencia-auditoria/route.test.ts
           src/lib/historicoAnalitico.test.ts
           src/app/api/admin/analytics/pedidos/route.test.ts
@@ -109,6 +112,8 @@ jobs:
           src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts
           src/app/api/admin/pesquisa-preferencia/elegibilidade-controlada/route.ts
           src/app/api/admin/pesquisa-preferencia/elegibilidade-controlada/route.test.ts
+          src/app/api/admin/pesquisa-preferencia/opt-out/route.ts
+          src/app/api/admin/pesquisa-preferencia/opt-out/route.test.ts
           src/app/api/cron/pesquisa-preferencia-auditoria/route.ts
           src/app/api/cron/pesquisa-preferencia-auditoria/route.test.ts
           src/app/dev/pesquisa-preferencia/page.tsx
