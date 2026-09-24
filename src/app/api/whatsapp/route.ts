@@ -43,6 +43,7 @@ import {
 import { marcarInboundRecebido, marcarOutboundConfirmado, marcarUpsertDescartado, marcarWebhookRecebido } from "@/lib/whatsappDiag";
 import { sanitizeErrorMessage } from "@/lib/sanitizeLog";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
+import { registrarContatoPesquisaBestEffort } from "@/lib/pesquisaPreferenciaContatosRedis";
 
 export const maxDuration = 30;
 
@@ -411,7 +412,7 @@ export async function enviarMensagem(phone: string, message: string, ritmoRapido
     }
     // Envio não confirmado (provider ausente ou falha HTTP/rede): nunca registra
     // no histórico uma mensagem que o cliente pode não ter recebido de fato.
-    return;
+    return false;
   }
   // Só registra no histórico (autor "bot") após confirmação de envio — usa o
   // texto FINAL (já com token de cardápio/substituições aplicadas), igual ao
@@ -420,6 +421,7 @@ export async function enviarMensagem(phone: string, message: string, ritmoRapido
   // a aparecer no histórico/painel.
   await registrarMensagem(phone, "bot", message);
   marcarOutboundConfirmado().catch(() => {});
+  return true;
 }
 
 async function enviarImagem(phone: string, imageUrl: string) {
@@ -1335,7 +1337,19 @@ export async function POST(req: NextRequest) {
           if (!jaEnviou) {
             await redis.set(chaveAvaliacao, true, { ex: 86400 })
             await redis.set(`avaliacao:${pedido.telefone}`, true, { ex: 3600 })
-            await enviarMensagem(pedido.telefone, `*${firstName}*, como foi sua experiência hoje? 😊\n\nAvalia nossa pizza de 1 a 5:\n\n  ⭐ 1 — Ruim\n  ⭐⭐ 2 — Regular\n  ⭐⭐⭐ 3 — Bom\n  ⭐⭐⭐⭐ 4 — Muito bom\n  ⭐⭐⭐⭐⭐ 5 — Excelente\n\nÉ só digitar o número! 😄`)
+            const avaliacaoEnviada = await enviarMensagem(pedido.telefone, `*${firstName}*, como foi sua experiência hoje? 😊\n\nAvalia nossa pizza de 1 a 5:\n\n  ⭐ 1 — Ruim\n  ⭐⭐ 2 — Regular\n  ⭐⭐⭐ 3 — Bom\n  ⭐⭐⭐⭐ 4 — Muito bom\n  ⭐⭐⭐⭐⭐ 5 — Excelente\n\nÉ só digitar o número! 😄`)
+            if (avaliacaoEnviada) {
+              await registrarContatoPesquisaBestEffort({
+                telefone: pedido.telefone,
+                registro: {
+                  exposureId: `avaliacao-pos-entrega:${pedido.id}`,
+                  questionId: "legacy-avaliacao-pos-entrega-v1",
+                  momentId: null,
+                  sentAtMs: Date.now(),
+                  origem: "avaliacao_pos_entrega_legada",
+                },
+              })
+            }
           }
           const maisEntregas = pedidos.filter((p) => p.status === 'saiu_entrega' && p.entregador?.telefone?.replace(/\D/g, '') === phone.replace(/\D/g, ''))
           if (maisEntregas.length > 0) {
