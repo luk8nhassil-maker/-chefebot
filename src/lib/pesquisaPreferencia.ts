@@ -171,9 +171,18 @@ export type ResumoPesquisaPreferencia = {
   };
   cobertura: {
     pedidosValidosObservados: number;
+    ocasioesCompraObservadas: number;
     clientesObservados: number;
     intervalosEntreComprasObservados: number;
+    intervalosEntreOcasioesObservados: number;
+    clientesComHistoricoSuficienteParaQueda: number;
+    clientesSemHistoricoSuficienteParaQueda: number;
     primeiraCompraObservadaNaoEquivaleAPrimeiraCompraVitalicia: true;
+  };
+  segmentacaoQueda: {
+    minimoOcasioesParaCompararRitmo: 3;
+    minimoIntervalosHistoricosPorCliente: 2;
+    regra: "gap_atual_supera_quantill_do_cliente_e_da_populacao";
   };
   calibracao: {
     medianaIntervaloDias: number | null;
@@ -215,29 +224,55 @@ function recordEstadosVazio(): Record<EstadoComportamentalId, number> {
   };
 }
 
-function agruparPorCliente(eventos: EventoAnalitico[]): Map<string, EventoAnalitico[]> {
-  const grupos = new Map<string, EventoAnalitico[]>();
+type OcasiaoCompra = {
+  expedienteId: string;
+  criadoEmMs: number;
+};
+
+function agruparOcasioesPorCliente(eventos: EventoAnalitico[]): Map<string, OcasiaoCompra[]> {
+  const porCliente = new Map<string, Map<string, OcasiaoCompra>>();
+
   for (const evento of eventos) {
     if (evento.statusAnalitico !== "entregue") continue;
-    const atual = grupos.get(evento.clienteId) ?? [];
-    atual.push(evento);
-    grupos.set(evento.clienteId, atual);
+
+    // Um expediente operacional representa uma ocasião de compra. Se houver
+    // mais de um pedido na mesma noite, mantemos apenas o instante mais recente
+    // para não transformar pedido complementar/correção em "recompra".
+    const chaveOcasiao = evento.expedienteId?.trim() || `pedido:${evento.pedidoId}`;
+    const porExpediente = porCliente.get(evento.clienteId) ?? new Map<string, OcasiaoCompra>();
+    const atual = porExpediente.get(chaveOcasiao);
+
+    if (!atual || evento.criadoEmMs > atual.criadoEmMs) {
+      porExpediente.set(chaveOcasiao, {
+        expedienteId: chaveOcasiao,
+        criadoEmMs: evento.criadoEmMs,
+      });
+    }
+
+    porCliente.set(evento.clienteId, porExpediente);
   }
-  for (const lista of grupos.values()) {
-    lista.sort((a, b) => a.criadoEmMs - b.criadoEmMs);
+
+  const grupos = new Map<string, OcasiaoCompra[]>();
+  for (const [clienteId, porExpediente] of porCliente.entries()) {
+    grupos.set(
+      clienteId,
+      [...porExpediente.values()].sort((a, b) => a.criadoEmMs - b.criadoEmMs)
+    );
   }
   return grupos;
 }
 
-function calcularIntervalos(grupos: Map<string, EventoAnalitico[]>): number[] {
+function calcularIntervalosLista(ocasioes: OcasiaoCompra[]): number[] {
   const intervalos: number[] = [];
-  for (const eventos of grupos.values()) {
-    for (let i = 1; i < eventos.length; i += 1) {
-      const gap = eventos[i].criadoEmMs - eventos[i - 1].criadoEmMs;
-      if (gap > 0) intervalos.push(gap);
-    }
+  for (let i = 1; i < ocasioes.length; i += 1) {
+    const gap = ocasioes[i].criadoEmMs - ocasioes[i - 1].criadoEmMs;
+    if (gap > 0) intervalos.push(gap);
   }
   return intervalos;
+}
+
+function calcularIntervalos(grupos: Map<string, OcasiaoCompra[]>): number[] {
+  return [...grupos.values()].flatMap(calcularIntervalosLista);
 }
 
 function montarMomentosVazios(): Record<MomentoPesquisaId, ResumoMomentoPesquisa> {
@@ -265,8 +300,17 @@ export function analisarPesquisaPreferencia(
   const validos = eventos
     .filter((evento) => evento.statusAnalitico === "entregue")
     .sort((a, b) => a.criadoEmMs - b.criadoEmMs);
-  const grupos = agruparPorCliente(validos);
+  const grupos = agruparOcasioesPorCliente(validos);
   const intervalos = calcularIntervalos(grupos);
+  const ocasioesCompraObservadas = [...grupos.values()].reduce(
+    (total, ocasioes) => total + ocasioes.length,
+    0
+  );
+  const clientesComHistoricoSuficienteParaQueda = [...grupos.values()].filter(
+    (ocasioes) => ocasioes.length >= 3
+  ).length;
+  const clientesSemHistoricoSuficienteParaQueda =
+    grupos.size - clientesComHistoricoSuficienteParaQueda;
 
   const p50 = quantilNearestRank(intervalos, 0.5);
   const p75 = quantilNearestRank(intervalos, 0.75);
@@ -283,10 +327,10 @@ export function analisarPesquisaPreferencia(
   let candidatosM5 = 0;
   let oportunidadesM6 = 0;
 
-  for (const eventosCliente of grupos.values()) {
-    const primeiro = eventosCliente[0];
-    const segundo = eventosCliente[1];
-    const ultimo = eventosCliente[eventosCliente.length - 1];
+  for (const ocasioesCliente of grupos.values()) {
+    const primeiro = ocasioesCliente[0];
+    const segundo = ocasioesCliente[1];
+    const ultimo = ocasioesCliente[ocasioesCliente.length - 1];
     const gapAtual = Math.max(0, agoraMs - ultimo.criadoEmMs);
 
     if (primeiro && primeiro.criadoEmMs >= janelaInicioMs && primeiro.criadoEmMs <= agoraMs) {
@@ -296,27 +340,58 @@ export function analisarPesquisaPreferencia(
       oportunidadesM2 += 1;
     }
 
-    if (p90 !== null && gapAtual > p90) {
-      estados.S6 += 1;
-    } else if (p75 !== null && gapAtual > p75) {
-      estados.S5 += 1;
-      candidatosM5 += 1;
-    } else if (eventosCliente.length === 1) {
+    // Uma ou duas ocasiões não formam histórico suficiente para afirmar
+    // queda de frequência: com 3 ocasiões existem pelo menos 2 intervalos
+    // anteriores, o mínimo estrutural para comparar ritmo passado x atual.
+    if (ocasioesCliente.length === 1) {
       estados.S1 += 1;
-    } else if (eventosCliente.length === 2) {
+    } else if (ocasioesCliente.length === 2) {
       estados.S2 += 1;
       candidatosM3 += 1;
     } else {
-      estados.S4 += 1;
-      candidatosM4 += 1;
+      const intervalosCliente = calcularIntervalosLista(ocasioesCliente);
+      const p75Cliente = quantilNearestRank(intervalosCliente, 0.75);
+      const p90Cliente = quantilNearestRank(intervalosCliente, 0.9);
+
+      if (
+        p90 !== null &&
+        p90Cliente !== null &&
+        gapAtual > p90 &&
+        gapAtual > p90Cliente
+      ) {
+        estados.S6 += 1;
+      } else if (
+        p75 !== null &&
+        p75Cliente !== null &&
+        gapAtual > p75 &&
+        gapAtual > p75Cliente
+      ) {
+        estados.S5 += 1;
+        candidatosM5 += 1;
+      } else {
+        estados.S4 += 1;
+        candidatosM4 += 1;
+      }
     }
 
-    if (eventosCliente.length >= 2 && p90 !== null) {
-      for (let i = 1; i < eventosCliente.length; i += 1) {
-        const atual = eventosCliente[i];
-        const anterior = eventosCliente[i - 1];
+    // Retorno após ausência também exige contexto anterior do próprio cliente.
+    // A partir da 3ª ocasião, comparamos o novo intervalo com o histórico que
+    // existia antes dele e com o p90 populacional.
+    if (ocasioesCliente.length >= 3 && p90 !== null) {
+      for (let i = 2; i < ocasioesCliente.length; i += 1) {
+        const atual = ocasioesCliente[i];
+        const anterior = ocasioesCliente[i - 1];
         const gap = atual.criadoEmMs - anterior.criadoEmMs;
-        if (atual.criadoEmMs >= janelaInicioMs && atual.criadoEmMs <= agoraMs && gap > p90) {
+        const intervalosAnteriores = calcularIntervalosLista(ocasioesCliente.slice(0, i));
+        const p90AnteriorCliente = quantilNearestRank(intervalosAnteriores, 0.9);
+
+        if (
+          p90AnteriorCliente !== null &&
+          atual.criadoEmMs >= janelaInicioMs &&
+          atual.criadoEmMs <= agoraMs &&
+          gap > p90 &&
+          gap > p90AnteriorCliente
+        ) {
           oportunidadesM6 += 1;
           break;
         }
@@ -344,9 +419,20 @@ export function analisarPesquisaPreferencia(
     },
     cobertura: {
       pedidosValidosObservados: validos.length,
+      ocasioesCompraObservadas,
       clientesObservados: grupos.size,
+      // Alias legado mantido para consumidores atuais. A unidade agora é
+      // ocasião de compra, não pedido individual.
       intervalosEntreComprasObservados: intervalos.length,
+      intervalosEntreOcasioesObservados: intervalos.length,
+      clientesComHistoricoSuficienteParaQueda,
+      clientesSemHistoricoSuficienteParaQueda,
       primeiraCompraObservadaNaoEquivaleAPrimeiraCompraVitalicia: true,
+    },
+    segmentacaoQueda: {
+      minimoOcasioesParaCompararRitmo: 3,
+      minimoIntervalosHistoricosPorCliente: 2,
+      regra: "gap_atual_supera_quantill_do_cliente_e_da_populacao",
     },
     calibracao: {
       medianaIntervaloDias: emDias(p50),
@@ -359,8 +445,9 @@ export function analisarPesquisaPreferencia(
     observacoes: [
       "Nenhuma pergunta é enviada por este módulo.",
       "Nenhum dado é gravado por este módulo.",
-      "M1 e M2 significam primeira e segunda compras observadas no histórico analítico disponível, não necessariamente na vida inteira do cliente.",
-      "M5 e S6 usam quantis do próprio histórico observado; não existem cortes fixos de dias codificados.",
+      "M1 e M2 significam primeira e segunda ocasiões observadas no histórico analítico disponível, não necessariamente na vida inteira do cliente.",
+      "Pedidos do mesmo expediente operacional contam como uma única ocasião de compra.",
+      "M5 e S6 só são avaliados a partir de 3 ocasiões e exigem que o gap atual supere o quantil correspondente do próprio cliente e da população; não existem cortes fixos de dias codificados.",
       "Momentos dependentes de checkout, problemas, indicação, teste moderado ou painel longitudinal permanecem não calculados até suas fontes seguras existirem.",
       "A resposta agregada não expõe identificadores individuais nem dados pessoais ou de pagamento.",
     ],
