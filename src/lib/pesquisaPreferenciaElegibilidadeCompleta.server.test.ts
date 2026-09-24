@@ -74,7 +74,7 @@ beforeEach(() => {
 });
 
 describe("montarContatosBootstrapConservador", () => {
-  test("pedido terminal sem ledger vira contato potencial sem gravar backfill", () => {
+  test("pedido pré-ledger sem exposição registrada vira contato potencial sem backfill", () => {
     const bootstrap = montarContatosBootstrapConservador({
       pedidos: [pedido()],
       clienteId: CLIENTE_ID,
@@ -82,7 +82,9 @@ describe("montarContatosBootstrapConservador", () => {
       agoraMs: AGORA,
     });
 
-    expect(bootstrap).toEqual([{ sentAtMs: AGORA - 20 * DIA }]);
+    expect(bootstrap).toEqual([
+      { sentAtMs: Date.parse("2026-09-20T12:00:00.000Z") },
+    ]);
   });
 
   test("não duplica pedido que já possui exposição pós-entrega confirmada", () => {
