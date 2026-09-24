@@ -12,6 +12,10 @@ on:
       - "src/app/api/admin/pesquisa-preferencia/dry-run/route.ts"
       - "src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts"
       - "src/app/dev/pesquisa-preferencia/page.tsx"
+      - "src/lib/auth.ts"
+      - "src/lib/auth.test.ts"
+      - "scripts/e2e-pesquisa-preferencia-preview.mjs"
+      - ".github/workflows/pesquisa-preferencia-preview-seguro.yml"
       - ".github/workflows/pesquisa-preferencia-ci.yml"
   workflow_dispatch:
 
@@ -44,6 +48,7 @@ jobs:
           src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts
           src/lib/historicoAnalitico.test.ts
           src/app/api/admin/analytics/pedidos/route.test.ts
+          src/lib/auth.test.ts
 
       - name: Lint do patch
         run: >-
@@ -57,6 +62,9 @@ jobs:
           src/app/api/admin/pesquisa-preferencia/dry-run/route.ts
           src/app/api/admin/pesquisa-preferencia/dry-run/route.test.ts
           src/app/dev/pesquisa-preferencia/page.tsx
+          src/lib/auth.ts
+          src/lib/auth.test.ts
+          scripts/e2e-pesquisa-preferencia-preview.mjs
 
       - name: Typecheck comparado com a main
         shell: bash
