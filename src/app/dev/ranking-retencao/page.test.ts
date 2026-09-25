@@ -72,8 +72,33 @@ describe("Preview seguro da retenção do ranking (quem já participa)", () => {
     for (const id of idsGamificacao) {
       expect(client).toContain(`id: "${id}"`);
     }
+  });
+
+  test("Preview V3 (auditoria de hardening do #446): 16 cenários novos, totalizando 42, sem remover nenhum dos 26 originais", () => {
+    const idsV3 = [
+      "v3-selo-outro-campeao-podium",
+      "v3-selo-outro-elite-pos4",
+      "v3-selo-outro-elite-pos10",
+      "v3-perseguindo-top10-pos11",
+      "v3-coroa-sem-ameaca-config",
+      "v3-coroa-ameacada",
+      "v3-coroa-config-mas-folgada",
+      "v3-missao-indicacao-card-incompleta",
+      "v3-missao-indicacao-card-concluida",
+      "v3-missao-semanal-cliente-antigo",
+      "v3-nivel-progresso-parcial",
+      "v3-nivel-maximo",
+      "v3-movimento-recente-subiu",
+      "v3-movimento-recente-desceu",
+      "v3-carryover-sem-login-anterior",
+      "v3-podium-selos-multiplos",
+    ];
+    expect(idsV3).toHaveLength(16);
+    for (const id of idsV3) {
+      expect(client).toContain(`id: "${id}"`);
+    }
     const totalCenarios = (client.match(/^\s{2}\{\n\s{4}id: "/gm) ?? []).length;
-    expect(totalCenarios).toBe(26);
+    expect(totalCenarios).toBe(42);
   });
 
   test("cenário 'sem prêmio' nunca promete prêmio (fail-closed)", () => {
