@@ -23,6 +23,20 @@ type TemporadaStatus = {
   ativa: TemporadaAtiva | null
   total: number
   encerradas: number
+  ultimaEncerradaId: string | null
+  ultimaEncerradaNome: string | null
+}
+
+type IdentidadeResultado = { participaCampanha: boolean; nomePublico: string | null; telefoneMascarado: string | null }
+
+type ResultadoTemporada = {
+  encerradaEm: string
+  premioDescricao: string | null
+  premioQuantidadePremiados: number | null
+  premioAprovado: boolean
+  vencedorDeclarado: boolean
+  vencedores: Array<{ posicao: number; score: number; identidade: IdentidadeResultado }>
+  participantesTopo: Array<{ posicao: number; score: number; identidade: IdentidadeResultado }>
 }
 
 type RankingEntry = { posicao: number; score: number }
@@ -101,6 +115,15 @@ export default function FidelidadePage() {
   const [analyticsCarregado, setAnalyticsCarregado] = useState(false)
   const [acaoEmCurso, setAcaoEmCurso] = useState(false)
   const [mensagemAcao, setMensagemAcao] = useState<string | null>(null)
+  // Prêmio da temporada é opcional e nunca tem valor padrão — em branco, a
+  // temporada é criada sem prêmio (fail-closed) e o encerramento arquiva só
+  // o ranking, sem declarar vencedor.
+  const [premioDescricaoInput, setPremioDescricaoInput] = useState('')
+  const [premioQuantidadeInput, setPremioQuantidadeInput] = useState('')
+  const [premioAprovadoInput, setPremioAprovadoInput] = useState(false)
+  const [resultadoTemporada, setResultadoTemporada] = useState<ResultadoTemporada | null>(null)
+  const [carregandoResultado, setCarregandoResultado] = useState(false)
+  const [erroResultado, setErroResultado] = useState<string | null>(null)
 
   async function carregarStatus() {
     setLoadingStatus(true)
@@ -154,15 +177,24 @@ export default function FidelidadePage() {
     setMensagemAcao(null)
     try {
       const temporadaId = `t-${Date.now()}`
+      const quantidade = Number(premioQuantidadeInput)
+      const corpo: Record<string, unknown> = {
+        acao: 'criar',
+        temporadaId,
+        nome: 'Temporada 30 dias',
+        duracaoDias: 30,
+      }
+      // Só envia o prêmio se a descrição foi preenchida — em branco, a
+      // temporada nasce sem prêmio (fail-closed), sem inventar nenhum valor.
+      if (premioDescricaoInput.trim()) {
+        corpo.premioDescricao = premioDescricaoInput.trim()
+        if (Number.isFinite(quantidade) && quantidade > 0) corpo.premioQuantidadePremiados = Math.round(quantidade)
+        corpo.premioAprovado = premioAprovadoInput
+      }
       const r = await fetch('/api/admin/fidelidade/temporadas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          acao: 'criar',
-          temporadaId,
-          nome: 'Temporada 30 dias',
-          duracaoDias: 30,
-        }),
+        body: JSON.stringify(corpo),
       })
       const data = await r.json()
       if (!r.ok || !data.ok) throw new Error(data.erro ?? data.error ?? 'Erro ao criar')
@@ -175,11 +207,30 @@ export default function FidelidadePage() {
       const data2 = await r2.json()
       if (!r2.ok || !data2.ok) throw new Error(data2.erro ?? data2.error ?? 'Erro ao ativar')
       setMensagemAcao('Temporada de 30 dias criada e ativada.')
+      setPremioDescricaoInput('')
+      setPremioQuantidadeInput('')
+      setPremioAprovadoInput(false)
       await carregarStatus()
     } catch (e: unknown) {
       setMensagemAcao(`Falha: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setAcaoEmCurso(false)
+    }
+  }
+
+  async function verResultadoTemporada(temporadaId: string) {
+    setCarregandoResultado(true)
+    setErroResultado(null)
+    setResultadoTemporada(null)
+    try {
+      const r = await fetch(`/api/admin/fidelidade/temporadas?resultado=${encodeURIComponent(temporadaId)}`)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const data = await r.json()
+      setResultadoTemporada(data.resultado ?? null)
+    } catch {
+      setErroResultado('Erro ao carregar resultado da temporada.')
+    } finally {
+      setCarregandoResultado(false)
     }
   }
 
@@ -354,6 +405,31 @@ export default function FidelidadePage() {
                       Total de temporadas: <strong>{status.temporada.total}</strong>
                       {status.temporada.encerradas > 0 && ` (${status.temporada.encerradas} encerrada${status.temporada.encerradas > 1 ? 's' : ''})`}
                     </div>
+                    <div style={{ marginBottom: 12, padding: 10, border: '1px dashed var(--border)', borderRadius: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Prêmio da temporada (opcional)</div>
+                      <div style={{ fontSize: 11, color: 'var(--foreground-muted)', marginBottom: 8 }}>
+                        Em branco, a temporada é criada sem prêmio — o encerramento arquiva o ranking mas nunca declara vencedor.
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Descrição do prêmio (ex.: 1 Pizza Família)"
+                        value={premioDescricaoInput}
+                        onChange={(e) => setPremioDescricaoInput(e.target.value)}
+                        style={{ width: '100%', fontSize: 12, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', marginBottom: 6 }}
+                      />
+                      <input
+                        type="number"
+                        min={1}
+                        placeholder="Quantidade de premiados"
+                        value={premioQuantidadeInput}
+                        onChange={(e) => setPremioQuantidadeInput(e.target.value)}
+                        style={{ width: '100%', fontSize: 12, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', marginBottom: 6 }}
+                      />
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                        <input type="checkbox" checked={premioAprovadoInput} onChange={(e) => setPremioAprovadoInput(e.target.checked)} />
+                        Prêmio aprovado — só assim o encerramento declara vencedor
+                      </label>
+                    </div>
                     <button
                       onClick={criarTemporada30d}
                       disabled={acaoEmCurso}
@@ -371,6 +447,40 @@ export default function FidelidadePage() {
                     >
                       {acaoEmCurso ? 'Aguarde…' : 'Criar temporada de 30 dias'}
                     </button>
+                    {status.temporada.ultimaEncerradaId && (
+                      <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                        <button
+                          onClick={() => verResultadoTemporada(status.temporada.ultimaEncerradaId!)}
+                          disabled={carregandoResultado}
+                          style={{ fontSize: 12, padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'none', cursor: carregandoResultado ? 'not-allowed' : 'pointer', fontWeight: 600 }}
+                        >
+                          {carregandoResultado ? 'Carregando…' : `Ver resultado — ${status.temporada.ultimaEncerradaNome ?? status.temporada.ultimaEncerradaId}`}
+                        </button>
+                        {erroResultado && <div style={{ fontSize: 12, color: 'var(--danger)', marginTop: 6 }}>{erroResultado}</div>}
+                        {resultadoTemporada && (
+                          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--foreground-secondary)', lineHeight: 1.7 }}>
+                            <div>Encerrada em: <strong>{formatarData(resultadoTemporada.encerradaEm)}</strong></div>
+                            {resultadoTemporada.premioDescricao && <div>Prêmio: <strong>{resultadoTemporada.premioDescricao}</strong></div>}
+                            {!resultadoTemporada.vencedorDeclarado ? (
+                              <div style={{ fontStyle: 'italic', marginTop: 4 }}>
+                                Sem vencedor declarado {resultadoTemporada.premioAprovado ? '(ranking sem participantes)' : '(prêmio não foi aprovado antes do encerramento)'}.
+                              </div>
+                            ) : (
+                              <div style={{ marginTop: 4 }}>
+                                <strong>Vencedores:</strong>
+                                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                                  {resultadoTemporada.vencedores.map((v) => (
+                                    <li key={v.posicao}>
+                                      {v.posicao}º — {v.identidade.participaCampanha ? (v.identidade.nomePublico ?? `Participante ${v.posicao}`) : 'Fora da disputa (revogou depois)'} · {v.score} estrelas
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </>
                 )}
               </div>

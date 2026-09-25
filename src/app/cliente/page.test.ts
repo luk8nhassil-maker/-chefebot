@@ -313,6 +313,14 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
     expect(fonte).toContain("Ranking da temporada");
   });
 
+  test("pódio e aba Participando usam a posição própria entre participantes, nunca a do ranking geral", () => {
+    const blocoTela = fonte.slice(fonte.indexOf("function FidelidadeRankingScreen"), fonte.indexOf("return (", fonte.indexOf("function FidelidadeRankingScreen")));
+    expect(blocoTela).toContain("ranking.participantes.lista");
+    // Regressão: a versão antiga filtrava ranking.lista por participaCampanha
+    // e reaproveitava a posição geral — não pode voltar.
+    expect(blocoTela).not.toContain("lista.filter((entrada) => entrada.participaCampanha)");
+  });
+
   test("preferencias do ranking usam texto vindo do servidor e permitem revogacao total", () => {
     expect(fonte).toContain("/api/cliente/privacidade/ranking");
     expect(fonte).toContain("<span>{opcao.texto}</span>");

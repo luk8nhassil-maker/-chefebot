@@ -9,8 +9,15 @@ import { lerSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
 import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
-import { posicaoClienteRanking, obterTopRanking } from "@/lib/rankingClientes";
+import { posicaoClienteRanking, obterTopRanking, obterRankingCompleto, reindexarPorFiltro } from "@/lib/rankingClientes";
 import { projetarIdentidadesPublicasRanking } from "@/lib/rankingPrivacidade";
+import {
+  calcularVariacaoPosicao,
+  garantirSnapshotDiario,
+  obterPosicaoAnterior,
+  type SnapshotPosicoesDoDia,
+  type VariacaoPosicao,
+} from "@/lib/rankingHistorico";
 
 const TENANT_PADRAO = "default";
 
@@ -46,12 +53,32 @@ export async function GET(req: NextRequest) {
       nomePublico?: string;
       telefoneMascarado?: string;
     }[];
+    // Histórico honesto: comparação contra o snapshot diário anterior, nunca
+    // um valor inventado. `null` quando ainda não existe snapshot anterior.
+    variacaoPosicao: VariacaoPosicao | null;
+    // Ranking próprio de quem "Vale prêmio" (autorizou aparecer). Reindexado
+    // 1..N só entre participantes — nunca reaproveita a posição do ranking
+    // geral, porque quem não autorizou pode estar à frente sem disputar.
+    participantes: {
+      posicao: number | null;
+      total: number;
+      variacaoPosicao: VariacaoPosicao | null;
+      lista: {
+        posicao: number;
+        score: number;
+        eVoce: boolean;
+        participaCampanha: true;
+        nomePublico?: string;
+        telefoneMascarado?: string;
+      }[];
+    };
   } | null = null;
 
   if (temporada) {
-    const [pos, top] = await Promise.all([
+    const [pos, top, completo] = await Promise.all([
       posicaoClienteRanking(tenantId, temporada.temporadaId, clienteId),
       obterTopRanking(tenantId, temporada.temporadaId, 50),
+      obterRankingCompleto(tenantId, temporada.temporadaId),
     ]);
     if (pos) {
       const vizinhos = top.filter(
@@ -67,10 +94,15 @@ export async function GET(req: NextRequest) {
       const listaBase = top.some((e) => e.clienteId === clienteId)
         ? top
         : [...top, { clienteId, score: pos.score, posicao: pos.posicao }];
-      const identidades = await projetarIdentidadesPublicasRanking([
+      // Uma única projeção cobre o ranking geral exibido e o ranking completo
+      // usado para recalcular a posição entre participantes — evita duas
+      // rodadas de leitura de consentimento para os mesmos clientes.
+      const idsRelevantes = Array.from(new Set([
         ...listaBase.map((e) => e.clienteId),
+        ...completo.map((e) => e.clienteId),
         clienteId,
-      ]);
+      ]));
+      const identidades = await projetarIdentidadesPublicasRanking(idsRelevantes);
       const lista = listaBase.map((e) => {
         const identidade = identidades.get(e.clienteId);
         return {
@@ -82,12 +114,60 @@ export async function GET(req: NextRequest) {
           ...(identidade?.telefoneMascarado ? { telefoneMascarado: identidade.telefoneMascarado } : {}),
         };
       });
+
+      const reindexados = reindexarPorFiltro(
+        completo,
+        (id) => identidades.get(id)?.participaCampanha === true,
+      );
+      const LIMITE_PARTICIPANTES = 50;
+      const topoParticipantes = reindexados.slice(0, LIMITE_PARTICIPANTES);
+      const proprioEntreParticipantes = reindexados.find((e) => e.clienteId === clienteId) ?? null;
+      const listaParticipantesBase =
+        proprioEntreParticipantes && !topoParticipantes.some((e) => e.clienteId === clienteId)
+          ? [...topoParticipantes, proprioEntreParticipantes]
+          : topoParticipantes;
+      const listaParticipantes = listaParticipantesBase.map((e) => {
+        const identidade = identidades.get(e.clienteId);
+        return {
+          posicao: e.posicao,
+          score: e.score,
+          eVoce: e.clienteId === clienteId,
+          participaCampanha: true as const,
+          ...(identidade?.nomePublico ? { nomePublico: identidade.nomePublico } : {}),
+          ...(identidade?.telefoneMascarado ? { telefoneMascarado: identidade.telefoneMascarado } : {}),
+        };
+      });
+
+      // Snapshot diário para o histórico "subiu/desceu": grava a posição de
+      // hoje de todo mundo (só na 1ª leitura do dia, ver rankingHistorico.ts)
+      // e compara a do cliente autenticado contra o snapshot anterior real.
+      const participantesPorId = new Map(reindexados.map((e) => [e.clienteId, e.posicao]));
+      const snapshotHoje: SnapshotPosicoesDoDia = {};
+      for (const e of completo) {
+        snapshotHoje[e.clienteId] = { geral: e.posicao, participantes: participantesPorId.get(e.clienteId) ?? null };
+      }
+      const [, posicaoAnterior] = await Promise.all([
+        garantirSnapshotDiario(tenantId, temporada.temporadaId, snapshotHoje),
+        obterPosicaoAnterior(tenantId, temporada.temporadaId, clienteId),
+      ]);
+      const variacaoPosicao = calcularVariacaoPosicao(posicaoAnterior?.geral, pos.posicao);
+      const variacaoPosicaoParticipantes = proprioEntreParticipantes
+        ? calcularVariacaoPosicao(posicaoAnterior?.participantes, proprioEntreParticipantes.posicao)
+        : null;
+
       ranking = {
         posicao: pos.posicao,
         score: pos.score,
         participaCampanha: identidades.get(clienteId)?.participaCampanha ?? false,
         entorno,
         lista,
+        variacaoPosicao,
+        participantes: {
+          posicao: proprioEntreParticipantes?.posicao ?? null,
+          total: reindexados.length,
+          variacaoPosicao: variacaoPosicaoParticipantes,
+          lista: listaParticipantes,
+        },
       };
     }
   }

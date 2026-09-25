@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 let temporadaAtiva: Record<string, unknown> | null = null;
 let posicaoPorCliente = new Map<string, { posicao: number; score: number } | null>();
 let topRanking: Array<{ clienteId: string; score: number; posicao: number }> = [];
+let rankingCompleto: Array<{ clienteId: string; score: number; posicao: number }> = [];
 let identidadesPublicas = new Map<string, { participaCampanha: boolean; nomePublico: string | null; telefoneMascarado: string | null; fotoPerfilUrl: null }>();
 
 vi.mock("@/lib/clienteAuth", () => ({
@@ -39,16 +40,32 @@ vi.mock("@/lib/temporadas", () => ({
   obterTemporadaAtiva: vi.fn(async () => temporadaAtiva),
 }));
 
-vi.mock("@/lib/rankingClientes", () => ({
-  posicaoClienteRanking: vi.fn(async (_tenantId: string, _tempId: string, clienteId: string) =>
-    posicaoPorCliente.get(clienteId) ?? null,
-  ),
-  obterTopRanking: vi.fn(async () => topRanking),
-}));
+vi.mock("@/lib/rankingClientes", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/rankingClientes")>("@/lib/rankingClientes");
+  return {
+    ...actual,
+    posicaoClienteRanking: vi.fn(async (_tenantId: string, _tempId: string, clienteId: string) =>
+      posicaoPorCliente.get(clienteId) ?? null,
+    ),
+    obterTopRanking: vi.fn(async () => topRanking),
+    obterRankingCompleto: vi.fn(async () => rankingCompleto),
+  };
+});
 
 vi.mock("@/lib/rankingPrivacidade", () => ({
   projetarIdentidadesPublicasRanking: vi.fn(async () => identidadesPublicas),
 }));
+
+let posicaoAnteriorMock: { geral: number; participantes: number | null } | null = null;
+
+vi.mock("@/lib/rankingHistorico", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/rankingHistorico")>("@/lib/rankingHistorico");
+  return {
+    ...actual,
+    garantirSnapshotDiario: vi.fn(async () => {}),
+    obterPosicaoAnterior: vi.fn(async () => posicaoAnteriorMock),
+  };
+});
 
 import { GET } from "./route";
 
@@ -62,7 +79,9 @@ beforeEach(() => {
   temporadaAtiva = null;
   posicaoPorCliente = new Map();
   topRanking = [];
+  rankingCompleto = [];
   identidadesPublicas = new Map();
+  posicaoAnteriorMock = null;
 });
 
 describe("GET /api/cliente/fidelidade/painel", () => {
@@ -170,6 +189,109 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       telefoneMascarado: "(11) 9••••-1234",
     });
     expect(JSON.stringify(body)).not.toContain("outro_1");
+  });
+
+  test("posição entre participantes é recalculada, nunca herda a posição geral", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    // Geral: 1º e 2º não participam; o cliente autenticado é o 3º geral mas
+    // o 1º colocado ENTRE PARTICIPANTES (únicos dois que autorizaram).
+    posicaoPorCliente.set(clienteId, { posicao: 3, score: 100 });
+    topRanking = [
+      { clienteId: "nao_participa_1", score: 300, posicao: 1 },
+      { clienteId: "nao_participa_2", score: 200, posicao: 2 },
+      { clienteId, score: 100, posicao: 3 },
+      { clienteId: "participa_2", score: 50, posicao: 4 },
+    ];
+    rankingCompleto = topRanking;
+    identidadesPublicas = new Map([
+      ["nao_participa_1", { participaCampanha: false, nomePublico: null, telefoneMascarado: null, fotoPerfilUrl: null }],
+      ["nao_participa_2", { participaCampanha: false, nomePublico: null, telefoneMascarado: null, fotoPerfilUrl: null }],
+      [clienteId, { participaCampanha: true, nomePublico: "Você", telefoneMascarado: "(11) 9••••-0001", fotoPerfilUrl: null }],
+      ["participa_2", { participaCampanha: true, nomePublico: "Bia", telefoneMascarado: "(21) 9••••-0002", fotoPerfilUrl: null }],
+    ]);
+
+    const body = await (await GET(req("token-cli-a"))).json();
+    // Posição geral continua 3 (não é sobrescrita).
+    expect(body.ranking.posicao).toBe(3);
+    // Entre participantes, o cliente é o 1º colocado — pódio real, não geral.
+    expect(body.ranking.participantes.posicao).toBe(1);
+    expect(body.ranking.participantes.total).toBe(2);
+    expect(body.ranking.participantes.lista).toEqual([
+      { posicao: 1, score: 100, eVoce: true, participaCampanha: true, nomePublico: "Você", telefoneMascarado: "(11) 9••••-0001" },
+      { posicao: 2, score: 50, eVoce: false, participaCampanha: true, nomePublico: "Bia", telefoneMascarado: "(21) 9••••-0002" },
+    ]);
+    // Ninguém que não autorizou aparece na lista de participantes.
+    expect(JSON.stringify(body.ranking.participantes)).not.toContain("nao_participa");
+  });
+
+  test("participante fora do Top 50 geral ainda aparece com a própria posição entre participantes", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 60, score: 5 });
+    topRanking = []; // fora do Top 50 geral
+    // Ranking completo: 59 não-participantes à frente, depois o cliente.
+    rankingCompleto = [
+      ...Array.from({ length: 59 }, (_, i) => ({ clienteId: `outro_${i}`, score: 100 - i, posicao: i + 1 })),
+      { clienteId, score: 5, posicao: 60 },
+    ];
+    identidadesPublicas = new Map([
+      [clienteId, { participaCampanha: true, nomePublico: "Você", telefoneMascarado: "(11) 9••••-0001", fotoPerfilUrl: null }],
+    ]);
+
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.ranking.participantes.posicao).toBe(1);
+    expect(body.ranking.participantes.total).toBe(1);
+    const proprio = body.ranking.participantes.lista.find((e: { eVoce: boolean }) => e.eVoce);
+    expect(proprio).toMatchObject({ posicao: 1, score: 5 });
+  });
+
+  test("variacaoPosicao null quando não há snapshot anterior — nunca inventa 'manteve'", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 3, score: 100 });
+    topRanking = [{ clienteId, score: 100, posicao: 3 }];
+    rankingCompleto = topRanking;
+    identidadesPublicas.set(clienteId, { participaCampanha: false, nomePublico: null, telefoneMascarado: null, fotoPerfilUrl: null });
+    posicaoAnteriorMock = null;
+
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.ranking.variacaoPosicao).toBeNull();
+    expect(body.ranking.participantes.variacaoPosicao).toBeNull();
+  });
+
+  test("variacaoPosicao reflete subida real contra o snapshot anterior", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 2, score: 150 });
+    topRanking = [
+      { clienteId: "outro", score: 200, posicao: 1 },
+      { clienteId, score: 150, posicao: 2 },
+    ];
+    rankingCompleto = topRanking;
+    identidadesPublicas.set(clienteId, { participaCampanha: true, nomePublico: "Você", telefoneMascarado: null, fotoPerfilUrl: null });
+    identidadesPublicas.set("outro", { participaCampanha: false, nomePublico: null, telefoneMascarado: null, fotoPerfilUrl: null });
+    posicaoAnteriorMock = { geral: 5, participantes: 3 };
+
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.ranking.variacaoPosicao).toEqual({ direcao: "subiu", casas: 3 });
+    // Único participante hoje → 1º entre participantes; ontem era 3º.
+    expect(body.ranking.participantes.variacaoPosicao).toEqual({ direcao: "subiu", casas: 2 });
+  });
+
+  test("variacaoPosicao entre participantes fica null quando o cliente não participa hoje", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 1, score: 10 });
+    topRanking = [{ clienteId, score: 10, posicao: 1 }];
+    rankingCompleto = topRanking;
+    identidadesPublicas.set(clienteId, { participaCampanha: false, nomePublico: null, telefoneMascarado: null, fotoPerfilUrl: null });
+    posicaoAnteriorMock = { geral: 4, participantes: 2 };
+
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.ranking.variacaoPosicao).toEqual({ direcao: "subiu", casas: 3 });
+    expect(body.ranking.participantes.posicao).toBeNull();
+    expect(body.ranking.participantes.variacaoPosicao).toBeNull();
   });
 
   test("ranking null quando cliente não está no ranking", async () => {
