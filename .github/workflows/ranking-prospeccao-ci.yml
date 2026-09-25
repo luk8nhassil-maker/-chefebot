@@ -13,6 +13,24 @@ on:
       - "src/app/cliente/page.test.ts"
       - "src/app/api/cliente/privacidade/ranking/**"
       - "src/app/dev/ranking-prospeccao/**"
+      - "src/lib/rankingClientes.ts"
+      - "src/lib/rankingClientes.test.ts"
+      - "src/lib/rankingHistorico.ts"
+      - "src/lib/rankingHistorico.test.ts"
+      - "src/lib/rankingPrivacidade.ts"
+      - "src/lib/rankingPrivacidade.test.ts"
+      - "src/lib/temporadas.ts"
+      - "src/lib/temporadas.test.ts"
+      - "src/lib/temporadaResultado.ts"
+      - "src/lib/temporadaResultado.test.ts"
+      - "src/app/api/cliente/fidelidade/painel/route.ts"
+      - "src/app/api/cliente/fidelidade/painel/route.test.ts"
+      - "src/app/api/admin/fidelidade/temporadas/route.ts"
+      - "src/app/api/admin/fidelidade/temporadas/route.test.ts"
+      - "src/app/api/admin/fidelidade/status/route.ts"
+      - "src/app/api/admin/fidelidade/status/route.test.ts"
+      - "src/app/admin/fidelidade/page.tsx"
+      - "src/app/admin/fidelidade/page.test.ts"
       - ".github/workflows/ranking-prospeccao-ci.yml"
   workflow_dispatch:
 
@@ -52,6 +70,15 @@ jobs:
           src/app/cliente/page.test.ts
           src/app/cardapio/page.test.ts
           src/app/dev/ranking-prospeccao/page.test.ts
+          src/lib/rankingClientes.test.ts
+          src/lib/rankingHistorico.test.ts
+          src/lib/rankingPrivacidade.test.ts
+          src/lib/temporadas.test.ts
+          src/lib/temporadaResultado.test.ts
+          src/app/api/cliente/fidelidade/painel/route.test.ts
+          src/app/api/admin/fidelidade/temporadas/route.test.ts
+          src/app/api/admin/fidelidade/status/route.test.ts
+          src/app/admin/fidelidade/page.test.ts
 
       - name: Lint do patch
         run: >-
@@ -69,6 +96,21 @@ jobs:
           src/app/dev/ranking-prospeccao/page.tsx
           src/app/dev/ranking-prospeccao/RankingProspeccaoPreview.tsx
           src/app/dev/ranking-prospeccao/page.test.ts
+          src/lib/rankingClientes.ts
+          src/lib/rankingClientes.test.ts
+          src/lib/rankingHistorico.ts
+          src/lib/rankingHistorico.test.ts
+          src/lib/temporadas.ts
+          src/lib/temporadaResultado.ts
+          src/lib/temporadaResultado.test.ts
+          src/app/api/cliente/fidelidade/painel/route.ts
+          src/app/api/cliente/fidelidade/painel/route.test.ts
+          src/app/api/admin/fidelidade/temporadas/route.ts
+          src/app/api/admin/fidelidade/temporadas/route.test.ts
+          src/app/api/admin/fidelidade/status/route.ts
+          src/app/api/admin/fidelidade/status/route.test.ts
+          src/app/admin/fidelidade/page.tsx
+          src/app/admin/fidelidade/page.test.ts
 
       - name: Typecheck
         run: npx tsc --noEmit
