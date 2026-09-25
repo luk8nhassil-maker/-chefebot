@@ -112,8 +112,12 @@ describe("/pedidos — a tela não pode voltar a engolir a falha da carga inicia
     fileURLToPath(new URL("../app/pedidos/page.tsx", import.meta.url)),
     "utf-8"
   ).replace(/\r\n/g, "\n");
+  // A sonda leve de revisão (economia de leituras do Redis) moveu a
+  // interpretação da resposta, o tratamento de 401 e o desfecho de erro para
+  // carregarPedidosCompleto; carregarPedidos hoje só decide se ela é chamada.
+  // O recorte precisa cobrir as duas funções, não só o wrapper.
   const carregar = fonte.slice(
-    fonte.indexOf("const carregarPedidos ="),
+    fonte.indexOf("const carregarPedidosCompleto ="),
     fonte.indexOf("useEffect(() => {\n    const tituloOriginal")
   );
 
