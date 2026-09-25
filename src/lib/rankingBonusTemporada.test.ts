@@ -133,6 +133,34 @@ describe("estornarBonusCompeticao", () => {
   });
 });
 
+describe("concorrência", () => {
+  test("dois créditos concorrentes (eventoIds diferentes) nunca se perdem — o lock serializa o get-then-set", async () => {
+    const [r1, r2] = await Promise.all([
+      creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "concorrente-1", tipo: "missao_semanal", pontos: 30, motivo: "x" }),
+      creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "concorrente-2", tipo: "impulso_podio", pontos: 20, motivo: "x" }),
+    ]);
+    expect(r1).toBe("creditado");
+    expect(r2).toBe("creditado");
+    // Sem o lock, um "GET extrato → append → SET extrato" concorrente
+    // perderia um dos dois créditos (o segundo SET sobrescreveria o
+    // primeiro). Com o lock, a soma final tem que refletir os dois.
+    expect(await obterBonusCompeticaoDaTemporada(T, TEMP, CLI)).toBe(50);
+    const movimentos = await obterMovimentosBonusTemporada(T, TEMP, CLI);
+    expect(movimentos).toHaveLength(2);
+  });
+
+  test("crédito e estorno concorrentes de eventos diferentes nunca se pisam", async () => {
+    await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "base", tipo: "carryover", pontos: 100, motivo: "x" });
+    const [credito, estorno] = await Promise.all([
+      creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "novo", tipo: "missao_semanal", pontos: 40, motivo: "x" }),
+      estornarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoIdOriginal: "base", motivo: "x" }),
+    ]);
+    expect(credito).toBe("creditado");
+    expect(estorno).toBe("estornado");
+    expect(await obterBonusCompeticaoDaTemporada(T, TEMP, CLI)).toBe(40);
+  });
+}, 10000);
+
 describe("calcularTotalBonusTemporada / calcularTotalBonusPorTipo", () => {
   test("soma líquida nunca fica negativa mesmo com estornos que superam créditos residuais de outro tipo", () => {
     const movimentos = [
