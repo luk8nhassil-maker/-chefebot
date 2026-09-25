@@ -15,7 +15,7 @@ import { obterConfigGamificacao } from "./rankingGamificacaoConfig";
 import { calcularBonusCarryover, calcularStatusPorPosicao, type StatusTemporada } from "./rankingGamificacao";
 import { creditarBonusCompeticao } from "./rankingBonusTemporada";
 import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
-import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporada";
+import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporadaSync";
 
 /**
  * Encontra a temporada mais recentemente ENCERRADA antes da temporada atual

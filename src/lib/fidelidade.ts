@@ -4,7 +4,8 @@ import { sanitizeTelefoneCliente, clienteIdDoTelefone } from "./clientes";
 import type { PedidoSnapshotOficial } from "./pedidoSnapshot";
 import { obterRecomendacaoPresente, type RecomendacaoPresente } from "./recompensaInteligente";
 import { obterTemporadaAtiva } from "./temporadas";
-import { atualizarScoreRanking, calcularScoreDaTemporada } from "./rankingClientes";
+import { calcularScoreDaTemporada } from "./rankingClientes";
+import { projetarScoreRankingComBonus } from "./rankingScoreTemporada";
 
 export type TipoRecompensa = "pizza_gratis" | "desconto_fixo" | "desconto_percentual";
 
@@ -727,8 +728,18 @@ export async function obterExtratoPontos(clienteId: string): Promise<MovimentoPo
   return (await obterEstadoPontos(clienteId)).extrato;
 }
 
-/** Atualiza a projeção do ranking sem deixar a infraestrutura de ranking
- * bloquear o crédito ou o estorno do cliente. */
+/**
+ * Recalcula a base de estrelas da temporada e delega a escrita da projeção
+ * de ranking para o único projetor autorizado (rankingScoreTemporada.ts).
+ *
+ * Importante (correção de blocker da Gamificação V2): esta função NUNCA
+ * escreve diretamente na projeção — ela só calcula a base e repassa. Isso
+ * garante que não existe um segundo "gravador base-only" da mesma chave: o
+ * projetor sempre soma o bônus de competição atual antes de gravar, então
+ * nenhum crédito/estorno/ajuste de pontos (fidelidade legada) consegue
+ * apagar um bônus de competição já creditado. fidelidade.ts continua sem
+ * nenhuma regra de negócio de gamificação — só lê o próprio extrato.
+ */
 async function sincronizarRankingCliente(clienteId: string): Promise<void> {
   try {
     const temporada = await obterTemporadaAtiva("default");
@@ -737,7 +748,7 @@ async function sincronizarRankingCliente(clienteId: string): Promise<void> {
     const fimMs = temporada.fimEm ? new Date(temporada.fimEm).getTime() : Date.now();
     if (!Number.isFinite(inicioMs) || !Number.isFinite(fimMs)) return;
     const resultado = calcularScoreDaTemporada(await obterExtratoPontos(clienteId), inicioMs, Math.min(fimMs, Date.now()));
-    await atualizarScoreRanking(temporada.tenantId, temporada.temporadaId, clienteId, resultado.score, resultado.primeiroAtingidoEm ?? Date.now());
+    await projetarScoreRankingComBonus(temporada.tenantId, temporada.temporadaId, clienteId, resultado.score, resultado.primeiroAtingidoEm ?? Date.now());
   } catch (erro) {
     console.warn("[ChefeBot] Não foi possível atualizar a projeção do ranking", erro);
   }

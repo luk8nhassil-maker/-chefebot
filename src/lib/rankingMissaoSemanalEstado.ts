@@ -18,7 +18,7 @@ import {
 import { obterConfigGamificacao } from "./rankingGamificacaoConfig";
 import { creditarBonusCompeticao, estornarBonusCompeticao } from "./rankingBonusTemporada";
 import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
-import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporada";
+import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporadaSync";
 
 type RegistroMissaoSemanal = {
   estado: EstadoMissaoSemanal;

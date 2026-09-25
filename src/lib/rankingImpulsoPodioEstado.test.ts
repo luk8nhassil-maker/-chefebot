@@ -16,7 +16,7 @@ vi.mock("./rankingBonusTemporada", async (importActual) => {
     creditarBonusCompeticao: creditarBonusMock,
   };
 });
-vi.mock("./rankingScoreTemporada", () => ({ sincronizarScoreTemporadaComBonus: sincronizarScoreMock }));
+vi.mock("./rankingScoreTemporadaSync", () => ({ sincronizarScoreTemporadaComBonus: sincronizarScoreMock }));
 
 import { aplicarImpulsoPodioSeElegivel } from "./rankingImpulsoPodioEstado";
 

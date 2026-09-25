@@ -24,7 +24,7 @@ vi.mock("./redis", () => ({ redis: redisMock }));
 vi.mock("./rankingGamificacaoConfig", () => ({ obterConfigGamificacao: obterConfigGamificacaoMock }));
 vi.mock("./rankingBonusTemporada", () => ({ creditarBonusCompeticao: creditarBonusMock, estornarBonusCompeticao: estornarBonusMock }));
 vi.mock("./rankingGamificacaoFatos", () => ({ registrarFatoRankingGamificacao: registrarFatoMock }));
-vi.mock("./rankingScoreTemporada", () => ({ sincronizarScoreTemporadaComBonus: sincronizarScoreMock }));
+vi.mock("./rankingScoreTemporadaSync", () => ({ sincronizarScoreTemporadaComBonus: sincronizarScoreMock }));
 
 import {
   sincronizarMissaoSemanalCliente,

@@ -27,7 +27,7 @@ vi.mock("./temporadaResultado", () => ({ obterResultadoTemporada: obterResultado
 vi.mock("./rankingGamificacaoConfig", () => ({ obterConfigGamificacao: obterConfigGamificacaoMock }));
 vi.mock("./rankingBonusTemporada", () => ({ creditarBonusCompeticao: creditarBonusMock }));
 vi.mock("./rankingGamificacaoFatos", () => ({ registrarFatoRankingGamificacao: registrarFatoMock }));
-vi.mock("./rankingScoreTemporada", () => ({ sincronizarScoreTemporadaComBonus: vi.fn(async () => undefined) }));
+vi.mock("./rankingScoreTemporadaSync", () => ({ sincronizarScoreTemporadaComBonus: vi.fn(async () => undefined) }));
 
 import {
   obterTemporadaAnteriorEncerrada,

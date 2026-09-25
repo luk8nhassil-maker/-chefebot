@@ -13,7 +13,7 @@ import {
 import { obterConfigGamificacao } from "./rankingGamificacaoConfig";
 import { creditarBonusCompeticao } from "./rankingBonusTemporada";
 import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
-import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporada";
+import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporadaSync";
 
 function chaveEstado(tenantId: string, temporadaId: string, clienteId: string): string {
   return `ranking:missaoIndicacao:${tenantId}:${temporadaId}:${clienteId}`;
