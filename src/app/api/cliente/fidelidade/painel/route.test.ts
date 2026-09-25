@@ -95,15 +95,19 @@ const {
   obterBonusMock,
   aplicarCarryoverMock,
   sincronizarStatusSocialMock,
+  reconciliarTransicaoMock,
   sincronizarMissaoSemanalMock,
   obterEstadoMissaoIndicacaoMock,
   aplicarImpulsoPodioMock,
   sincronizarNivelChefMock,
+  obterStatusSocialVigenteMock,
+  sincronizarMovimentoRecenteMock,
 } = vi.hoisted(() => ({
   obterConfigGamificacaoMock: vi.fn(),
   obterBonusMock: vi.fn(async () => 0),
   aplicarCarryoverMock: vi.fn(async () => undefined),
   sincronizarStatusSocialMock: vi.fn(async () => null as { status: string | null; temporadaOrigemId: string; atribuidoEm: string } | null),
+  reconciliarTransicaoMock: vi.fn(async () => undefined),
   sincronizarMissaoSemanalMock: vi.fn(async () => ({
     status: "inativa" as "inativa" | "desbloqueada" | "consumida",
     desbloqueadaEm: null as string | null,
@@ -117,6 +121,8 @@ const {
   })),
   aplicarImpulsoPodioMock: vi.fn(async () => undefined),
   sincronizarNivelChefMock: vi.fn(async () => undefined),
+  obterStatusSocialVigenteMock: vi.fn(async (_tenantId: string, _clienteId: string) => null as { status: string | null; temporadaOrigemId: string; atribuidoEm: string } | null),
+  sincronizarMovimentoRecenteMock: vi.fn(async () => null as { variacao: { direcao: string; casas: number }; desde: string } | null),
 }));
 
 vi.mock("@/lib/rankingGamificacaoConfig", () => ({ obterConfigGamificacao: obterConfigGamificacaoMock }));
@@ -124,13 +130,17 @@ vi.mock("@/lib/rankingBonusTemporada", () => ({ obterBonusCompeticaoDaTemporada:
 vi.mock("@/lib/rankingTransicaoTemporada", () => ({
   aplicarCarryoverClienteSeNecessario: aplicarCarryoverMock,
   sincronizarStatusSocialCliente: sincronizarStatusSocialMock,
+  reconciliarTransicaoTemporada: reconciliarTransicaoMock,
+  obterStatusSocialVigente: obterStatusSocialVigenteMock,
 }));
 vi.mock("@/lib/rankingMissaoSemanalEstado", () => ({ sincronizarMissaoSemanalCliente: sincronizarMissaoSemanalMock }));
 vi.mock("@/lib/rankingMissaoIndicacaoEstado", () => ({ obterEstadoMissaoIndicacao: obterEstadoMissaoIndicacaoMock }));
 vi.mock("@/lib/rankingImpulsoPodioEstado", () => ({ aplicarImpulsoPodioSeElegivel: aplicarImpulsoPodioMock }));
 vi.mock("@/lib/rankingNivelChefEstado", () => ({ sincronizarNivelChefCliente: sincronizarNivelChefMock }));
+vi.mock("@/lib/rankingMovimentoRecenteEstado", () => ({ sincronizarMovimentoRecente: sincronizarMovimentoRecenteMock }));
 
 import { GET } from "./route";
+import { obterExtratoPontos, type MovimentoPontos } from "@/lib/fidelidade";
 
 function req(token?: string) {
   const url = "http://localhost/api/cliente/fidelidade/painel";
@@ -159,11 +169,14 @@ beforeEach(() => {
   obterConfigGamificacaoMock.mockReset().mockImplementation(async () => configGamificacaoMock);
   obterBonusMock.mockReset().mockResolvedValue(0);
   aplicarCarryoverMock.mockReset().mockResolvedValue(undefined);
+  reconciliarTransicaoMock.mockReset().mockResolvedValue(undefined);
   sincronizarStatusSocialMock.mockReset().mockResolvedValue(null);
   sincronizarMissaoSemanalMock.mockReset().mockResolvedValue({ status: "inativa", desbloqueadaEm: null, consumidaEm: null, consumidaPedidoId: null });
   obterEstadoMissaoIndicacaoMock.mockReset().mockResolvedValue({ concluida: false, concluidaEm: null, pedidoId: null });
   aplicarImpulsoPodioMock.mockReset().mockResolvedValue(undefined);
   sincronizarNivelChefMock.mockReset().mockResolvedValue(undefined);
+  obterStatusSocialVigenteMock.mockReset().mockResolvedValue(null);
+  sincronizarMovimentoRecenteMock.mockReset().mockResolvedValue(null);
 });
 
 describe("GET /api/cliente/fidelidade/painel", () => {
@@ -588,6 +601,8 @@ describe("GET /api/cliente/fidelidade/painel", () => {
         bonusCompeticao: 0,
         missaoSemanal: null,
         missaoIndicacao: null,
+        movimentoRecente: null,
+        coroaAmeacada: false,
         nivelChef: null,
       });
     });
@@ -603,6 +618,18 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       expect(body.gamificacao.missaoIndicacao).toBeNull();
       expect(body.gamificacao.nivelChef).toBeNull();
       expect(aplicarCarryoverMock).toHaveBeenCalledWith("default", temporadaAtiva, clienteId);
+    });
+
+    test("com temporada ativa, reconcilia a transição em lote ANTES da chamada por cliente (nunca depende só do próprio login)", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      await GET(req("token-cli-a"));
+      expect(reconciliarTransicaoMock).toHaveBeenCalledWith("default", temporadaAtiva);
+    });
+
+    test("sem temporada, nunca chama a reconciliação em lote", async () => {
+      temporadaAtiva = null;
+      await GET(req("token-cli-a"));
+      expect(reconciliarTransicaoMock).not.toHaveBeenCalled();
     });
 
     test("expõe o status social vigente quando a transição já foi sincronizada", async () => {
@@ -657,6 +684,106 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       const body = await res.json();
       expect(body.gamificacao.nivelChef).toBeNull();
       expect(sincronizarNivelChefMock).not.toHaveBeenCalled();
+    });
+
+    test("missão semanal ativa: batiza ultimoPedidoConfirmadoConhecido com o último pedido confirmado real do extrato", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      configGamificacaoMock.missaoSemanalAtiva = true;
+      vi.mocked(obterExtratoPontos).mockResolvedValueOnce([
+        { movimentoId: "m1", clienteId: "hashed_11900000001", tipo: "confirmado", pontos: 10, motivo: "x", createdAt: "2026-01-05T00:00:00.000Z" },
+        { movimentoId: "m2", clienteId: "hashed_11900000001", tipo: "confirmado", pontos: 10, motivo: "x", createdAt: "2026-02-10T00:00:00.000Z" },
+      ] satisfies MovimentoPontos[]);
+      await GET(req("token-cli-a"));
+      expect(sincronizarMissaoSemanalMock).toHaveBeenCalledWith(
+        expect.objectContaining({ ultimoPedidoConfirmadoConhecido: "2026-02-10T00:00:00.000Z" }),
+      );
+    });
+
+    test("missão semanal ativa mas sem nenhum pedido confirmado no extrato: batizado fica null (nunca inventa data)", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      configGamificacaoMock.missaoSemanalAtiva = true;
+      vi.mocked(obterExtratoPontos).mockResolvedValueOnce([]);
+      await GET(req("token-cli-a"));
+      expect(sincronizarMissaoSemanalMock).toHaveBeenCalledWith(
+        expect.objectContaining({ ultimoPedidoConfirmadoConhecido: null }),
+      );
+    });
+
+    test("movimento recente: repassa o resultado real de sincronizarMovimentoRecente (nunca inventa 'desde ontem')", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      const clienteId = "hashed_11900000001";
+      posicaoPorCliente.set(clienteId, { posicao: 5, score: 100 });
+      topRanking = [{ clienteId, score: 100, posicao: 5 }];
+      rankingCompleto = topRanking;
+      identidadesPublicas.set(clienteId, { participaCampanha: true, nomePublico: "Eu", telefoneMascarado: null, fotoPerfilUrl: null });
+      sincronizarMovimentoRecenteMock.mockResolvedValue({ variacao: { direcao: "subiu", casas: 2 }, desde: "2026-01-01T00:00:00.000Z" });
+      const res = await GET(req("token-cli-a"));
+      const body = await res.json();
+      expect(body.gamificacao.movimentoRecente).toEqual({ variacao: { direcao: "subiu", casas: 2 }, desde: "2026-01-01T00:00:00.000Z" });
+      // Único participante autorizado: reindexado para posicao 1 (nunca reaproveita a posicao 5 do ranking geral).
+      expect(sincronizarMovimentoRecenteMock).toHaveBeenCalledWith("default", "temp_1", clienteId, 1);
+    });
+
+    test("sem posição entre participantes, nunca chama sincronizarMovimentoRecente", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      await GET(req("token-cli-a"));
+      expect(sincronizarMovimentoRecenteMock).not.toHaveBeenCalled();
+    });
+
+    test("coroa ameaçada: true quando líder e vantagem real está dentro do ameacaPodioMaxGap configurado", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      configGamificacaoMock.ameacaPodioMaxGap = 5;
+      const clienteId = "hashed_11900000001";
+      posicaoPorCliente.set(clienteId, { posicao: 1, score: 100 });
+      topRanking = [
+        { clienteId, score: 100, posicao: 1 },
+        { clienteId: "outro_2", score: 97, posicao: 2 },
+      ];
+      rankingCompleto = topRanking;
+      identidadesPublicas.set(clienteId, { participaCampanha: true, nomePublico: "Eu", telefoneMascarado: null, fotoPerfilUrl: null });
+      identidadesPublicas.set("outro_2", { participaCampanha: true, nomePublico: "Outro", telefoneMascarado: null, fotoPerfilUrl: null });
+      const res = await GET(req("token-cli-a"));
+      const body = await res.json();
+      expect(body.gamificacao.coroaAmeacada).toBe(true);
+    });
+
+    test("coroa nunca ameaçada sem ameacaPodioMaxGap configurado (fail-closed), mesmo líder por pouco", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      const clienteId = "hashed_11900000001";
+      posicaoPorCliente.set(clienteId, { posicao: 1, score: 100 });
+      topRanking = [
+        { clienteId, score: 100, posicao: 1 },
+        { clienteId: "outro_2", score: 97, posicao: 2 },
+      ];
+      rankingCompleto = topRanking;
+      identidadesPublicas.set(clienteId, { participaCampanha: true, nomePublico: "Eu", telefoneMascarado: null, fotoPerfilUrl: null });
+      identidadesPublicas.set("outro_2", { participaCampanha: true, nomePublico: "Outro", telefoneMascarado: null, fotoPerfilUrl: null });
+      const res = await GET(req("token-cli-a"));
+      const body = await res.json();
+      expect(body.gamificacao.coroaAmeacada).toBe(false);
+    });
+
+    test("status social de OUTROS membros do Top 10 aparece na lista de participantes, não só do próprio cliente", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      const clienteId = "hashed_11900000001";
+      posicaoPorCliente.set(clienteId, { posicao: 5, score: 100 });
+      topRanking = [
+        { clienteId: "outro_1", score: 500, posicao: 1 },
+        { clienteId, score: 100, posicao: 5 },
+      ];
+      rankingCompleto = topRanking;
+      identidadesPublicas.set("outro_1", { participaCampanha: true, nomePublico: "Campeão Antigo", telefoneMascarado: null, fotoPerfilUrl: null });
+      identidadesPublicas.set(clienteId, { participaCampanha: true, nomePublico: "Eu", telefoneMascarado: null, fotoPerfilUrl: null });
+      obterStatusSocialVigenteMock.mockImplementation(async (_tenantId: string, id: string) =>
+        id === "outro_1" ? { status: "campeao", temporadaOrigemId: "temp_0", atribuidoEm: "x" } : null,
+      );
+      const res = await GET(req("token-cli-a"));
+      const body = await res.json();
+      // Só 2 participantes autorizados: reindexado 1..2 entre eles (nunca reaproveita a posicao 5 do ranking geral).
+      const entradaOutro = body.ranking.participantes.lista.find((e: { posicao: number }) => e.posicao === 1);
+      expect(entradaOutro.statusSocial).toBe("campeao");
+      const entradaPropria = body.ranking.participantes.lista.find((e: { posicao: number }) => e.posicao === 2);
+      expect(entradaPropria.statusSocial).toBeUndefined();
     });
   });
 });

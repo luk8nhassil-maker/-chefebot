@@ -77,6 +77,28 @@ function montarRanking(params: {
   };
 }
 
+/**
+ * Sobrepõe selos sociais (Campeão/Prata/Bronze/Elite) em posições específicas
+ * de `ranking.participantes.lista` — usado pelos cenários V3 que mostram o
+ * selo de OUTROS membros do Top 10, não só do próprio cliente (correção de
+ * blocker da auditoria do #446). Nunca reescreve `eVoce`/score, só anexa o
+ * campo que o servidor real também só anexa (painel/route.ts).
+ */
+function comStatusSocialNosParticipantes(
+  ranking: RankingCompleto,
+  porPosicao: Record<number, NonNullable<PainelGamificacao["statusSocial"]>>,
+): RankingCompleto {
+  return {
+    ...ranking,
+    participantes: {
+      ...ranking.participantes,
+      lista: ranking.participantes.lista.map((entrada) =>
+        porPosicao[entrada.posicao] ? { ...entrada, statusSocial: porPosicao[entrada.posicao] } : entrada,
+      ),
+    },
+  };
+}
+
 const TEMPORADA_PADRAO: TemporadaCompleta = {
   nome: "Temporada Preview",
   diasRestantes: 18,
@@ -126,6 +148,8 @@ const GAMIFICACAO_NEUTRA: PainelGamificacao = {
   missaoSemanal: null,
   missaoIndicacao: null,
   nivelChef: null,
+  movimentoRecente: null,
+  coroaAmeacada: false,
 };
 
 const CENARIOS: Cenario[] = [
@@ -428,10 +452,239 @@ const CENARIOS: Cenario[] = [
         missaoSemanal: { status: "desbloqueada" },
         missaoIndicacao: { concluida: false },
         nivelChef: { nivel: 4, nome: "Chef Executivo", xpAtual: 1450, xpProximoNivel: null },
+        movimentoRecente: { variacao: { direcao: "subiu", casas: 2 }, desde: "2026-09-20T12:00:00.000Z" },
+        coroaAmeacada: false,
       },
     },
   },
+
+  // -------------------------------------------------------------------
+  // Preview V3 — cenários novos da auditoria de hardening do #446
+  // (16 cenários abaixo, mantendo os 26 originais intactos acima).
+  // -------------------------------------------------------------------
 ];
+
+/** Top 12 participantes reais para os cenários V3 que precisam de posições
+ * além do #7 (Elite #10, #11 perseguindo o Top 10). */
+const PARTICIPANTES_TOP12: ParticipanteFixture[] = [
+  { nome: "Ana", telefone: "(11) 9••••-4201", score: 90 },
+  { nome: "Bruno", telefone: "(12) 9••••-1002", score: 82 },
+  { nome: "Carlos", telefone: "(21) 9••••-1188", score: 75 },
+  { nome: "Diana", telefone: "(22) 9••••-2233", score: 68 },
+  { nome: "Marina", telefone: "(31) 9••••-0777", score: 60 },
+  { nome: "Rafael", telefone: "(41) 9••••-9863", score: 52 },
+  { nome: "Sofia", telefone: "(42) 9••••-3344", score: 45 },
+  { nome: "Lucas", telefone: "(99) 9••••-9991", score: 38 },
+  { nome: "Julia", telefone: "(51) 9••••-4426", score: 30 },
+  { nome: "Otavio", telefone: "(61) 9••••-2231", score: 22 },
+  { nome: "Beatriz", telefone: "(71) 9••••-5566", score: 18 },
+  { nome: "Tomas", telefone: "(81) 9••••-7788", score: 12 },
+];
+
+const LIDER_GAP_PEQUENO: ParticipanteFixture[] = [
+  { nome: "Você", telefone: null, score: 50 },
+  { nome: "Rafael", telefone: "(41) 9••••-9863", score: 47 },
+  { nome: "Julia", telefone: "(51) 9••••-4426", score: 30 },
+];
+
+const LIDER_GAP_GRANDE: ParticipanteFixture[] = [
+  { nome: "Você", telefone: null, score: 80 },
+  { nome: "Rafael", telefone: "(41) 9••••-9863", score: 20 },
+  { nome: "Julia", telefone: "(51) 9••••-4426", score: 12 },
+];
+
+const CENARIOS_V3: Cenario[] = [
+  {
+    id: "v3-selo-outro-campeao-podium",
+    titulo: "27. Selo Campeão em OUTRO participante do pódio",
+    detalhe: "O #1 é outro cliente (não você) — o selo Campeão aparece nele mesmo sem você estar logado como esse cliente.",
+    props: {
+      ranking: comStatusSocialNosParticipantes(
+        montarRanking({ participantes: PARTICIPANTES_TOP12, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+        { 1: "campeao" },
+      ),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: GAMIFICACAO_NEUTRA,
+    },
+  },
+  {
+    id: "v3-selo-outro-elite-pos4",
+    titulo: "28. Selo Elite em outro participante — posição #4",
+    detalhe: "Elite (Top 4-10 da temporada anterior) exibido em quem está na posição #4 agora, não em você.",
+    props: {
+      ranking: comStatusSocialNosParticipantes(
+        montarRanking({ participantes: PARTICIPANTES_TOP12, voceIndex: 6, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+        { 4: "elite" },
+      ),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: GAMIFICACAO_NEUTRA,
+    },
+  },
+  {
+    id: "v3-selo-outro-elite-pos10",
+    titulo: "29. Selo Elite em outro participante — posição #10 (borda do Top 10)",
+    detalhe: "Última posição que ainda recebe selo Elite — #11 (cenário seguinte) nunca recebe selo nenhum.",
+    props: {
+      ranking: comStatusSocialNosParticipantes(
+        montarRanking({ participantes: PARTICIPANTES_TOP12, voceIndex: 6, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+        { 10: "elite" },
+      ),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: GAMIFICACAO_NEUTRA,
+    },
+  },
+  {
+    id: "v3-perseguindo-top10-pos11",
+    titulo: "30. Você é #11 — perseguindo o Top 10",
+    detalhe: "Fora do Top 10 por pouco: a disputa mostra a distância real até o #10, nunca um selo (selo só existe de #1 a #10).",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_TOP12, voceIndex: 10, variacaoPosicao: { direcao: "subiu", casas: 1 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: GAMIFICACAO_NEUTRA,
+    },
+  },
+  {
+    id: "v3-coroa-sem-ameaca-config",
+    titulo: "31. Defenda sua coroa — sem ameaça configurada",
+    detalhe: "Você lidera; sem ameacaPodioMaxGap configurado pelo admin, mostra só a distância neutra até o #2 (fail-closed).",
+    props: {
+      ranking: montarRanking({ participantes: LIDER_GAP_PEQUENO, voceIndex: 0, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, coroaAmeacada: false },
+    },
+  },
+  {
+    id: "v3-coroa-ameacada",
+    titulo: "32. Coroa ameaçada! (config real + vantagem pequena)",
+    detalhe: "Admin configurou ameacaPodioMaxGap e a vantagem real (3 Estrelas) está dentro do limite — alerta aparece.",
+    props: {
+      ranking: montarRanking({ participantes: LIDER_GAP_PEQUENO, voceIndex: 0, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, coroaAmeacada: true },
+    },
+  },
+  {
+    id: "v3-coroa-config-mas-folgada",
+    titulo: "33. Coroa com config ativa mas vantagem folgada — sem alerta",
+    detalhe: "Mesmo com ameacaPodioMaxGap configurado, uma vantagem grande (60 Estrelas) nunca mostra 'ameaçada' — nunca alarme falso.",
+    props: {
+      ranking: montarRanking({ participantes: LIDER_GAP_GRANDE, voceIndex: 0, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, coroaAmeacada: false },
+    },
+  },
+  {
+    id: "v3-missao-indicacao-card-incompleta",
+    titulo: "34. Missão de indicação — card visível, 0/1",
+    detalhe: "Card 'MISSÃO DA TEMPORADA' aparece direto na tela, sem precisar abrir o sheet 'Quero subir'.",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, missaoIndicacao: { concluida: false } },
+    },
+  },
+  {
+    id: "v3-missao-indicacao-card-concluida",
+    titulo: "35. Missão de indicação — card visível, 1/1 ✓",
+    detalhe: "Mesmo card, agora mostrando conclusão real após a primeira compra confirmada do indicado.",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, missaoIndicacao: { concluida: true } },
+    },
+  },
+  {
+    id: "v3-missao-semanal-cliente-antigo",
+    titulo: "36. Caçada ao Pódio para cliente ANTIGO (pedido antes da feature existir)",
+    detalhe: "Batizado (backdating) usa a data real do último pedido confirmado no extrato — nunca fica bloqueado para sempre por 'nunca ter um pedido elegível registrado'.",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, missaoSemanal: { status: "desbloqueada" } },
+    },
+  },
+  {
+    id: "v3-nivel-progresso-parcial",
+    titulo: "37. Nível de Chef — barra de progresso parcial",
+    detalhe: "XP atual no meio do caminho até o próximo nível — barra reflete a fração real (nunca 0% logo após subir de nível).",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, nivelChef: { nivel: 2, nome: "Cozinheiro", xpAtual: 250, xpProximoNivel: 500 } },
+    },
+  },
+  {
+    id: "v3-nivel-maximo",
+    titulo: "38. Nível de Chef — nível máximo atingido",
+    detalhe: "Sem próximo nível configurado: barra cheia e texto 'Nível máximo atingido', nunca um XP restante inventado.",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, nivelChef: { nivel: 5, nome: "Lenda da Cozinha", xpAtual: 9999, xpProximoNivel: null } },
+    },
+  },
+  {
+    id: "v3-movimento-recente-subiu",
+    titulo: "39. Movimento recente — ▲ desde sua última visita",
+    detalhe: "Conceito separado do histórico diário: compara com a última vez que VOCÊ abriu o painel, nunca com 'ontem'.",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, movimentoRecente: { variacao: { direcao: "subiu", casas: 3 }, desde: "2026-09-18T09:00:00.000Z" } },
+    },
+  },
+  {
+    id: "v3-movimento-recente-desceu",
+    titulo: "40. Movimento recente — ▼ desde sua última visita",
+    detalhe: "Mesmo conceito, direção de queda — sempre com evidência real da visita anterior, nunca uma data inventada.",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, movimentoRecente: { variacao: { direcao: "desceu", casas: 1 }, desde: "2026-09-19T14:30:00.000Z" } },
+    },
+  },
+  {
+    id: "v3-carryover-sem-login-anterior",
+    titulo: "41. Carryover aplicado sem depender do login do vencedor",
+    detalhe: "Bônus de largada e selo social já refletidos na PRIMEIRA visita da temporada — a reconciliação em lote roda a partir de QUALQUER leitura do painel, nunca espera o próprio Top 10 logar.",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, statusSocial: "bronze", bonusCompeticao: 12 },
+    },
+  },
+  {
+    id: "v3-podium-selos-multiplos",
+    titulo: "42. Pódio com 3 selos diferentes, todos de outros participantes",
+    detalhe: "Campeão, Prata e Bronze aparecem simultaneamente em quem ocupa #1/#2/#3 — você está fora do pódio, sem selo nenhum.",
+    props: {
+      ranking: comStatusSocialNosParticipantes(
+        montarRanking({ participantes: PARTICIPANTES_TOP12, voceIndex: 6, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+        { 1: "campeao", 2: "prata", 3: "bronze" },
+      ),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: GAMIFICACAO_NEUTRA,
+    },
+  },
+];
+
+CENARIOS.push(...CENARIOS_V3);
 
 export default function RankingRetencaoPreview() {
   const [cenario, setCenario] = useState(CENARIOS[0]);

@@ -7,7 +7,7 @@ import "server-only";
 import { calcularImpulsoPodioDisponivel } from "./rankingGamificacao";
 import { obterConfigGamificacao } from "./rankingGamificacaoConfig";
 import { calcularTotalBonusPorTipo, creditarBonusCompeticao, obterMovimentosBonusTemporada } from "./rankingBonusTemporada";
-import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporada";
+import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporadaSync";
 
 export async function aplicarImpulsoPodioSeElegivel(params: {
   tenantId: string;

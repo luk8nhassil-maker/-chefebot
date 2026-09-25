@@ -30,6 +30,12 @@ export type ConfigGamificacao = {
   // Nível de Chef — progressão permanente, separada do ranking da temporada.
   nivelChefAtivo: boolean;
   nivelChefLimiares: LimiarNivelChef[];
+
+  // "Coroa ameaçada" — vantagem máxima (em Estrelas) do líder sobre o #2
+  // para a UI poder afirmar isso. Fail-closed: `0` (padrão) desliga a
+  // mecânica — a UI mostra só a distância neutra, nunca inventa uma
+  // ameaça sem essa condição matemática configurada pelo admin.
+  ameacaPodioMaxGap: number;
 };
 
 export const CONFIG_GAMIFICACAO_PADRAO: ConfigGamificacao = {
@@ -45,6 +51,7 @@ export const CONFIG_GAMIFICACAO_PADRAO: ConfigGamificacao = {
   carryoverTabela: [],
   nivelChefAtivo: false,
   nivelChefLimiares: [],
+  ameacaPodioMaxGap: 0,
 };
 
 const CHAVE_CONFIG = "config:ranking:gamificacao";

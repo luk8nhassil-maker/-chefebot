@@ -19,6 +19,10 @@ const {
   consumirMissaoSemanalMock,
   reverterMissaoSemanalMock,
   concluirMissaoIndicacaoMock,
+  reverterMissaoIndicacaoMock,
+  registrarConversaoIndicacaoMock,
+  obterConversaoIndicacaoMock,
+  estornarEstrelasIndicacaoMock,
 } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   return {
@@ -40,6 +44,10 @@ const {
     consumirMissaoSemanalMock: vi.fn(async (_p: unknown) => ({ consumida: false, bonusCreditado: 0 })),
     reverterMissaoSemanalMock: vi.fn(async (_pedidoId: string, _motivo: string) => undefined),
     concluirMissaoIndicacaoMock: vi.fn(async (_p: unknown) => ({ concluida: false, bonusCreditado: 0 })),
+    reverterMissaoIndicacaoMock: vi.fn(async (_pedidoId: string, _motivo: string) => undefined),
+    registrarConversaoIndicacaoMock: vi.fn(async (_p: unknown) => undefined),
+    obterConversaoIndicacaoMock: vi.fn(async (_pedidoId: string) => null as { indicadorId: string; indicadoId: string; pedidoId: string } | null),
+    estornarEstrelasIndicacaoMock: vi.fn(async (_p: unknown) => "estornado" as const),
   };
 });
 
@@ -88,6 +96,12 @@ vi.mock("./indicacaoToken", () => ({
 vi.mock("./estrelasIndicacao", () => ({
   creditarEstrelasIndicacaoValida: creditarIndicacaoMock,
   creditarEstrelaApoioRecorrente: creditarApoioMock,
+  estornarEstrelasIndicacaoValida: estornarEstrelasIndicacaoMock,
+}));
+
+vi.mock("./rankingIndicacaoConversao", () => ({
+  registrarConversaoIndicacao: registrarConversaoIndicacaoMock,
+  obterConversaoIndicacaoDoPedido: obterConversaoIndicacaoMock,
 }));
 
 vi.mock("./expedienteOperacional", () => ({
@@ -110,6 +124,7 @@ vi.mock("./rankingMissaoSemanalEstado", () => ({
 
 vi.mock("./rankingMissaoIndicacaoEstado", () => ({
   concluirMissaoIndicacaoNoPedido: concluirMissaoIndicacaoMock,
+  reverterMissaoIndicacaoDoPedido: reverterMissaoIndicacaoMock,
 }));
 
 import {
@@ -148,6 +163,10 @@ beforeEach(() => {
   consumirMissaoSemanalMock.mockReset().mockResolvedValue({ consumida: false, bonusCreditado: 0 });
   reverterMissaoSemanalMock.mockReset().mockResolvedValue(undefined);
   concluirMissaoIndicacaoMock.mockReset().mockResolvedValue({ concluida: false, bonusCreditado: 0 });
+  reverterMissaoIndicacaoMock.mockReset().mockResolvedValue(undefined);
+  registrarConversaoIndicacaoMock.mockReset().mockResolvedValue(undefined);
+  obterConversaoIndicacaoMock.mockReset().mockResolvedValue(null);
+  estornarEstrelasIndicacaoMock.mockReset().mockResolvedValue("estornado");
 });
 
 describe("processarEfeitosPedidoEntregue", () => {
@@ -325,6 +344,34 @@ describe("efeito gamificacao (pedido cancelado) — reversão da missão semanal
 
     expect(reverterMissaoSemanalMock).not.toHaveBeenCalled();
   });
+
+  test("cancelamento também tenta reverter a missão de indicação pelo mesmo pedidoId", async () => {
+    const pedido = { ...pedidoEntregue, id: "ped_cancelado", status: "cancelado", statusAnterior: "entregue" };
+    await processarEfeitosPedidoCancelado(pedido);
+    expect(reverterMissaoIndicacaoMock).toHaveBeenCalledWith("ped_cancelado", expect.stringContaining("ped_cancelado"));
+  });
+
+  test("CANCELAMENTO TARDIO DE INDICAÇÃO: pedido com conversão registrada estorna as estrelas base do indicador", async () => {
+    const pedido = { ...pedidoEntregue, id: "ped_cancelado", status: "cancelado", statusAnterior: "entregue" };
+    obterConversaoIndicacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", indicadoId: "cli_canonico", pedidoId: "ped_cancelado" });
+
+    await processarEfeitosPedidoCancelado(pedido);
+
+    expect(estornarEstrelasIndicacaoMock).toHaveBeenCalledWith(expect.objectContaining({
+      indicadorId: "cli_indicador",
+      indicadoId: "cli_canonico",
+      pedidoId: "ped_cancelado",
+    }));
+  });
+
+  test("sem migalha de conversão (pedido nunca gerou indicação), nunca tenta estornar estrelas de indicação", async () => {
+    const pedido = { ...pedidoEntregue, id: "ped_cancelado", status: "cancelado", statusAnterior: "entregue" };
+    obterConversaoIndicacaoMock.mockResolvedValue(null);
+
+    await processarEfeitosPedidoCancelado(pedido);
+
+    expect(estornarEstrelasIndicacaoMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("efeito indicacao", () => {
@@ -398,6 +445,32 @@ describe("efeito indicacao", () => {
       clienteId: "cli_indicador",
       pedidoId: "ped_entregue",
     }));
+  });
+
+  test("crédito real sempre registra a migalha de conversão (indicador/indicado/pedido) para cancelamento tardio", async () => {
+    obterRelacaoMock.mockResolvedValue(null);
+    obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    registrarRelacaoMock.mockResolvedValue("registrado");
+    creditarIndicacaoMock.mockResolvedValue("creditado");
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(registrarConversaoIndicacaoMock).toHaveBeenCalledWith(expect.objectContaining({
+      indicadorId: "cli_indicador",
+      indicadoId: "cli_canonico",
+      pedidoId: "ped_entregue",
+    }));
+  });
+
+  test("'ja_creditado' (retry) nunca registra a migalha de conversão de novo", async () => {
+    obterRelacaoMock.mockResolvedValue(null);
+    obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    registrarRelacaoMock.mockResolvedValue("registrado");
+    creditarIndicacaoMock.mockResolvedValue("ja_creditado");
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(registrarConversaoIndicacaoMock).not.toHaveBeenCalled();
   });
 
   test("crédito real sem temporada ativa nunca tenta concluir a missão da temporada (fail-closed)", async () => {
