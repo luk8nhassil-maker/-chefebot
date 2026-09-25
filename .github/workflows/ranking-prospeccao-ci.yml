@@ -1,0 +1,82 @@
+name: ranking-prospeccao-ci
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/rankingProspeccao.ts"
+      - "src/lib/rankingProspeccao.test.ts"
+      - "src/components/RankingInviteModal.tsx"
+      - "src/components/RankingInviteModal.test.ts"
+      - "src/app/cardapio/page.tsx"
+      - "src/app/cardapio/page.test.ts"
+      - "src/app/cliente/page.tsx"
+      - "src/app/cliente/page.test.ts"
+      - "src/app/api/cliente/privacidade/ranking/**"
+      - "src/app/dev/ranking-prospeccao/**"
+      - ".github/workflows/ranking-prospeccao-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ranking-prospeccao-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERCEL_ENV: "preview"
+    steps:
+      - name: Checkout do SHA validado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Testes focados
+        run: >-
+          npm test --
+          src/lib/rankingProspeccao.test.ts
+          src/components/RankingInviteModal.test.ts
+          src/app/api/cliente/privacidade/ranking/route.test.ts
+          src/app/cliente/page.test.ts
+          src/app/cardapio/page.test.ts
+          src/app/dev/ranking-prospeccao/page.test.ts
+
+      - name: Lint do patch
+        run: >-
+          npm run lint --
+          src/lib/rankingProspeccao.ts
+          src/lib/rankingProspeccao.test.ts
+          src/components/RankingInviteModal.tsx
+          src/components/RankingInviteModal.test.ts
+          src/app/api/cliente/privacidade/ranking/route.ts
+          src/app/api/cliente/privacidade/ranking/route.test.ts
+          src/app/cliente/page.tsx
+          src/app/cliente/page.test.ts
+          src/app/cardapio/page.tsx
+          src/app/cardapio/page.test.ts
+          src/app/dev/ranking-prospeccao/page.tsx
+          src/app/dev/ranking-prospeccao/RankingProspeccaoPreview.tsx
+          src/app/dev/ranking-prospeccao/page.test.ts
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Suite completa
+        run: npm test
+
+      - name: Build de producao
+        run: npm run build

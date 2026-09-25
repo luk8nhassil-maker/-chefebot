@@ -1506,3 +1506,33 @@ describe("Ingredientes + busca no cardápio do cliente (sabores/produtos)", () =
     expect(fonte).toContain('placeholder="Buscar produto..."');
   });
 });
+
+
+describe("/cardapio — prospeccao de ranking sem competir com pedido/pagamento", () => {
+  test("pedido concluido continua indo imediatamente para sc-done", () => {
+    expect(fonte).toContain('go("sc-done")');
+    expect(fonte).toContain("avaliarConviteRankingPosPedido");
+  });
+
+  test("Pix pendente nao oferece ranking; convite so e avaliado quando pagamento vira pago", () => {
+    expect(fonte).not.toContain("Quer que essa compra conte para sua fidelidade?");
+    expect(fonte).toContain('statusPixCliente !== "pago"');
+    expect(fonte).toContain('void avaliarConviteRankingPosPedido("pago")');
+  });
+
+  test("Talvez depois suprime novas abordagens somente na sessao atual", () => {
+    expect(fonte).toContain("RANKING_CONVITE_ADIADO_SESSION_KEY");
+    expect(fonte).toContain("adiarConviteRankingNestaSessao");
+    expect(fonte).not.toContain("localStorage.setItem(RANKING_CONVITE_ADIADO_SESSION_KEY");
+  });
+
+  test("cardapio nunca grava consentimento do ranking; apenas encaminha para /cliente", () => {
+    const inicio = fonte.indexOf("const avaliarConviteRankingPosPedido");
+    const fim = fonte.indexOf("const adiarConviteRankingNestaSessao", inicio);
+    const bloco = fonte.slice(inicio, fim);
+    expect(fonte).toContain('window.location.href = "/cliente?fromOrder=1"');
+    expect(bloco).toContain('fetch("/api/cliente/privacidade/ranking"');
+    expect(bloco).not.toContain("PATCH");
+    expect(bloco).not.toContain("DELETE");
+  });
+});

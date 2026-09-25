@@ -418,3 +418,18 @@ describe("/cliente — Correções PR #427: textos comerciais, estados vazios, P
     expect(blocoUseEffect).not.toContain("POST");
   });
 });
+
+
+describe("/cliente — prospeccao segura do Ranking no pos-pedido", () => {
+  test("participacao efetiva vem do servidor, nao do estado bruto de uma finalidade", () => {
+    expect(fonte).toContain("preferencias?.participaCampanha === true");
+    expect(fonte).not.toContain("preferencias?.finalidades.some((item) => item.estado === 'concedido')");
+  });
+
+  test("cliente que ja participa vai direto ao ranking quando chega do pedido", () => {
+    const bloco = fonte.slice(fonte.indexOf("function abrirPontos"), fonte.indexOf("function limparVinculo"));
+    expect(bloco).toContain("if (preferencias?.participaCampanha === true)");
+    expect(bloco).toContain("setMobilePanel('ranking')");
+    expect(bloco).toContain("setRankingConsentModal(true)");
+  });
+});

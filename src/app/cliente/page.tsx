@@ -72,6 +72,7 @@ type PainelFidelidade = {
 type FinalidadePrivacidadeRanking = 'ranking_primeiro_nome' | 'ranking_telefone_mascarado' | 'ranking_foto_perfil'
 
 type PreferenciasPrivacidadeRanking = {
+  participaCampanha: boolean
   finalidades: Array<{
     finalidade: FinalidadePrivacidadeRanking
     texto: string | null
@@ -286,6 +287,7 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
       {modalRankingConsentimento && (
         <RankingConsentModal
           privacidade={{
+            participaCampanha: false,
             finalidades: [
               { finalidade: 'ranking_primeiro_nome', texto: 'Nome', textoVersao: 'preview-v1', disponivel: true, motivoIndisponivel: null, estado: 'revogado', atualizadoEm: null },
               { finalidade: 'ranking_telefone_mascarado', texto: 'Telefone', textoVersao: 'preview-v1', disponivel: true, motivoIndisponivel: null, estado: 'revogado', atualizadoEm: null },
@@ -791,7 +793,7 @@ export default function ClientePage() {
   async function abrirRanking() {
     setRankingConsentModal(true)
     const preferencias = await carregarPrivacidadeRanking()
-    const jaParticipa = preferencias?.finalidades.some((item) => item.estado === 'concedido') ?? false
+    const jaParticipa = preferencias?.participaCampanha === true
     if (jaParticipa) {
       setRankingConsentModal(false)
       setMobilePanel('ranking')
@@ -813,7 +815,10 @@ export default function ClientePage() {
       }, sessaoMemRef.current)
       const data = await res.json().catch(() => ({}))
       if (!res.ok || !data.finalidades) throw new Error('preferencia_nao_salva')
-      setPrivacidadeRanking({ finalidades: data.finalidades })
+      setPrivacidadeRanking({
+        finalidades: data.finalidades,
+        participaCampanha: data.participaCampanha === true,
+      })
       await carregarPainel()
       setPrivacidadeSalvando(null)
       return true
@@ -842,7 +847,10 @@ export default function ClientePage() {
       const res = await fetchCliente('/api/cliente/privacidade/ranking', { method: 'DELETE' }, sessaoMemRef.current)
       const data = await res.json().catch(() => ({}))
       if (!res.ok || !data.finalidades) throw new Error('preferencias_nao_revogadas')
-      setPrivacidadeRanking({ finalidades: data.finalidades })
+      setPrivacidadeRanking({
+        finalidades: data.finalidades,
+        participaCampanha: data.participaCampanha === true,
+      })
       await carregarPainel()
       setMobilePanel(null)
     } catch {
@@ -888,8 +896,11 @@ export default function ClientePage() {
     carregarPrivacidadeRanking().then((preferencias) => {
       if (!convitePosPedidoRef.current) return
       convitePosPedidoRef.current = false
-      const jaParticipa = preferencias?.finalidades.some((item) => item.estado === 'concedido') ?? false
-      if (!jaParticipa) setRankingConsentModal(true)
+      if (preferencias?.participaCampanha === true) {
+        setMobilePanel('ranking')
+      } else {
+        setRankingConsentModal(true)
+      }
     })
     // Processa indicação capturada antes do login (cf_ref)
     try {
