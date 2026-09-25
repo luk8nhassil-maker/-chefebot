@@ -15,6 +15,10 @@ const {
   registrarRelacaoMock,
   creditarIndicacaoMock,
   creditarApoioMock,
+  obterTemporadaAtivaMock,
+  consumirMissaoSemanalMock,
+  reverterMissaoSemanalMock,
+  concluirMissaoIndicacaoMock,
 } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   return {
@@ -26,12 +30,16 @@ const {
     resgateMock: vi.fn(async () => undefined),
     reversaoJornadaMock: vi.fn(async () => ({ ok: true, pendenciaAberta: false })),
     liberarRecompensaMock: vi.fn(async () => undefined),
-    obterExtratoPontosMock: vi.fn(async () => [{ pedidoId: "ped_cancelado", tipo: "confirmado" }] as Array<{ pedidoId?: string; tipo: string }>),
+    obterExtratoPontosMock: vi.fn(async () => [{ pedidoId: "ped_cancelado", tipo: "confirmado" }] as Array<{ pedidoId?: string; tipo: string; pontos?: number }>),
     obterRelacaoMock: vi.fn(async () => null as { indicadorId: string; criadoEm: string } | null),
     obterCandidaturaMock: vi.fn(async () => null as { indicadorId: string; criadoEm: string } | null),
     registrarRelacaoMock: vi.fn(async () => "ja_existe" as "registrado" | "ja_existe" | "self_referral"),
     creditarIndicacaoMock: vi.fn(async () => undefined as "creditado" | "ja_creditado" | "nao_elegivel" | undefined),
     creditarApoioMock: vi.fn(async () => undefined),
+    obterTemporadaAtivaMock: vi.fn(async () => null as { temporadaId: string; tenantId: string } | null),
+    consumirMissaoSemanalMock: vi.fn(async (_p: unknown) => ({ consumida: false, bonusCreditado: 0 })),
+    reverterMissaoSemanalMock: vi.fn(async (_pedidoId: string, _motivo: string) => undefined),
+    concluirMissaoIndicacaoMock: vi.fn(async (_p: unknown) => ({ concluida: false, bonusCreditado: 0 })),
   };
 });
 
@@ -91,6 +99,19 @@ vi.mock("./historicoAnalitico", () => ({
   estornarEventoAnalitico: vi.fn(async () => undefined),
 }));
 
+vi.mock("./temporadas", () => ({
+  obterTemporadaAtiva: obterTemporadaAtivaMock,
+}));
+
+vi.mock("./rankingMissaoSemanalEstado", () => ({
+  consumirMissaoSemanalNoPedido: consumirMissaoSemanalMock,
+  reverterMissaoSemanalDoPedido: reverterMissaoSemanalMock,
+}));
+
+vi.mock("./rankingMissaoIndicacaoEstado", () => ({
+  concluirMissaoIndicacaoNoPedido: concluirMissaoIndicacaoMock,
+}));
+
 import {
   obterPendenciasEfeitosFidelidade,
   processarEfeitosPedidoCancelado,
@@ -123,6 +144,10 @@ beforeEach(() => {
   registrarRelacaoMock.mockReset().mockResolvedValue("ja_existe");
   creditarIndicacaoMock.mockReset().mockResolvedValue(undefined);
   creditarApoioMock.mockReset().mockResolvedValue(undefined);
+  obterTemporadaAtivaMock.mockReset().mockResolvedValue(null);
+  consumirMissaoSemanalMock.mockReset().mockResolvedValue({ consumida: false, bonusCreditado: 0 });
+  reverterMissaoSemanalMock.mockReset().mockResolvedValue(undefined);
+  concluirMissaoIndicacaoMock.mockReset().mockResolvedValue({ concluida: false, bonusCreditado: 0 });
 });
 
 describe("processarEfeitosPedidoEntregue", () => {
@@ -225,6 +250,83 @@ describe("processarEfeitosPedidoCancelado", () => {
   });
 });
 
+describe("efeito gamificacao (pedido entregue)", () => {
+  test("sem temporada ativa, nunca consome a missão semanal (fail-closed)", async () => {
+    obterTemporadaAtivaMock.mockResolvedValue(null);
+    obterExtratoPontosMock.mockResolvedValue([{ pedidoId: "ped_entregue", tipo: "confirmado", pontos: 50 }]);
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(consumirMissaoSemanalMock).not.toHaveBeenCalled();
+  });
+
+  test("sem crédito de pontos para ESTE pedidoId exato, nunca consome a missão", async () => {
+    obterTemporadaAtivaMock.mockResolvedValue({ temporadaId: "temp_1", tenantId: "default" });
+    // extrato sem nenhum movimento para "ped_entregue" — nunca inventa crédito
+    obterExtratoPontosMock.mockResolvedValue([{ pedidoId: "outro_pedido", tipo: "confirmado", pontos: 50 }]);
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(consumirMissaoSemanalMock).not.toHaveBeenCalled();
+  });
+
+  test("com temporada ativa e crédito do pedido exato, consome a missão semanal com as estrelas base do PEDIDO", async () => {
+    obterTemporadaAtivaMock.mockResolvedValue({ temporadaId: "temp_1", tenantId: "default" });
+    obterExtratoPontosMock.mockResolvedValue([{ pedidoId: "ped_entregue", tipo: "confirmado", pontos: 40 }]);
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(consumirMissaoSemanalMock).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId: "default",
+      temporadaId: "temp_1",
+      clienteId: "cli_canonico",
+      pedidoId: "ped_entregue",
+      estrelasBaseDoPedido: 40,
+    }));
+  });
+
+  test("retry do efeito já concluído nunca chama a missão semanal de novo", async () => {
+    obterTemporadaAtivaMock.mockResolvedValue({ temporadaId: "temp_1", tenantId: "default" });
+    obterExtratoPontosMock.mockResolvedValue([{ pedidoId: "ped_entregue", tipo: "confirmado", pontos: 40 }]);
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+    consumirMissaoSemanalMock.mockClear();
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(consumirMissaoSemanalMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("efeito gamificacao (pedido cancelado) — reversão da missão semanal", () => {
+  test("cancelamento sempre tenta reverter a missão semanal pelo pedidoId exato (idempotente e no-op sem consumo prévio)", async () => {
+    const pedido = {
+      ...pedidoEntregue,
+      id: "ped_cancelado",
+      status: "cancelado",
+      statusAnterior: "entregue",
+    };
+
+    await processarEfeitosPedidoCancelado(pedido);
+
+    expect(reverterMissaoSemanalMock).toHaveBeenCalledWith("ped_cancelado", expect.stringContaining("ped_cancelado"));
+  });
+
+  test("retry do efeito já concluído nunca chama a reversão de novo", async () => {
+    const pedido = {
+      ...pedidoEntregue,
+      id: "ped_cancelado",
+      status: "cancelado",
+      statusAnterior: "entregue",
+    };
+
+    await processarEfeitosPedidoCancelado(pedido);
+    reverterMissaoSemanalMock.mockClear();
+    await processarEfeitosPedidoCancelado(pedido);
+
+    expect(reverterMissaoSemanalMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("efeito indicacao", () => {
   test("sem candidatura e sem relação: nenhum crédito disparado", async () => {
     // defaults: obterRelacaoMock → null, obterCandidaturaMock → null
@@ -279,6 +381,35 @@ describe("efeito indicacao", () => {
     await processarEfeitosPedidoEntregue(pedidoEntregue);
 
     expect(store.get("ranking:gamificacao:fato:indicacao_convertida:indicacao:cli_canonico:primeira-compra:ped_entregue")).toBeTruthy();
+  });
+
+  test("crédito real com temporada ativa também tenta concluir a missão da temporada 'Indique um amigo' PARA O INDICADOR", async () => {
+    obterRelacaoMock.mockResolvedValue(null);
+    obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    registrarRelacaoMock.mockResolvedValue("registrado");
+    creditarIndicacaoMock.mockResolvedValue("creditado");
+    obterTemporadaAtivaMock.mockResolvedValue({ temporadaId: "temp_1", tenantId: "default" });
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(concluirMissaoIndicacaoMock).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId: "default",
+      temporadaId: "temp_1",
+      clienteId: "cli_indicador",
+      pedidoId: "ped_entregue",
+    }));
+  });
+
+  test("crédito real sem temporada ativa nunca tenta concluir a missão da temporada (fail-closed)", async () => {
+    obterRelacaoMock.mockResolvedValue(null);
+    obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    registrarRelacaoMock.mockResolvedValue("registrado");
+    creditarIndicacaoMock.mockResolvedValue("creditado");
+    obterTemporadaAtivaMock.mockResolvedValue(null);
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(concluirMissaoIndicacaoMock).not.toHaveBeenCalled();
   });
 
   test("retry do mesmo efeito (já concluído) nunca duplica o fato — idempotência do #445", async () => {
