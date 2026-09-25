@@ -96,6 +96,23 @@ describe("GET /api/admin/fidelidade/status", () => {
     expect(text).not.toContain("coberturaEconomicaAprovada");
   });
 
+  test("ultimaEncerradaId aponta para a mais recente por encerradaEm, não a última da lista", async () => {
+    mockListarTemporadas.mockResolvedValue([
+      { temporadaId: "t-antiga", estado: "encerrada", encerradaEm: "2026-01-01T00:00:00.000Z", criadaEm: "" },
+      { temporadaId: "t-recente", nome: "Verão", estado: "encerrada", encerradaEm: "2026-06-01T00:00:00.000Z", criadaEm: "" },
+    ]);
+    const body = await (await GET(makeReq())).json();
+    expect(body.temporada.encerradas).toBe(2);
+    expect(body.temporada.ultimaEncerradaId).toBe("t-recente");
+    expect(body.temporada.ultimaEncerradaNome).toBe("Verão");
+  });
+
+  test("ultimaEncerradaId null quando nenhuma temporada foi encerrada", async () => {
+    mockListarTemporadas.mockResolvedValue([{ temporadaId: "t1", estado: "rascunho", criadaEm: "" }]);
+    const body = await (await GET(makeReq())).json();
+    expect(body.temporada.ultimaEncerradaId).toBeNull();
+  });
+
   test("ranking top5 sem PII — apenas posicao e score", async () => {
     mockTemporadaAtiva.mockResolvedValue({
       temporadaId: "t1",

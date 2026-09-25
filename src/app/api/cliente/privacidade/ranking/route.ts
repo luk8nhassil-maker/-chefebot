@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoCliente } from "@/lib/clienteAuth";
 import {
   ErroConsentimentoRanking,
+  obterFinalidadesAtivasRanking,
   obterHistoricoConsentimentoRanking,
   obterPreferenciasConsentimentoRanking,
   registrarConsentimentoRanking,
@@ -27,19 +28,32 @@ function statusErroConsentimento(erro: ErroConsentimentoRanking): number {
   return 503;
 }
 
+async function obterEstadoRankingCliente(clienteId: string) {
+  const [finalidades, ativas] = await Promise.all([
+    obterPreferenciasConsentimentoRanking(clienteId),
+    obterFinalidadesAtivasRanking(clienteId),
+  ]);
+  return {
+    finalidades,
+    participaCampanha:
+      ativas.has("ranking_primeiro_nome") ||
+      ativas.has("ranking_telefone_mascarado"),
+  };
+}
+
 export async function GET(req: NextRequest) {
   const cliente = await clienteAutenticado(req);
   if (!cliente) return respostaJson({ error: "Nao autorizado" }, { status: 401 });
 
   try {
-    const finalidades = await obterPreferenciasConsentimentoRanking(cliente.clienteId);
+    const estadoRanking = await obterEstadoRankingCliente(cliente.clienteId);
     const incluirHistorico = req.nextUrl.searchParams.get("historico") === "1";
-    if (!incluirHistorico) return respostaJson({ finalidades });
+    if (!incluirHistorico) return respostaJson(estadoRanking);
 
     const offsetBruto = Number(req.nextUrl.searchParams.get("offset") ?? 0);
     const offset = Number.isFinite(offsetBruto) ? offsetBruto : 0;
     const historico = await obterHistoricoConsentimentoRanking(cliente.clienteId, offset, 50);
-    return respostaJson({ finalidades, historico });
+    return respostaJson({ ...estadoRanking, historico });
   } catch (erro) {
     if (erro instanceof ErroConsentimentoRanking) {
       return respostaJson({ error: erro.codigo }, { status: statusErroConsentimento(erro) });
@@ -70,8 +84,8 @@ export async function PATCH(req: NextRequest) {
       estado: body.estado,
       textoVersaoInformada: body.textoVersao,
     });
-    const finalidades = await obterPreferenciasConsentimentoRanking(cliente.clienteId);
-    return respostaJson({ ok: true, finalidades });
+    const estadoRanking = await obterEstadoRankingCliente(cliente.clienteId);
+    return respostaJson({ ok: true, ...estadoRanking });
   } catch (erro) {
     if (erro instanceof ErroConsentimentoRanking) {
       return respostaJson({ ok: false, error: erro.codigo }, { status: statusErroConsentimento(erro) });
@@ -88,8 +102,8 @@ export async function DELETE(req: NextRequest) {
 
   try {
     await revogarTodosConsentimentosRanking(cliente.clienteId);
-    const finalidades = await obterPreferenciasConsentimentoRanking(cliente.clienteId);
-    return respostaJson({ ok: true, finalidades });
+    const estadoRanking = await obterEstadoRankingCliente(cliente.clienteId);
+    return respostaJson({ ok: true, ...estadoRanking });
   } catch (erro) {
     if (erro instanceof ErroConsentimentoRanking) {
       return respostaJson({ ok: false, error: erro.codigo }, { status: statusErroConsentimento(erro) });

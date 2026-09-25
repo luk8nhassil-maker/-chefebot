@@ -313,6 +313,14 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
     expect(fonte).toContain("Ranking da temporada");
   });
 
+  test("pódio e aba Participando usam a posição própria entre participantes, nunca a do ranking geral", () => {
+    const blocoTela = fonte.slice(fonte.indexOf("function FidelidadeRankingScreen"), fonte.indexOf("return (", fonte.indexOf("function FidelidadeRankingScreen")));
+    expect(blocoTela).toContain("ranking.participantes.lista");
+    // Regressão: a versão antiga filtrava ranking.lista por participaCampanha
+    // e reaproveitava a posição geral — não pode voltar.
+    expect(blocoTela).not.toContain("lista.filter((entrada) => entrada.participaCampanha)");
+  });
+
   test("preferencias do ranking usam texto vindo do servidor e permitem revogacao total", () => {
     expect(fonte).toContain("/api/cliente/privacidade/ranking");
     expect(fonte).toContain("<span>{opcao.texto}</span>");
@@ -416,5 +424,20 @@ describe("/cliente — Correções PR #427: textos comerciais, estados vazios, P
     // o useEffect inicial só armazena o ref, não processa
     const blocoUseEffect = fonte.slice(fonte.indexOf("useEffect(() => {"), fonte.indexOf("function abrirSacola"));
     expect(blocoUseEffect).not.toContain("POST");
+  });
+});
+
+
+describe("/cliente — prospeccao segura do Ranking no pos-pedido", () => {
+  test("participacao efetiva vem do servidor, nao do estado bruto de uma finalidade", () => {
+    expect(fonte).toContain("preferencias?.participaCampanha === true");
+    expect(fonte).not.toContain("preferencias?.finalidades.some((item) => item.estado === 'concedido')");
+  });
+
+  test("cliente que ja participa vai direto ao ranking quando chega do pedido", () => {
+    const bloco = fonte.slice(fonte.indexOf("function abrirPontos"), fonte.indexOf("function limparVinculo"));
+    expect(bloco).toContain("if (preferencias?.participaCampanha === true)");
+    expect(bloco).toContain("setMobilePanel('ranking')");
+    expect(bloco).toContain("setRankingConsentModal(true)");
   });
 });

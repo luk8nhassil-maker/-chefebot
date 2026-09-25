@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { lerSessao, preferencias, registrar, revogarTodos, historico } = vi.hoisted(() => ({
+const { lerSessao, preferencias, ativas, registrar, revogarTodos, historico } = vi.hoisted(() => ({
   lerSessao: vi.fn(),
   preferencias: vi.fn(),
+  ativas: vi.fn(),
   registrar: vi.fn(),
   revogarTodos: vi.fn(),
   historico: vi.fn(),
@@ -15,6 +16,7 @@ vi.mock("@/lib/consentimentoRanking", async () => {
   return {
     ...actual,
     obterPreferenciasConsentimentoRanking: preferencias,
+    obterFinalidadesAtivasRanking: ativas,
     registrarConsentimentoRanking: registrar,
     revogarTodosConsentimentosRanking: revogarTodos,
     obterHistoricoConsentimentoRanking: historico,
@@ -35,6 +37,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   lerSessao.mockResolvedValue({ clienteId: "cli_5511999990000", telefone: "5511999990000" });
   preferencias.mockResolvedValue([{ finalidade: "ranking_primeiro_nome", estado: "revogado" }]);
+  ativas.mockResolvedValue(new Set());
   historico.mockResolvedValue({ eventos: [], proximoOffset: null });
   registrar.mockResolvedValue({ estado: "concedido" });
   revogarTodos.mockResolvedValue([]);
@@ -53,6 +56,18 @@ describe("/api/cliente/privacidade/ranking", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toContain("no-store");
     expect(historico).toHaveBeenCalledWith("cli_5511999990000", 50, 50);
+  });
+
+  test("GET devolve participacao efetiva, nunca infere apenas pelo estado bruto salvo", async () => {
+    preferencias.mockResolvedValueOnce([{ finalidade: "ranking_primeiro_nome", estado: "concedido", textoVersao: "antiga" }]);
+    ativas.mockResolvedValueOnce(new Set());
+    const inativo = await GET(req());
+    expect(await inativo.json()).toMatchObject({ participaCampanha: false });
+
+    preferencias.mockResolvedValueOnce([{ finalidade: "ranking_primeiro_nome", estado: "concedido", textoVersao: "atual" }]);
+    ativas.mockResolvedValueOnce(new Set(["ranking_primeiro_nome"]));
+    const ativo = await GET(req());
+    expect(await ativo.json()).toMatchObject({ participaCampanha: true });
   });
 
   test("PATCH usa apenas o cliente autenticado e a origem fica no servidor", async () => {

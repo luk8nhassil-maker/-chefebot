@@ -85,6 +85,23 @@ export async function obterTopRanking(
   return ordenados.slice(0, n).map((e, index) => ({ clienteId: e.clienteId, score: e.score, posicao: index + 1 }));
 }
 
+/**
+ * Ranking completo da temporada, sem corte de tamanho. Necessário para
+ * recalcular a posição de um cliente dentro de um subconjunto (ex.: só quem
+ * participa da campanha) sem herdar a posição do ranking geral — um
+ * participante fora do Top 50 geral ainda precisa da sua posição real entre
+ * participantes.
+ */
+export async function obterRankingCompleto(
+  tenantId: string,
+  temporadaId: string,
+): Promise<EntradaRanking[]> {
+  if (!tenantId || !temporadaId) return [];
+  const membros = (await zredis.zrange(chaveRanking(tenantId, temporadaId), 0, -1, { rev: true })) as string[];
+  const ordenados = await ordenarMembros(tenantId, temporadaId, membros);
+  return ordenados.map((e, index) => ({ clienteId: e.clienteId, score: e.score, posicao: index + 1 }));
+}
+
 export async function posicaoClienteRanking(
   tenantId: string,
   temporadaId: string,
@@ -96,6 +113,20 @@ export async function posicaoClienteRanking(
   const index = ordenados.findIndex((e) => e.clienteId === clienteId);
   if (index < 0) return null;
   return { posicao: index + 1, score: ordenados[index].score };
+}
+
+/**
+ * Reindexa 1..N um ranking já ordenado, mantendo só quem passa no filtro.
+ * Pura e agnóstica de privacidade — quem decide "quem entra" é o chamador
+ * (ex.: só clientes com consentimento ativo do ranking). Usada para nunca
+ * reaproveitar a posição do ranking geral num subconjunto (participantes da
+ * campanha, resultado de encerramento de temporada etc.).
+ */
+export function reindexarPorFiltro(
+  entradas: EntradaRanking[],
+  incluir: (clienteId: string) => boolean,
+): EntradaRanking[] {
+  return entradas.filter((e) => incluir(e.clienteId)).map((e, index) => ({ ...e, posicao: index + 1 }));
 }
 
 /** Calcula o score da temporada sem depender do estado do ranking. */

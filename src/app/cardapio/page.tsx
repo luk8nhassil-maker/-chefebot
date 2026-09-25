@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef, type CSSProperties } from "react";
+import { useState, useEffect, useRef, useCallback, type CSSProperties } from "react";
 import { Pizza, Sandwich, Soup, CupSoda, GlassWater, Zap, Banknote, CreditCard, Shuffle, Wallet, Bike, Store, UtensilsCrossed, Sun, Moon, Receipt, Gift, Pencil, Plus, Minus, Clock, ChevronRight, Sparkles, Beef, Croissant, Milk, Search, PartyPopper } from "lucide-react";
 import PanelShell from "@/components/PanelShell";
 import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
@@ -22,6 +22,11 @@ import { norm } from "@/lib/pedidoAppItens";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useDialogA11y } from "@/components/useDialogA11y";
 import RankingInviteModal from "@/components/RankingInviteModal";
+import {
+  RANKING_CONVITE_ADIADO_SESSION_KEY,
+  deveMostrarConviteRankingPosPedido,
+  type RankingProspeccaoStatusPagamento,
+} from "@/lib/rankingProspeccao";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -1337,6 +1342,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [toast, setToast] = useState("");
   const [pedidoConfirmado, setPedidoConfirmado] = useState<PedidoConfirmadoCliente | null>(null);
   const [conviteRankingPedido, setConviteRankingPedido] = useState(false);
+  const conviteRankingPagamentoAvaliadoRef = useRef<string | null>(null);
   const [statusPedidoConfirmado, setStatusPedidoConfirmado] = useState<PedidoConfirmadoStatus>("novo");
   const [statusPixCliente, setStatusPixCliente] = useState<PagamentoPixClienteStatus>("aguardando_pix");
   const [erroNome, setErroNome] = useState("");
@@ -1345,6 +1351,29 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [erroEntrega, setErroEntrega] = useState("");
   const [erroTroco, setErroTroco] = useState("");
   const [trocoOpcao, setTrocoOpcao] = useState<"nao" | "sim" | null>(null);
+
+  const avaliarConviteRankingPosPedido = useCallback(async (pagamentoStatus: RankingProspeccaoStatusPagamento) => {
+    let adiouNestaSessao = false;
+    try { adiouNestaSessao = sessionStorage.getItem(RANKING_CONVITE_ADIADO_SESSION_KEY) === "1"; } catch {}
+
+    let participaCampanha: boolean | null = null;
+    try {
+      const res = await fetch("/api/cliente/privacidade/ranking", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        participaCampanha = typeof data?.participaCampanha === "boolean" ? data.participaCampanha : null;
+      }
+    } catch {}
+
+    if (deveMostrarConviteRankingPosPedido({ pedidoConcluido: true, participaCampanha, adiouNestaSessao, pagamentoStatus })) {
+      setConviteRankingPedido(true);
+    }
+  }, []);
+
+  const adiarConviteRankingNestaSessao = useCallback(() => {
+    try { sessionStorage.setItem(RANKING_CONVITE_ADIADO_SESSION_KEY, "1"); } catch {}
+    setConviteRankingPedido(false);
+  }, []);
   // Pagamento misto Pix + Dinheiro: rascunho dos dois campos do modal antes de
   // confirmar. Reaproveita troco/trocoOpcao acima para a parte em dinheiro.
   const [mistoPixInput, setMistoPixInput] = useState("");
@@ -1582,6 +1611,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       clearInterval(interval);
     };
   }, [pedidoConfirmado?.id, pedidoConfirmado?.statusToken]);
+
+  useEffect(() => {
+    if (screen !== "sc-done" || !pedidoConfirmado?.id || statusPixCliente !== "pago") return;
+    const pedidoId = String(pedidoConfirmado.id);
+    if (conviteRankingPagamentoAvaliadoRef.current === pedidoId) return;
+    conviteRankingPagamentoAvaliadoRef.current = pedidoId;
+    void avaliarConviteRankingPosPedido("pago");
+  }, [screen, pedidoConfirmado?.id, statusPixCliente, avaliarConviteRankingPosPedido]);
 
   function showToast(m: string) { setToast(m); if (toastTimer.current) clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 1700); }
 
@@ -2491,10 +2528,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} if (itemRecompensaJornada) limparReferenciaRecompensa(localStorage); try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: agoraEmMs(), statusToken: typeof data.statusToken === "string" ? data.statusToken : undefined }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } setConviteRankingPedido(!payment?.toLowerCase().includes("pix")); go("sc-done"); } else { if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
+      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} if (itemRecompensaJornada) limparReferenciaRecompensa(localStorage); try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: agoraEmMs(), statusToken: typeof data.statusToken === "string" ? data.statusToken : undefined }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } const pagamentoRanking: RankingProspeccaoStatusPagamento = payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"; setConviteRankingPedido(false); go("sc-done"); if (pagamentoRanking === "nao_pix") void avaliarConviteRankingPosPedido(pagamentoRanking); } else { if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
-  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setBairroQuery(""); setBairroDropdownOpen(false); setRua(""); setRuaSugestoes([]); setRuaDropdownOpen(false); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setMistoPixInput(""); setMistoDinheiroInput(""); setErroMisto(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setConviteRankingPedido(false); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
+  function resetAll() { conviteRankingPagamentoAvaliadoRef.current = null; setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setBairroQuery(""); setBairroDropdownOpen(false); setRua(""); setRuaSugestoes([]); setRuaDropdownOpen(false); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setMistoPixInput(""); setMistoDinheiroInput(""); setErroMisto(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setConviteRankingPedido(false); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
 
   const stepMap: Record<string, number> = { "sc-start": 0, "sc-build": 0, "sc-border": 0, "sc-addons": 0, "sc-list": 0, "sc-novidades": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-macarronada-addon": 0, "sc-promo": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
   const stepIdx = stepMap[screen] ?? 0;
@@ -3259,14 +3296,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                             )}
                           </div>
                         </div>
-                        <a href="/cliente" className="info-card-v2">
-                          <span className="info-icon-v2"><Gift size={20} aria-hidden="true" /></span>
-                          <span className="info-text-v2">
-                            <strong>Quer que essa compra conte para sua fidelidade?</strong>
-                            <span>Entre com seu WhatsApp e acompanhe seu progresso.</span>
-                          </span>
-                          <ChevronRight size={18} className="info-chevron" aria-hidden="true" />
-                        </a>
                       </>
                     )}
                     {isPagamentoPix && (
@@ -3320,13 +3349,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                         Seu pedido já foi aceito pela loja. Para solicitar alguma mudança, fale diretamente com a loja.
                       </p>
                     )}
-                    {isPagamentoPix && (
-                      <a href="#ranking-convite" onClick={(event) => { event.preventDefault(); setConviteRankingPedido(true) }} style={{ display: "block", background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 12, padding: "12px 14px", marginBottom: 10, textDecoration: "none", textAlign: "left" }}>
-                        <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>🎁 Quer que essa compra conte para sua fidelidade?</span>
-                        <span style={{ display: "block", fontSize: 12.5, color: "var(--text-sub)", marginTop: 2 }}>Entre com seu WhatsApp e acompanhe seu progresso.</span>
-                      </a>
-                    )}
-                  </>
+                   </>
                 )}
                 <button className="btn btn-ghost btn-icon" style={{ marginTop: pedidoConfirmado ? 0 : 22 }} onClick={resetAll}>
                   <Plus size={17} aria-hidden="true" /> Fazer novo pedido
@@ -3337,7 +3360,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           {screen === "sc-done" && conviteRankingPedido && (
             <RankingInviteModal
               onParticipar={() => { window.location.href = "/cliente?fromOrder=1" }}
-              onDepois={() => setConviteRankingPedido(false)}
+              onDepois={adiarConviteRankingNestaSessao}
             />
           )}
         </main>

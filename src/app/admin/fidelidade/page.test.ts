@@ -23,3 +23,31 @@ describe("/admin/fidelidade — Analytics de pedidos", () => {
     expect(fonte).toContain("Cada cliente é contado uma única vez");
   });
 });
+
+describe("/admin/fidelidade — Prêmio da temporada e resultado de encerramento", () => {
+  test("prêmio só é enviado ao criar quando a descrição foi preenchida (fail-closed)", () => {
+    const bloco = fonte.slice(fonte.indexOf("async function criarTemporada30d"), fonte.indexOf("async function verResultadoTemporada"));
+    expect(bloco).toContain("if (premioDescricaoInput.trim())");
+    expect(bloco).toContain("corpo.premioAprovado = premioAprovadoInput");
+    // Fora do if: nada de prêmio é adicionado ao corpo por padrão.
+    const antesDoIf = bloco.slice(0, bloco.indexOf("if (premioDescricaoInput.trim())"));
+    expect(antesDoIf).not.toContain("premioAprovado");
+  });
+
+  test("checkbox de aprovação nunca vem marcado por padrão", () => {
+    expect(fonte).toContain("useState(false)");
+    expect(fonte).toContain("checked={premioAprovadoInput}");
+  });
+
+  test("resultado sem vencedor explica o motivo (prêmio não aprovado ou sem participantes)", () => {
+    const bloco = fonte.slice(fonte.indexOf("!resultadoTemporada.vencedorDeclarado"), fonte.indexOf("<strong>Vencedores:</strong>"));
+    expect(bloco).toContain("ranking sem participantes");
+    expect(bloco).toContain("prêmio não foi aprovado antes do encerramento");
+  });
+
+  test("vencedor que revogou consentimento depois aparece anonimizado no histórico, nunca com o nome antigo", () => {
+    const bloco = fonte.slice(fonte.indexOf("<strong>Vencedores:</strong>"), fonte.indexOf("</ul>"));
+    expect(bloco).toContain("v.identidade.participaCampanha");
+    expect(bloco).toContain("Fora da disputa (revogou depois)");
+  });
+});

@@ -45,6 +45,10 @@ export async function GET(req: NextRequest) {
     // coberturaEconomicaAprovada NUNCA exposta aqui — pertence ao modal de config
   };
 
+  const encerradas = todasTemporadas
+    .filter((t) => t.estado === "encerrada")
+    .sort((a, b) => new Date(b.encerradaEm ?? 0).getTime() - new Date(a.encerradaEm ?? 0).getTime());
+
   const temporada = {
     ativa: temporadaAtiva
       ? {
@@ -58,7 +62,11 @@ export async function GET(req: NextRequest) {
         }
       : null,
     total: todasTemporadas.length,
-    encerradas: todasTemporadas.filter((t) => t.estado === "encerrada").length,
+    encerradas: encerradas.length,
+    // Para o admin conseguir abrir o resultado arquivado (GET
+    // /api/admin/fidelidade/temporadas?resultado=) sem precisar adivinhar o id.
+    ultimaEncerradaId: encerradas[0]?.temporadaId ?? null,
+    ultimaEncerradaNome: encerradas[0]?.nome ?? null,
   };
 
   const ranking = {

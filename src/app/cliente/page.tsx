@@ -66,12 +66,29 @@ type PainelFidelidade = {
       nomePublico?: string
       telefoneMascarado?: string
     }[]
+    variacaoPosicao: VariacaoPosicaoRanking | null
+    participantes: {
+      posicao: number | null
+      total: number
+      variacaoPosicao: VariacaoPosicaoRanking | null
+      lista: {
+        posicao: number
+        score: number
+        eVoce: boolean
+        participaCampanha: true
+        nomePublico?: string
+        telefoneMascarado?: string
+      }[]
+    }
   } | null
 }
+
+type VariacaoPosicaoRanking = { direcao: 'subiu' | 'desceu' | 'manteve'; casas: number }
 
 type FinalidadePrivacidadeRanking = 'ranking_primeiro_nome' | 'ranking_telefone_mascarado' | 'ranking_foto_perfil'
 
 type PreferenciasPrivacidadeRanking = {
+  participaCampanha: boolean
   finalidades: Array<{
     finalidade: FinalidadePrivacidadeRanking
     texto: string | null
@@ -174,6 +191,20 @@ const PAINEL_PREVIEW: PainelFidelidade = {
       { posicao: 9, score: 18, eVoce: false, participaCampanha: true, nomePublico: 'Julia', telefoneMascarado: '(51) 94444-**26' },
       { posicao: 10, score: 16, eVoce: false, participaCampanha: false },
     ],
+    variacaoPosicao: { direcao: 'subiu', casas: 2 },
+    participantes: {
+      posicao: 5,
+      total: 6,
+      variacaoPosicao: { direcao: 'manteve', casas: 0 },
+      lista: [
+        { posicao: 1, score: 28, eVoce: false, participaCampanha: true, nomePublico: 'Ana', telefoneMascarado: '(11) 98888-**42' },
+        { posicao: 2, score: 26, eVoce: false, participaCampanha: true, nomePublico: 'Carlos', telefoneMascarado: '(21) 97777-**18' },
+        { posicao: 3, score: 24, eVoce: false, participaCampanha: true, nomePublico: 'Marina', telefoneMascarado: '(31) 96666-**07' },
+        { posicao: 4, score: 22, eVoce: false, participaCampanha: true, nomePublico: 'Rafael', telefoneMascarado: '(41) 95555-**63' },
+        { posicao: 5, score: 20, eVoce: true, participaCampanha: true, nomePublico: 'Lucas', telefoneMascarado: '(99) 99999-**91' },
+        { posicao: 6, score: 18, eVoce: false, participaCampanha: true, nomePublico: 'Julia', telefoneMascarado: '(51) 94444-**26' },
+      ],
+    },
   },
 }
 
@@ -286,6 +317,7 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
       {modalRankingConsentimento && (
         <RankingConsentModal
           privacidade={{
+            participaCampanha: false,
             finalidades: [
               { finalidade: 'ranking_primeiro_nome', texto: 'Nome', textoVersao: 'preview-v1', disponivel: true, motivoIndisponivel: null, estado: 'revogado', atualizadoEm: null },
               { finalidade: 'ranking_telefone_mascarado', texto: 'Telefone', textoVersao: 'preview-v1', disponivel: true, motivoIndisponivel: null, estado: 'revogado', atualizadoEm: null },
@@ -418,7 +450,11 @@ function FidelidadeRankingScreen({
   const [aba, setAba] = useState<'participantes' | 'minha' | 'geral'>('participantes')
   const lista = [...ranking.lista].sort((a, b) => a.posicao - b.posicao)
   const listaSemPodio = lista.filter((entrada) => entrada.posicao > 3)
-  const participantes = lista.filter((entrada) => entrada.participaCampanha)
+  // Posição própria de quem "Vale prêmio": reindexada só entre participantes
+  // pelo servidor (src/app/api/cliente/fidelidade/painel/route.ts), nunca a
+  // posição do ranking geral — um participante pode estar no pódio aqui
+  // mesmo fora do Top 3 geral, se os primeiros colocados não participarem.
+  const participantes = [...ranking.participantes.lista].sort((a, b) => a.posicao - b.posicao)
   const podium = participantes.filter((entrada) => entrada.posicao <= 3)
   const linhas = aba === 'minha'
     ? lista.filter((entrada) => entrada.eVoce)
@@ -433,6 +469,16 @@ function FidelidadeRankingScreen({
   const scoreSeguro = (score: number) => (
     <span className="cf-ranking-score"><Star size={16} fill="currentColor" strokeWidth={1.8} aria-hidden="true" />{score}</span>
   )
+  // Histórico honesto: só mostra selo quando o servidor tem um snapshot
+  // anterior real para comparar (variacaoPosicao null = sem histórico ainda,
+  // e "manteve" não gera selo — não há o que destacar).
+  const variacaoDaAba = aba === 'participantes' ? ranking.participantes.variacaoPosicao : ranking.variacaoPosicao
+  const seloVariacao = (variacao: VariacaoPosicaoRanking | null) => {
+    if (!variacao || variacao.direcao === 'manteve') return null
+    const cor = variacao.direcao === 'subiu' ? 'var(--success-text)' : 'var(--danger-text)'
+    const seta = variacao.direcao === 'subiu' ? '▲' : '▼'
+    return <small style={{ color: cor, fontWeight: 700 }}>{seta} {variacao.casas} desde ontem</small>
+  }
 
   return (
     <main className="cf-ranking-screen" aria-label="Pódio Chefe">
@@ -471,6 +517,7 @@ function FidelidadeRankingScreen({
             <span className="cf-ranking-row-avatar">{avatarSeguro(entrada) ?? <Star size={15} fill="currentColor" strokeWidth={1.8} aria-hidden="true" />}</span>
             <span className="cf-ranking-row-name">
               {nomeSeguro(entrada)}
+              {entrada.eVoce && seloVariacao(variacaoDaAba)}
               {entrada.telefoneMascarado && <small>{entrada.telefoneMascarado}</small>}
             </span>
             <b>{scoreSeguro(entrada.score)}</b>
@@ -791,7 +838,7 @@ export default function ClientePage() {
   async function abrirRanking() {
     setRankingConsentModal(true)
     const preferencias = await carregarPrivacidadeRanking()
-    const jaParticipa = preferencias?.finalidades.some((item) => item.estado === 'concedido') ?? false
+    const jaParticipa = preferencias?.participaCampanha === true
     if (jaParticipa) {
       setRankingConsentModal(false)
       setMobilePanel('ranking')
@@ -813,7 +860,10 @@ export default function ClientePage() {
       }, sessaoMemRef.current)
       const data = await res.json().catch(() => ({}))
       if (!res.ok || !data.finalidades) throw new Error('preferencia_nao_salva')
-      setPrivacidadeRanking({ finalidades: data.finalidades })
+      setPrivacidadeRanking({
+        finalidades: data.finalidades,
+        participaCampanha: data.participaCampanha === true,
+      })
       await carregarPainel()
       setPrivacidadeSalvando(null)
       return true
@@ -842,7 +892,10 @@ export default function ClientePage() {
       const res = await fetchCliente('/api/cliente/privacidade/ranking', { method: 'DELETE' }, sessaoMemRef.current)
       const data = await res.json().catch(() => ({}))
       if (!res.ok || !data.finalidades) throw new Error('preferencias_nao_revogadas')
-      setPrivacidadeRanking({ finalidades: data.finalidades })
+      setPrivacidadeRanking({
+        finalidades: data.finalidades,
+        participaCampanha: data.participaCampanha === true,
+      })
       await carregarPainel()
       setMobilePanel(null)
     } catch {
@@ -888,8 +941,11 @@ export default function ClientePage() {
     carregarPrivacidadeRanking().then((preferencias) => {
       if (!convitePosPedidoRef.current) return
       convitePosPedidoRef.current = false
-      const jaParticipa = preferencias?.finalidades.some((item) => item.estado === 'concedido') ?? false
-      if (!jaParticipa) setRankingConsentModal(true)
+      if (preferencias?.participaCampanha === true) {
+        setMobilePanel('ranking')
+      } else {
+        setRankingConsentModal(true)
+      }
     })
     // Processa indicação capturada antes do login (cf_ref)
     try {

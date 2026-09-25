@@ -37,7 +37,7 @@ const { zset, redisMock } = vi.hoisted(() => {
 
 vi.mock("./redis", () => ({ redis: redisMock }));
 
-import { atualizarScoreRanking, calcularScoreDaTemporada, obterTopRanking, posicaoClienteRanking } from "./rankingClientes";
+import { atualizarScoreRanking, calcularScoreDaTemporada, obterRankingCompleto, obterTopRanking, posicaoClienteRanking } from "./rankingClientes";
 import type { MovimentoPontos } from "./fidelidade";
 
 const TENANT = "default";
@@ -136,6 +136,32 @@ describe("posicaoClienteRanking", () => {
   test("retorna null para parâmetros vazios", async () => {
     expect(await posicaoClienteRanking("", TEMPORADA, "cli_a")).toBeNull();
     expect(await posicaoClienteRanking(TENANT, TEMPORADA, "")).toBeNull();
+  });
+});
+
+describe("obterRankingCompleto", () => {
+  test("retorna vazio quando sem dados ou parâmetros ausentes", async () => {
+    expect(await obterRankingCompleto(TENANT, TEMPORADA)).toEqual([]);
+    expect(await obterRankingCompleto("", TEMPORADA)).toEqual([]);
+    expect(await obterRankingCompleto(TENANT, "")).toEqual([]);
+  });
+
+  test("retorna todos os membros, sem o corte de 50 do Top N", async () => {
+    for (let i = 0; i < 60; i++) {
+      await atualizarScoreRanking(TENANT, TEMPORADA, `cli_${i}`, 60 - i);
+    }
+    const completo = await obterRankingCompleto(TENANT, TEMPORADA);
+    expect(completo).toHaveLength(60);
+    expect(completo[0]).toEqual({ clienteId: "cli_0", score: 60, posicao: 1 });
+    expect(completo[59]).toEqual({ clienteId: "cli_59", score: 1, posicao: 60 });
+  });
+
+  test("preserva o mesmo desempate de obterTopRanking", async () => {
+    await atualizarScoreRanking(TENANT, TEMPORADA, "cli_depois", 50, 200);
+    await atualizarScoreRanking(TENANT, TEMPORADA, "cli_primeiro", 50, 100);
+
+    const completo = await obterRankingCompleto(TENANT, TEMPORADA);
+    expect(completo.map((e) => e.clienteId)).toEqual(["cli_primeiro", "cli_depois"]);
   });
 });
 

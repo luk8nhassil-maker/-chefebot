@@ -24,6 +24,14 @@ export type ConfigTemporada = {
   metaIndicacoes?: number;
   duracaoDias?: number;
   fimEm?: string;
+  // Prêmio da TEMPORADA (ranking), distinto do presente por meta individual
+  // (ConfigFidelidadePontos.descricaoRecompensa). Nada aqui tem default
+  // inventado: sem premioAprovado === true e premioQuantidadePremiados > 0
+  // definidos pelo admin nesta temporada, o encerramento nunca declara
+  // vencedor — só arquiva o resultado do ranking (fail-closed).
+  premioDescricao?: string;
+  premioQuantidadePremiados?: number;
+  premioAprovado?: boolean;
 };
 
 function chaveTemporada(tenantId: string, temporadaId: string): string {
@@ -47,7 +55,10 @@ export function temporadaExpirada(config: ConfigTemporada, agora?: Date): boolea
 export async function criarTemporada(
   tenantId: string,
   temporadaId: string,
-  params: Partial<Pick<ConfigTemporada, "nome" | "metaCompras" | "metaIndicacoes" | "duracaoDias">> = {}
+  params: Partial<Pick<
+    ConfigTemporada,
+    "nome" | "metaCompras" | "metaIndicacoes" | "duracaoDias" | "premioDescricao" | "premioQuantidadePremiados" | "premioAprovado"
+  >> = {}
 ): Promise<ConfigTemporada> {
   const existente = await obterTemporada(tenantId, temporadaId);
   // Temporada ativa ou encerrada é imutável — apenas atualiza campos opcionais de rascunho
