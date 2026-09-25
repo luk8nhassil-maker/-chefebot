@@ -90,6 +90,42 @@ describe("sincronizarMissaoSemanalCliente", () => {
     expect(registrarFatoMock).toHaveBeenCalledWith("missao_semanal_desbloqueada", expect.stringContaining(`${CLI}:${TEMP}:`));
   });
 
+  test("BACKDATING: primeira avaliação de um cliente antigo usa a data real do último pedido confirmado", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
+    // Nunca teve ultimoPedidoElegivelEm registrado (cliente existia antes da feature).
+    const agora = new Date("2026-01-10T00:00:00Z");
+    const estado = await sincronizarMissaoSemanalCliente({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, participaCampanha: true, posicaoAtual: 8, agora,
+      ultimoPedidoConfirmadoConhecido: "2026-01-01T00:00:00.000Z", // pedido real, 9 dias atrás
+    });
+    expect(estado.status).toBe("desbloqueada");
+    const registro = store.get(`ranking:missaoSemanal:${T}:${TEMP}:${CLI}`) as { ultimoPedidoElegivelEm: string };
+    expect(registro.ultimoPedidoElegivelEm).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  test("BACKDATING: nunca sobrescreve um ultimoPedidoElegivelEm já registrado", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
+    store.set(`ranking:missaoSemanal:${T}:${TEMP}:${CLI}`, {
+      estado: { status: "inativa", desbloqueadaEm: null, consumidaEm: null, consumidaPedidoId: null, processandoPedidoId: null },
+      ultimoPedidoElegivelEm: "2026-01-08T00:00:00.000Z", // já registrado por um pedido real recente
+    });
+    await sincronizarMissaoSemanalCliente({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, participaCampanha: true, posicaoAtual: 8, agora: new Date("2026-01-10T00:00:00Z"),
+      ultimoPedidoConfirmadoConhecido: "2020-01-01T00:00:00.000Z", // valor antigo do extrato — não deve substituir o já registrado
+    });
+    const registro = store.get(`ranking:missaoSemanal:${T}:${TEMP}:${CLI}`) as { ultimoPedidoElegivelEm: string };
+    expect(registro.ultimoPedidoElegivelEm).toBe("2026-01-08T00:00:00.000Z");
+  });
+
+  test("BACKDATING: sem nenhum pedido real conhecido, continua sem desbloquear (nunca inventa data)", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
+    const estado = await sincronizarMissaoSemanalCliente({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, participaCampanha: true, posicaoAtual: 8, agora: new Date(),
+      ultimoPedidoConfirmadoConhecido: null,
+    });
+    expect(estado.status).toBe("inativa");
+  });
+
   test("estado sem mudança não regrava nem dispara fato de novo", async () => {
     obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
     const agora = new Date("2026-01-10T00:00:00Z");

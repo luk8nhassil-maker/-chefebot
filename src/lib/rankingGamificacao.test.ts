@@ -13,6 +13,8 @@ import {
   calcularBonusCarryover,
   calcularXpChefDosMovimentos,
   calcularNivelChef,
+  calcularUltimoPedidoConfirmadoDosMovimentos,
+  calcularCoroaAmeacada,
   ESTADO_MISSAO_SEMANAL_INICIAL,
   ESTADO_MISSAO_INDICACAO_INICIAL,
   type EstadoMissaoSemanal,
@@ -209,6 +211,31 @@ describe("reservarConsumoMissaoSemanal / confirmarConsumoMissaoSemanal / reverte
   });
 });
 
+describe("calcularUltimoPedidoConfirmadoDosMovimentos", () => {
+  test("retorna a data do movimento confirmado mais recente", () => {
+    const resultado = calcularUltimoPedidoConfirmadoDosMovimentos([
+      { tipo: "confirmado", createdAt: "2026-01-01T00:00:00.000Z" },
+      { tipo: "confirmado", createdAt: "2026-01-10T00:00:00.000Z" },
+      { tipo: "confirmado", createdAt: "2026-01-05T00:00:00.000Z" },
+    ]);
+    expect(resultado).toBe("2026-01-10T00:00:00.000Z");
+  });
+
+  test("ignora movimentos que não são 'confirmado' (estorno, resgate, ajuste)", () => {
+    const resultado = calcularUltimoPedidoConfirmadoDosMovimentos([
+      { tipo: "confirmado", createdAt: "2026-01-01T00:00:00.000Z" },
+      { tipo: "estornado", createdAt: "2026-01-15T00:00:00.000Z" },
+      { tipo: "resgatado", createdAt: "2026-01-20T00:00:00.000Z" },
+    ]);
+    expect(resultado).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  test("sem nenhum movimento confirmado, retorna null — nunca inventa uma data", () => {
+    expect(calcularUltimoPedidoConfirmadoDosMovimentos([])).toBeNull();
+    expect(calcularUltimoPedidoConfirmadoDosMovimentos([{ tipo: "estornado", createdAt: "2026-01-01T00:00:00.000Z" }])).toBeNull();
+  });
+});
+
 describe("calcularBonusMissaoSemanal", () => {
   test("2x credita bônus igual ao base", () => {
     expect(calcularBonusMissaoSemanal(50, 2)).toBe(50);
@@ -362,5 +389,30 @@ describe("calcularNivelChef", () => {
   test("abaixo do primeiro limiar (xpMinimo > 0), nível 0 com próximo limiar", () => {
     const semZero = [{ nivel: 1, nome: "Cozinheiro", xpMinimo: 100 }];
     expect(calcularNivelChef(50, semZero)).toEqual({ nivel: 0, nome: null, xpAtual: 50, xpProximoNivel: 100 });
+  });
+});
+
+describe("calcularCoroaAmeacada", () => {
+  test("fail-closed: sem config (0 ou negativo), nunca é ameaçada mesmo com vantagem mínima", () => {
+    expect(calcularCoroaAmeacada(1, 0)).toBe(false);
+    expect(calcularCoroaAmeacada(0, 0)).toBe(false);
+    expect(calcularCoroaAmeacada(1, -5)).toBe(false);
+  });
+
+  test("sem vantagem real conhecida (null), nunca é ameaçada mesmo com config", () => {
+    expect(calcularCoroaAmeacada(null, 10)).toBe(false);
+  });
+
+  test("vantagem dentro do limite configurado: ameaçada", () => {
+    expect(calcularCoroaAmeacada(3, 5)).toBe(true);
+    expect(calcularCoroaAmeacada(5, 5)).toBe(true);
+  });
+
+  test("vantagem acima do limite configurado: não ameaçada", () => {
+    expect(calcularCoroaAmeacada(6, 5)).toBe(false);
+  });
+
+  test("vantagem zero (empate técnico) com config ativa: ameaçada", () => {
+    expect(calcularCoroaAmeacada(0, 5)).toBe(true);
   });
 });

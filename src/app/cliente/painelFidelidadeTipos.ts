@@ -38,6 +38,9 @@ export type PainelFidelidade = {
         participaCampanha: true
         nomePublico?: string
         telefoneMascarado?: string
+        // Selo herdado do Top 10 da temporada ANTERIOR — de QUALQUER membro
+        // da lista, não só do próprio cliente (`eVoce`).
+        statusSocial?: StatusTemporadaSocial
       }[]
       // Alvo atual e disputa relativa (vizinho acima/abaixo), sempre entre
       // PARTICIPANTES — quem não autorizou não disputa o prêmio.
@@ -63,6 +66,13 @@ export type PainelGamificacao = {
   missaoSemanal: { status: 'inativa' | 'desbloqueada' | 'processando' | 'consumida' } | null
   missaoIndicacao: { concluida: boolean } | null
   nivelChef: { nivel: number; nome: string | null; xpAtual: number; xpProximoNivel: number | null } | null
+  // Comparação contra a ÚLTIMA VISITA real deste cliente ao painel — conceito
+  // separado do histórico diário (`ranking.variacaoPosicao`). `null` na
+  // primeira visita ou sem posição entre participantes (nunca inventa dado).
+  movimentoRecente: { variacao: VariacaoPosicaoRanking; desde: string } | null
+  // Só true quando o admin configurou uma condição matemática real
+  // (`ameacaPodioMaxGap`) E o líder está dentro dela — fail-closed.
+  coroaAmeacada: boolean
 }
 
 export type VariacaoPosicaoRanking = { direcao: 'subiu' | 'desceu' | 'manteve'; casas: number }

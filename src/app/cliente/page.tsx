@@ -188,6 +188,8 @@ const PAINEL_PREVIEW: PainelFidelidade = {
     missaoSemanal: { status: 'desbloqueada' },
     missaoIndicacao: { concluida: false },
     nivelChef: { nivel: 2, nome: 'Cozinheiro', xpAtual: 240, xpProximoNivel: 500 },
+    movimentoRecente: null,
+    coroaAmeacada: false,
   },
 }
 

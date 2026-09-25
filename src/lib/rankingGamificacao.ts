@@ -201,6 +201,26 @@ export function calcularBonusMissaoSemanal(estrelasBaseDoPedido: number, multipl
   return Math.round(estrelasBaseDoPedido * (multiplicador - 1));
 }
 
+/**
+ * Data do último pedido REAL confirmado, a partir do extrato de fidelidade
+ * (fonte canônica, nunca inventada) — usada para "batizar" a missão semanal
+ * de um cliente que já comprava antes da feature existir, sem o que ele
+ * ficaria bloqueado para sempre por nunca ter um "pedido elegível
+ * registrado" depois da ativação (mata o próprio objetivo de reativação).
+ */
+export function calcularUltimoPedidoConfirmadoDosMovimentos(
+  movimentos: { tipo: string; createdAt: string }[],
+): string | null {
+  let maisRecente: string | null = null;
+  for (const m of movimentos) {
+    if (m.tipo !== "confirmado") continue;
+    const ms = new Date(m.createdAt).getTime();
+    if (!Number.isFinite(ms)) continue;
+    if (!maisRecente || ms > new Date(maisRecente).getTime()) maisRecente = m.createdAt;
+  }
+  return maisRecente;
+}
+
 // ---------------------------------------------------------------------------
 // Missão da temporada "Indique um amigo" (0/1 por temporada)
 // ---------------------------------------------------------------------------
@@ -344,4 +364,18 @@ export function calcularNivelChef(xpTotal: number, limiares: LimiarNivelChef[] |
   const atual = ordenados[atualIndex];
   const proximo = ordenados[atualIndex + 1] ?? null;
   return { nivel: atual.nivel, nome: atual.nome, xpAtual: xp, xpProximoNivel: proximo ? proximo.xpMinimo : null };
+}
+
+// ---------------------------------------------------------------------------
+// "Defenda sua Coroa" — a vantagem real do líder sobre o #2 já é calculada
+// em rankingRetencao.ts (AlvoRankingAtual). Esta função só decide se essa
+// distância é pequena o bastante para a UI chamar de "ameaçada" — nunca sem
+// uma condição matemática configurada (fail-closed: sem config, só a
+// distância neutra aparece, nunca uma afirmação de ameaça inventada).
+// ---------------------------------------------------------------------------
+
+export function calcularCoroaAmeacada(vantagem: number | null, maxGapConfigurado: number): boolean {
+  if (!Number.isFinite(maxGapConfigurado) || maxGapConfigurado <= 0) return false;
+  if (vantagem === null || !Number.isFinite(vantagem)) return false;
+  return vantagem <= maxGapConfigurado;
 }

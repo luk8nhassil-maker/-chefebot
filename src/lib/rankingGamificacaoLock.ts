@@ -46,6 +46,18 @@ async function liberarLock(chave: string, token: string): Promise<void> {
  * como falha best-effort, igual ao resto do pipeline de efeitos do pedido —
  * nunca reporta sucesso sem ter executado `fn`).
  */
+/**
+ * Chave de lock compartilhada entre TODOS os caminhos que recalculam e
+ * escrevem a projeção de score de um cliente (fidelidade.ts após um crédito
+ * de pontos, rankingScoreTemporadaSync.ts após um crédito/estorno de bônus).
+ * Sem ela, duas leituras concorrentes do extrato/bônus podiam terminar com a
+ * mais lenta escrevendo por cima da mais rápida com uma base desatualizada
+ * (residual de concorrência apontado na auditoria do #446, seção 16).
+ */
+export function chaveLockScoreRanking(tenantId: string, temporadaId: string, clienteId: string): string {
+  return `ranking:score:lock:${tenantId}:${temporadaId}:${clienteId}`;
+}
+
 export async function comBloqueioGamificacao<T>(chave: string, fn: () => Promise<T>): Promise<T> {
   for (let tentativa = 0; tentativa < LOCK_MAX_TENTATIVAS; tentativa++) {
     const token = tokenLock();

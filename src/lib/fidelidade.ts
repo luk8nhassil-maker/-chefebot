@@ -6,6 +6,7 @@ import { obterRecomendacaoPresente, type RecomendacaoPresente } from "./recompen
 import { obterTemporadaAtiva } from "./temporadas";
 import { calcularScoreDaTemporada } from "./rankingClientes";
 import { projetarScoreRankingComBonus } from "./rankingScoreTemporada";
+import { comBloqueioGamificacao, chaveLockScoreRanking } from "./rankingGamificacaoLock";
 
 export type TipoRecompensa = "pizza_gratis" | "desconto_fixo" | "desconto_percentual";
 
@@ -744,11 +745,19 @@ async function sincronizarRankingCliente(clienteId: string): Promise<void> {
   try {
     const temporada = await obterTemporadaAtiva("default");
     if (!temporada?.ativadaEm) return;
-    const inicioMs = new Date(temporada.ativadaEm).getTime();
-    const fimMs = temporada.fimEm ? new Date(temporada.fimEm).getTime() : Date.now();
-    if (!Number.isFinite(inicioMs) || !Number.isFinite(fimMs)) return;
-    const resultado = calcularScoreDaTemporada(await obterExtratoPontos(clienteId), inicioMs, Math.min(fimMs, Date.now()));
-    await projetarScoreRankingComBonus(temporada.tenantId, temporada.temporadaId, clienteId, resultado.score, resultado.primeiroAtingidoEm ?? Date.now());
+    // Lock compartilhado com rankingScoreTemporadaSync.ts: o extrato só é
+    // relido DEPOIS de garantir a exclusão mútua, para este crédito nunca
+    // escrever uma base desatualizada por cima (nem ser sobrescrito por) um
+    // crédito/estorno de bônus concorrente (residual de concorrência da
+    // auditoria do #446, seção 16 — "fidelidade update at the same instant
+    // as bonus").
+    await comBloqueioGamificacao(chaveLockScoreRanking(temporada.tenantId, temporada.temporadaId, clienteId), async () => {
+      const inicioMs = new Date(temporada.ativadaEm as string).getTime();
+      const fimMs = temporada.fimEm ? new Date(temporada.fimEm).getTime() : Date.now();
+      if (!Number.isFinite(inicioMs) || !Number.isFinite(fimMs)) return;
+      const resultado = calcularScoreDaTemporada(await obterExtratoPontos(clienteId), inicioMs, Math.min(fimMs, Date.now()));
+      await projetarScoreRankingComBonus(temporada.tenantId, temporada.temporadaId, clienteId, resultado.score, resultado.primeiroAtingidoEm ?? Date.now());
+    });
   } catch (erro) {
     console.warn("[ChefeBot] Não foi possível atualizar a projeção do ranking", erro);
   }

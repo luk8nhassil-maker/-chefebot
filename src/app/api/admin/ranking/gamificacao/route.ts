@@ -27,6 +27,7 @@ const LIMITES = {
   impulsoPodioCapTemporada: { min: 0, max: 1_000_000 },
   carryoverBonus: { min: 0, max: 100_000 },
   nivelXpMinimo: { min: 0, max: 10_000_000 },
+  ameacaPodioMaxGap: { min: 0, max: 100_000 },
 } as const;
 
 type Resultado<T> = { ok: true; valor: T } | { ok: false; erro: string };
@@ -200,6 +201,11 @@ export async function POST(req: NextRequest) {
   if ("nivelChefLimiares" in body) {
     const r = parseNivelLimiares(body.nivelChefLimiares);
     if (r.ok) novaConfig.nivelChefLimiares = r.valor; else erros.push(r.erro);
+  }
+
+  if ("ameacaPodioMaxGap" in body) {
+    const r = parseNumero("ameacaPodioMaxGap", body.ameacaPodioMaxGap, LIMITES.ameacaPodioMaxGap);
+    if (r.ok) novaConfig.ameacaPodioMaxGap = r.valor; else erros.push(r.erro);
   }
 
   // Regra cruzada: o bônus do impulso nunca pode valer mais que o teto da

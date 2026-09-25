@@ -14,6 +14,7 @@ import { obterExtratoPontos } from "./fidelidade";
 import { obterTemporada } from "./temporadas";
 import { calcularScoreDaTemporada } from "./rankingClientes";
 import { projetarScoreRankingComBonus } from "./rankingScoreTemporada";
+import { comBloqueioGamificacao, chaveLockScoreRanking } from "./rankingGamificacaoLock";
 
 export async function sincronizarScoreTemporadaComBonus(
   tenantId: string,
@@ -22,14 +23,21 @@ export async function sincronizarScoreTemporadaComBonus(
 ): Promise<void> {
   if (!tenantId || !temporadaId || !clienteId) return;
   try {
-    const temporada = await obterTemporada(tenantId, temporadaId);
-    if (!temporada?.ativadaEm) return;
-    const inicioMs = new Date(temporada.ativadaEm).getTime();
-    const fimMs = temporada.fimEm ? new Date(temporada.fimEm).getTime() : Date.now();
-    if (!Number.isFinite(inicioMs) || !Number.isFinite(fimMs)) return;
-    const extrato = await obterExtratoPontos(clienteId);
-    const base = calcularScoreDaTemporada(extrato, inicioMs, Math.min(fimMs, Date.now()));
-    await projetarScoreRankingComBonus(tenantId, temporadaId, clienteId, base.score, base.primeiroAtingidoEm ?? Date.now());
+    // Lock compartilhado com fidelidade.ts (sincronizarRankingCliente):
+    // o extrato só é lido DEPOIS de garantir a exclusão mútua, para nunca
+    // escrever uma base desatualizada por cima de um crédito concorrente
+    // que só terminou de escrever enquanto este caminho esperava o bônus
+    // (residual de concorrência da auditoria do #446, seção 16).
+    await comBloqueioGamificacao(chaveLockScoreRanking(tenantId, temporadaId, clienteId), async () => {
+      const temporada = await obterTemporada(tenantId, temporadaId);
+      if (!temporada?.ativadaEm) return;
+      const inicioMs = new Date(temporada.ativadaEm).getTime();
+      const fimMs = temporada.fimEm ? new Date(temporada.fimEm).getTime() : Date.now();
+      if (!Number.isFinite(inicioMs) || !Number.isFinite(fimMs)) return;
+      const extrato = await obterExtratoPontos(clienteId);
+      const base = calcularScoreDaTemporada(extrato, inicioMs, Math.min(fimMs, Date.now()));
+      await projetarScoreRankingComBonus(tenantId, temporadaId, clienteId, base.score, base.primeiroAtingidoEm ?? Date.now());
+    });
   } catch (erro) {
     console.warn("[ChefeBot] Não foi possível sincronizar o score de competição da temporada", erro);
   }

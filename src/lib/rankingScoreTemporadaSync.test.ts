@@ -9,6 +9,15 @@ const { obterExtratoPontosMock, obterTemporadaMock, projetarMock } = vi.hoisted(
 vi.mock("./fidelidade", () => ({ obterExtratoPontos: obterExtratoPontosMock }));
 vi.mock("./temporadas", () => ({ obterTemporada: obterTemporadaMock }));
 vi.mock("./rankingScoreTemporada", () => ({ projetarScoreRankingComBonus: projetarMock }));
+// Lock real (Redis) não está disponível neste teste unitário — o passthrough
+// abaixo mantém o comportamento testado focado na lógica de recálculo, sem
+// depender de infraestrutura. A exclusão mútua em si é coberta por
+// rankingGamificacaoLock.test.ts e pelo teste de integração
+// rankingScoreAutoridadeUnica.integration.test.ts.
+vi.mock("./rankingGamificacaoLock", () => ({
+  comBloqueioGamificacao: (_chave: string, fn: () => Promise<unknown>) => fn(),
+  chaveLockScoreRanking: (tenantId: string, temporadaId: string, clienteId: string) => `${tenantId}:${temporadaId}:${clienteId}`,
+}));
 
 import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporadaSync";
 

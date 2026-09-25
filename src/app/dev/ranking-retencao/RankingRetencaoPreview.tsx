@@ -126,6 +126,8 @@ const GAMIFICACAO_NEUTRA: PainelGamificacao = {
   missaoSemanal: null,
   missaoIndicacao: null,
   nivelChef: null,
+  movimentoRecente: null,
+  coroaAmeacada: false,
 };
 
 const CENARIOS: Cenario[] = [
@@ -428,6 +430,8 @@ const CENARIOS: Cenario[] = [
         missaoSemanal: { status: "desbloqueada" },
         missaoIndicacao: { concluida: false },
         nivelChef: { nivel: 4, nome: "Chef Executivo", xpAtual: 1450, xpProximoNivel: null },
+        movimentoRecente: { variacao: { direcao: "subiu", casas: 2 }, desde: "2026-09-20T12:00:00.000Z" },
+        coroaAmeacada: false,
       },
     },
   },

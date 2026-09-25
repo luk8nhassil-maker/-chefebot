@@ -183,6 +183,18 @@ describe("POST /api/admin/ranking/gamificacao", () => {
     expect(res.status).toBe(400);
   });
 
+  test("ameacaPodioMaxGap válido é aceito e persistido", async () => {
+    const res = await POST(req(adminToken, { ameacaPodioMaxGap: 5 }));
+    expect(res.status).toBe(200);
+    const getRes = await GET(req(adminToken));
+    expect((await getRes.json()).ameacaPodioMaxGap).toBe(5);
+  });
+
+  test("ameacaPodioMaxGap negativo é rejeitado", async () => {
+    const res = await POST(req(adminToken, { ameacaPodioMaxGap: -1 }));
+    expect(res.status).toBe(400);
+  });
+
   test("valor numérico inválido é REJEITADO (400) e nunca sobrescreve o anterior", async () => {
     await POST(req(adminToken, { missaoSemanalMultiplicador: 3 }));
     const res = await POST(req(adminToken, { missaoSemanalMultiplicador: "abc" }));

@@ -84,24 +84,37 @@ export async function sincronizarMissaoSemanalCliente(params: {
   participaCampanha: boolean;
   posicaoAtual: number | null;
   agora: Date;
+  /**
+   * Data do último pedido REAL confirmado (fonte canônica: extrato de
+   * fidelidade), usada só para "batizar" a missão na PRIMEIRA avaliação de
+   * um cliente que nunca teve `ultimoPedidoElegivelEm` registrado — nunca
+   * sobrescreve um valor já existente. Sem isso, quem já era cliente antes
+   * da feature existir ficaria bloqueado para sempre (nunca teria um
+   * "pedido elegível registrado" depois da ativação).
+   */
+  ultimoPedidoConfirmadoConhecido?: string | null;
 }): Promise<EstadoMissaoSemanal> {
-  const { tenantId, temporadaId, clienteId, participaCampanha, posicaoAtual, agora } = params;
+  const { tenantId, temporadaId, clienteId, participaCampanha, posicaoAtual, agora, ultimoPedidoConfirmadoConhecido } = params;
   const config = await obterConfigGamificacao();
   if (!config.missaoSemanalAtiva) return ESTADO_MISSAO_SEMANAL_INICIAL;
 
   return comBloqueioGamificacao(chaveLock(tenantId, temporadaId, clienteId), async () => {
     const registro = await obterRegistro(tenantId, temporadaId, clienteId);
+    const baseline = registro.ultimoPedidoElegivelEm === null && ultimoPedidoConfirmadoConhecido
+      ? ultimoPedidoConfirmadoConhecido
+      : registro.ultimoPedidoElegivelEm;
+
     const novoEstado = avaliarDesbloqueioMissaoSemanal({
       estadoAtual: registro.estado,
       participaCampanha,
       posicaoAtual,
-      ultimoPedidoElegivelEm: registro.ultimoPedidoElegivelEm,
+      ultimoPedidoElegivelEm: baseline,
       agora,
       cooldownDias: config.missaoSemanalCooldownDias,
     });
-    if (novoEstado !== registro.estado) {
-      await salvarRegistro(tenantId, temporadaId, clienteId, { ...registro, estado: novoEstado });
-      if (novoEstado.status === "desbloqueada") {
+    if (novoEstado !== registro.estado || baseline !== registro.ultimoPedidoElegivelEm) {
+      await salvarRegistro(tenantId, temporadaId, clienteId, { estado: novoEstado, ultimoPedidoElegivelEm: baseline });
+      if (novoEstado.status === "desbloqueada" && novoEstado !== registro.estado) {
         await registrarFatoRankingGamificacao("missao_semanal_desbloqueada", `${clienteId}:${temporadaId}:${novoEstado.desbloqueadaEm}`);
       }
     }

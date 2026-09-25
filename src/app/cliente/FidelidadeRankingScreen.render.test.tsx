@@ -54,42 +54,42 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
   });
 
   test("statusSocial null não mostra selo de status, mesmo com nivelChef presente", () => {
-    montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: { nivel: 2, nome: "Cozinheiro", xpAtual: 10, xpProximoNivel: 100 } } });
+    montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: { nivel: 2, nome: "Cozinheiro", xpAtual: 10, xpProximoNivel: 100 }, movimentoRecente: null, coroaAmeacada: false } });
     expect(screen.queryByText(/Campeão/)).toBeNull();
     expect(screen.getByText(/Nível 2/)).toBeTruthy();
   });
 
   test("statusSocial campeao mostra o selo Campeão", () => {
-    montar({ gamificacao: { statusSocial: "campeao", bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: null } });
+    montar({ gamificacao: { statusSocial: "campeao", bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false } });
     expect(screen.getByText("Campeão")).toBeTruthy();
   });
 
   test("statusSocial elite mostra o selo Elite Top 10", () => {
-    montar({ gamificacao: { statusSocial: "elite", bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: null } });
+    montar({ gamificacao: { statusSocial: "elite", bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false } });
     expect(screen.getByText("Elite Top 10")).toBeTruthy();
   });
 
   test("missão semanal desbloqueada mostra o card Caçada ao Pódio", () => {
-    montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "desbloqueada" }, missaoIndicacao: null, nivelChef: null } });
+    montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "desbloqueada" }, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false } });
     expect(screen.getByText("Caçada ao Pódio liberada!")).toBeTruthy();
   });
 
   test("missão semanal inativa ou consumida nunca mostra o card (nunca falso positivo)", () => {
-    montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "inativa" }, missaoIndicacao: null, nivelChef: null } });
+    montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "inativa" }, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false } });
     expect(screen.queryByText(/Caçada ao Pódio/)).toBeNull();
     cleanup();
-    montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "consumida" }, missaoIndicacao: null, nivelChef: null } });
+    montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "consumida" }, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false } });
     expect(screen.queryByText(/Caçada ao Pódio/)).toBeNull();
   });
 
   test("nível de chef mostra nível e nome quando presente", () => {
-    montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: { nivel: 3, nome: "Chef", xpAtual: 600, xpProximoNivel: null } } });
+    montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: { nivel: 3, nome: "Chef", xpAtual: 600, xpProximoNivel: null }, movimentoRecente: null, coroaAmeacada: false } });
     expect(screen.getByText("Nível 3 — Chef")).toBeTruthy();
   });
 
   test("missão de indicação concluída aparece no sheet 'Quero subir'", async () => {
     montar({
-      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: { concluida: true }, nivelChef: null },
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: { concluida: true }, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
       onNovoPedido: () => undefined,
     });
     screen.getByText("Quero subir").click();
@@ -98,10 +98,126 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
 
   test("sem missão de indicação concluída, mostra o texto normal de estrelas", async () => {
     montar({
-      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: { concluida: false }, nivelChef: null },
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: { concluida: false }, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
       onNovoPedido: () => undefined,
     });
     screen.getByText("Quero subir").click();
     expect(await screen.findByText(/Estrelas na primeira compra dele/)).toBeTruthy();
+  });
+
+  test("missão de indicação incompleta aparece como card VISÍVEL, sem precisar abrir o sheet 'Quero subir'", () => {
+    montar({
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: { concluida: false }, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
+    });
+    expect(screen.getByText("MISSÃO DA TEMPORADA")).toBeTruthy();
+    expect(screen.getByText("Indique 1 amigo — 0/1")).toBeTruthy();
+  });
+
+  test("missão de indicação concluída no card visível mostra 1/1 concluída", () => {
+    montar({
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: { concluida: true }, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
+    });
+    expect(screen.getByText("Indique 1 amigo — 1/1 ✓ Concluída")).toBeTruthy();
+  });
+
+  test("sem missão de indicação ativa (null), nunca mostra o card da temporada", () => {
+    montar({
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
+    });
+    expect(screen.queryByText("MISSÃO DA TEMPORADA")).toBeNull();
+  });
+
+  test("copy da missão semanal nunca confunde o bônus do Ranking com Estrelas normais da Fidelidade", () => {
+    montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "desbloqueada" }, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false } });
+    expect(screen.getByText("Seu próximo pedido vale 2x no Ranking desta temporada.")).toBeTruthy();
+    expect(screen.getByText(/Suas Estrelas normais da Fidelidade continuam as mesmas/)).toBeTruthy();
+  });
+
+  test("nível de chef mostra XP atual, XP do próximo nível e barra de progresso proporcional", () => {
+    montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: { nivel: 2, nome: "Cozinheiro", xpAtual: 50, xpProximoNivel: 100 }, movimentoRecente: null, coroaAmeacada: false } });
+    expect(screen.getByText("50 XP / 100 XP")).toBeTruthy();
+    const barra = screen.getByRole("progressbar");
+    expect(barra.getAttribute("aria-valuenow")).toBe("50");
+  });
+
+  test("nível máximo (sem próximo nível) mostra barra cheia e nunca pede XP restante inventado", () => {
+    montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: { nivel: 5, nome: "Lenda", xpAtual: 9999, xpProximoNivel: null }, movimentoRecente: null, coroaAmeacada: false } });
+    expect(screen.getByText("Nível máximo atingido.")).toBeTruthy();
+    const barra = screen.getByRole("progressbar");
+    expect(barra.getAttribute("aria-valuenow")).toBe("100");
+  });
+
+  test("movimento recente sobe: mostra '▲N desde sua última visita', nunca 'desde ontem'", () => {
+    montar({
+      gamificacao: {
+        statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: null,
+        movimentoRecente: { variacao: { direcao: "subiu", casas: 2 }, desde: "2026-01-01T00:00:00.000Z" },
+        coroaAmeacada: false,
+      },
+    });
+    expect(screen.getByText("▲ 2 desde sua última visita")).toBeTruthy();
+    expect(screen.queryByText(/desde ontem/)).toBeNull();
+  });
+
+  test("movimento recente 'manteve' não mostra chip (nada a destacar)", () => {
+    montar({
+      gamificacao: {
+        statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: null,
+        movimentoRecente: { variacao: { direcao: "manteve", casas: 0 }, desde: "2026-01-01T00:00:00.000Z" },
+        coroaAmeacada: false,
+      },
+    });
+    expect(screen.queryByText(/desde sua última visita/)).toBeNull();
+  });
+
+  test("líder sem coroaAmeacada configurada mostra framing neutro 'Defenda sua coroa'", () => {
+    montar({
+      ranking: {
+        ...RANKING_BASE,
+        participantes: { ...RANKING_BASE.participantes, alvo: { estado: "liderando", vantagem: 6 } },
+      },
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
+    });
+    expect(screen.getByText("Defenda sua coroa")).toBeTruthy();
+    expect(screen.queryByText("Coroa ameaçada!")).toBeNull();
+  });
+
+  test("líder com coroaAmeacada true (config real do admin) mostra o alerta 'Coroa ameaçada!'", () => {
+    montar({
+      ranking: {
+        ...RANKING_BASE,
+        participantes: { ...RANKING_BASE.participantes, alvo: { estado: "liderando", vantagem: 2 } },
+      },
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: true },
+    });
+    expect(screen.getByText("Coroa ameaçada!")).toBeTruthy();
+  });
+
+  test("quem não lidera nunca vê a seção 'Defenda sua coroa'", () => {
+    montar({
+      ranking: {
+        ...RANKING_BASE,
+        participantes: { ...RANKING_BASE.participantes, alvo: { estado: "alcancar", alvoPosicao: 4, necessario: 3, scoreAlvo: 22 } },
+      },
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
+    });
+    expect(screen.queryByText("Defenda sua coroa")).toBeNull();
+    expect(screen.queryByText("Coroa ameaçada!")).toBeNull();
+  });
+
+  test("selo social de OUTRO membro do Top 10 aparece no pódio, não só do próprio cliente", () => {
+    montar({
+      ranking: {
+        ...RANKING_BASE,
+        participantes: {
+          ...RANKING_BASE.participantes,
+          lista: [
+            { posicao: 1, score: 500, eVoce: false, participaCampanha: true, nomePublico: "Rival", statusSocial: "campeao" },
+            { posicao: 5, score: 100, eVoce: true, participaCampanha: true, statusSocial: undefined },
+          ],
+        },
+      },
+    });
+    expect(screen.getByTitle("Campeão")).toBeTruthy();
   });
 });

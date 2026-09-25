@@ -193,4 +193,62 @@ describe("autoridade única de projeção do score (blocker crítico do #446)", 
     expect(retry).toBeNull(); // já processado
     expect(await scoreAtual()).toBe(17);
   });
+
+  // ---------------------------------------------------------------------
+  // Seção 16 da auditoria: testes adversariais de concorrência. Os cenários
+  // de "dois pedidos concorrentes" e "recuperação de falha intermediária" já
+  // têm prova dedicada em rankingMissaoSemanalEstado.test.ts e
+  // rankingMissaoIndicacaoEstado.test.ts (mesmo lock exclusivo por cliente).
+  // Os dois testes abaixo cobrem o cenário que falta: duas ESCRITAS
+  // concorrentes na MESMA projeção de score por caminhos DIFERENTES
+  // (fidelidade.ts vs. crédito de bônus) — o caso em que não há lock
+  // compartilhado entre os dois caminhos.
+  // ---------------------------------------------------------------------
+
+  test("8. crédito de fidelidade e crédito de bônus no MESMO instante: o último a terminar nunca apaga o outro (cada um relê o estado mais recente antes de escrever)", async () => {
+    obterBonusMock.mockResolvedValue(0);
+    await credito("pedido-0", 10);
+    expect(await scoreAtual()).toBe(10);
+
+    // Dois caminhos concorrentes disparados ao mesmo tempo: um pedido novo
+    // (fidelidade.ts) e uma missão semanal sendo confirmada nesse instante
+    // (sincronizarScoreTemporadaComBonus, chamada por
+    // rankingMissaoSemanalEstado.ts após creditar o bônus no ledger).
+    obterBonusMock.mockResolvedValue(8);
+    const { sincronizarScoreTemporadaComBonus } = await import("./rankingScoreTemporadaSync");
+    await Promise.all([
+      credito("pedido-1", 5),
+      sincronizarScoreTemporadaComBonus(TENANT, TEMP, CLI),
+    ]);
+
+    // Cada caminho recalcula a partir da fonte de verdade (extrato completo
+    // para a base, ledger de bônus para o bônus) — não existe "incremento"
+    // sobre um valor em memória que o outro pudesse pisar. Resultado
+    // determinístico: 15 base + 8 bônus, não importa qual terminou por
+    // último.
+    expect(await scoreAtual()).toBe(23);
+  });
+
+  test("9. bônus creditado no exato instante de um novo pedido: nenhum dos dois se perde, mesmo com Redis lento em um dos dois caminhos", async () => {
+    obterBonusMock.mockResolvedValue(3);
+    await credito("pedido-0", 10);
+    expect(await scoreAtual()).toBe(13); // 10 base + 3 bônus
+
+    // Simula o bônus real do ledger passando de 3 para 9 NO MEIO da leitura
+    // (ex.: outro worker credita a missão semanal exatamente agora, e o
+    // Redis desse caminho é um pouco mais lento) — qualquer leitura de
+    // obterBonusCompeticaoDaTemporada que comece DEPOIS da transição já vê o
+    // valor novo, como um ledger real faria.
+    let bonusReal = 3;
+    obterBonusMock.mockImplementation(async () => bonusReal);
+    setTimeout(() => { bonusReal = 9; }, 5);
+
+    const { sincronizarScoreTemporadaComBonus } = await import("./rankingScoreTemporadaSync");
+    await Promise.all([
+      sincronizarScoreTemporadaComBonus(TENANT, TEMP, CLI),
+      new Promise((resolve) => setTimeout(resolve, 20)).then(() => credito("pedido-1", 7)),
+    ]);
+
+    expect(await scoreAtual()).toBe(26); // 17 base + 9 bônus — nenhum dos dois créditos se perdeu, não importa a ordem
+  });
 });
