@@ -125,3 +125,59 @@ export async function sincronizarStatusSocialCliente(
   }
   return novo;
 }
+
+function chaveReconciliacao(tenantId: string, temporadaAnteriorId: string, temporadaNovaId: string): string {
+  return `ranking:reconciliacao:${tenantId}:${temporadaAnteriorId}:${temporadaNovaId}`;
+}
+
+/**
+ * Correção de blocker da auditoria do #446: carryover e status social NÃO
+ * podem depender de cada membro do Top 10 anterior abrir o app — antes,
+ * `aplicarCarryoverClienteSeNecessario`/`sincronizarStatusSocialCliente` só
+ * rodavam quando O PRÓPRIO cliente lia o painel, deixando o ranking
+ * incompleto até todo o Top 10 logar.
+ *
+ * Esta função reconcilia TODO o Top 10 elegível de uma vez, disparada pela
+ * leitura de painel de QUALQUER cliente (não precisa ser um dos vencedores)
+ * — sem cron, sem precisar tocar `temporadas.ts`. Uma marca (`SET NX`)
+ * garante que o laço sobre o Top 10 só roda uma vez por transição; se o
+ * resultado arquivado da temporada anterior ainda não existir (corrida rara
+ * bem no instante da ativação), a marca é removida para a PRÓXIMA leitura
+ * tentar de novo — nunca fica "presa" sem nunca reconciliar.
+ *
+ * Reaproveita as MESMAS funções por-cliente já testadas (nunca duplica a
+ * regra de negócio) — só decide "para quem" chamar, em vez de esperar cada
+ * um logar sozinho.
+ */
+export async function reconciliarTransicaoTemporada(
+  tenantId: string,
+  temporadaAtual: ConfigTemporada,
+): Promise<void> {
+  const anterior = await obterTemporadaAnteriorEncerrada(tenantId, temporadaAtual);
+  if (!anterior) return;
+
+  const chaveMarca = chaveReconciliacao(tenantId, anterior.temporadaId, temporadaAtual.temporadaId);
+  const marcou = await redis.set(chaveMarca, true, { nx: true });
+  if (!marcou) return;
+
+  try {
+    const resultado = await obterResultadoTemporada(tenantId, anterior.temporadaId);
+    if (!resultado) {
+      // Snapshot da temporada anterior ainda não foi arquivado — solta a
+      // marca para a próxima leitura tentar de novo, nunca falha silenciosa
+      // para sempre.
+      await redis.del(chaveMarca);
+      return;
+    }
+    const top10 = resultado.participantesTopo.filter((e) => e.posicao <= 10);
+    for (const entrada of top10) {
+      await aplicarCarryoverClienteSeNecessario(tenantId, temporadaAtual, entrada.clienteId);
+      await sincronizarStatusSocialCliente(tenantId, temporadaAtual, entrada.clienteId);
+    }
+  } catch (erro) {
+    // Best-effort: uma falha no meio do laço solta a marca para a próxima
+    // leitura retomar (idempotente — clientes já reconciliados são no-op).
+    await redis.del(chaveMarca).catch(() => undefined);
+    console.warn("[ChefeBot] Não foi possível reconciliar a transição de temporada", erro);
+  }
+}

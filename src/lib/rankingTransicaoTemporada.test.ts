@@ -9,6 +9,10 @@ const { store, redisMock, listarTemporadasMock, obterResultadoTemporadaMock, obt
       store.set(key, value);
       return "OK";
     }),
+    del: vi.fn(async (key: string) => {
+      store.delete(key);
+      return 1;
+    }),
   };
   return {
     store,
@@ -16,7 +20,7 @@ const { store, redisMock, listarTemporadasMock, obterResultadoTemporadaMock, obt
     listarTemporadasMock: vi.fn(),
     obterResultadoTemporadaMock: vi.fn(),
     obterConfigGamificacaoMock: vi.fn(),
-    creditarBonusMock: vi.fn(async () => "creditado" as const),
+    creditarBonusMock: vi.fn(async (_params: { clienteId: string }) => "creditado" as const),
     registrarFatoMock: vi.fn(async () => true),
   };
 });
@@ -34,6 +38,7 @@ import {
   aplicarCarryoverClienteSeNecessario,
   sincronizarStatusSocialCliente,
   obterStatusSocialVigente,
+  reconciliarTransicaoTemporada,
 } from "./rankingTransicaoTemporada";
 import type { ConfigTemporada } from "./temporadas";
 
@@ -185,5 +190,76 @@ describe("sincronizarStatusSocialCliente / obterStatusSocialVigente", () => {
     obterResultadoTemporadaMock.mockResolvedValue({ participantesTopo: [{ clienteId: "cli_a", posicao: 2 }] });
     await sincronizarStatusSocialCliente(TENANT, atual, "cli_a");
     expect((await obterStatusSocialVigente(TENANT, "cli_a"))?.status).toBe("prata");
+  });
+});
+
+describe("reconciliarTransicaoTemporada (blocker: independente do login do Top 10)", () => {
+  const atual = temporada();
+  const TOP10 = Array.from({ length: 10 }, (_, i) => ({ clienteId: `cli_${i + 1}`, posicao: i + 1, score: 1000 - i }));
+
+  test("reconcilia carryover E status social de TODO o Top 10 numa única chamada, sem nenhum deles ter 'logado'", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ carryoverAtivo: true, carryoverTabela: [{ posicao: 1, bonus: 100 }, { posicao: 2, bonus: 60 }] });
+    listarTemporadasMock.mockResolvedValue([{ temporadaId: "temp_1", estado: "encerrada", encerradaEm: "2026-01-31T00:00:00.000Z" }]);
+    obterResultadoTemporadaMock.mockResolvedValue({ participantesTopo: TOP10 });
+
+    await reconciliarTransicaoTemporada(TENANT, atual);
+
+    // #1 e #2 têm bônus configurado — os dois foram creditados sem que
+    // "cli_1"/"cli_2" tivessem feito nenhuma chamada própria.
+    expect(creditarBonusMock).toHaveBeenCalledWith(expect.objectContaining({ clienteId: "cli_1", pontos: 100 }));
+    expect(creditarBonusMock).toHaveBeenCalledWith(expect.objectContaining({ clienteId: "cli_2", pontos: 60 }));
+    // Status social também sincronizado para todo o Top 10.
+    expect((await obterStatusSocialVigente(TENANT, "cli_1"))?.status).toBe("campeao");
+    expect((await obterStatusSocialVigente(TENANT, "cli_3"))?.status).toBe("bronze");
+    expect((await obterStatusSocialVigente(TENANT, "cli_10"))?.status).toBe("elite");
+  });
+
+  test("idempotente: uma segunda chamada não reprocessa o Top 10 de novo (marca já existe)", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ carryoverAtivo: true, carryoverTabela: [{ posicao: 1, bonus: 100 }] });
+    listarTemporadasMock.mockResolvedValue([{ temporadaId: "temp_1", estado: "encerrada", encerradaEm: "2026-01-31T00:00:00.000Z" }]);
+    obterResultadoTemporadaMock.mockResolvedValue({ participantesTopo: TOP10 });
+
+    await reconciliarTransicaoTemporada(TENANT, atual);
+    obterResultadoTemporadaMock.mockClear();
+    creditarBonusMock.mockClear();
+
+    await reconciliarTransicaoTemporada(TENANT, atual);
+    expect(obterResultadoTemporadaMock).not.toHaveBeenCalled();
+    expect(creditarBonusMock).not.toHaveBeenCalled();
+  });
+
+  test("sem temporada anterior, não faz nada", async () => {
+    listarTemporadasMock.mockResolvedValue([]);
+    await reconciliarTransicaoTemporada(TENANT, atual);
+    expect(creditarBonusMock).not.toHaveBeenCalled();
+  });
+
+  test("sem resultado arquivado ainda (corrida na ativação), solta a marca para a PRÓXIMA leitura tentar de novo", async () => {
+    listarTemporadasMock.mockResolvedValue([{ temporadaId: "temp_1", estado: "encerrada", encerradaEm: "2026-01-31T00:00:00.000Z" }]);
+    obterResultadoTemporadaMock.mockResolvedValueOnce(null);
+
+    await reconciliarTransicaoTemporada(TENANT, atual);
+    expect(creditarBonusMock).not.toHaveBeenCalled();
+
+    obterConfigGamificacaoMock.mockResolvedValue({ carryoverAtivo: true, carryoverTabela: [{ posicao: 1, bonus: 100 }] });
+    obterResultadoTemporadaMock.mockResolvedValue({ participantesTopo: TOP10 });
+    await reconciliarTransicaoTemporada(TENANT, atual);
+    expect(creditarBonusMock).toHaveBeenCalledWith(expect.objectContaining({ clienteId: "cli_1", pontos: 100 }));
+  });
+
+  test("dois workers concorrentes reconciliando a mesma transição: só um processa o laço", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ carryoverAtivo: true, carryoverTabela: [{ posicao: 1, bonus: 100 }] });
+    listarTemporadasMock.mockResolvedValue([{ temporadaId: "temp_1", estado: "encerrada", encerradaEm: "2026-01-31T00:00:00.000Z" }]);
+    obterResultadoTemporadaMock.mockResolvedValue({ participantesTopo: TOP10 });
+
+    await Promise.all([
+      reconciliarTransicaoTemporada(TENANT, atual),
+      reconciliarTransicaoTemporada(TENANT, atual),
+    ]);
+
+    // A marca (SET NX) garante que só UM dos dois workers processa o laço
+    // inteiro — o outro vê a marca já existente e nem lê o resultado.
+    const chamadasParaCli1 = creditarBonusMock.mock.calls.filter((c) => (c[0] as { clienteId: string }).clienteId === "cli_1");
+    expect(chamadasParaCli1).toHaveLength(1);
   });
 });

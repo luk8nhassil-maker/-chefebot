@@ -95,6 +95,7 @@ const {
   obterBonusMock,
   aplicarCarryoverMock,
   sincronizarStatusSocialMock,
+  reconciliarTransicaoMock,
   sincronizarMissaoSemanalMock,
   obterEstadoMissaoIndicacaoMock,
   aplicarImpulsoPodioMock,
@@ -104,6 +105,7 @@ const {
   obterBonusMock: vi.fn(async () => 0),
   aplicarCarryoverMock: vi.fn(async () => undefined),
   sincronizarStatusSocialMock: vi.fn(async () => null as { status: string | null; temporadaOrigemId: string; atribuidoEm: string } | null),
+  reconciliarTransicaoMock: vi.fn(async () => undefined),
   sincronizarMissaoSemanalMock: vi.fn(async () => ({
     status: "inativa" as "inativa" | "desbloqueada" | "consumida",
     desbloqueadaEm: null as string | null,
@@ -124,6 +126,7 @@ vi.mock("@/lib/rankingBonusTemporada", () => ({ obterBonusCompeticaoDaTemporada:
 vi.mock("@/lib/rankingTransicaoTemporada", () => ({
   aplicarCarryoverClienteSeNecessario: aplicarCarryoverMock,
   sincronizarStatusSocialCliente: sincronizarStatusSocialMock,
+  reconciliarTransicaoTemporada: reconciliarTransicaoMock,
 }));
 vi.mock("@/lib/rankingMissaoSemanalEstado", () => ({ sincronizarMissaoSemanalCliente: sincronizarMissaoSemanalMock }));
 vi.mock("@/lib/rankingMissaoIndicacaoEstado", () => ({ obterEstadoMissaoIndicacao: obterEstadoMissaoIndicacaoMock }));
@@ -159,6 +162,7 @@ beforeEach(() => {
   obterConfigGamificacaoMock.mockReset().mockImplementation(async () => configGamificacaoMock);
   obterBonusMock.mockReset().mockResolvedValue(0);
   aplicarCarryoverMock.mockReset().mockResolvedValue(undefined);
+  reconciliarTransicaoMock.mockReset().mockResolvedValue(undefined);
   sincronizarStatusSocialMock.mockReset().mockResolvedValue(null);
   sincronizarMissaoSemanalMock.mockReset().mockResolvedValue({ status: "inativa", desbloqueadaEm: null, consumidaEm: null, consumidaPedidoId: null });
   obterEstadoMissaoIndicacaoMock.mockReset().mockResolvedValue({ concluida: false, concluidaEm: null, pedidoId: null });
@@ -603,6 +607,18 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       expect(body.gamificacao.missaoIndicacao).toBeNull();
       expect(body.gamificacao.nivelChef).toBeNull();
       expect(aplicarCarryoverMock).toHaveBeenCalledWith("default", temporadaAtiva, clienteId);
+    });
+
+    test("com temporada ativa, reconcilia a transição em lote ANTES da chamada por cliente (nunca depende só do próprio login)", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      await GET(req("token-cli-a"));
+      expect(reconciliarTransicaoMock).toHaveBeenCalledWith("default", temporadaAtiva);
+    });
+
+    test("sem temporada, nunca chama a reconciliação em lote", async () => {
+      temporadaAtiva = null;
+      await GET(req("token-cli-a"));
+      expect(reconciliarTransicaoMock).not.toHaveBeenCalled();
     });
 
     test("expõe o status social vigente quando a transição já foi sincronizada", async () => {

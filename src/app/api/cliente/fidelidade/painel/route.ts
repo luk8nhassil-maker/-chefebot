@@ -34,7 +34,7 @@ import {
 import { calcularNivelChef, calcularXpChefDosMovimentos } from "@/lib/rankingGamificacao";
 import { obterConfigGamificacao } from "@/lib/rankingGamificacaoConfig";
 import { obterBonusCompeticaoDaTemporada } from "@/lib/rankingBonusTemporada";
-import { aplicarCarryoverClienteSeNecessario, sincronizarStatusSocialCliente } from "@/lib/rankingTransicaoTemporada";
+import { aplicarCarryoverClienteSeNecessario, sincronizarStatusSocialCliente, reconciliarTransicaoTemporada } from "@/lib/rankingTransicaoTemporada";
 import { sincronizarMissaoSemanalCliente } from "@/lib/rankingMissaoSemanalEstado";
 import { obterEstadoMissaoIndicacao } from "@/lib/rankingMissaoIndicacaoEstado";
 import { aplicarImpulsoPodioSeElegivel } from "@/lib/rankingImpulsoPodioEstado";
@@ -62,10 +62,18 @@ export async function GET(req: NextRequest) {
   const temporada = await obterTemporadaAtiva(tenantId);
   const configGamificacao = await obterConfigGamificacao();
 
-  // Vantagem de largada (carryover) — aplicada ANTES de ler a posição, para
-  // que o Top 10 herdado da temporada anterior já apareça refletido nesta
-  // mesma leitura. Idempotente: repetir em toda leitura do painel é seguro.
+  // Vantagem de largada (carryover) e status social — aplicados ANTES de ler
+  // a posição, para que o Top 10 herdado da temporada anterior já apareça
+  // refletido nesta mesma leitura. Idempotente: repetir em toda leitura do
+  // painel é seguro.
+  //
+  // A reconciliação em lote roda primeiro e cobre TODO o Top 10 anterior de
+  // uma vez (nunca depende de cada um deles logar — correção de blocker da
+  // auditoria do #446); a chamada por-cliente logo depois garante que o
+  // PRÓPRIO cliente autenticado nesta requisição também fica em dia mesmo
+  // que a reconciliação em lote já tenha rodado por outra pessoa.
   if (temporada) {
+    await reconciliarTransicaoTemporada(tenantId, temporada);
     await aplicarCarryoverClienteSeNecessario(tenantId, temporada, clienteId);
   }
 
