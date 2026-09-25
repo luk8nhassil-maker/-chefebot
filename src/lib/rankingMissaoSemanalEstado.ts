@@ -5,12 +5,20 @@
 // - consumirMissaoSemanalNoPedido / reverterMissaoSemanalDoPedido: chamadas
 //   pelo efeito "gamificacao" do pedido entregue/cancelado
 //   (fidelidadeEfeitos.ts), sempre amarradas ao pedidoId exato.
+//
+// Consumo atômico e retomável (correção de dois blockers da auditoria do
+// #446): reservar/confirmar passam pelo MESMO lock exclusivo do cliente —
+// dois pedidos concorrentes nunca conseguem reservar a mesma missão
+// desbloqueada, e uma falha entre reservar e confirmar deixa o estado em
+// "processando" (nunca "consumida" sem o bônus garantido, nunca perdido) —
+// um retry com o MESMO pedidoId sempre retoma e conclui com segurança.
 import "server-only";
 import { redis } from "./redis";
 import {
   avaliarDesbloqueioMissaoSemanal,
   calcularBonusMissaoSemanal,
-  consumirMissaoSemanal,
+  reservarConsumoMissaoSemanal,
+  confirmarConsumoMissaoSemanal,
   reverterConsumoMissaoSemanal,
   ESTADO_MISSAO_SEMANAL_INICIAL,
   type EstadoMissaoSemanal,
@@ -19,6 +27,7 @@ import { obterConfigGamificacao } from "./rankingGamificacaoConfig";
 import { creditarBonusCompeticao, estornarBonusCompeticao } from "./rankingBonusTemporada";
 import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
 import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporadaSync";
+import { comBloqueioGamificacao } from "./rankingGamificacaoLock";
 
 type RegistroMissaoSemanal = {
   estado: EstadoMissaoSemanal;
@@ -32,6 +41,10 @@ const REGISTRO_INICIAL: RegistroMissaoSemanal = {
 
 function chaveRegistro(tenantId: string, temporadaId: string, clienteId: string): string {
   return `ranking:missaoSemanal:${tenantId}:${temporadaId}:${clienteId}`;
+}
+
+function chaveLock(tenantId: string, temporadaId: string, clienteId: string): string {
+  return `ranking:missaoSemanal:lock:${tenantId}:${temporadaId}:${clienteId}`;
 }
 
 // Migalha por pedido: guarda QUAL (tenant, temporada, cliente, bônus) esse
@@ -61,6 +74,8 @@ export async function obterEstadoMissaoSemanal(tenantId: string, temporadaId: st
  * Reavalia o desbloqueio a cada leitura do painel. Fail-closed: sem
  * `missaoSemanalAtiva` na config do admin, sempre retorna o estado inicial
  * (missão nunca aparece, nunca é avaliada, nunca escreve nada no Redis).
+ * Roda sob o mesmo lock do cliente para nunca correr por cima de uma
+ * reserva de consumo em andamento.
  */
 export async function sincronizarMissaoSemanalCliente(params: {
   tenantId: string;
@@ -74,22 +89,24 @@ export async function sincronizarMissaoSemanalCliente(params: {
   const config = await obterConfigGamificacao();
   if (!config.missaoSemanalAtiva) return ESTADO_MISSAO_SEMANAL_INICIAL;
 
-  const registro = await obterRegistro(tenantId, temporadaId, clienteId);
-  const novoEstado = avaliarDesbloqueioMissaoSemanal({
-    estadoAtual: registro.estado,
-    participaCampanha,
-    posicaoAtual,
-    ultimoPedidoElegivelEm: registro.ultimoPedidoElegivelEm,
-    agora,
-    cooldownDias: config.missaoSemanalCooldownDias,
-  });
-  if (novoEstado !== registro.estado) {
-    await salvarRegistro(tenantId, temporadaId, clienteId, { ...registro, estado: novoEstado });
-    if (novoEstado.status === "desbloqueada") {
-      await registrarFatoRankingGamificacao("missao_semanal_desbloqueada", `${clienteId}:${temporadaId}:${novoEstado.desbloqueadaEm}`);
+  return comBloqueioGamificacao(chaveLock(tenantId, temporadaId, clienteId), async () => {
+    const registro = await obterRegistro(tenantId, temporadaId, clienteId);
+    const novoEstado = avaliarDesbloqueioMissaoSemanal({
+      estadoAtual: registro.estado,
+      participaCampanha,
+      posicaoAtual,
+      ultimoPedidoElegivelEm: registro.ultimoPedidoElegivelEm,
+      agora,
+      cooldownDias: config.missaoSemanalCooldownDias,
+    });
+    if (novoEstado !== registro.estado) {
+      await salvarRegistro(tenantId, temporadaId, clienteId, { ...registro, estado: novoEstado });
+      if (novoEstado.status === "desbloqueada") {
+        await registrarFatoRankingGamificacao("missao_semanal_desbloqueada", `${clienteId}:${temporadaId}:${novoEstado.desbloqueadaEm}`);
+      }
     }
-  }
-  return novoEstado;
+    return novoEstado;
+  });
 }
 
 export type ResultadoConsumoMissaoSemanal = { consumida: boolean; bonusCreditado: number };
@@ -99,6 +116,13 @@ export type ResultadoConsumoMissaoSemanal = { consumida: boolean; bonusCreditado
  * "último pedido elegível" (alimenta o cooldown de desbloqueio), e só
  * consome/credita quando havia uma missão desbloqueada — nunca cria bônus a
  * partir do nada.
+ *
+ * Consumo atômico e retomável: TODA a seção (reservar → creditar →
+ * confirmar) roda sob o lock exclusivo do cliente. Se o processo cair entre
+ * reservar e confirmar, o estado fica "processando" com este `pedidoId` — um
+ * retry (mesmo pedidoId) reentra no lock, vê a reserva já é sua, e retoma o
+ * crédito (idempotente por eventoId) até confirmar. Nunca perde, nunca
+ * duplica o bônus.
  */
 export async function consumirMissaoSemanalNoPedido(params: {
   tenantId: string;
@@ -110,64 +134,82 @@ export async function consumirMissaoSemanalNoPedido(params: {
 }): Promise<ResultadoConsumoMissaoSemanal> {
   const { tenantId, temporadaId, clienteId, pedidoId, estrelasBaseDoPedido, agora } = params;
   const config = await obterConfigGamificacao();
-  const registro = await obterRegistro(tenantId, temporadaId, clienteId);
-
   if (!config.missaoSemanalAtiva) {
     return { consumida: false, bonusCreditado: 0 };
   }
 
-  const atualizado: RegistroMissaoSemanal = { ...registro, ultimoPedidoElegivelEm: agora.toISOString() };
-  const consumido = consumirMissaoSemanal({ estadoAtual: registro.estado, pedidoId, agora });
-  if (!consumido) {
-    await salvarRegistro(tenantId, temporadaId, clienteId, atualizado);
-    return { consumida: false, bonusCreditado: 0 };
-  }
+  return comBloqueioGamificacao(chaveLock(tenantId, temporadaId, clienteId), async () => {
+    const registro = await obterRegistro(tenantId, temporadaId, clienteId);
+    const atualizado: RegistroMissaoSemanal = { ...registro, ultimoPedidoElegivelEm: agora.toISOString() };
 
-  const bonus = calcularBonusMissaoSemanal(estrelasBaseDoPedido, config.missaoSemanalMultiplicador);
-  await salvarRegistro(tenantId, temporadaId, clienteId, { ...atualizado, estado: consumido });
-  if (bonus <= 0) return { consumida: true, bonusCreditado: 0 };
+    const reservado = reservarConsumoMissaoSemanal({ estadoAtual: registro.estado, pedidoId });
+    if (!reservado) {
+      await salvarRegistro(tenantId, temporadaId, clienteId, atualizado);
+      return { consumida: false, bonusCreditado: 0 };
+    }
+    await salvarRegistro(tenantId, temporadaId, clienteId, { ...atualizado, estado: reservado });
 
-  const resultado = await creditarBonusCompeticao({
-    tenantId,
-    temporadaId,
-    clienteId,
-    eventoId: `missaoSemanal:${pedidoId}`,
-    tipo: "missao_semanal",
-    pontos: bonus,
-    motivo: `Caçada ao Pódio — 2x no pedido ${pedidoId}`,
+    const bonus = calcularBonusMissaoSemanal(estrelasBaseDoPedido, config.missaoSemanalMultiplicador);
+    let bonusCreditado = 0;
+    if (bonus > 0) {
+      const resultado = await creditarBonusCompeticao({
+        tenantId,
+        temporadaId,
+        clienteId,
+        eventoId: `missaoSemanal:${pedidoId}`,
+        tipo: "missao_semanal",
+        pontos: bonus,
+        motivo: `Caçada ao Pódio — 2x no pedido ${pedidoId}`,
+      });
+      // "creditado" (primeira vez) ou "ja_creditado" (retry pós-falha, o
+      // bônus já estava garantido) — os dois significam "o ledger tem esse
+      // crédito agora", então os dois avançam para confirmar a missão.
+      if (resultado === "creditado" || resultado === "ja_creditado") {
+        bonusCreditado = bonus;
+        if (resultado === "creditado") {
+          await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus } satisfies BreadcrumbPedido);
+          await registrarFatoRankingGamificacao("missao_semanal_consumida", `${clienteId}:${temporadaId}:${pedidoId}`);
+          await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
+        }
+      }
+    }
+
+    const confirmado = confirmarConsumoMissaoSemanal({ estadoAtual: reservado, pedidoId, agora });
+    if (confirmado) {
+      const registroAtual = await obterRegistro(tenantId, temporadaId, clienteId);
+      await salvarRegistro(tenantId, temporadaId, clienteId, { ...registroAtual, estado: confirmado });
+    }
+    return { consumida: true, bonusCreditado };
   });
-  if (resultado === "creditado") {
-    await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus } satisfies BreadcrumbPedido);
-    await registrarFatoRankingGamificacao("missao_semanal_consumida", `${clienteId}:${temporadaId}:${pedidoId}`);
-    await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
-  }
-  return { consumida: true, bonusCreditado: bonus };
 }
 
 /**
  * Chamada pelo efeito "gamificacao" de um pedido cancelado/estornado. Só
- * reverte se ESTE pedido exato foi o que consumiu a missão (a migalha só
- * existe quando houve consumo real) — nunca mexe no estado de outro pedido.
- * Idempotente: chamar duas vezes (retry) é seguro.
+ * reverte se ESTE pedido exato foi o que reservou/consumiu a missão (a
+ * migalha só existe quando houve ao menos uma tentativa real de consumo) —
+ * nunca mexe no estado de outro pedido/cliente. Idempotente: chamar duas
+ * vezes (retry) é seguro. Roda sob o mesmo lock do cliente.
  */
 export async function reverterMissaoSemanalDoPedido(pedidoId: string, motivo: string): Promise<void> {
   if (!pedidoId) return;
   const breadcrumb = await redis.get<BreadcrumbPedido>(chaveBreadcrumbPedido(pedidoId));
   if (!breadcrumb) return;
 
-  const registro = await obterRegistro(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId);
-  const revertido = reverterConsumoMissaoSemanal({ estadoAtual: registro.estado, pedidoId });
-  if (revertido) {
-    await salvarRegistro(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId, { ...registro, estado: revertido });
-  }
-  const resultado = await estornarBonusCompeticao({
-    tenantId: breadcrumb.tenantId,
-    temporadaId: breadcrumb.temporadaId,
-    clienteId: breadcrumb.clienteId,
-    eventoIdOriginal: `missaoSemanal:${pedidoId}`,
-    motivo,
+  await comBloqueioGamificacao(chaveLock(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId), async () => {
+    const registro = await obterRegistro(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId);
+    const revertido = reverterConsumoMissaoSemanal({ estadoAtual: registro.estado, pedidoId });
+    if (revertido) {
+      await salvarRegistro(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId, { ...registro, estado: revertido });
+    }
+    const resultado = await estornarBonusCompeticao({
+      tenantId: breadcrumb.tenantId,
+      temporadaId: breadcrumb.temporadaId,
+      clienteId: breadcrumb.clienteId,
+      eventoIdOriginal: `missaoSemanal:${pedidoId}`,
+      motivo,
+    });
+    if (resultado === "estornado") {
+      await sincronizarScoreTemporadaComBonus(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId);
+    }
   });
-  if (resultado === "estornado") {
-    await sincronizarScoreTemporadaComBonus(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId);
-  }
 }

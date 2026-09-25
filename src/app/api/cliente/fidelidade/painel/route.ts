@@ -293,7 +293,7 @@ export async function GET(req: NextRequest) {
   // missões da temporada — tudo fail-closed sem config/temporada.
   let statusSocial: "campeao" | "prata" | "bronze" | "elite" | null = null;
   let bonusCompeticao = 0;
-  let missaoSemanal: { status: "inativa" | "desbloqueada" | "consumida" } | null = null;
+  let missaoSemanal: { status: "inativa" | "desbloqueada" | "processando" | "consumida" } | null = null;
   let missaoIndicacao: { concluida: boolean } | null = null;
   if (temporada) {
     const statusVigente = await sincronizarStatusSocialCliente(tenantId, temporada, clienteId);

@@ -60,7 +60,7 @@ export type PainelGamificacao = {
   // Já está somado dentro de ranking.score/ranking.participantes — exposto
   // aqui só para a UI conseguir mostrar "dos quais X são bônus de temporada".
   bonusCompeticao: number
-  missaoSemanal: { status: 'inativa' | 'desbloqueada' | 'consumida' } | null
+  missaoSemanal: { status: 'inativa' | 'desbloqueada' | 'processando' | 'consumida' } | null
   missaoIndicacao: { concluida: boolean } | null
   nivelChef: { nivel: number; nome: string | null; xpAtual: number; xpProximoNivel: number | null } | null
 }

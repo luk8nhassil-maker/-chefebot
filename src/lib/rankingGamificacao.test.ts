@@ -2,10 +2,13 @@ import { describe, expect, test } from "vitest";
 import {
   calcularStatusPorPosicao,
   avaliarDesbloqueioMissaoSemanal,
-  consumirMissaoSemanal,
+  reservarConsumoMissaoSemanal,
+  confirmarConsumoMissaoSemanal,
   reverterConsumoMissaoSemanal,
   calcularBonusMissaoSemanal,
-  concluirMissaoIndicacaoTemporada,
+  reservarMissaoIndicacaoTemporada,
+  confirmarMissaoIndicacaoTemporada,
+  reverterMissaoIndicacaoTemporada,
   calcularImpulsoPodioDisponivel,
   calcularBonusCarryover,
   calcularXpChefDosMovimentos,
@@ -83,9 +86,21 @@ describe("avaliarDesbloqueioMissaoSemanal", () => {
       desbloqueadaEm: "2026-01-05T00:00:00.000Z",
       consumidaEm: null,
       consumidaPedidoId: null,
+      processandoPedidoId: null,
     };
     const resultado = avaliarDesbloqueioMissaoSemanal({ ...base, estadoAtual: jaDesbloqueada, posicaoAtual: 1 });
     expect(resultado).toBe(jaDesbloqueada);
+  });
+
+  test("missão 'processando' nunca é reavaliada (não pode mexer no meio de uma reserva atômica)", () => {
+    const processando: EstadoMissaoSemanal = {
+      status: "processando",
+      desbloqueadaEm: "2026-01-05T00:00:00.000Z",
+      consumidaEm: null,
+      consumidaPedidoId: null,
+      processandoPedidoId: "pedido-1",
+    };
+    expect(avaliarDesbloqueioMissaoSemanal({ ...base, estadoAtual: processando })).toBe(processando);
   });
 
   test("cooldownDias inválido nunca desbloqueia", () => {
@@ -94,39 +109,73 @@ describe("avaliarDesbloqueioMissaoSemanal", () => {
   });
 });
 
-describe("consumirMissaoSemanal / reverterConsumoMissaoSemanal", () => {
+describe("reservarConsumoMissaoSemanal / confirmarConsumoMissaoSemanal / reverterConsumoMissaoSemanal", () => {
   const desbloqueada: EstadoMissaoSemanal = {
     status: "desbloqueada",
     desbloqueadaEm: "2026-01-05T00:00:00.000Z",
     consumidaEm: null,
     consumidaPedidoId: null,
+    processandoPedidoId: null,
   };
 
-  test("consome uma missão desbloqueada", () => {
-    const resultado = consumirMissaoSemanal({ estadoAtual: desbloqueada, pedidoId: "pedido-1", agora: new Date("2026-01-10T00:00:00Z") });
-    expect(resultado).toEqual({
+  test("reserva uma missão desbloqueada para o pedido (desbloqueada -> processando)", () => {
+    const reservado = reservarConsumoMissaoSemanal({ estadoAtual: desbloqueada, pedidoId: "pedido-1" });
+    expect(reservado).toEqual({
+      status: "processando",
+      desbloqueadaEm: desbloqueada.desbloqueadaEm,
+      consumidaEm: null,
+      consumidaPedidoId: null,
+      processandoPedidoId: "pedido-1",
+    });
+  });
+
+  test("confirma a reserva do MESMO pedido (processando -> consumida)", () => {
+    const reservado = reservarConsumoMissaoSemanal({ estadoAtual: desbloqueada, pedidoId: "pedido-1" })!;
+    const confirmado = confirmarConsumoMissaoSemanal({ estadoAtual: reservado, pedidoId: "pedido-1", agora: new Date("2026-01-10T00:00:00Z") });
+    expect(confirmado).toEqual({
       status: "consumida",
       desbloqueadaEm: desbloqueada.desbloqueadaEm,
       consumidaEm: "2026-01-10T00:00:00.000Z",
       consumidaPedidoId: "pedido-1",
+      processandoPedidoId: null,
     });
   });
 
-  test("não consome missão inativa (nada a consumir)", () => {
-    expect(consumirMissaoSemanal({ estadoAtual: ESTADO_MISSAO_SEMANAL_INICIAL, pedidoId: "pedido-1", agora: new Date() })).toBeNull();
+  test("reservar de novo o MESMO pedido já processando é idempotente (retry de falha intermediária)", () => {
+    const reservado = reservarConsumoMissaoSemanal({ estadoAtual: desbloqueada, pedidoId: "pedido-1" })!;
+    const retry = reservarConsumoMissaoSemanal({ estadoAtual: reservado, pedidoId: "pedido-1" });
+    expect(retry).toBe(reservado);
   });
 
-  test("não consome duas vezes (já consumida)", () => {
-    const consumida: EstadoMissaoSemanal = { status: "consumida", desbloqueadaEm: "x", consumidaEm: "y", consumidaPedidoId: "pedido-1" };
-    expect(consumirMissaoSemanal({ estadoAtual: consumida, pedidoId: "pedido-2", agora: new Date() })).toBeNull();
+  test("consumo atômico: dois pedidos não podem reservar a mesma missão desbloqueada", () => {
+    const reservadoPorA = reservarConsumoMissaoSemanal({ estadoAtual: desbloqueada, pedidoId: "pedido-A" })!;
+    expect(reservadoPorA.processandoPedidoId).toBe("pedido-A");
+    // pedido-B tenta reservar o MESMO estado (já processando por A) -> null
+    const reservadoPorB = reservarConsumoMissaoSemanal({ estadoAtual: reservadoPorA, pedidoId: "pedido-B" });
+    expect(reservadoPorB).toBeNull();
   });
 
-  test("reverte o consumo quando o pedido exato é cancelado", () => {
+  test("não reserva missão inativa (nada a reservar)", () => {
+    expect(reservarConsumoMissaoSemanal({ estadoAtual: ESTADO_MISSAO_SEMANAL_INICIAL, pedidoId: "pedido-1" })).toBeNull();
+  });
+
+  test("não reserva duas vezes (já consumida)", () => {
+    const consumida: EstadoMissaoSemanal = { status: "consumida", desbloqueadaEm: "x", consumidaEm: "y", consumidaPedidoId: "pedido-1", processandoPedidoId: null };
+    expect(reservarConsumoMissaoSemanal({ estadoAtual: consumida, pedidoId: "pedido-2" })).toBeNull();
+  });
+
+  test("não confirma um pedido diferente do que reservou", () => {
+    const reservado = reservarConsumoMissaoSemanal({ estadoAtual: desbloqueada, pedidoId: "pedido-1" })!;
+    expect(confirmarConsumoMissaoSemanal({ estadoAtual: reservado, pedidoId: "pedido-outro", agora: new Date() })).toBeNull();
+  });
+
+  test("reverte o consumo quando o pedido exato (já consumida) é cancelado", () => {
     const consumida: EstadoMissaoSemanal = {
       status: "consumida",
       desbloqueadaEm: "2026-01-05T00:00:00.000Z",
       consumidaEm: "2026-01-10T00:00:00.000Z",
       consumidaPedidoId: "pedido-1",
+      processandoPedidoId: null,
     };
     const resultado = reverterConsumoMissaoSemanal({ estadoAtual: consumida, pedidoId: "pedido-1" });
     expect(resultado).toEqual({
@@ -134,7 +183,14 @@ describe("consumirMissaoSemanal / reverterConsumoMissaoSemanal", () => {
       desbloqueadaEm: "2026-01-05T00:00:00.000Z",
       consumidaEm: null,
       consumidaPedidoId: null,
+      processandoPedidoId: null,
     });
+  });
+
+  test("reverte também no meio do processamento (falha/cancelamento entre reservar e confirmar)", () => {
+    const reservado = reservarConsumoMissaoSemanal({ estadoAtual: desbloqueada, pedidoId: "pedido-1" })!;
+    const resultado = reverterConsumoMissaoSemanal({ estadoAtual: reservado, pedidoId: "pedido-1" });
+    expect(resultado?.status).toBe("desbloqueada");
   });
 
   test("nunca reverte um pedido diferente do que consumiu (protege contra reversão cruzada)", () => {
@@ -143,11 +199,12 @@ describe("consumirMissaoSemanal / reverterConsumoMissaoSemanal", () => {
       desbloqueadaEm: "2026-01-05T00:00:00.000Z",
       consumidaEm: "2026-01-10T00:00:00.000Z",
       consumidaPedidoId: "pedido-1",
+      processandoPedidoId: null,
     };
     expect(reverterConsumoMissaoSemanal({ estadoAtual: consumida, pedidoId: "pedido-outro" })).toBeNull();
   });
 
-  test("não reverte uma missão que não está consumida", () => {
+  test("não reverte uma missão que não está consumida nem processando", () => {
     expect(reverterConsumoMissaoSemanal({ estadoAtual: desbloqueada, pedidoId: "pedido-1" })).toBeNull();
   });
 });
@@ -172,19 +229,42 @@ describe("calcularBonusMissaoSemanal", () => {
   });
 });
 
-describe("concluirMissaoIndicacaoTemporada", () => {
-  test("conclui a missão pendente", () => {
-    const resultado = concluirMissaoIndicacaoTemporada({
-      estadoAtual: ESTADO_MISSAO_INDICACAO_INICIAL,
-      pedidoId: "pedido-1",
-      agora: new Date("2026-01-10T00:00:00Z"),
-    });
-    expect(resultado).toEqual({ concluida: true, concluidaEm: "2026-01-10T00:00:00.000Z", pedidoId: "pedido-1" });
+describe("reservarMissaoIndicacaoTemporada / confirmarMissaoIndicacaoTemporada / reverterMissaoIndicacaoTemporada", () => {
+  test("reserva e confirma a missão pendente", () => {
+    const reservada = reservarMissaoIndicacaoTemporada({ estadoAtual: ESTADO_MISSAO_INDICACAO_INICIAL, pedidoId: "pedido-1" });
+    expect(reservada).toEqual({ concluida: false, concluidaEm: null, pedidoId: null, processandoPedidoId: "pedido-1" });
+
+    const confirmada = confirmarMissaoIndicacaoTemporada({ estadoAtual: reservada!, pedidoId: "pedido-1", agora: new Date("2026-01-10T00:00:00Z") });
+    expect(confirmada).toEqual({ concluida: true, concluidaEm: "2026-01-10T00:00:00.000Z", pedidoId: "pedido-1", processandoPedidoId: null });
   });
 
-  test("nunca duplica — já concluída retorna null", () => {
-    const jaConcluida = { concluida: true, concluidaEm: "x", pedidoId: "pedido-1" };
-    expect(concluirMissaoIndicacaoTemporada({ estadoAtual: jaConcluida, pedidoId: "pedido-2", agora: new Date() })).toBeNull();
+  test("nunca duplica — já concluída não reserva de novo", () => {
+    const jaConcluida = { concluida: true, concluidaEm: "x", pedidoId: "pedido-1", processandoPedidoId: null };
+    expect(reservarMissaoIndicacaoTemporada({ estadoAtual: jaConcluida, pedidoId: "pedido-2" })).toBeNull();
+  });
+
+  test("consumo atômico: duas indicações quase simultâneas não reservam ambas", () => {
+    const reservadaPorA = reservarMissaoIndicacaoTemporada({ estadoAtual: ESTADO_MISSAO_INDICACAO_INICIAL, pedidoId: "pedido-A" })!;
+    const reservadaPorB = reservarMissaoIndicacaoTemporada({ estadoAtual: reservadaPorA, pedidoId: "pedido-B" });
+    expect(reservadaPorB).toBeNull();
+  });
+
+  test("reservar de novo o MESMO pedido já reservado é idempotente (retry)", () => {
+    const reservada = reservarMissaoIndicacaoTemporada({ estadoAtual: ESTADO_MISSAO_INDICACAO_INICIAL, pedidoId: "pedido-1" })!;
+    const retry = reservarMissaoIndicacaoTemporada({ estadoAtual: reservada, pedidoId: "pedido-1" });
+    expect(retry).toBe(reservada);
+  });
+
+  test("reverte quando o pedido exato que concluiu é cancelado depois", () => {
+    const concluida = { concluida: true, concluidaEm: "x", pedidoId: "pedido-1", processandoPedidoId: null };
+    expect(reverterMissaoIndicacaoTemporada({ estadoAtual: concluida, pedidoId: "pedido-1" })).toEqual({
+      concluida: false, concluidaEm: null, pedidoId: null, processandoPedidoId: null,
+    });
+  });
+
+  test("nunca reverte um pedido diferente do que concluiu", () => {
+    const concluida = { concluida: true, concluidaEm: "x", pedidoId: "pedido-1", processandoPedidoId: null };
+    expect(reverterMissaoIndicacaoTemporada({ estadoAtual: concluida, pedidoId: "pedido-outro" })).toBeNull();
   });
 });
 

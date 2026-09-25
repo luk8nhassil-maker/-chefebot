@@ -3,21 +3,41 @@
 // este módulo só decide se a indicação, já confirmada e creditada de
 // verdade, também conclui a missão 0/1 da temporada e credita o bônus de
 // competição configurado (nunca cria uma indicação paralela).
+//
+// Consumo atômico e retomável (mesmo princípio da missão semanal): reservar
+// e confirmar rodam sob o lock exclusivo do (tenant, temporada, indicador),
+// e uma falha entre reservar e creditar deixa uma reserva retomável — nunca
+// perde nem duplica o bônus.
 import "server-only";
 import { redis } from "./redis";
 import {
-  concluirMissaoIndicacaoTemporada,
+  reservarMissaoIndicacaoTemporada,
+  confirmarMissaoIndicacaoTemporada,
+  reverterMissaoIndicacaoTemporada,
   ESTADO_MISSAO_INDICACAO_INICIAL,
   type EstadoMissaoIndicacaoTemporada,
 } from "./rankingGamificacao";
 import { obterConfigGamificacao } from "./rankingGamificacaoConfig";
-import { creditarBonusCompeticao } from "./rankingBonusTemporada";
+import { creditarBonusCompeticao, estornarBonusCompeticao } from "./rankingBonusTemporada";
 import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
 import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporadaSync";
+import { comBloqueioGamificacao } from "./rankingGamificacaoLock";
 
 function chaveEstado(tenantId: string, temporadaId: string, clienteId: string): string {
   return `ranking:missaoIndicacao:${tenantId}:${temporadaId}:${clienteId}`;
 }
+
+function chaveLock(tenantId: string, temporadaId: string, clienteId: string): string {
+  return `ranking:missaoIndicacao:lock:${tenantId}:${temporadaId}:${clienteId}`;
+}
+
+// Migalha por pedido (mesmo padrão da missão semanal): permite reverter no
+// cancelamento tardio sem depender de saber qual é a temporada "atual".
+function chaveBreadcrumbPedido(pedidoId: string): string {
+  return `ranking:missaoIndicacao:pedido:${pedidoId}`;
+}
+
+type BreadcrumbPedido = { tenantId: string; temporadaId: string; clienteId: string; bonus: number };
 
 export async function obterEstadoMissaoIndicacao(
   tenantId: string,
@@ -47,28 +67,71 @@ export async function concluirMissaoIndicacaoNoPedido(params: {
   const config = await obterConfigGamificacao();
   if (!config.missaoIndicacaoAtiva) return { concluida: false, bonusCreditado: 0 };
 
-  const estadoAtual = await obterEstadoMissaoIndicacao(tenantId, temporadaId, clienteId);
-  const novoEstado = concluirMissaoIndicacaoTemporada({ estadoAtual, pedidoId, agora });
-  if (!novoEstado) return { concluida: false, bonusCreditado: 0 };
-  await redis.set(chaveEstado(tenantId, temporadaId, clienteId), novoEstado);
+  return comBloqueioGamificacao(chaveLock(tenantId, temporadaId, clienteId), async () => {
+    const estadoAtual = await obterEstadoMissaoIndicacao(tenantId, temporadaId, clienteId);
+    const reservado = reservarMissaoIndicacaoTemporada({ estadoAtual, pedidoId });
+    if (!reservado) return { concluida: false, bonusCreditado: 0 };
+    await redis.set(chaveEstado(tenantId, temporadaId, clienteId), reservado);
 
-  const bonus = Number.isFinite(config.missaoIndicacaoBonus) && config.missaoIndicacaoBonus > 0
-    ? Math.round(config.missaoIndicacaoBonus)
-    : 0;
-  if (bonus <= 0) return { concluida: true, bonusCreditado: 0 };
+    const bonus = Number.isFinite(config.missaoIndicacaoBonus) && config.missaoIndicacaoBonus > 0
+      ? Math.round(config.missaoIndicacaoBonus)
+      : 0;
+    let bonusCreditado = 0;
+    if (bonus > 0) {
+      const resultado = await creditarBonusCompeticao({
+        tenantId,
+        temporadaId,
+        clienteId,
+        eventoId: `missaoIndicacao:${temporadaId}:${clienteId}`,
+        tipo: "missao_indicacao",
+        pontos: bonus,
+        motivo: `Indique um amigo — indicação confirmada no pedido ${pedidoId}`,
+      });
+      if (resultado === "creditado" || resultado === "ja_creditado") {
+        bonusCreditado = bonus;
+        if (resultado === "creditado") {
+          await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus } satisfies BreadcrumbPedido);
+          await registrarFatoRankingGamificacao("missao_indicacao_concluida", `${clienteId}:${temporadaId}`);
+          await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
+        }
+      }
+    }
 
-  const resultado = await creditarBonusCompeticao({
-    tenantId,
-    temporadaId,
-    clienteId,
-    eventoId: `missaoIndicacao:${temporadaId}:${clienteId}`,
-    tipo: "missao_indicacao",
-    pontos: bonus,
-    motivo: `Indique um amigo — indicação confirmada no pedido ${pedidoId}`,
+    const confirmado = confirmarMissaoIndicacaoTemporada({ estadoAtual: reservado, pedidoId, agora });
+    if (confirmado) {
+      await redis.set(chaveEstado(tenantId, temporadaId, clienteId), confirmado);
+    }
+    return { concluida: true, bonusCreditado };
   });
-  if (resultado === "creditado") {
-    await registrarFatoRankingGamificacao("missao_indicacao_concluida", `${clienteId}:${temporadaId}`);
-    await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
-  }
-  return { concluida: true, bonusCreditado: bonus };
+}
+
+/**
+ * Cancelamento tardio: se o pedido que originou a primeira compra do
+ * indicado for corrigido para cancelado DEPOIS de já ter concluído a missão
+ * (ou de estar no meio de concluir), reverte a missão e estorna o bônus —
+ * nunca deixa uma vantagem baseada num pedido comercial inválido. Idempotente
+ * e sem efeito quando este pedido nunca reservou/concluiu nada.
+ */
+export async function reverterMissaoIndicacaoDoPedido(pedidoId: string, motivo: string): Promise<void> {
+  if (!pedidoId) return;
+  const breadcrumb = await redis.get<BreadcrumbPedido>(chaveBreadcrumbPedido(pedidoId));
+  if (!breadcrumb) return;
+
+  await comBloqueioGamificacao(chaveLock(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId), async () => {
+    const estadoAtual = await obterEstadoMissaoIndicacao(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId);
+    const revertido = reverterMissaoIndicacaoTemporada({ estadoAtual, pedidoId });
+    if (revertido) {
+      await redis.set(chaveEstado(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId), revertido);
+    }
+    const resultado = await estornarBonusCompeticao({
+      tenantId: breadcrumb.tenantId,
+      temporadaId: breadcrumb.temporadaId,
+      clienteId: breadcrumb.clienteId,
+      eventoIdOriginal: `missaoIndicacao:${breadcrumb.temporadaId}:${breadcrumb.clienteId}`,
+      motivo,
+    });
+    if (resultado === "estornado") {
+      await sincronizarScoreTemporadaComBonus(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId);
+    }
+  });
 }

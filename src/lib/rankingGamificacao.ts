@@ -36,13 +36,22 @@ export const NOME_STATUS_TEMPORADA: Record<Exclude<StatusTemporada, null>, strin
 // Missão semanal "Caçada ao Pódio"
 // ---------------------------------------------------------------------------
 
-export type MissaoSemanalStatus = "inativa" | "desbloqueada" | "consumida";
+// "processando" é um estado INTERMEDIÁRIO da reserva atômica de consumo:
+// entra aqui assim que um pedido reivindica a missão (antes de creditar
+// qualquer bônus) e só sai para "consumida" depois do bônus estar
+// garantido no ledger. Existe para que um retry (efeito reprocessado após
+// falha no meio do caminho) sempre saiba retomar exatamente de onde parou,
+// sem nunca perder nem duplicar o bônus (ver reservarConsumoMissaoSemanal /
+// confirmarConsumoMissaoSemanal).
+export type MissaoSemanalStatus = "inativa" | "desbloqueada" | "processando" | "consumida";
 
 export type EstadoMissaoSemanal = {
   status: MissaoSemanalStatus;
   desbloqueadaEm: string | null;
   consumidaEm: string | null;
   consumidaPedidoId: string | null;
+  /** Pedido que reservou a missão (status "processando") — null fora desse estado. */
+  processandoPedidoId: string | null;
 };
 
 export const ESTADO_MISSAO_SEMANAL_INICIAL: EstadoMissaoSemanal = {
@@ -50,6 +59,7 @@ export const ESTADO_MISSAO_SEMANAL_INICIAL: EstadoMissaoSemanal = {
   desbloqueadaEm: null,
   consumidaEm: null,
   consumidaPedidoId: null,
+  processandoPedidoId: null,
 };
 
 /**
@@ -74,7 +84,9 @@ export function avaliarDesbloqueioMissaoSemanal(params: {
 }): EstadoMissaoSemanal {
   const { estadoAtual, participaCampanha, posicaoAtual, ultimoPedidoElegivelEm, agora, cooldownDias } = params;
   if (!participaCampanha) return estadoAtual;
-  if (estadoAtual.status === "desbloqueada") return estadoAtual;
+  // "processando" nunca é reavaliado aqui — está no meio de uma reserva
+  // atômica de consumo, mexer nele por fora quebraria a máquina de estado.
+  if (estadoAtual.status === "desbloqueada" || estadoAtual.status === "processando") return estadoAtual;
   if (!Number.isFinite(cooldownDias) || cooldownDias <= 0) return estadoAtual;
   const foraDoPodio = posicaoAtual === null || posicaoAtual >= 4;
   if (!foraDoPodio) return estadoAtual;
@@ -89,43 +101,97 @@ export function avaliarDesbloqueioMissaoSemanal(params: {
     desbloqueadaEm: agora.toISOString(),
     consumidaEm: estadoAtual.consumidaEm,
     consumidaPedidoId: estadoAtual.consumidaPedidoId,
-  };
-}
-
-/** Consome a missão desbloqueada no pedido informado. `null` = nada a consumir (idempotência do chamador). */
-export function consumirMissaoSemanal(params: {
-  estadoAtual: EstadoMissaoSemanal;
-  pedidoId: string;
-  agora: Date;
-}): EstadoMissaoSemanal | null {
-  if (params.estadoAtual.status !== "desbloqueada") return null;
-  if (!params.pedidoId) return null;
-  return {
-    status: "consumida",
-    desbloqueadaEm: params.estadoAtual.desbloqueadaEm,
-    consumidaEm: params.agora.toISOString(),
-    consumidaPedidoId: params.pedidoId,
+    processandoPedidoId: null,
   };
 }
 
 /**
- * Reverte o consumo quando o PEDIDO EXATO que consumiu a missão é cancelado
- * ou estornado — a missão volta a ficar disponível (o cliente não deveria
- * "perder a chance" por causa de um cancelamento). Nunca reverte se o pedido
- * informado não foi o que consumiu (protege contra reversão cruzada).
+ * Passo 1 do consumo atômico: reserva a missão desbloqueada para ESTE
+ * pedido (desbloqueada → processando). Só o chamador que detém o lock
+ * exclusivo do cliente/temporada pode chamar isto — é o que impede dois
+ * pedidos concorrentes de reivindicarem a mesma missão (blocker crítico da
+ * auditoria do #446).
+ *
+ * Idempotente para retry do MESMO pedido: se já estiver "processando" com
+ * este `pedidoId`, retorna o estado inalterado (nunca lança, nunca
+ * regride) — o chamador então repete a etapa de crédito com segurança
+ * (o ledger de bônus já é idempotente por eventoId).
+ *
+ * `null` = nada a reservar: ou a missão não está desbloqueada, ou já está
+ * sendo processada por OUTRO pedido, ou já foi consumida.
+ */
+export function reservarConsumoMissaoSemanal(params: {
+  estadoAtual: EstadoMissaoSemanal;
+  pedidoId: string;
+}): EstadoMissaoSemanal | null {
+  const { estadoAtual, pedidoId } = params;
+  if (!pedidoId) return null;
+  if (estadoAtual.status === "processando") {
+    return estadoAtual.processandoPedidoId === pedidoId ? estadoAtual : null;
+  }
+  if (estadoAtual.status !== "desbloqueada") return null;
+  return {
+    status: "processando",
+    desbloqueadaEm: estadoAtual.desbloqueadaEm,
+    consumidaEm: estadoAtual.consumidaEm,
+    consumidaPedidoId: estadoAtual.consumidaPedidoId,
+    processandoPedidoId: pedidoId,
+  };
+}
+
+/**
+ * Passo 2 do consumo atômico: confirma que o bônus já foi garantido no
+ * ledger (processando → consumida). Só confirma se for o MESMO pedido que
+ * reservou — protege contra confirmar a reserva de outro pedido.
+ */
+export function confirmarConsumoMissaoSemanal(params: {
+  estadoAtual: EstadoMissaoSemanal;
+  pedidoId: string;
+  agora: Date;
+}): EstadoMissaoSemanal | null {
+  const { estadoAtual, pedidoId, agora } = params;
+  if (estadoAtual.status !== "processando" || estadoAtual.processandoPedidoId !== pedidoId) return null;
+  return {
+    status: "consumida",
+    desbloqueadaEm: estadoAtual.desbloqueadaEm,
+    consumidaEm: agora.toISOString(),
+    consumidaPedidoId: pedidoId,
+    processandoPedidoId: null,
+  };
+}
+
+/**
+ * Reverte o consumo quando o PEDIDO EXATO que consumiu (ou está no meio de
+ * consumir) a missão é cancelado ou estornado — a missão volta a ficar
+ * disponível (o cliente não deveria "perder a chance" por causa de um
+ * cancelamento). Cobre tanto "consumida" quanto "processando" (cancelamento
+ * no meio do processamento). Nunca reverte se o pedido informado não foi o
+ * que reservou/consumiu (protege contra reversão cruzada).
  */
 export function reverterConsumoMissaoSemanal(params: {
   estadoAtual: EstadoMissaoSemanal;
   pedidoId: string;
 }): EstadoMissaoSemanal | null {
-  if (params.estadoAtual.status !== "consumida") return null;
-  if (params.estadoAtual.consumidaPedidoId !== params.pedidoId) return null;
-  return {
-    status: "desbloqueada",
-    desbloqueadaEm: params.estadoAtual.desbloqueadaEm,
-    consumidaEm: null,
-    consumidaPedidoId: null,
-  };
+  const { estadoAtual, pedidoId } = params;
+  if (estadoAtual.status === "consumida" && estadoAtual.consumidaPedidoId === pedidoId) {
+    return {
+      status: "desbloqueada",
+      desbloqueadaEm: estadoAtual.desbloqueadaEm,
+      consumidaEm: null,
+      consumidaPedidoId: null,
+      processandoPedidoId: null,
+    };
+  }
+  if (estadoAtual.status === "processando" && estadoAtual.processandoPedidoId === pedidoId) {
+    return {
+      status: "desbloqueada",
+      desbloqueadaEm: estadoAtual.desbloqueadaEm,
+      consumidaEm: null,
+      consumidaPedidoId: null,
+      processandoPedidoId: null,
+    };
+  }
+  return null;
 }
 
 /** Bônus da missão semanal (2x = crédito adicional IGUAL ao já creditado na fidelidade base). */
@@ -143,23 +209,63 @@ export type EstadoMissaoIndicacaoTemporada = {
   concluida: boolean;
   concluidaEm: string | null;
   pedidoId: string | null;
+  /** Pedido que reservou a conclusão (evita duas indicações quase simultâneas concluírem/creditarem em duplicidade). */
+  processandoPedidoId: string | null;
 };
 
 export const ESTADO_MISSAO_INDICACAO_INICIAL: EstadoMissaoIndicacaoTemporada = {
   concluida: false,
   concluidaEm: null,
   pedidoId: null,
+  processandoPedidoId: null,
 };
 
-/** Conclui a missão de indicação da temporada. `null` = já estava concluída (nunca duplica o bônus). */
-export function concluirMissaoIndicacaoTemporada(params: {
+/**
+ * Passo 1 do consumo atômico: reserva a conclusão da missão para ESTE
+ * pedido. Idempotente para retry do mesmo pedido. `null` quando já
+ * concluída, ou já reservada por outro pedido.
+ */
+export function reservarMissaoIndicacaoTemporada(params: {
+  estadoAtual: EstadoMissaoIndicacaoTemporada;
+  pedidoId: string;
+}): EstadoMissaoIndicacaoTemporada | null {
+  const { estadoAtual, pedidoId } = params;
+  if (!pedidoId) return null;
+  if (estadoAtual.concluida) return null;
+  if (estadoAtual.processandoPedidoId) {
+    return estadoAtual.processandoPedidoId === pedidoId ? estadoAtual : null;
+  }
+  return { ...estadoAtual, processandoPedidoId: pedidoId };
+}
+
+/** Passo 2: confirma a conclusão depois do bônus (se houver) estar garantido no ledger. */
+export function confirmarMissaoIndicacaoTemporada(params: {
   estadoAtual: EstadoMissaoIndicacaoTemporada;
   pedidoId: string;
   agora: Date;
 }): EstadoMissaoIndicacaoTemporada | null {
-  if (params.estadoAtual.concluida) return null;
-  if (!params.pedidoId) return null;
-  return { concluida: true, concluidaEm: params.agora.toISOString(), pedidoId: params.pedidoId };
+  const { estadoAtual, pedidoId, agora } = params;
+  if (estadoAtual.concluida || estadoAtual.processandoPedidoId !== pedidoId) return null;
+  return { concluida: true, concluidaEm: agora.toISOString(), pedidoId, processandoPedidoId: null };
+}
+
+/**
+ * Reverte a missão quando o PEDIDO EXATO que a concluiu (ou reservou) é
+ * corrigido para cancelado depois de já ter creditado a indicação —
+ * cancelamento tardio nunca pode deixar uma vantagem indevida no jogo.
+ */
+export function reverterMissaoIndicacaoTemporada(params: {
+  estadoAtual: EstadoMissaoIndicacaoTemporada;
+  pedidoId: string;
+}): EstadoMissaoIndicacaoTemporada | null {
+  const { estadoAtual, pedidoId } = params;
+  if (estadoAtual.concluida && estadoAtual.pedidoId === pedidoId) {
+    return { concluida: false, concluidaEm: null, pedidoId: null, processandoPedidoId: null };
+  }
+  if (!estadoAtual.concluida && estadoAtual.processandoPedidoId === pedidoId) {
+    return { concluida: false, concluidaEm: null, pedidoId: null, processandoPedidoId: null };
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 import {
   estrelasV1Ativa,
   obterConfigFidelidadePontos,
+  obterExtratoPontos,
   registrarMovimentoPontosIdempotente,
 } from "./fidelidade";
 import { REGRA_ESTRELAS_V1 } from "./estrelas";
@@ -40,6 +41,39 @@ export async function creditarEstrelasIndicacaoValida(params: {
     unidade: "estrelas",
   });
   return movimento ? "creditado" : "ja_creditado";
+}
+
+export type ResultadoEstornoIndicacao = "estornado" | "ja_estornado" | "credito_nao_encontrado";
+
+/**
+ * Cancelamento tardio: reverte o crédito de indicação quando o pedido que
+ * originou a primeira compra do indicado é corrigido para cancelado DEPOIS
+ * de já ter creditado. Idempotente por eventoId — nunca estorna duas vezes
+ * nem um crédito que nunca existiu. Nunca apaga o movimento original: grava
+ * um movimento "estornado" novo, igual ao resto do ledger de fidelidade.
+ */
+export async function estornarEstrelasIndicacaoValida(params: {
+  indicadorId: string;
+  indicadoId: string;
+  pedidoId: string;
+  motivo: string;
+}): Promise<ResultadoEstornoIndicacao> {
+  const eventoIdOriginal = `indicacao:${params.indicadoId}:primeira-compra:${params.pedidoId}`;
+  const extrato = await obterExtratoPontos(params.indicadorId);
+  const original = extrato.find((m) => m.eventoId === eventoIdOriginal);
+  if (!original) return "credito_nao_encontrado";
+  const eventoIdEstorno = `estorno:${eventoIdOriginal}`;
+  if (extrato.some((m) => m.eventoId === eventoIdEstorno)) return "ja_estornado";
+  const movimento = await registrarMovimentoPontosIdempotente(params.indicadorId, {
+    eventoId: eventoIdEstorno,
+    pedidoId: params.pedidoId,
+    tipo: "estornado",
+    pontos: original.pontos,
+    motivo: params.motivo,
+    regraVersao: REGRA_ESTRELAS_V1,
+    unidade: "estrelas",
+  });
+  return movimento ? "estornado" : "ja_estornado";
 }
 
 /**

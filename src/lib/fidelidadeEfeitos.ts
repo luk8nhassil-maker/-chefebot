@@ -26,7 +26,9 @@ import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
 import { obterTemporadaAtiva } from "./temporadas";
 import { detectarCreditoDoPedido } from "./rankingRetencao";
 import { consumirMissaoSemanalNoPedido, reverterMissaoSemanalDoPedido } from "./rankingMissaoSemanalEstado";
-import { concluirMissaoIndicacaoNoPedido } from "./rankingMissaoIndicacaoEstado";
+import { concluirMissaoIndicacaoNoPedido, reverterMissaoIndicacaoDoPedido } from "./rankingMissaoIndicacaoEstado";
+import { registrarConversaoIndicacao, obterConversaoIndicacaoDoPedido } from "./rankingIndicacaoConversao";
+import { estornarEstrelasIndicacaoValida } from "./estrelasIndicacao";
 import type { ItemApp } from "./pedidoAppItens";
 import type { PedidoRedis } from "@/types/pedidoRedis";
 
@@ -352,6 +354,13 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
           "indicacao_convertida",
           `indicacao:${clienteId}:primeira-compra:${pedido.id}`,
         );
+        // Migalha para o cancelamento tardio (ver "gamificacao" do
+        // cancelado) encontrar indicador/indicado sem reconsultar a relação.
+        await registrarConversaoIndicacao({
+          indicadorId: candidatura.indicadorId,
+          indicadoId: clienteId,
+          pedidoId: pedido.id,
+        });
         // Missão da temporada "Indique um amigo" — reaproveita o MESMO
         // crédito real de indicação, nunca cria um sistema paralelo. Quem
         // cumpre a missão é o indicador (candidatura.indicadorId), não o
@@ -462,6 +471,17 @@ export async function processarEfeitosPedidoCancelado(pedido: PedidoParaEfeitosF
       // Sem migalha para este pedido, é no-op (nunca mexe no estado de
       // nenhum outro cliente/pedido).
       await reverterMissaoSemanalDoPedido(pedido.id, `Pedido ${pedido.id} cancelado`);
+      // Cancelamento tardio da indicação: se este pedido (a primeira compra
+      // do indicado) já tinha creditado a indicação real e concluído a
+      // missão da temporada do indicador, reverte os dois — nunca deixa uma
+      // vantagem de jogo (nem de estrelas base, nem de bônus de competição)
+      // baseada num pedido comercial que virou inválido.
+      const motivoCancelamento = `Pedido ${pedido.id} cancelado`;
+      const conversao = await obterConversaoIndicacaoDoPedido(pedido.id);
+      if (conversao) {
+        await estornarEstrelasIndicacaoValida({ ...conversao, motivo: motivoCancelamento });
+      }
+      await reverterMissaoIndicacaoDoPedido(pedido.id, motivoCancelamento);
     });
     await executarEfeito(chave, estado, "jornada", async () => {
       await reverterConclusaoPedidoJornada(pedido.id, `Pedido ${pedido.id} cancelado`);
