@@ -96,37 +96,146 @@ describe("POST /api/admin/ranking/gamificacao", () => {
     expect(body.config.impulsoPodioAtivo).toBe(true);
   });
 
-  test("valida e sanitiza a tabela de carryover — descarta posições fora de 1..10 e bônus <= 0", async () => {
+  test("carryoverTabela válida (posições únicas, bônus decrescente) é aceita e ordenada", async () => {
     const res = await POST(req(adminToken, {
       carryoverAtivo: true,
       carryoverTabela: [
+        { posicao: 2, bonus: 60 },
         { posicao: 1, bonus: 100 },
-        { posicao: 11, bonus: 50 },
-        { posicao: 2, bonus: -10 },
-        { posicao: "invalido", bonus: 20 },
       ],
     }));
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.config.carryoverTabela).toEqual([{ posicao: 1, bonus: 100 }]);
+    expect(body.config.carryoverTabela).toEqual([{ posicao: 1, bonus: 100 }, { posicao: 2, bonus: 60 }]);
   });
 
-  test("valida e sanitiza os limiares de nível de chef — descarta entradas sem nome", async () => {
+  test("carryoverTabela com posição fora de 1..10 é REJEITADA por inteiro (400), nada é salvo", async () => {
+    const res = await POST(req(adminToken, {
+      carryoverAtivo: true,
+      carryoverTabela: [{ posicao: 1, bonus: 100 }, { posicao: 11, bonus: 50 }],
+    }));
+    expect(res.status).toBe(400);
+    const getRes = await GET(req(adminToken));
+    const getBody = await getRes.json();
+    expect(getBody.carryoverAtivo).toBe(false);
+    expect(getBody.carryoverTabela).toEqual([]);
+  });
+
+  test("carryoverTabela com posição duplicada é rejeitada", async () => {
+    const res = await POST(req(adminToken, {
+      carryoverTabela: [{ posicao: 1, bonus: 100 }, { posicao: 1, bonus: 50 }],
+    }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detalhes.join(" ")).toContain("duplicada");
+  });
+
+  test("carryoverTabela com bônus negativo é rejeitada", async () => {
+    const res = await POST(req(adminToken, {
+      carryoverTabela: [{ posicao: 1, bonus: -10 }],
+    }));
+    expect(res.status).toBe(400);
+  });
+
+  test("carryoverTabela com ordem incoerente (posição pior valendo mais) é rejeitada", async () => {
+    const res = await POST(req(adminToken, {
+      carryoverTabela: [{ posicao: 1, bonus: 50 }, { posicao: 2, bonus: 100 }],
+    }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detalhes.join(" ")).toContain("decrescente");
+  });
+
+  test("nivelChefLimiares válidos (únicos, XP crescente) são aceitos", async () => {
     const res = await POST(req(adminToken, {
       nivelChefAtivo: true,
       nivelChefLimiares: [
         { nivel: 1, nome: "Aprendiz", xpMinimo: 0 },
-        { nivel: 2, nome: "", xpMinimo: 100 },
+        { nivel: 2, nome: "Cozinheiro", xpMinimo: 100 },
       ],
     }));
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.config.nivelChefLimiares).toEqual([{ nivel: 1, nome: "Aprendiz", xpMinimo: 0 }]);
+    expect(body.config.nivelChefLimiares).toEqual([
+      { nivel: 1, nome: "Aprendiz", xpMinimo: 0 },
+      { nivel: 2, nome: "Cozinheiro", xpMinimo: 100 },
+    ]);
   });
 
-  test("valor numérico inválido não sobrescreve o anterior", async () => {
+  test("nivelChefLimiares sem nome é rejeitado (400), nada é salvo", async () => {
+    const res = await POST(req(adminToken, {
+      nivelChefLimiares: [{ nivel: 1, nome: "", xpMinimo: 0 }],
+    }));
+    expect(res.status).toBe(400);
+  });
+
+  test("nivelChefLimiares com nível duplicado é rejeitado", async () => {
+    const res = await POST(req(adminToken, {
+      nivelChefLimiares: [{ nivel: 1, nome: "A", xpMinimo: 0 }, { nivel: 1, nome: "B", xpMinimo: 100 }],
+    }));
+    expect(res.status).toBe(400);
+  });
+
+  test("nivelChefLimiares com XP não-crescente é rejeitado", async () => {
+    const res = await POST(req(adminToken, {
+      nivelChefLimiares: [{ nivel: 1, nome: "A", xpMinimo: 100 }, { nivel: 2, nome: "B", xpMinimo: 50 }],
+    }));
+    expect(res.status).toBe(400);
+  });
+
+  test("valor numérico inválido é REJEITADO (400) e nunca sobrescreve o anterior", async () => {
     await POST(req(adminToken, { missaoSemanalMultiplicador: 3 }));
     const res = await POST(req(adminToken, { missaoSemanalMultiplicador: "abc" }));
+    expect(res.status).toBe(400);
+    const getRes = await GET(req(adminToken));
+    expect((await getRes.json()).missaoSemanalMultiplicador).toBe(3);
+  });
+
+  test("multiplicador fora do limite técnico (ex.: 20x por erro de digitação) é rejeitado", async () => {
+    const res = await POST(req(adminToken, { missaoSemanalMultiplicador: 20 }));
+    expect(res.status).toBe(400);
+  });
+
+  test("cooldown fora do limite técnico é rejeitado", async () => {
+    const res = await POST(req(adminToken, { missaoSemanalCooldownDias: 999 }));
+    expect(res.status).toBe(400);
+  });
+
+  test("booleano estrito: string 'false' NUNCA vira true (proteção contra Boolean(string))", async () => {
+    const res = await POST(req(adminToken, { missaoSemanalAtiva: "false" }));
+    expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.config.missaoSemanalMultiplicador).toBe(3);
+    expect(body.detalhes.join(" ")).toContain("missaoSemanalAtiva");
+  });
+
+  test("booleano estrito: número não é aceito no lugar de true/false", async () => {
+    const res = await POST(req(adminToken, { carryoverAtivo: 1 }));
+    expect(res.status).toBe(400);
+  });
+
+  test("impulsoPodioBonus maior que o cap da temporada é rejeitado (regra cruzada)", async () => {
+    const res = await POST(req(adminToken, { impulsoPodioBonus: 100, impulsoPodioCapTemporada: 50 }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detalhes.join(" ")).toContain("impulsoPodioBonus");
+  });
+
+  test("impulsoPodioBonus permitido quando <= cap", async () => {
+    const res = await POST(req(adminToken, { impulsoPodioBonus: 30, impulsoPodioCapTemporada: 100 }));
+    expect(res.status).toBe(200);
+  });
+
+  test("regra cruzada não dispara quando o cap ainda não foi configurado (0 = inativo, não incoerente)", async () => {
+    const res = await POST(req(adminToken, { impulsoPodioBonus: 30 }));
+    expect(res.status).toBe(200);
+  });
+
+  test("requisição com um campo válido e outro inválido rejeita TUDO — nenhum campo é salvo parcialmente", async () => {
+    const antes = await (await GET(req(adminToken))).json();
+    const res = await POST(req(adminToken, { missaoSemanalAtiva: true, missaoSemanalMultiplicador: "abc" }));
+    expect(res.status).toBe(400);
+    const depois = await (await GET(req(adminToken))).json();
+    expect(depois).toEqual(antes);
   });
 
   test("body invalido retorna 400", async () => {
