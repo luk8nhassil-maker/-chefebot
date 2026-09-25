@@ -593,6 +593,27 @@ export function construirEventoIdPontos(pedidoId: string, tipo: TipoMovimentoPon
   return sufixo ? `${tipo}:${pedidoId}:${sufixo}` : `${tipo}:${pedidoId}`;
 }
 
+export type OrigemMovimentoPontos = "indicacao" | "apoio" | "pedido" | "outro";
+
+const PREFIXOS_ORIGEM_PEDIDO = ["confirmado:", "cancelado:", "estornado:", "resgatado:", "ajuste:"];
+
+/**
+ * Classifica a origem de um movimento a partir do `eventoId` estruturado —
+ * nunca a partir da descrição em linguagem humana (`motivo`), que é texto
+ * livre para exibição e nunca deve ser usada como fonte de verdade de
+ * negócio (correção do #445: o app do cliente detectava indicação com um
+ * regex sobre a descrição). `estrelasIndicacao.ts` prefixa o eventoId com
+ * `indicacao:`/`apoio:`; créditos e ajustes do pedido em si usam
+ * `construirEventoIdPontos` (prefixo = o próprio `tipo`).
+ */
+export function classificarOrigemMovimentoPontos(eventoId: string | null | undefined): OrigemMovimentoPontos {
+  if (!eventoId) return "outro";
+  if (eventoId.startsWith("indicacao:")) return "indicacao";
+  if (eventoId.startsWith("apoio:")) return "apoio";
+  if (PREFIXOS_ORIGEM_PEDIDO.some((prefixo) => eventoId.startsWith(prefixo))) return "pedido";
+  return "outro";
+}
+
 /**
  * Meta em pontos. Prioridade: `metaPontos` explícito (se > 0) sempre vence;
  * na ausência dele, deriva de `valorPizzaFamiliaReferencia × metaPizzasFamilia`

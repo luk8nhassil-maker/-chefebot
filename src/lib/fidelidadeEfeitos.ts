@@ -22,6 +22,7 @@ import {
 } from "./jornadaChef";
 import type { PedidoSnapshotOficial } from "./pedidoSnapshot";
 import { registrarEventoEntregue, estornarEventoAnalitico } from "./historicoAnalitico";
+import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
 import type { ItemApp } from "./pedidoAppItens";
 import type { PedidoRedis } from "@/types/pedidoRedis";
 
@@ -307,12 +308,23 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       if (confirmado !== "registrado") return;
 
       // Primeira compra comercial válida: +6 ao indicador — SEM apoio neste evento
-      await creditarEstrelasIndicacaoValida({
+      const resultadoIndicacao = await creditarEstrelasIndicacaoValida({
         indicadorId: candidatura.indicadorId,
         indicadoId: clienteId,
         pedidoId: pedido.id,
         primeiraCompraComercialValida: true,
       });
+      // Fato de negócio "indicação convertida" registrado no MESMO instante
+      // idempotente do crédito real — nunca inferido depois por regex/diff de
+      // extrato no navegador (correção do #445). O eventoId espelha
+      // exatamente a chave de idempotência do próprio ledger, então mesmo um
+      // retry deste efeito nunca conta o fato duas vezes.
+      if (resultadoIndicacao === "creditado") {
+        await registrarFatoRankingGamificacao(
+          "indicacao_convertida",
+          `indicacao:${clienteId}:primeira-compra:${pedido.id}`,
+        );
+      }
     });
 
     await executarEfeito(chave, estado, "analytics", async () => {

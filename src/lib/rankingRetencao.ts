@@ -138,23 +138,63 @@ export function mensagemMovimento(variacao: VariacaoPosicaoSimples | null): stri
     : `A disputa mudou. Você está ${casasTxt} abaixo de ontem.`;
 }
 
-export type MovimentoConfirmadoMinimo = { tipo: string; pontos: number; criadoEm: string };
+export type MovimentoParaCreditoPedido = { pedidoId: string | null; tipo: string; pontos: number };
 
 /**
- * Encontra um crédito confirmado recente no extrato — usado para decidir se
- * o feedback pós-pedido pode sair de "pendente" para "creditado". Nunca
- * promete crédito: só reconhece um movimento que já existe no ledger, já é
- * `"confirmado"` pelo servidor e está dentro da janela de recência.
+ * Encontra o crédito confirmado do PEDIDO EXATO que trouxe o cliente de
+ * volta à tela (nunca por janela de tempo) — usado para decidir se o
+ * feedback pós-pedido pode sair de "pendente" para "creditado". Correção do
+ * #445: a versão anterior aceitava qualquer movimento confirmado recente,
+ * podendo atribuir ao pedido atual um crédito de indicação, apoio, outro
+ * pedido ou ajuste. Agora só reconhece um movimento cujo `pedidoId` bate
+ * exatamente com o pedido informado — cada pedido tem um id único no
+ * sistema, então não há ambiguidade possível entre contas ou pedidos.
  */
-export function detectarCreditoRecente(
-  extrato: MovimentoConfirmadoMinimo[],
-  agoraMs: number,
-  janelaMs = 10 * 60 * 1000,
+export function detectarCreditoDoPedido(
+  extrato: MovimentoParaCreditoPedido[],
+  pedidoId: string | null | undefined,
 ): { pontos: number } | null {
-  const recente = extrato.find(
-    (movimento) => movimento.tipo === "confirmado" && agoraMs - new Date(movimento.criadoEm).getTime() < janelaMs,
-  );
-  return recente ? { pontos: recente.pontos } : null;
+  if (!pedidoId) return null;
+  const credito = extrato.find((movimento) => movimento.pedidoId === pedidoId && movimento.tipo === "confirmado");
+  return credito ? { pontos: credito.pontos } : null;
+}
+
+export type FatoPosicaoDetectado =
+  | "subiu_posicao"
+  | "entrou_top10"
+  | "entrou_top3"
+  | "chegou_top1"
+  | "recuperou_lideranca"
+  | "perdeu_lideranca";
+
+/**
+ * Decide quais FATOS de negócio uma variação real de posição representa —
+ * pura, sem I/O. O chamador (painel/route.ts) é responsável por registrar
+ * cada fato retornado de forma idempotente (rankingGamificacaoFatos.ts).
+ * `jaFoiLiderNestaTemporada` distingue "chegou ao #1" (primeira vez) de
+ * "recuperou a liderança" (já tinha sido #1 antes, perdeu, voltou) sem
+ * precisar guardar todo o histórico de posições da temporada.
+ */
+export function detectarFatosDePosicao(params: {
+  posicaoAnterior: number | null | undefined;
+  posicaoAtual: number;
+  jaFoiLiderNestaTemporada: boolean;
+}): FatoPosicaoDetectado[] {
+  const { posicaoAnterior, posicaoAtual, jaFoiLiderNestaTemporada } = params;
+  if (posicaoAnterior === null || posicaoAnterior === undefined || posicaoAnterior === posicaoAtual) return [];
+
+  if (posicaoAtual < posicaoAnterior) {
+    const fatos: FatoPosicaoDetectado[] = ["subiu_posicao"];
+    if (posicaoAtual <= 10 && posicaoAnterior > 10) fatos.push("entrou_top10");
+    if (posicaoAtual <= 3 && posicaoAnterior > 3) fatos.push("entrou_top3");
+    if (posicaoAtual === 1 && posicaoAnterior !== 1) {
+      fatos.push(jaFoiLiderNestaTemporada ? "recuperou_lideranca" : "chegou_top1");
+    }
+    return fatos;
+  }
+
+  if (posicaoAnterior === 1 && posicaoAtual !== 1) return ["perdeu_lideranca"];
+  return [];
 }
 
 export type ConquistaRanking =

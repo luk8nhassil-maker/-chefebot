@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import {
-  FidelidadeRankingScreen,
-  type PainelFidelidade,
-  type PreferenciasPrivacidadeRanking,
-} from "@/app/cliente/page";
+import { FidelidadeRankingScreen } from "@/app/cliente/FidelidadeRankingScreen";
+import type {
+  PainelFidelidade,
+  PreferenciasPrivacidadeRanking,
+} from "@/app/cliente/painelFidelidadeTipos";
 import { calcularAlvoRankingAtual, montarDisputaRelativa } from "@/lib/rankingRetencao";
 
 type RankingCompleto = NonNullable<PainelFidelidade["ranking"]>;

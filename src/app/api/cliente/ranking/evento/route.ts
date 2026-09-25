@@ -26,6 +26,6 @@ export async function POST(req: NextRequest) {
   const tipo = body.tipo;
   if (!eventoRankingRetencaoValido(tipo)) return new NextResponse(null, { status: 204 });
 
-  await registrarEventoRankingRetencao(TENANT_PADRAO, tipo, body.detalhe);
+  await registrarEventoRankingRetencao(TENANT_PADRAO, tipo);
   return new NextResponse(null, { status: 204 });
 }

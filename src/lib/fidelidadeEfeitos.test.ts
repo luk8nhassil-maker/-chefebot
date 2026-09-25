@@ -30,7 +30,7 @@ const {
     obterRelacaoMock: vi.fn(async () => null as { indicadorId: string; criadoEm: string } | null),
     obterCandidaturaMock: vi.fn(async () => null as { indicadorId: string; criadoEm: string } | null),
     registrarRelacaoMock: vi.fn(async () => "ja_existe" as "registrado" | "ja_existe" | "self_referral"),
-    creditarIndicacaoMock: vi.fn(async () => undefined),
+    creditarIndicacaoMock: vi.fn(async () => undefined as "creditado" | "ja_creditado" | "nao_elegivel" | undefined),
     creditarApoioMock: vi.fn(async () => undefined),
   };
 });
@@ -268,6 +268,41 @@ describe("efeito indicacao", () => {
     expect(creditarApoioMock).not.toHaveBeenCalled();
     // relação confirmada via registrarRelacaoIndicacao
     expect(registrarRelacaoMock).toHaveBeenCalledWith("cli_canonico", "cli_indicador");
+  });
+
+  test("crédito real ('creditado') registra o fato idempotente 'indicacao_convertida' — nunca por regex/diff no navegador", async () => {
+    obterRelacaoMock.mockResolvedValue(null);
+    obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    registrarRelacaoMock.mockResolvedValue("registrado");
+    creditarIndicacaoMock.mockResolvedValue("creditado");
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(store.get("ranking:gamificacao:fato:indicacao_convertida:indicacao:cli_canonico:primeira-compra:ped_entregue")).toBeTruthy();
+  });
+
+  test("retry do mesmo efeito (já concluído) nunca duplica o fato — idempotência do #445", async () => {
+    obterRelacaoMock.mockResolvedValue(null);
+    obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    registrarRelacaoMock.mockResolvedValue("registrado");
+    creditarIndicacaoMock.mockResolvedValue("creditado");
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+    creditarIndicacaoMock.mockClear();
+    await processarEfeitosPedidoEntregue(pedidoEntregue); // efeito já "concluido": no-op inteiro
+
+    expect(creditarIndicacaoMock).not.toHaveBeenCalled();
+  });
+
+  test("'ja_creditado' (retry interno do ledger) nunca registra o fato de novo", async () => {
+    obterRelacaoMock.mockResolvedValue(null);
+    obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    registrarRelacaoMock.mockResolvedValue("registrado");
+    creditarIndicacaoMock.mockResolvedValue("ja_creditado");
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(store.get("ranking:gamificacao:fato:indicacao_convertida:indicacao:cli_canonico:primeira-compra:ped_entregue")).toBeFalsy();
   });
 
   test("compra posterior (relação permanente já existe) credita SOMENTE +1 apoio (sem +6)", async () => {

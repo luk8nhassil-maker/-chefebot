@@ -61,6 +61,16 @@ vi.mock("@/lib/rankingPrivacidade", () => ({
 
 let posicaoAnteriorMock: { geral: number; participantes: number | null } | null = null;
 
+const { registrarFatoMock, marcarLiderancaMock } = vi.hoisted(() => ({
+  registrarFatoMock: vi.fn(async (_tipo: string, _eventoId: string) => true),
+  marcarLiderancaMock: vi.fn(async (_tenantId: string, _temporadaId: string, _clienteId: string) => false),
+}));
+
+vi.mock("@/lib/rankingGamificacaoFatos", () => ({
+  registrarFatoRankingGamificacao: registrarFatoMock,
+  marcarLiderancaEVerificarSeJaFoiLider: marcarLiderancaMock,
+}));
+
 vi.mock("@/lib/rankingHistorico", async () => {
   const actual = await vi.importActual<typeof import("@/lib/rankingHistorico")>("@/lib/rankingHistorico");
   return {
@@ -86,6 +96,8 @@ beforeEach(() => {
   identidadesPublicas = new Map();
   posicaoAnteriorMock = null;
   configFidelidadeMock = { ativo: true, regraVersao: "estrelas-faixas-v1" };
+  registrarFatoMock.mockClear();
+  marcarLiderancaMock.mockClear().mockResolvedValue(false);
 });
 
 describe("GET /api/cliente/fidelidade/painel", () => {
@@ -281,6 +293,61 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     expect(body.ranking.variacaoPosicao).toEqual({ direcao: "subiu", casas: 3 });
     // Único participante hoje → 1º entre participantes; ontem era 3º.
     expect(body.ranking.participantes.variacaoPosicao).toEqual({ direcao: "subiu", casas: 2 });
+    // Fatos de negócio registrados no SERVIDOR (nunca pelo navegador,
+    // correção do #445). Ontem já era #3 entre participantes (dentro do
+    // Top 10 e do Top 3), então só "subiu" e "chegou ao #1" são fatos reais
+    // — "entrou_top10"/"entrou_top3" corretamente NÃO disparam de novo.
+    const tiposRegistrados = registrarFatoMock.mock.calls.map((c) => c[0]);
+    expect(tiposRegistrados).toEqual(expect.arrayContaining(["subiu_posicao", "chegou_top1"]));
+    expect(tiposRegistrados).not.toContain("entrou_top10");
+    expect(tiposRegistrados).not.toContain("entrou_top3");
+    // Todas as chamadas usam o MESMO eventoId do dia — idempotente mesmo
+    // que a rota seja chamada várias vezes no mesmo dia.
+    const eventoIds = new Set(registrarFatoMock.mock.calls.map((c) => c[1]));
+    expect(eventoIds.size).toBe(1);
+  });
+
+  test("sem variação (sem snapshot anterior) nunca registra fato nenhum", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 1, score: 10 });
+    topRanking = [{ clienteId, score: 10, posicao: 1 }];
+    rankingCompleto = topRanking;
+    identidadesPublicas.set(clienteId, { participaCampanha: true, nomePublico: "Você", telefoneMascarado: null, fotoPerfilUrl: null });
+    posicaoAnteriorMock = null;
+
+    await GET(req("token-cli-a"));
+    expect(registrarFatoMock).not.toHaveBeenCalled();
+  });
+
+  test("manteve a posição não registra fato nenhum", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 4, score: 10 });
+    topRanking = [{ clienteId, score: 10, posicao: 4 }];
+    rankingCompleto = topRanking;
+    identidadesPublicas.set(clienteId, { participaCampanha: true, nomePublico: "Você", telefoneMascarado: null, fotoPerfilUrl: null });
+    posicaoAnteriorMock = { geral: 4, participantes: 1 };
+
+    await GET(req("token-cli-a"));
+    expect(registrarFatoMock).not.toHaveBeenCalled();
+  });
+
+  test("desceu do #1 registra perdeu_lideranca", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 2, score: 10 });
+    topRanking = [
+      { clienteId: "outro", score: 20, posicao: 1 },
+      { clienteId, score: 10, posicao: 2 },
+    ];
+    rankingCompleto = topRanking;
+    identidadesPublicas.set(clienteId, { participaCampanha: true, nomePublico: "Você", telefoneMascarado: null, fotoPerfilUrl: null });
+    identidadesPublicas.set("outro", { participaCampanha: true, nomePublico: "Outro", telefoneMascarado: null, fotoPerfilUrl: null });
+    posicaoAnteriorMock = { geral: 1, participantes: 1 };
+
+    await GET(req("token-cli-a"));
+    expect(registrarFatoMock).toHaveBeenCalledWith("perdeu_lideranca", expect.any(String));
   });
 
   test("variacaoPosicao entre participantes fica null quando o cliente não participa hoje", async () => {

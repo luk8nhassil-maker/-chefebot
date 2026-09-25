@@ -12,8 +12,7 @@ describe("Preview seguro da retenção do ranking (quem já participa)", () => {
   });
 
   test("reaproveita o componente real de produção, não uma simulação paralela", () => {
-    expect(client).toContain('import {\n  FidelidadeRankingScreen,');
-    expect(client).toContain('from "@/app/cliente/page"');
+    expect(client).toContain('import { FidelidadeRankingScreen } from "@/app/cliente/FidelidadeRankingScreen"');
   });
 
   test("nao chama fetch nem navega de verdade — toda ação é simulada localmente", () => {

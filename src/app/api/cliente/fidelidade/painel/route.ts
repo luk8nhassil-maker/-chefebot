@@ -21,10 +21,16 @@ import {
 } from "@/lib/rankingHistorico";
 import {
   calcularAlvoRankingAtual,
+  detectarFatosDePosicao,
   montarDisputaRelativa,
   type AlvoRankingAtual,
   type DisputaRelativa,
 } from "@/lib/rankingRetencao";
+import { dataReferenciaUtc } from "@/lib/rankingHistorico";
+import {
+  marcarLiderancaEVerificarSeJaFoiLider,
+  registrarFatoRankingGamificacao,
+} from "@/lib/rankingGamificacaoFatos";
 
 const TENANT_PADRAO = "default";
 
@@ -167,6 +173,31 @@ export async function GET(req: NextRequest) {
       const variacaoPosicaoParticipantes = proprioEntreParticipantes
         ? calcularVariacaoPosicao(posicaoAnterior?.participantes, proprioEntreParticipantes.posicao)
         : null;
+
+      // Fatos de negócio (subiu/entrou Top 10/entrou Top 3/chegou ou
+      // recuperou/perdeu a liderança) — SEMPRE calculados e registrados aqui
+      // no servidor, nunca pelo navegador (correção do #445). Escopo entre
+      // PARTICIPANTES, a mesma posição que importa para a disputa/missão.
+      // Idempotente por dia: a variação só muda uma vez por dia (mesmo
+      // snapshot diário do histórico), então reabrir a tela várias vezes no
+      // mesmo dia nunca conta o fato de novo.
+      if (proprioEntreParticipantes) {
+        const posicaoAtualParticipantes = proprioEntreParticipantes.posicao;
+        const posicaoAnteriorParticipantes = posicaoAnterior?.participantes;
+        const chegouOuVoltouAoTopo = posicaoAtualParticipantes === 1 && posicaoAnteriorParticipantes !== 1;
+        const jaFoiLider = chegouOuVoltouAoTopo
+          ? await marcarLiderancaEVerificarSeJaFoiLider(tenantId, temporada.temporadaId, clienteId)
+          : false;
+        const fatosPosicao = detectarFatosDePosicao({
+          posicaoAnterior: posicaoAnteriorParticipantes,
+          posicaoAtual: posicaoAtualParticipantes,
+          jaFoiLiderNestaTemporada: jaFoiLider,
+        });
+        if (fatosPosicao.length > 0) {
+          const eventoIdDoDia = `${clienteId}:${temporada.temporadaId}:${dataReferenciaUtc(new Date())}`;
+          await Promise.all(fatosPosicao.map((tipo) => registrarFatoRankingGamificacao(tipo, eventoIdDoDia)));
+        }
+      }
 
       // reindexados é 1..N sequencial (reindexarPorFiltro), então o índice do
       // array já corresponde a posicao-1 — nenhuma busca extra é necessária
