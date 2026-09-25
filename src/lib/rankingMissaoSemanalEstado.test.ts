@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estornarBonusMock, registrarFatoMock } = vi.hoisted(() => {
+const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estornarBonusMock, registrarFatoMock, sincronizarScoreMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
     get: vi.fn(async (key: string) => store.get(key) ?? null),
@@ -16,6 +16,7 @@ const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estorna
     creditarBonusMock: vi.fn(async () => "creditado" as const),
     estornarBonusMock: vi.fn(async () => "estornado" as const),
     registrarFatoMock: vi.fn(async () => true),
+    sincronizarScoreMock: vi.fn(async () => undefined),
   };
 });
 
@@ -23,6 +24,7 @@ vi.mock("./redis", () => ({ redis: redisMock }));
 vi.mock("./rankingGamificacaoConfig", () => ({ obterConfigGamificacao: obterConfigGamificacaoMock }));
 vi.mock("./rankingBonusTemporada", () => ({ creditarBonusCompeticao: creditarBonusMock, estornarBonusCompeticao: estornarBonusMock }));
 vi.mock("./rankingGamificacaoFatos", () => ({ registrarFatoRankingGamificacao: registrarFatoMock }));
+vi.mock("./rankingScoreTemporada", () => ({ sincronizarScoreTemporadaComBonus: sincronizarScoreMock }));
 
 import {
   sincronizarMissaoSemanalCliente,
@@ -44,6 +46,7 @@ beforeEach(() => {
   creditarBonusMock.mockResolvedValue("creditado");
   estornarBonusMock.mockResolvedValue("estornado");
   registrarFatoMock.mockResolvedValue(true);
+  sincronizarScoreMock.mockResolvedValue(undefined);
 });
 
 describe("sincronizarMissaoSemanalCliente", () => {
@@ -107,6 +110,7 @@ describe("consumirMissaoSemanalNoPedido", () => {
       tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "missaoSemanal:pedido-1", tipo: "missao_semanal", pontos: 50,
     }));
     expect(registrarFatoMock).toHaveBeenCalledWith("missao_semanal_consumida", `${CLI}:${TEMP}:pedido-1`);
+    expect(sincronizarScoreMock).toHaveBeenCalledWith(T, TEMP, CLI);
   });
 
   test("fail-closed: config desativada nunca consome nem credita", async () => {
@@ -152,6 +156,7 @@ describe("reverterMissaoSemanalDoPedido", () => {
     expect(estornarBonusMock).toHaveBeenCalledWith(expect.objectContaining({
       tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoIdOriginal: "missaoSemanal:pedido-1",
     }));
+    expect(sincronizarScoreMock).toHaveBeenCalledWith(T, TEMP, CLI);
     expect(await obterEstadoMissaoSemanal(T, TEMP, CLI)).toEqual({
       status: "desbloqueada", desbloqueadaEm: "2026-01-05T00:00:00.000Z", consumidaEm: null, consumidaPedidoId: null,
     });

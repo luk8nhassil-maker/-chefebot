@@ -47,6 +47,22 @@ export type PainelFidelidade = {
   } | null
   // Regra oficial de indicação — nunca hardcoded no frontend.
   indicacao?: { ativa: boolean; estrelasPrimeiraCompra: number | null } | null
+  // Gamificação V2 — cada campo fica null/ausente quando o admin não
+  // configurou aquela mecânica (fail-closed). Nunca renderizar um selo,
+  // missão ou nível a partir de um valor "adivinhado" quando o campo é null.
+  gamificacao?: PainelGamificacao | null
+}
+
+export type StatusTemporadaSocial = 'campeao' | 'prata' | 'bronze' | 'elite' | null
+
+export type PainelGamificacao = {
+  statusSocial: StatusTemporadaSocial
+  // Já está somado dentro de ranking.score/ranking.participantes — exposto
+  // aqui só para a UI conseguir mostrar "dos quais X são bônus de temporada".
+  bonusCompeticao: number
+  missaoSemanal: { status: 'inativa' | 'desbloqueada' | 'consumida' } | null
+  missaoIndicacao: { concluida: boolean } | null
+  nivelChef: { nivel: number; nome: string | null; xpAtual: number; xpProximoNivel: number | null } | null
 }
 
 export type VariacaoPosicaoRanking = { direcao: 'subiu' | 'desceu' | 'manteve'; casas: number }

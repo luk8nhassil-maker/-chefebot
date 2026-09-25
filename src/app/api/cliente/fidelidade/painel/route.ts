@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
-import { derivarClienteIdPorTelefone, estrelasV1Ativa, obterConfigFidelidadePontos } from "@/lib/fidelidade";
+import { derivarClienteIdPorTelefone, estrelasV1Ativa, obterConfigFidelidadePontos, obterExtratoPontos } from "@/lib/fidelidade";
 import { ESTRELAS_INDICACAO_PRIMEIRA_COMPRA } from "@/lib/estrelasIndicacao";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
 import { posicaoClienteRanking, obterTopRanking, obterRankingCompleto, reindexarPorFiltro } from "@/lib/rankingClientes";
@@ -31,6 +31,14 @@ import {
   marcarLiderancaEVerificarSeJaFoiLider,
   registrarFatoRankingGamificacao,
 } from "@/lib/rankingGamificacaoFatos";
+import { calcularNivelChef, calcularXpChefDosMovimentos } from "@/lib/rankingGamificacao";
+import { obterConfigGamificacao } from "@/lib/rankingGamificacaoConfig";
+import { obterBonusCompeticaoDaTemporada } from "@/lib/rankingBonusTemporada";
+import { aplicarCarryoverClienteSeNecessario, sincronizarStatusSocialCliente } from "@/lib/rankingTransicaoTemporada";
+import { sincronizarMissaoSemanalCliente } from "@/lib/rankingMissaoSemanalEstado";
+import { obterEstadoMissaoIndicacao } from "@/lib/rankingMissaoIndicacaoEstado";
+import { aplicarImpulsoPodioSeElegivel } from "@/lib/rankingImpulsoPodioEstado";
+import { sincronizarNivelChefCliente } from "@/lib/rankingNivelChefEstado";
 
 const TENANT_PADRAO = "default";
 
@@ -52,6 +60,14 @@ export async function GET(req: NextRequest) {
   const tenantId = TENANT_PADRAO;
 
   const temporada = await obterTemporadaAtiva(tenantId);
+  const configGamificacao = await obterConfigGamificacao();
+
+  // Vantagem de largada (carryover) — aplicada ANTES de ler a posição, para
+  // que o Top 10 herdado da temporada anterior já apareça refletido nesta
+  // mesma leitura. Idempotente: repetir em toda leitura do painel é seguro.
+  if (temporada) {
+    await aplicarCarryoverClienteSeNecessario(tenantId, temporada, clienteId);
+  }
 
   let ranking: {
     posicao: number;
@@ -196,6 +212,18 @@ export async function GET(req: NextRequest) {
         if (fatosPosicao.length > 0) {
           const eventoIdDoDia = `${clienteId}:${temporada.temporadaId}:${dataReferenciaUtc(new Date())}`;
           await Promise.all(fatosPosicao.map((tipo) => registrarFatoRankingGamificacao(tipo, eventoIdDoDia)));
+          // Impulso do Pódio — bônus limitado e com teto, concedido quando o
+          // cliente entra no Top 3. Idempotente pelo mesmo eventoId diário
+          // (nunca credita duas vezes no mesmo dia) e sempre fail-closed sem
+          // config do admin.
+          if (fatosPosicao.includes("entrou_top3")) {
+            await aplicarImpulsoPodioSeElegivel({
+              tenantId,
+              temporadaId: temporada.temporadaId,
+              clienteId,
+              eventoId: `impulsoPodio:${eventoIdDoDia}`,
+            });
+          }
         }
       }
 
@@ -245,6 +273,49 @@ export async function GET(req: NextRequest) {
     ? { ativa: true as const, estrelasPrimeiraCompra: ESTRELAS_INDICACAO_PRIMEIRA_COMPRA }
     : { ativa: false as const, estrelasPrimeiraCompra: null };
 
+  // Nível de Chef — progressão PERMANENTE, independente de temporada/ranking
+  // (por isso calculada fora do bloco `if (temporada)`). Fail-closed: sem
+  // limiares configurados pelo admin, o campo fica ausente na resposta e a
+  // UI nunca mostra um "Nível 0" inventado.
+  let nivelChef: { nivel: number; nome: string | null; xpAtual: number; xpProximoNivel: number | null } | null = null;
+  if (configGamificacao.nivelChefAtivo && configGamificacao.nivelChefLimiares.length > 0) {
+    const extratoCompleto = await obterExtratoPontos(clienteId);
+    const xp = calcularXpChefDosMovimentos(extratoCompleto);
+    const nivel = calcularNivelChef(xp, configGamificacao.nivelChefLimiares);
+    if (nivel.nivel > 0) {
+      await sincronizarNivelChefCliente(tenantId, clienteId, nivel.nivel);
+      nivelChef = nivel;
+    }
+  }
+
+  // Status social (Campeão/Prata/Bronze/Elite) herdado do Top 10 da
+  // temporada anterior, bônus de competição já refletido no score acima, e
+  // missões da temporada — tudo fail-closed sem config/temporada.
+  let statusSocial: "campeao" | "prata" | "bronze" | "elite" | null = null;
+  let bonusCompeticao = 0;
+  let missaoSemanal: { status: "inativa" | "desbloqueada" | "consumida" } | null = null;
+  let missaoIndicacao: { concluida: boolean } | null = null;
+  if (temporada) {
+    const statusVigente = await sincronizarStatusSocialCliente(tenantId, temporada, clienteId);
+    statusSocial = statusVigente?.status ?? null;
+    bonusCompeticao = await obterBonusCompeticaoDaTemporada(tenantId, temporada.temporadaId, clienteId);
+    if (configGamificacao.missaoSemanalAtiva) {
+      const estadoMissaoSemanal = await sincronizarMissaoSemanalCliente({
+        tenantId,
+        temporadaId: temporada.temporadaId,
+        clienteId,
+        participaCampanha: ranking?.participaCampanha ?? false,
+        posicaoAtual: ranking?.participantes.posicao ?? null,
+        agora: new Date(),
+      });
+      missaoSemanal = { status: estadoMissaoSemanal.status };
+    }
+    if (configGamificacao.missaoIndicacaoAtiva) {
+      const estadoMissaoIndicacao = await obterEstadoMissaoIndicacao(tenantId, temporada.temporadaId, clienteId);
+      missaoIndicacao = { concluida: estadoMissaoIndicacao.concluida };
+    }
+  }
+
   return NextResponse.json({
     temporada: temporada
       ? {
@@ -265,5 +336,15 @@ export async function GET(req: NextRequest) {
       : null,
     ranking,
     indicacao,
+    // Gamificação V2 — cada campo é null/ausente quando o admin não
+    // configurou aquela mecânica (fail-closed): a UI nunca mostra um selo,
+    // missão ou nível que não foi explicitamente ligado.
+    gamificacao: {
+      statusSocial,
+      bonusCompeticao,
+      missaoSemanal,
+      missaoIndicacao,
+      nivelChef,
+    },
   });
 }

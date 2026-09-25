@@ -11,6 +11,7 @@
 //   ledger inteiro fica auditável do início ao fim.
 import "server-only";
 import { redis } from "./redis";
+import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
 
 export type TipoBonusCompeticao =
   | "missao_semanal"
@@ -154,6 +155,10 @@ export async function creditarBonusCompeticao(params: {
       createdAt: new Date().toISOString(),
     };
     await redis.set(chaveBonus(tenantId, temporadaId, clienteId), { movimentos: [...movimentos, novo] });
+    // Fato de negócio único para qualquer tipo de bônus — o próprio eventoId
+    // do crédito já é a chave de idempotência, então nunca duplica mesmo em
+    // retry (Telemetria V2: fato server-side, nunca inferido pelo cliente).
+    await registrarFatoRankingGamificacao("bonus_competicao_aplicado", eventoId);
     return "creditado";
   });
 }

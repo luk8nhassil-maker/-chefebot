@@ -13,6 +13,14 @@ const { store, redisMock } = vi.hoisted(() => {
       store.delete(key);
       return 1;
     }),
+    incr: vi.fn(async (key: string) => {
+      const atual = Number(store.get(key)) || 0;
+      const novo = atual + 1;
+      store.set(key, novo);
+      return novo;
+    }),
+    expire: vi.fn(async () => 1),
+    mget: vi.fn(async (...keys: string[]) => keys.map((k) => store.get(k) ?? null)),
   };
   return { store, redisMock };
 });
@@ -70,6 +78,11 @@ describe("creditarBonusCompeticao", () => {
   test("parâmetros vazios nunca creditam", async () => {
     expect(await creditarBonusCompeticao({ tenantId: "", temporadaId: TEMP, clienteId: CLI, eventoId: "e1", tipo: "ajuste", pontos: 10, motivo: "x" })).toBe("ja_creditado");
     expect(await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "", tipo: "ajuste", pontos: 10, motivo: "x" })).toBe("ja_creditado");
+  });
+
+  test("todo crédito bem-sucedido registra o fato 'bonus_competicao_aplicado' (Telemetria V2)", async () => {
+    await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "e1", tipo: "carryover", pontos: 100, motivo: "x" });
+    expect(store.get("ranking:gamificacao:fato:bonus_competicao_aplicado:e1")).toBeTruthy();
   });
 
   test("clientes e temporadas diferentes não compartilham saldo", async () => {

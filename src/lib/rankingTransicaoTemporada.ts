@@ -15,6 +15,7 @@ import { obterConfigGamificacao } from "./rankingGamificacaoConfig";
 import { calcularBonusCarryover, calcularStatusPorPosicao, type StatusTemporada } from "./rankingGamificacao";
 import { creditarBonusCompeticao } from "./rankingBonusTemporada";
 import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
+import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporada";
 
 /**
  * Encontra a temporada mais recentemente ENCERRADA antes da temporada atual
@@ -64,7 +65,7 @@ export async function aplicarCarryoverClienteSeNecessario(
   if (!entrada) return;
   const bonus = calcularBonusCarryover(entrada.posicao, config.carryoverTabela);
   if (bonus <= 0) return;
-  await creditarBonusCompeticao({
+  const resultadoCredito = await creditarBonusCompeticao({
     tenantId,
     temporadaId: temporadaAtual.temporadaId,
     clienteId,
@@ -73,6 +74,9 @@ export async function aplicarCarryoverClienteSeNecessario(
     pontos: bonus,
     motivo: `Vantagem de largada — #${entrada.posicao} na temporada anterior`,
   });
+  if (resultadoCredito === "creditado") {
+    await sincronizarScoreTemporadaComBonus(tenantId, temporadaAtual.temporadaId, clienteId);
+  }
 }
 
 export type StatusSocialVigente = {

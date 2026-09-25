@@ -13,6 +13,7 @@ import {
 import { obterConfigGamificacao } from "./rankingGamificacaoConfig";
 import { creditarBonusCompeticao } from "./rankingBonusTemporada";
 import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
+import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporada";
 
 function chaveEstado(tenantId: string, temporadaId: string, clienteId: string): string {
   return `ranking:missaoIndicacao:${tenantId}:${temporadaId}:${clienteId}`;
@@ -67,6 +68,7 @@ export async function concluirMissaoIndicacaoNoPedido(params: {
   });
   if (resultado === "creditado") {
     await registrarFatoRankingGamificacao("missao_indicacao_concluida", `${clienteId}:${temporadaId}`);
+    await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
   }
   return { concluida: true, bonusCreditado: bonus };
 }

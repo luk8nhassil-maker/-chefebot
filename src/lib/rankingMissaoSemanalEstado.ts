@@ -18,6 +18,7 @@ import {
 import { obterConfigGamificacao } from "./rankingGamificacaoConfig";
 import { creditarBonusCompeticao, estornarBonusCompeticao } from "./rankingBonusTemporada";
 import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
+import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporada";
 
 type RegistroMissaoSemanal = {
   estado: EstadoMissaoSemanal;
@@ -138,6 +139,7 @@ export async function consumirMissaoSemanalNoPedido(params: {
   if (resultado === "creditado") {
     await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus } satisfies BreadcrumbPedido);
     await registrarFatoRankingGamificacao("missao_semanal_consumida", `${clienteId}:${temporadaId}:${pedidoId}`);
+    await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
   }
   return { consumida: true, bonusCreditado: bonus };
 }
@@ -158,11 +160,14 @@ export async function reverterMissaoSemanalDoPedido(pedidoId: string, motivo: st
   if (revertido) {
     await salvarRegistro(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId, { ...registro, estado: revertido });
   }
-  await estornarBonusCompeticao({
+  const resultado = await estornarBonusCompeticao({
     tenantId: breadcrumb.tenantId,
     temporadaId: breadcrumb.temporadaId,
     clienteId: breadcrumb.clienteId,
     eventoIdOriginal: `missaoSemanal:${pedidoId}`,
     motivo,
   });
+  if (resultado === "estornado") {
+    await sincronizarScoreTemporadaComBonus(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId);
+  }
 }
