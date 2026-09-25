@@ -182,6 +182,13 @@ const PAINEL_PREVIEW: PainelFidelidade = {
     },
   },
   indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+  gamificacao: {
+    statusSocial: null,
+    bonusCompeticao: 0,
+    missaoSemanal: { status: 'desbloqueada' },
+    missaoIndicacao: { concluida: false },
+    nivelChef: { nivel: 2, nome: 'Cozinheiro', xpAtual: 240, xpProximoNivel: 500 },
+  },
 }
 
 type PreviewFidelidadeMobileProps = {
@@ -208,6 +215,7 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
         ranking={PAINEL_PREVIEW.ranking}
         temporada={PAINEL_PREVIEW.temporada}
         indicacao={PAINEL_PREVIEW.indicacao}
+        gamificacao={PAINEL_PREVIEW.gamificacao}
         privacidade={null}
         privacidadeCarregando={false}
         privacidadeSalvando={null}
@@ -1486,6 +1494,7 @@ export default function ClientePage() {
                 ranking={painel.ranking}
                 temporada={painel.temporada}
                 indicacao={painel.indicacao}
+                gamificacao={painel.gamificacao}
                 privacidade={privacidadeRanking}
                 privacidadeCarregando={privacidadeCarregando}
                 privacidadeSalvando={privacidadeSalvando}

@@ -19,12 +19,30 @@ import type {
   VariacaoPosicaoRanking,
   FinalidadePrivacidadeRanking,
   PreferenciasPrivacidadeRanking,
+  PainelGamificacao,
 } from './painelFidelidadeTipos'
+
+const NOME_STATUS_SOCIAL: Record<NonNullable<PainelGamificacao['statusSocial']>, string> = {
+  campeao: 'Campeão',
+  prata: 'Prata',
+  bronze: 'Bronze',
+  elite: 'Elite Top 10',
+}
+
+const ICONE_STATUS_SOCIAL: Record<NonNullable<PainelGamificacao['statusSocial']>, string> = {
+  campeao: '👑',
+  prata: '🥈',
+  bronze: '🥉',
+  elite: '✦',
+}
 
 export type FidelidadeRankingScreenProps = {
   ranking: NonNullable<PainelFidelidade['ranking']>
   temporada: PainelFidelidade['temporada']
   indicacao?: PainelFidelidade['indicacao']
+  // Gamificação V2 — ausente/null quando o admin não configurou nenhuma
+  // mecânica (fail-closed): a tela nunca mostra selo, missão ou nível vazio.
+  gamificacao?: PainelGamificacao | null
   privacidade: PreferenciasPrivacidadeRanking | null
   privacidadeCarregando: boolean
   privacidadeSalvando: FinalidadePrivacidadeRanking | 'todas' | null
@@ -51,6 +69,7 @@ export function FidelidadeRankingScreen({
   ranking,
   temporada,
   indicacao,
+  gamificacao = null,
   privacidade,
   privacidadeCarregando,
   privacidadeSalvando,
@@ -160,6 +179,32 @@ export function FidelidadeRankingScreen({
           </div>
         )}
       </header>
+
+      {(gamificacao?.statusSocial || gamificacao?.nivelChef) && (
+        <section className="cf-ranking-selos" aria-label="Seu status">
+          {gamificacao.statusSocial && (
+            <span className={`cf-ranking-selo cf-ranking-selo-${gamificacao.statusSocial}`}>
+              <span aria-hidden="true">{ICONE_STATUS_SOCIAL[gamificacao.statusSocial]}</span>
+              {NOME_STATUS_SOCIAL[gamificacao.statusSocial]}
+            </span>
+          )}
+          {gamificacao.nivelChef && (
+            <span className="cf-ranking-selo cf-ranking-selo-nivel">
+              Nível {gamificacao.nivelChef.nivel}{gamificacao.nivelChef.nome ? ` — ${gamificacao.nivelChef.nome}` : ''}
+            </span>
+          )}
+        </section>
+      )}
+
+      {gamificacao?.missaoSemanal?.status === 'desbloqueada' && (
+        <section className="cf-ranking-note cf-ranking-missao" aria-label="Missão semanal">
+          <span aria-hidden="true">🎯</span>
+          <div>
+            <strong>Caçada ao Pódio liberada!</strong>
+            <p>Seu próximo pedido vale o dobro de estrelas na disputa da temporada.</p>
+          </div>
+        </section>
+      )}
 
       {posPedido && (
         <section className="cf-ranking-note" aria-label="Resultado do pedido" style={{ marginTop: 0, marginBottom: 14 }}>
@@ -298,7 +343,13 @@ export function FidelidadeRankingScreen({
               <div className="cf-ranking-sheet-row">
                 <span>
                   <strong>Indicar um amigo</strong>
-                  <small>{indicacao.estrelasPrimeiraCompra ? `+${indicacao.estrelasPrimeiraCompra} Estrelas na primeira compra dele.` : 'Estrelas na primeira compra dele.'}</small>
+                  <small>
+                    {gamificacao?.missaoIndicacao?.concluida
+                      ? '✓ Missão da temporada já concluída.'
+                      : indicacao.estrelasPrimeiraCompra
+                        ? `+${indicacao.estrelasPrimeiraCompra} Estrelas na primeira compra dele.`
+                        : 'Estrelas na primeira compra dele.'}
+                  </small>
                 </span>
                 <button
                   type="button"
@@ -337,6 +388,14 @@ export function FidelidadeRankingScreen({
         .cf-ranking-tabs { display: grid; grid-template-columns: repeat(3,1fr); gap: 2px; margin: 17px 0 11px; padding: 3px; border-radius: 24px; background: rgba(222,227,234,.75); }.cf-ranking-tabs button { min-height: 39px; border: 0; border-radius: 21px; background: transparent; color: #687488; font: 700 12px inherit; cursor: pointer; }.cf-ranking-tabs button.ativo { color: #1f63d6; background: rgba(255,255,255,.98); box-shadow: 0 3px 10px rgba(48,75,108,.1); }
         .cf-ranking-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; }.cf-ranking-row { display: grid; grid-template-columns: 30px 34px 1fr auto; align-items: center; gap: 7px; min-height: 48px; padding: 6px 11px; border: 1px solid rgba(255,255,255,.85); border-radius: 24px; background: rgba(255,255,255,.84); box-shadow: 0 5px 14px rgba(58,78,101,.05); }.cf-ranking-row.voce { border-color: rgba(88,151,247,.4); background: linear-gradient(90deg, rgba(234,244,255,.98), rgba(248,252,255,.9)); }.cf-ranking-row>strong { font-size: 17px; text-align: center; }.cf-ranking-row-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #e8eef5; color: #61738a; font-size: 12px; font-weight: 800; }.cf-ranking-row.voce .cf-ranking-row-avatar { background: #4f86ed; color: #fff; }.cf-ranking-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }.cf-ranking-row-name small{display:block;margin-top:2px;color:#758296;font-size:10px}.cf-ranking-row>b { color: #ae7109; font-size: 12px; white-space: nowrap; }.cf-ranking-empty,.cf-ranking-footnote { margin: 7px 2px; color: #6d7a8c; font-size: 12px; line-height: 1.45; text-align: center; }
         .cf-ranking-note { display: flex; gap: 12px; align-items: center; margin-top: 17px; padding: 14px 15px; border: 1px solid rgba(226,180,55,.38); border-radius: 18px; background: linear-gradient(110deg, rgba(255,252,239,.96), rgba(255,247,218,.75)); }.cf-ranking-note>span { font-size: 25px; }.cf-ranking-note strong { font-size: 13px; display: block; }.cf-ranking-note p { margin: 4px 0 0; color: #697588; font-size: 11.5px; line-height: 1.35; }
+        .cf-ranking-selos { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; margin: 0 0 12px; }
+        .cf-ranking-selo { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 999px; font-size: 11.5px; font-weight: 800; background: #eef1f5; color: #4a5568; }
+        .cf-ranking-selo-campeao { background: linear-gradient(110deg, #fff3c4, #ffe08a); color: #8a5c00; }
+        .cf-ranking-selo-prata { background: linear-gradient(110deg, #eef2f6, #d9e1e8); color: #4a5568; }
+        .cf-ranking-selo-bronze { background: linear-gradient(110deg, #f3ded0, #e6b58b); color: #7b4322; }
+        .cf-ranking-selo-elite { background: linear-gradient(110deg, #e7f0ff, #d5e6ff); color: #2a548f; }
+        .cf-ranking-selo-nivel { background: #10193a; color: #fff; }
+        .cf-ranking-missao { border-color: rgba(88,151,247,.4); background: linear-gradient(110deg, rgba(234,244,255,.98), rgba(248,252,255,.9)); }
         .cf-ranking-share-btn { margin-top: 8px; padding: 8px 14px; border: 0; border-radius: 12px; background: #4f86ed; color: #fff; font-weight: 700; font-size: 12px; cursor: pointer; }.cf-ranking-share-btn:disabled { opacity: .6; cursor: wait; }
         .cf-ranking-cta-primary { display: block; width: 100%; min-height: 46px; margin: 0 0 14px; border: 0; border-radius: 13px; background: #ffc900; color: #252a30; font-weight: 700; font-size: 14.5px; cursor: pointer; }
         .cf-ranking-sheet-backdrop { position: fixed; inset: 0; z-index: 80; display: flex; align-items: flex-end; justify-content: center; padding: 18px; background: rgba(20,27,37,.38); }
