@@ -4,6 +4,7 @@ import { useState } from "react";
 import { FidelidadeRankingScreen } from "@/app/cliente/FidelidadeRankingScreen";
 import type {
   PainelFidelidade,
+  PainelGamificacao,
   PreferenciasPrivacidadeRanking,
 } from "@/app/cliente/painelFidelidadeTipos";
 import { calcularAlvoRankingAtual, montarDisputaRelativa } from "@/lib/rankingRetencao";
@@ -115,7 +116,16 @@ type Cenario = {
     temporada: TemporadaCompleta | null;
     indicacao: PainelFidelidade["indicacao"];
     posPedido?: { estado: "pendente" | "creditado"; estrelasGanhas?: number } | null;
+    gamificacao?: PainelGamificacao | null;
   };
+};
+
+const GAMIFICACAO_NEUTRA: PainelGamificacao = {
+  statusSocial: null,
+  bonusCompeticao: 0,
+  missaoSemanal: null,
+  missaoIndicacao: null,
+  nivelChef: null,
 };
 
 const CENARIOS: Cenario[] = [
@@ -327,6 +337,100 @@ const CENARIOS: Cenario[] = [
       indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
     },
   },
+  {
+    id: "status-campeao",
+    titulo: "19. Status social — Campeão",
+    detalhe: "Selo herdado do #1 da temporada anterior, exibido durante a temporada atual.",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, statusSocial: "campeao" },
+    },
+  },
+  {
+    id: "status-prata",
+    titulo: "20. Status social — Prata",
+    detalhe: "Selo herdado do #2 da temporada anterior.",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, statusSocial: "prata" },
+    },
+  },
+  {
+    id: "status-bronze",
+    titulo: "21. Status social — Bronze",
+    detalhe: "Selo herdado do #3 da temporada anterior.",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, statusSocial: "bronze" },
+    },
+  },
+  {
+    id: "status-elite",
+    titulo: "22. Status social — Elite Top 10",
+    detalhe: "Selo herdado de quem ficou entre #4 e #10 na temporada anterior.",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, statusSocial: "elite" },
+    },
+  },
+  {
+    id: "missao-semanal-desbloqueada",
+    titulo: "23. Caçada ao Pódio — desbloqueada",
+    detalhe: "Fora do pódio há 7+ dias sem pedido: próximo pedido vale o dobro de estrelas na temporada.",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, missaoSemanal: { status: "desbloqueada" } },
+    },
+  },
+  {
+    id: "missao-indicacao-concluida",
+    titulo: "24. Missão da temporada — Indique um amigo (concluída)",
+    detalhe: "Progresso 0/1 já cumprido nesta temporada — nunca duplica o bônus numa segunda indicação.",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, missaoIndicacao: { concluida: true } },
+    },
+  },
+  {
+    id: "nivel-chef",
+    titulo: "25. Nível de Chef",
+    detalhe: "Progressão permanente por XP vitalício, independente da temporada em disputa.",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: { ...GAMIFICACAO_NEUTRA, nivelChef: { nivel: 3, nome: "Chef", xpAtual: 620, xpProximoNivel: 1000 } },
+    },
+  },
+  {
+    id: "gamificacao-completa",
+    titulo: "26. Tudo ativo ao mesmo tempo",
+    detalhe: "Status, bônus de competição, missão semanal e nível juntos — nenhum atrapalha o outro.",
+    props: {
+      ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 1, variacaoPosicao: { direcao: "subiu", casas: 1 } }),
+      temporada: TEMPORADA_PADRAO,
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+      gamificacao: {
+        statusSocial: "elite",
+        bonusCompeticao: 45,
+        missaoSemanal: { status: "desbloqueada" },
+        missaoIndicacao: { concluida: false },
+        nivelChef: { nivel: 4, nome: "Chef Executivo", xpAtual: 1450, xpProximoNivel: null },
+      },
+    },
+  },
 ];
 
 export default function RankingRetencaoPreview() {
@@ -347,11 +451,11 @@ export default function RankingRetencaoPreview() {
       <section style={{ maxWidth: 1100, margin: "0 auto", display: "grid", gridTemplateColumns: "280px 1fr", gap: 24, alignItems: "start" }}>
         <div>
           <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 800, color: "#3972d7" }}>PREVIEW ISOLADO</p>
-          <h1 style={{ margin: "0 0 8px", fontSize: 22 }}>Ranking do Chefe — Retenção</h1>
+          <h1 style={{ margin: "0 0 8px", fontSize: 22 }}>Ranking do Chefe — Retenção + Gamificação V2</h1>
           <p style={{ margin: "0 0 14px", color: "#61738b", lineHeight: 1.5, fontSize: 13 }}>
-            Fixtures locais. Nenhum pedido, Pix, WhatsApp, impressão, estoque, fidelidade real, indicação real ou
-            escrita em Redis é criada aqui — o componente renderizado é o mesmo usado em produção
-            (<code>FidelidadeRankingScreen</code>).
+            Fixtures locais. Nenhum pedido, Pix, WhatsApp, impressão, estoque, fidelidade real, indicação real,
+            bônus de competição ou escrita em Redis é criada aqui — o componente renderizado é o mesmo usado em
+            produção (<code>FidelidadeRankingScreen</code>).
           </p>
           <div style={{ display: "grid", gap: 8, maxHeight: "80dvh", overflow: "auto", paddingRight: 4 }}>
             {CENARIOS.map((item) => (
@@ -386,6 +490,7 @@ export default function RankingRetencaoPreview() {
             ranking={cenario.props.ranking}
             temporada={cenario.props.temporada}
             indicacao={cenario.props.indicacao}
+            gamificacao={cenario.props.gamificacao ?? null}
             privacidade={PRIVACIDADE_PARTICIPANTE}
             privacidadeCarregando={false}
             privacidadeSalvando={null}

@@ -30,7 +30,7 @@ describe("Preview seguro da retenção do ranking (quem já participa)", () => {
     expect(client).not.toContain("compartilharConquistaRanking(");
   });
 
-  test("cobre os 18 cenários obrigatórios", () => {
+  test("cobre os 18 cenários obrigatórios da retenção (#445)", () => {
     const ids = [
       "posicao-intermediaria",
       "subiu",
@@ -55,6 +55,25 @@ describe("Preview seguro da retenção do ranking (quem já participa)", () => {
     for (const id of ids) {
       expect(client).toContain(`id: "${id}"`);
     }
+  });
+
+  test("cobre os 8 cenários adicionais da Gamificação V2, totalizando 26", () => {
+    const idsGamificacao = [
+      "status-campeao",
+      "status-prata",
+      "status-bronze",
+      "status-elite",
+      "missao-semanal-desbloqueada",
+      "missao-indicacao-concluida",
+      "nivel-chef",
+      "gamificacao-completa",
+    ];
+    expect(idsGamificacao).toHaveLength(8);
+    for (const id of idsGamificacao) {
+      expect(client).toContain(`id: "${id}"`);
+    }
+    const totalCenarios = (client.match(/^\s{2}\{\n\s{4}id: "/gm) ?? []).length;
+    expect(totalCenarios).toBe(26);
   });
 
   test("cenário 'sem prêmio' nunca promete prêmio (fail-closed)", () => {
