@@ -111,3 +111,30 @@ entrar na campanha antes do prazo final para concorrer.
 - definir a política de contato do bot quando a meta for atingida;
 - validar as regras da promoção com o responsável jurídico/DPO antes de
   publicar em produção.
+
+## Adendo (2026-09-25) — infraestrutura de encerramento e histórico
+
+Implementado em código (branch `feat/ranking-prospeccao-app-20260925`), sem
+decidir nenhuma regra comercial nova:
+
+- **Posição própria em "Valendo prêmio"**: a visão de participantes agora
+  tem sua própria contagem 1..N, recalculada só entre quem autorizou — nunca
+  reaproveita a posição da visão geral (ver `src/lib/rankingClientes.ts`:
+  `obterRankingCompleto`/`reindexarPorFiltro`).
+- **Histórico de posição**: snapshot diário real e imutável do dia (nunca
+  reescrito), usado só para mostrar "subiu N"/"desceu N" contra o dia
+  anterior — sem histórico anterior, nada é exibido (`src/lib/rankingHistorico.ts`).
+- **Encerramento de temporada**: agora gera um arquivo imutável do
+  resultado (ranking geral + ranking de participantes no momento do
+  encerramento). Continua **sem prêmio, sem quantidade de premiados e sem
+  vencedor por padrão** — esses três campos (`premioDescricao`,
+  `premioQuantidadePremiados`, `premioAprovado`) só existem se o admin os
+  definir explicitamente ao criar a temporada, e um vencedor só é declarado
+  se os três estiverem presentes **antes** do encerramento
+  (`src/lib/temporadaResultado.ts`). Isso é infraestrutura para quando as
+  decisões de produto acima (meta, benefício, textos, jurídico) forem
+  fechadas — não substitui nenhuma delas.
+- A identidade de quem aparece num resultado arquivado (inclusive
+  vencedores) é recalculada a partir do consentimento **atual** a cada
+  leitura, nunca do momento do encerramento — quem revoga depois passa a
+  aparecer anonimizado também no histórico.
