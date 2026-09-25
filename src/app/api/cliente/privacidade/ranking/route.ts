@@ -8,6 +8,8 @@ import {
   registrarConsentimentoRanking,
   revogarTodosConsentimentosRanking,
 } from "@/lib/consentimentoRanking";
+import { dataReferenciaUtc } from "@/lib/rankingHistorico";
+import { registrarFatoRankingGamificacao } from "@/lib/rankingGamificacaoFatos";
 
 export const dynamic = "force-dynamic";
 
@@ -102,6 +104,13 @@ export async function DELETE(req: NextRequest) {
 
   try {
     await revogarTodosConsentimentosRanking(cliente.clienteId);
+    // Fato de negócio registrado no servidor (nunca a partir do clique no
+    // navegador) — deduplicado por cliente+dia, coerente com o mesmo idioma
+    // de "referência diária" já usado no snapshot do histórico do ranking.
+    await registrarFatoRankingGamificacao(
+      "participacao_revogada",
+      `${cliente.clienteId}:${dataReferenciaUtc(new Date())}`,
+    );
     const estadoRanking = await obterEstadoRankingCliente(cliente.clienteId);
     return respostaJson({ ok: true, ...estadoRanking });
   } catch (erro) {

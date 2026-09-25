@@ -22,6 +22,11 @@ import {
 } from "./jornadaChef";
 import type { PedidoSnapshotOficial } from "./pedidoSnapshot";
 import { registrarEventoEntregue, estornarEventoAnalitico } from "./historicoAnalitico";
+import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
+import { obterTemporadaAtiva } from "./temporadas";
+import { detectarCreditoDoPedido } from "./rankingRetencao";
+import { consumirMissaoSemanalNoPedido, reverterMissaoSemanalDoPedido } from "./rankingMissaoSemanalEstado";
+import { concluirMissaoIndicacaoNoPedido } from "./rankingMissaoIndicacaoEstado";
 import type { ItemApp } from "./pedidoAppItens";
 import type { PedidoRedis } from "@/types/pedidoRedis";
 
@@ -253,7 +258,7 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       await removerPendencia(pedido.id, "entregue", tenantId);
       return;
     }
-    estado = estado ?? (await novoEstado(pedido.id, "entregue", ["fidelidade_legada", "pontos", "jornada", "indicacao", "analytics"]));
+    estado = estado ?? (await novoEstado(pedido.id, "entregue", ["fidelidade_legada", "pontos", "gamificacao", "jornada", "indicacao", "analytics"]));
 
     await executarEfeito(chave, estado, "fidelidade_legada", async () => {
       await creditarFidelidadePedido({
@@ -271,6 +276,30 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
         total: pedido.total ?? 0,
         taxaEntrega: pedido.taxaEntrega,
         snapshotOficial: pedido.snapshotOficial,
+      });
+    });
+    await executarEfeito(chave, estado, "gamificacao", async () => {
+      // Bônus de competição da temporada (Caçada ao Pódio) — nunca toca no
+      // saldo de fidelidade; só lê o que "pontos" acabou de creditar PARA
+      // ESTE pedidoId exato (nunca por janela de tempo, correção do #445) e
+      // credita o dobro num ledger separado quando há missão desbloqueada.
+      const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
+      if (!clienteId) return;
+      const temporada = await obterTemporadaAtiva(tenantId);
+      if (!temporada) return;
+      const extrato = await obterExtratoPontos(clienteId);
+      const credito = detectarCreditoDoPedido(
+        extrato.map((m) => ({ pedidoId: m.pedidoId ?? null, tipo: m.tipo, pontos: m.pontos })),
+        pedido.id,
+      );
+      if (!credito || credito.pontos <= 0) return;
+      await consumirMissaoSemanalNoPedido({
+        tenantId,
+        temporadaId: temporada.temporadaId,
+        clienteId,
+        pedidoId: pedido.id,
+        estrelasBaseDoPedido: credito.pontos,
+        agora: new Date(),
       });
     });
     await executarEfeito(chave, estado, "jornada", async () => {
@@ -307,12 +336,37 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       if (confirmado !== "registrado") return;
 
       // Primeira compra comercial válida: +6 ao indicador — SEM apoio neste evento
-      await creditarEstrelasIndicacaoValida({
+      const resultadoIndicacao = await creditarEstrelasIndicacaoValida({
         indicadorId: candidatura.indicadorId,
         indicadoId: clienteId,
         pedidoId: pedido.id,
         primeiraCompraComercialValida: true,
       });
+      // Fato de negócio "indicação convertida" registrado no MESMO instante
+      // idempotente do crédito real — nunca inferido depois por regex/diff de
+      // extrato no navegador (correção do #445). O eventoId espelha
+      // exatamente a chave de idempotência do próprio ledger, então mesmo um
+      // retry deste efeito nunca conta o fato duas vezes.
+      if (resultadoIndicacao === "creditado") {
+        await registrarFatoRankingGamificacao(
+          "indicacao_convertida",
+          `indicacao:${clienteId}:primeira-compra:${pedido.id}`,
+        );
+        // Missão da temporada "Indique um amigo" — reaproveita o MESMO
+        // crédito real de indicação, nunca cria um sistema paralelo. Quem
+        // cumpre a missão é o indicador (candidatura.indicadorId), não o
+        // indicado. Sem temporada ativa, fica fail-closed (sem missão).
+        const temporadaIndicacao = await obterTemporadaAtiva(tenantId);
+        if (temporadaIndicacao) {
+          await concluirMissaoIndicacaoNoPedido({
+            tenantId,
+            temporadaId: temporadaIndicacao.temporadaId,
+            clienteId: candidatura.indicadorId,
+            pedidoId: pedido.id,
+            agora: new Date(),
+          });
+        }
+      }
     });
 
     await executarEfeito(chave, estado, "analytics", async () => {
@@ -356,7 +410,7 @@ export async function processarEfeitosPedidoCancelado(pedido: PedidoParaEfeitosF
       await removerPendencia(pedido.id, "cancelado", tenantId);
       return;
     }
-    estado = estado ?? (await novoEstado(pedido.id, "cancelado", ["pontos", "resgate", "jornada", "analytics"]));
+    estado = estado ?? (await novoEstado(pedido.id, "cancelado", ["pontos", "resgate", "gamificacao", "jornada", "analytics"]));
 
     await executarEfeito(chave, estado, "pontos", async () => {
       const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
@@ -400,6 +454,14 @@ export async function processarEfeitosPedidoCancelado(pedido: PedidoParaEfeitosF
       if (!pedido.resgateId) return;
       const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
       if (clienteId) await reverterResgateConfirmado(clienteId, pedido.resgateId, `Pedido ${pedido.id} cancelado`);
+    });
+    await executarEfeito(chave, estado, "gamificacao", async () => {
+      // Nunca deixa o cliente "perder a chance" da missão semanal por causa
+      // de um cancelamento: se ESTE pedido exato consumiu a missão, o
+      // estorno do bônus e a reabertura da missão acontecem juntos aqui.
+      // Sem migalha para este pedido, é no-op (nunca mexe no estado de
+      // nenhum outro cliente/pedido).
+      await reverterMissaoSemanalDoPedido(pedido.id, `Pedido ${pedido.id} cancelado`);
     });
     await executarEfeito(chave, estado, "jornada", async () => {
       await reverterConclusaoPedidoJornada(pedido.id, `Pedido ${pedido.id} cancelado`);

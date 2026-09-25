@@ -41,7 +41,7 @@ describe("POST /api/cliente/ranking/evento", () => {
   test("204 e registra evento válido", async () => {
     const res = await POST(req({ tipo: "ranking_aberto" }, "token-cli-a"));
     expect(res.status).toBe(204);
-    expect(registrar).toHaveBeenCalledWith("default", "ranking_aberto", undefined);
+    expect(registrar).toHaveBeenCalledWith("default", "ranking_aberto");
   });
 
   test("tipo fora da allowlist é descartado silenciosamente (204, sem gravar)", async () => {
@@ -62,8 +62,14 @@ describe("POST /api/cliente/ranking/evento", () => {
     expect(registrar).not.toHaveBeenCalled();
   });
 
-  test("repassa detalhe bruto para o registrador sanitizar (nunca confia no client)", async () => {
-    await POST(req({ tipo: "entrou_top3", detalhe: { posicaoFaixa: "top3", clienteId: "cli_a" } }, "token-cli-a"));
-    expect(registrar).toHaveBeenCalledWith("default", "entrou_top3", { posicaoFaixa: "top3", clienteId: "cli_a" });
+  test("'entrou_top3' não é mais aceito aqui — virou fato server-side (correção do #445)", async () => {
+    const res = await POST(req({ tipo: "entrou_top3" }, "token-cli-a"));
+    expect(res.status).toBe(204);
+    expect(registrar).not.toHaveBeenCalled();
+  });
+
+  test("um campo 'detalhe' enviado pelo cliente é ignorado — a rota não repassa nada além do tipo", async () => {
+    await POST(req({ tipo: "cta_subir_clicado", detalhe: { qualquer: "coisa" } }, "token-cli-a"));
+    expect(registrar).toHaveBeenCalledWith("default", "cta_subir_clicado");
   });
 });

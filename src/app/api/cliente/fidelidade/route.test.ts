@@ -359,3 +359,39 @@ describe("GET /api/cliente/fidelidade — nenhuma informacao sensivel exposta", 
     expect(texto).not.toContain("fidelidade:pontos:");
   });
 });
+
+describe("GET /api/cliente/fidelidade — origem estruturada do movimento (correção do #445)", () => {
+  test("movimento de indicação vem classificado por eventoId, não por texto", async () => {
+    extratosPorCliente.set("cli_a", [
+      mov({ tipo: "confirmado", pontos: 6, pedidoId: "p_amigo", eventoId: "indicacao:cli_amigo:primeira-compra:p_amigo", motivo: "Estrelas por indicação válida" }),
+    ]);
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+    expect(body.extrato[0].origem).toBe("indicacao");
+  });
+
+  test("movimento comum do pedido nunca é classificado como indicação, mesmo com esse texto no motivo", async () => {
+    extratosPorCliente.set("cli_a", [
+      mov({ tipo: "ajuste", pontos: 3, pedidoId: "p1", eventoId: "ajuste:p1:correção manual — não é indicação", motivo: "Ajuste manual mencionando indicação" }),
+    ]);
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+    expect(body.extrato[0].origem).toBe("pedido");
+  });
+
+  test("apoio recorrente vem classificado corretamente", async () => {
+    extratosPorCliente.set("cli_a", [
+      mov({ tipo: "confirmado", pontos: 1, pedidoId: "p2", eventoId: "apoio:cli_amigo:expediente:2026-09-25" }),
+    ]);
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+    expect(body.extrato[0].origem).toBe("apoio");
+  });
+
+  test("movimento sem eventoId (histórico antigo) cai em 'outro', nunca em 'indicacao'", async () => {
+    extratosPorCliente.set("cli_a", [mov({ tipo: "confirmado", pontos: 10, pedidoId: "p1" })]);
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+    expect(body.extrato[0].origem).toBe("outro");
+  });
+});

@@ -36,6 +36,7 @@ vi.mock("@/lib/fidelidade", async () => {
     ...actual,
     derivarClienteIdPorTelefone: vi.fn((telefone: string) => `hashed_${telefone}`),
     obterConfigFidelidadePontos: vi.fn(async () => configFidelidadeMock),
+    obterExtratoPontos: vi.fn(async () => [] as unknown[]),
   };
 });
 
@@ -61,6 +62,16 @@ vi.mock("@/lib/rankingPrivacidade", () => ({
 
 let posicaoAnteriorMock: { geral: number; participantes: number | null } | null = null;
 
+const { registrarFatoMock, marcarLiderancaMock } = vi.hoisted(() => ({
+  registrarFatoMock: vi.fn(async (_tipo: string, _eventoId: string) => true),
+  marcarLiderancaMock: vi.fn(async (_tenantId: string, _temporadaId: string, _clienteId: string) => false),
+}));
+
+vi.mock("@/lib/rankingGamificacaoFatos", () => ({
+  registrarFatoRankingGamificacao: registrarFatoMock,
+  marcarLiderancaEVerificarSeJaFoiLider: marcarLiderancaMock,
+}));
+
 vi.mock("@/lib/rankingHistorico", async () => {
   const actual = await vi.importActual<typeof import("@/lib/rankingHistorico")>("@/lib/rankingHistorico");
   return {
@@ -69,6 +80,55 @@ vi.mock("@/lib/rankingHistorico", async () => {
     obterPosicaoAnterior: vi.fn(async () => posicaoAnteriorMock),
   };
 });
+
+let configGamificacaoMock: Record<string, unknown> = {
+  missaoSemanalAtiva: false,
+  missaoIndicacaoAtiva: false,
+  impulsoPodioAtivo: false,
+  carryoverAtivo: false,
+  nivelChefAtivo: false,
+  nivelChefLimiares: [],
+};
+
+const {
+  obterConfigGamificacaoMock,
+  obterBonusMock,
+  aplicarCarryoverMock,
+  sincronizarStatusSocialMock,
+  sincronizarMissaoSemanalMock,
+  obterEstadoMissaoIndicacaoMock,
+  aplicarImpulsoPodioMock,
+  sincronizarNivelChefMock,
+} = vi.hoisted(() => ({
+  obterConfigGamificacaoMock: vi.fn(),
+  obterBonusMock: vi.fn(async () => 0),
+  aplicarCarryoverMock: vi.fn(async () => undefined),
+  sincronizarStatusSocialMock: vi.fn(async () => null as { status: string | null; temporadaOrigemId: string; atribuidoEm: string } | null),
+  sincronizarMissaoSemanalMock: vi.fn(async () => ({
+    status: "inativa" as "inativa" | "desbloqueada" | "consumida",
+    desbloqueadaEm: null as string | null,
+    consumidaEm: null as string | null,
+    consumidaPedidoId: null as string | null,
+  })),
+  obterEstadoMissaoIndicacaoMock: vi.fn(async () => ({
+    concluida: false,
+    concluidaEm: null as string | null,
+    pedidoId: null as string | null,
+  })),
+  aplicarImpulsoPodioMock: vi.fn(async () => undefined),
+  sincronizarNivelChefMock: vi.fn(async () => undefined),
+}));
+
+vi.mock("@/lib/rankingGamificacaoConfig", () => ({ obterConfigGamificacao: obterConfigGamificacaoMock }));
+vi.mock("@/lib/rankingBonusTemporada", () => ({ obterBonusCompeticaoDaTemporada: obterBonusMock }));
+vi.mock("@/lib/rankingTransicaoTemporada", () => ({
+  aplicarCarryoverClienteSeNecessario: aplicarCarryoverMock,
+  sincronizarStatusSocialCliente: sincronizarStatusSocialMock,
+}));
+vi.mock("@/lib/rankingMissaoSemanalEstado", () => ({ sincronizarMissaoSemanalCliente: sincronizarMissaoSemanalMock }));
+vi.mock("@/lib/rankingMissaoIndicacaoEstado", () => ({ obterEstadoMissaoIndicacao: obterEstadoMissaoIndicacaoMock }));
+vi.mock("@/lib/rankingImpulsoPodioEstado", () => ({ aplicarImpulsoPodioSeElegivel: aplicarImpulsoPodioMock }));
+vi.mock("@/lib/rankingNivelChefEstado", () => ({ sincronizarNivelChefCliente: sincronizarNivelChefMock }));
 
 import { GET } from "./route";
 
@@ -86,6 +146,24 @@ beforeEach(() => {
   identidadesPublicas = new Map();
   posicaoAnteriorMock = null;
   configFidelidadeMock = { ativo: true, regraVersao: "estrelas-faixas-v1" };
+  registrarFatoMock.mockClear();
+  marcarLiderancaMock.mockClear().mockResolvedValue(false);
+  configGamificacaoMock = {
+    missaoSemanalAtiva: false,
+    missaoIndicacaoAtiva: false,
+    impulsoPodioAtivo: false,
+    carryoverAtivo: false,
+    nivelChefAtivo: false,
+    nivelChefLimiares: [],
+  };
+  obterConfigGamificacaoMock.mockReset().mockImplementation(async () => configGamificacaoMock);
+  obterBonusMock.mockReset().mockResolvedValue(0);
+  aplicarCarryoverMock.mockReset().mockResolvedValue(undefined);
+  sincronizarStatusSocialMock.mockReset().mockResolvedValue(null);
+  sincronizarMissaoSemanalMock.mockReset().mockResolvedValue({ status: "inativa", desbloqueadaEm: null, consumidaEm: null, consumidaPedidoId: null });
+  obterEstadoMissaoIndicacaoMock.mockReset().mockResolvedValue({ concluida: false, concluidaEm: null, pedidoId: null });
+  aplicarImpulsoPodioMock.mockReset().mockResolvedValue(undefined);
+  sincronizarNivelChefMock.mockReset().mockResolvedValue(undefined);
 });
 
 describe("GET /api/cliente/fidelidade/painel", () => {
@@ -281,6 +359,61 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     expect(body.ranking.variacaoPosicao).toEqual({ direcao: "subiu", casas: 3 });
     // Único participante hoje → 1º entre participantes; ontem era 3º.
     expect(body.ranking.participantes.variacaoPosicao).toEqual({ direcao: "subiu", casas: 2 });
+    // Fatos de negócio registrados no SERVIDOR (nunca pelo navegador,
+    // correção do #445). Ontem já era #3 entre participantes (dentro do
+    // Top 10 e do Top 3), então só "subiu" e "chegou ao #1" são fatos reais
+    // — "entrou_top10"/"entrou_top3" corretamente NÃO disparam de novo.
+    const tiposRegistrados = registrarFatoMock.mock.calls.map((c) => c[0]);
+    expect(tiposRegistrados).toEqual(expect.arrayContaining(["subiu_posicao", "chegou_top1"]));
+    expect(tiposRegistrados).not.toContain("entrou_top10");
+    expect(tiposRegistrados).not.toContain("entrou_top3");
+    // Todas as chamadas usam o MESMO eventoId do dia — idempotente mesmo
+    // que a rota seja chamada várias vezes no mesmo dia.
+    const eventoIds = new Set(registrarFatoMock.mock.calls.map((c) => c[1]));
+    expect(eventoIds.size).toBe(1);
+  });
+
+  test("sem variação (sem snapshot anterior) nunca registra fato nenhum", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 1, score: 10 });
+    topRanking = [{ clienteId, score: 10, posicao: 1 }];
+    rankingCompleto = topRanking;
+    identidadesPublicas.set(clienteId, { participaCampanha: true, nomePublico: "Você", telefoneMascarado: null, fotoPerfilUrl: null });
+    posicaoAnteriorMock = null;
+
+    await GET(req("token-cli-a"));
+    expect(registrarFatoMock).not.toHaveBeenCalled();
+  });
+
+  test("manteve a posição não registra fato nenhum", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 4, score: 10 });
+    topRanking = [{ clienteId, score: 10, posicao: 4 }];
+    rankingCompleto = topRanking;
+    identidadesPublicas.set(clienteId, { participaCampanha: true, nomePublico: "Você", telefoneMascarado: null, fotoPerfilUrl: null });
+    posicaoAnteriorMock = { geral: 4, participantes: 1 };
+
+    await GET(req("token-cli-a"));
+    expect(registrarFatoMock).not.toHaveBeenCalled();
+  });
+
+  test("desceu do #1 registra perdeu_lideranca", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 2, score: 10 });
+    topRanking = [
+      { clienteId: "outro", score: 20, posicao: 1 },
+      { clienteId, score: 10, posicao: 2 },
+    ];
+    rankingCompleto = topRanking;
+    identidadesPublicas.set(clienteId, { participaCampanha: true, nomePublico: "Você", telefoneMascarado: null, fotoPerfilUrl: null });
+    identidadesPublicas.set("outro", { participaCampanha: true, nomePublico: "Outro", telefoneMascarado: null, fotoPerfilUrl: null });
+    posicaoAnteriorMock = { geral: 1, participantes: 1 };
+
+    await GET(req("token-cli-a"));
+    expect(registrarFatoMock).toHaveBeenCalledWith("perdeu_lideranca", expect.any(String));
   });
 
   test("variacaoPosicao entre participantes fica null quando o cliente não participa hoje", async () => {
@@ -443,5 +576,87 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     expect(body.ranking).toBeNull();
     // indicacao é independente de temporada — continua respondendo normalmente.
     expect(body.indicacao).toEqual({ ativa: true, estrelasPrimeiraCompra: 6 });
+  });
+
+  describe("gamificacao (V2)", () => {
+    test("sem temporada, gamificacao vem toda fail-closed (null/0) e nunca quebra", async () => {
+      temporadaAtiva = null;
+      const res = await GET(req("token-cli-a"));
+      const body = await res.json();
+      expect(body.gamificacao).toEqual({
+        statusSocial: null,
+        bonusCompeticao: 0,
+        missaoSemanal: null,
+        missaoIndicacao: null,
+        nivelChef: null,
+      });
+    });
+
+    test("com temporada mas sem nenhuma config de gamificação ligada, tudo fica fail-closed", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      const clienteId = "hashed_11900000001";
+      posicaoPorCliente.set(clienteId, { posicao: 5, score: 100 });
+      topRanking = [{ clienteId, score: 100, posicao: 5 }];
+      const res = await GET(req("token-cli-a"));
+      const body = await res.json();
+      expect(body.gamificacao.missaoSemanal).toBeNull();
+      expect(body.gamificacao.missaoIndicacao).toBeNull();
+      expect(body.gamificacao.nivelChef).toBeNull();
+      expect(aplicarCarryoverMock).toHaveBeenCalledWith("default", temporadaAtiva, clienteId);
+    });
+
+    test("expõe o status social vigente quando a transição já foi sincronizada", async () => {
+      temporadaAtiva = { temporadaId: "temp_2", nome: null, fimEm: null, estado: "ativa" };
+      sincronizarStatusSocialMock.mockResolvedValue({ status: "campeao", temporadaOrigemId: "temp_1", atribuidoEm: "x" });
+      const res = await GET(req("token-cli-a"));
+      const body = await res.json();
+      expect(body.gamificacao.statusSocial).toBe("campeao");
+    });
+
+    test("expõe o bônus de competição já acumulado na temporada", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      obterBonusMock.mockResolvedValue(75);
+      const res = await GET(req("token-cli-a"));
+      const body = await res.json();
+      expect(body.gamificacao.bonusCompeticao).toBe(75);
+    });
+
+    test("missão semanal ativa por config expõe o status atual", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      configGamificacaoMock.missaoSemanalAtiva = true;
+      sincronizarMissaoSemanalMock.mockResolvedValue({ status: "desbloqueada", desbloqueadaEm: "x", consumidaEm: null, consumidaPedidoId: null });
+      const res = await GET(req("token-cli-a"));
+      const body = await res.json();
+      expect(body.gamificacao.missaoSemanal).toEqual({ status: "desbloqueada" });
+    });
+
+    test("missão de indicação ativa por config expõe o progresso 0/1", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      configGamificacaoMock.missaoIndicacaoAtiva = true;
+      obterEstadoMissaoIndicacaoMock.mockResolvedValue({ concluida: true, concluidaEm: "x", pedidoId: "p1" });
+      const res = await GET(req("token-cli-a"));
+      const body = await res.json();
+      expect(body.gamificacao.missaoIndicacao).toEqual({ concluida: true });
+    });
+
+    test("nível de chef ativo por config expõe o nível calculado a partir do extrato", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      configGamificacaoMock.nivelChefAtivo = true;
+      configGamificacaoMock.nivelChefLimiares = [{ nivel: 1, nome: "Aprendiz", xpMinimo: 0 }];
+      const res = await GET(req("token-cli-a"));
+      const body = await res.json();
+      expect(body.gamificacao.nivelChef).toEqual({ nivel: 1, nome: "Aprendiz", xpAtual: 0, xpProximoNivel: null });
+      expect(sincronizarNivelChefMock).toHaveBeenCalledWith("default", "hashed_11900000001", 1);
+    });
+
+    test("nível de chef ativo mas nível calculado é 0 (abaixo do primeiro limiar): fica null, nunca mostra Nível 0", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      configGamificacaoMock.nivelChefAtivo = true;
+      configGamificacaoMock.nivelChefLimiares = [{ nivel: 1, nome: "Aprendiz", xpMinimo: 1000 }];
+      const res = await GET(req("token-cli-a"));
+      const body = await res.json();
+      expect(body.gamificacao.nivelChef).toBeNull();
+      expect(sincronizarNivelChefMock).not.toHaveBeenCalled();
+    });
   });
 });

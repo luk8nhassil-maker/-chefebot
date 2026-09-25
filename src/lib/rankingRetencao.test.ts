@@ -2,7 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
   calcularAlvoRankingAtual,
   detectarConquistaRanking,
-  detectarCreditoRecente,
+  detectarCreditoDoPedido,
+  detectarFatosDePosicao,
   mensagemAlvoRanking,
   mensagemMovimento,
   montarDisputaRelativa,
@@ -221,31 +222,111 @@ describe("detectarConquistaRanking / textoConquistaRanking", () => {
   });
 });
 
-describe("detectarCreditoRecente (feedback pós-pedido)", () => {
-  const AGORA = new Date("2026-09-25T12:00:00.000Z").getTime();
+describe("detectarCreditoDoPedido (feedback pós-pedido, correção do #445)", () => {
+  test("reconhece o crédito confirmado do pedido exato", () => {
+    const extrato = [{ pedidoId: "ped_123", tipo: "confirmado", pontos: 5 }];
+    expect(detectarCreditoDoPedido(extrato, "ped_123")).toEqual({ pontos: 5 });
+  });
 
-  test("reconhece um movimento confirmado dentro da janela de recência", () => {
+  test("nunca atribui ao pedido atual o crédito de OUTRO pedido, mesmo recente", () => {
+    const extrato = [{ pedidoId: "ped_outro", tipo: "confirmado", pontos: 99 }];
+    expect(detectarCreditoDoPedido(extrato, "ped_123")).toBeNull();
+  });
+
+  test("nunca atribui crédito de indicação/apoio ao pedido atual (pedidoId diferente)", () => {
+    // Crédito de indicação carrega o pedidoId do AMIGO indicado, não do
+    // pedido do indicador — mesmo estando no extrato do indicador, não deve
+    // ser confundido com o crédito do pedido que trouxe o indicador aqui.
     const extrato = [
-      { tipo: "confirmado", pontos: 5, criadoEm: new Date(AGORA - 60_000).toISOString() },
+      { pedidoId: "ped_do_amigo", tipo: "confirmado", pontos: 6 },
+      { pedidoId: "ped_123", tipo: "confirmado", pontos: 5 },
     ];
-    expect(detectarCreditoRecente(extrato, AGORA)).toEqual({ pontos: 5 });
+    expect(detectarCreditoDoPedido(extrato, "ped_123")).toEqual({ pontos: 5 });
   });
 
   test("nunca promete crédito antes da confirmação — movimento 'previsto' não conta", () => {
-    const extrato = [
-      { tipo: "previsto", pontos: 5, criadoEm: new Date(AGORA - 60_000).toISOString() },
-    ];
-    expect(detectarCreditoRecente(extrato, AGORA)).toBeNull();
+    const extrato = [{ pedidoId: "ped_123", tipo: "previsto", pontos: 5 }];
+    expect(detectarCreditoDoPedido(extrato, "ped_123")).toBeNull();
   });
 
-  test("movimento confirmado antigo (fora da janela) não dispara o feedback", () => {
-    const extrato = [
-      { tipo: "confirmado", pontos: 5, criadoEm: new Date(AGORA - 60 * 60_000).toISOString() },
-    ];
-    expect(detectarCreditoRecente(extrato, AGORA)).toBeNull();
+  test("sem pedidoId conhecido, nunca inventa crédito", () => {
+    const extrato = [{ pedidoId: "ped_123", tipo: "confirmado", pontos: 5 }];
+    expect(detectarCreditoDoPedido(extrato, null)).toBeNull();
+    expect(detectarCreditoDoPedido(extrato, undefined)).toBeNull();
+    expect(detectarCreditoDoPedido(extrato, "")).toBeNull();
   });
 
   test("extrato vazio nunca inventa crédito", () => {
-    expect(detectarCreditoRecente([], AGORA)).toBeNull();
+    expect(detectarCreditoDoPedido([], "ped_123")).toBeNull();
+  });
+});
+
+describe("detectarFatosDePosicao (fatos server-side, correção do #445)", () => {
+  test("sem histórico anterior, nunca inventa fato", () => {
+    expect(detectarFatosDePosicao({ posicaoAnterior: null, posicaoAtual: 5, jaFoiLiderNestaTemporada: false })).toEqual([]);
+    expect(detectarFatosDePosicao({ posicaoAnterior: undefined, posicaoAtual: 5, jaFoiLiderNestaTemporada: false })).toEqual([]);
+  });
+
+  test("manteve a posição não gera fato nenhum", () => {
+    expect(detectarFatosDePosicao({ posicaoAnterior: 5, posicaoAtual: 5, jaFoiLiderNestaTemporada: false })).toEqual([]);
+  });
+
+  test("subida simples (sem cruzar Top 10/Top 3) só gera subiu_posicao", () => {
+    expect(detectarFatosDePosicao({ posicaoAnterior: 30, posicaoAtual: 25, jaFoiLiderNestaTemporada: false })).toEqual(["subiu_posicao"]);
+  });
+
+  test("subida que cruza para o Top 10 gera os dois fatos", () => {
+    expect(detectarFatosDePosicao({ posicaoAnterior: 12, posicaoAtual: 8, jaFoiLiderNestaTemporada: false })).toEqual([
+      "subiu_posicao",
+      "entrou_top10",
+    ]);
+  });
+
+  test("subida que cruza direto para o Top 3 gera subiu + top10 + top3", () => {
+    expect(detectarFatosDePosicao({ posicaoAnterior: 12, posicaoAtual: 2, jaFoiLiderNestaTemporada: false })).toEqual([
+      "subiu_posicao",
+      "entrou_top10",
+      "entrou_top3",
+    ]);
+  });
+
+  test("já estava no Top 10 e subiu para o Top 3 não repete entrou_top10", () => {
+    expect(detectarFatosDePosicao({ posicaoAnterior: 7, posicaoAtual: 2, jaFoiLiderNestaTemporada: false })).toEqual([
+      "subiu_posicao",
+      "entrou_top3",
+    ]);
+  });
+
+  test("chegou ao #1 pela primeira vez, vindo de fora do Top 10", () => {
+    expect(detectarFatosDePosicao({ posicaoAnterior: 15, posicaoAtual: 1, jaFoiLiderNestaTemporada: false })).toEqual([
+      "subiu_posicao",
+      "entrou_top10",
+      "entrou_top3",
+      "chegou_top1",
+    ]);
+  });
+
+  test("já estava no Top 3 (posição #2) e assumiu o #1 pela primeira vez", () => {
+    expect(detectarFatosDePosicao({ posicaoAnterior: 2, posicaoAtual: 1, jaFoiLiderNestaTemporada: false })).toEqual([
+      "subiu_posicao",
+      "chegou_top1",
+    ]);
+  });
+
+  test("recuperou a liderança (já tinha sido #1 antes nesta temporada), vindo de fora do Top 10", () => {
+    expect(detectarFatosDePosicao({ posicaoAnterior: 15, posicaoAtual: 1, jaFoiLiderNestaTemporada: true })).toEqual([
+      "subiu_posicao",
+      "entrou_top10",
+      "entrou_top3",
+      "recuperou_lideranca",
+    ]);
+  });
+
+  test("perdeu a liderança", () => {
+    expect(detectarFatosDePosicao({ posicaoAnterior: 1, posicaoAtual: 2, jaFoiLiderNestaTemporada: true })).toEqual(["perdeu_lideranca"]);
+  });
+
+  test("desceu sem ter sido líder não gera fato nenhum (nunca linguagem punitiva)", () => {
+    expect(detectarFatosDePosicao({ posicaoAnterior: 5, posicaoAtual: 8, jaFoiLiderNestaTemporada: false })).toEqual([]);
   });
 });

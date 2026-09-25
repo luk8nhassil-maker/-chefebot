@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const { store, redisMock } = vi.hoisted(() => {
-  const store = new Map<string, unknown>();
+  const store = new Map<string, number>();
   const redisMock = {
-    get: vi.fn(async (key: string) => store.get(key) ?? null),
-    set: vi.fn(async (key: string, value: unknown) => {
-      store.set(key, value);
-      return "OK";
+    incr: vi.fn(async (key: string) => {
+      const atual = store.get(key) ?? 0;
+      const novo = atual + 1;
+      store.set(key, novo);
+      return novo;
     }),
+    expire: vi.fn(async () => 1),
   };
   return { store, redisMock };
 });
@@ -17,7 +19,6 @@ vi.mock("./redis", () => ({ redis: redisMock }));
 import {
   eventoRankingRetencaoValido,
   registrarEventoRankingRetencao,
-  sanitizarDetalheEventoRankingRetencao,
   TIPOS_EVENTO_RANKING_RETENCAO,
 } from "./rankingRetencaoTelemetria";
 
@@ -27,75 +28,54 @@ beforeEach(() => {
 });
 
 describe("eventoRankingRetencaoValido", () => {
-  test("aceita só a allowlist fixa", () => {
+  test("aceita só interações client-side — fatos de negócio não fazem parte desta allowlist", () => {
     expect(eventoRankingRetencaoValido("ranking_aberto")).toBe(true);
+    expect(eventoRankingRetencaoValido("cta_subir_clicado")).toBe(true);
+    // Correção do #445: estes viraram FATOS server-side (rankingGamificacaoFatos.ts)
+    // e nunca mais devem ser aceitos vindos do navegador aqui.
+    expect(eventoRankingRetencaoValido("indicacao_convertida")).toBe(false);
+    expect(eventoRankingRetencaoValido("subiu_posicao")).toBe(false);
+    expect(eventoRankingRetencaoValido("entrou_top10")).toBe(false);
+    expect(eventoRankingRetencaoValido("entrou_top3")).toBe(false);
+    expect(eventoRankingRetencaoValido("participacao_revogada")).toBe(false);
     expect(eventoRankingRetencaoValido("evento_inventado")).toBe(false);
-    expect(eventoRankingRetencaoValido(123)).toBe(false);
   });
 });
 
-describe("sanitizarDetalheEventoRankingRetencao", () => {
-  test("descarta campos fora da allowlist (nunca PII)", () => {
-    expect(
-      sanitizarDetalheEventoRankingRetencao({
-        posicaoFaixa: "top3",
-        casas: 2,
-        clienteId: "cli_123",
-        telefone: "11999999999",
-      }),
-    ).toEqual({ posicaoFaixa: "top3", casas: 2 });
+describe("registrarEventoRankingRetencao (contador atômico, correção do #445)", () => {
+  test("incrementa um contador por tenant+tipo+dia, nunca uma lista", async () => {
+    const dia = new Date("2026-09-25T12:00:00.000Z");
+    await registrarEventoRankingRetencao("default", "ranking_aberto", dia);
+    expect(redisMock.incr).toHaveBeenCalledWith("ranking:retencao:contador:default:ranking_aberto:2026-09-25");
+    expect(store.get("ranking:retencao:contador:default:ranking_aberto:2026-09-25")).toBe(1);
   });
 
-  test("rejeita faixa desconhecida", () => {
-    expect(sanitizarDetalheEventoRankingRetencao({ posicaoFaixa: "top999" })).toEqual({});
+  test("chamadas concorrentes no mesmo dia se acumulam via INCR atômico (nunca GET-array-append-SET)", async () => {
+    const dia = new Date("2026-09-25T12:00:00.000Z");
+    await Promise.all([
+      registrarEventoRankingRetencao("default", "ranking_aberto", dia),
+      registrarEventoRankingRetencao("default", "ranking_aberto", dia),
+      registrarEventoRankingRetencao("default", "ranking_aberto", dia),
+    ]);
+    expect(store.get("ranking:retencao:contador:default:ranking_aberto:2026-09-25")).toBe(3);
   });
 
-  test("casas é clampado e arredondado", () => {
-    expect(sanitizarDetalheEventoRankingRetencao({ casas: -5 })).toEqual({ casas: 0 });
-    expect(sanitizarDetalheEventoRankingRetencao({ casas: 10.6 })).toEqual({ casas: 11 });
-    expect(sanitizarDetalheEventoRankingRetencao({ casas: 99999 })).toEqual({ casas: 999 });
+  test("dias diferentes usam chaves diferentes", async () => {
+    await registrarEventoRankingRetencao("default", "ranking_aberto", new Date("2026-09-25T00:00:00.000Z"));
+    await registrarEventoRankingRetencao("default", "ranking_aberto", new Date("2026-09-26T00:00:00.000Z"));
+    expect(store.get("ranking:retencao:contador:default:ranking_aberto:2026-09-25")).toBe(1);
+    expect(store.get("ranking:retencao:contador:default:ranking_aberto:2026-09-26")).toBe(1);
   });
 
-  test("entrada não-objeto retorna vazio", () => {
-    expect(sanitizarDetalheEventoRankingRetencao(null)).toEqual({});
-    expect(sanitizarDetalheEventoRankingRetencao("string")).toEqual({});
-  });
-});
-
-describe("registrarEventoRankingRetencao", () => {
-  test("grava evento sanitizado na lista do tenant", async () => {
-    await registrarEventoRankingRetencao("default", "ranking_aberto");
-    const eventos = store.get("ranking:retencao:eventos:default") as Array<{ tipo: string }>;
-    expect(eventos).toHaveLength(1);
-    expect(eventos[0].tipo).toBe("ranking_aberto");
-  });
-
-  test("nunca persiste campos fora da allowlist de detalhe", async () => {
-    await registrarEventoRankingRetencao("default", "entrou_top3", {
-      posicaoFaixa: "top3",
-      clienteId: "cli_123", // simula payload malicioso vindo do cliente
-    });
-    const eventos = store.get("ranking:retencao:eventos:default") as Array<Record<string, unknown>>;
-    expect(eventos[0]).not.toHaveProperty("clienteId");
-    expect(JSON.stringify(eventos)).not.toContain("cli_123");
-  });
-
-  test("tipo inválido é ignorado silenciosamente (nunca lança)", async () => {
+  test("tipo fora da allowlist é ignorado silenciosamente (nunca lança)", async () => {
     // @ts-expect-error — testando o guard em runtime
     await expect(registrarEventoRankingRetencao("default", "evento_invalido")).resolves.toBeUndefined();
-    expect(store.has("ranking:retencao:eventos:default")).toBe(false);
+    expect(redisMock.incr).not.toHaveBeenCalled();
   });
 
   test("falha do Redis nunca propaga (best-effort)", async () => {
-    redisMock.get.mockRejectedValueOnce(new Error("timeout"));
+    redisMock.incr.mockRejectedValueOnce(new Error("timeout"));
     await expect(registrarEventoRankingRetencao("default", "ranking_aberto")).resolves.toBeUndefined();
-  });
-
-  test("lista é capada e nunca cresce sem limite", async () => {
-    store.set("ranking:retencao:eventos:default", Array.from({ length: 5000 }, () => ({ tipo: "ranking_aberto", criadoEm: "x" })));
-    await registrarEventoRankingRetencao("default", "ranking_retorno");
-    const eventos = store.get("ranking:retencao:eventos:default") as unknown[];
-    expect(eventos.length).toBe(5000);
   });
 
   test("todos os tipos declarados na allowlist são aceitos", async () => {

@@ -1530,7 +1530,7 @@ describe("/cardapio — prospeccao de ranking sem competir com pedido/pagamento"
     const inicio = fonte.indexOf("const avaliarConviteRankingPosPedido");
     const fim = fonte.indexOf("const adiarConviteRankingNestaSessao", inicio);
     const bloco = fonte.slice(inicio, fim);
-    expect(fonte).toContain('window.location.href = "/cliente?fromOrder=1"');
+    expect(fonte).toContain('window.location.href = `/cliente?fromOrder=1&pedido=${encodeURIComponent(pedidoConfirmado?.id ?? "")}`');
     expect(bloco).toContain('fetch("/api/cliente/privacidade/ranking"');
     expect(bloco).not.toContain("PATCH");
     expect(bloco).not.toContain("DELETE");
