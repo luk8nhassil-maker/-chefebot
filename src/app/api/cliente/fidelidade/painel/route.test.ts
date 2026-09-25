@@ -28,11 +28,14 @@ vi.mock("@/lib/clientes", async () => {
   };
 });
 
+let configFidelidadeMock: { ativo: boolean; regraVersao: string } = { ativo: true, regraVersao: "estrelas-faixas-v1" };
+
 vi.mock("@/lib/fidelidade", async () => {
   const actual = await vi.importActual<typeof import("@/lib/fidelidade")>("@/lib/fidelidade");
   return {
     ...actual,
     derivarClienteIdPorTelefone: vi.fn((telefone: string) => `hashed_${telefone}`),
+    obterConfigFidelidadePontos: vi.fn(async () => configFidelidadeMock),
   };
 });
 
@@ -82,6 +85,7 @@ beforeEach(() => {
   rankingCompleto = [];
   identidadesPublicas = new Map();
   posicaoAnteriorMock = null;
+  configFidelidadeMock = { ativo: true, regraVersao: "estrelas-faixas-v1" };
 });
 
 describe("GET /api/cliente/fidelidade/painel", () => {
@@ -300,5 +304,144 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     const res = await GET(req("token-cli-a"));
     const body = await res.json();
     expect(body.ranking).toBeNull();
+  });
+
+  test("alvo e disputa calculados entre participantes com o vizinho real acima/abaixo", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 2, score: 20 });
+    topRanking = [
+      { clienteId: "ana", score: 30, posicao: 1 },
+      { clienteId, score: 20, posicao: 2 },
+      { clienteId: "carlos", score: 10, posicao: 3 },
+    ];
+    rankingCompleto = topRanking;
+    identidadesPublicas = new Map([
+      ["ana", { participaCampanha: true, nomePublico: "Ana", telefoneMascarado: null, fotoPerfilUrl: null }],
+      [clienteId, { participaCampanha: true, nomePublico: "Você", telefoneMascarado: null, fotoPerfilUrl: null }],
+      ["carlos", { participaCampanha: true, nomePublico: "Carlos", telefoneMascarado: null, fotoPerfilUrl: null }],
+    ]);
+
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.ranking.participantes.alvo).toEqual({
+      estado: "alcancar",
+      alvoPosicao: 1,
+      necessario: 11,
+      scoreAlvo: 30,
+    });
+    expect(body.ranking.participantes.disputa).toEqual({
+      acima: { posicao: 1, score: 30, eVoce: false, nomePublico: "Ana", telefoneMascarado: null },
+      voce: { posicao: 2, score: 20, eVoce: true, nomePublico: "Você", telefoneMascarado: null },
+      abaixo: { posicao: 3, score: 10, eVoce: false, nomePublico: "Carlos", telefoneMascarado: null },
+      sozinho: false,
+    });
+  });
+
+  test("único participante: alvo sozinho e disputa sem vizinhos", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 1, score: 5 });
+    topRanking = [{ clienteId, score: 5, posicao: 1 }];
+    rankingCompleto = topRanking;
+    identidadesPublicas.set(clienteId, { participaCampanha: true, nomePublico: "Você", telefoneMascarado: null, fotoPerfilUrl: null });
+
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.ranking.participantes.alvo).toEqual({ estado: "sozinho" });
+    expect(body.ranking.participantes.disputa).toEqual({
+      acima: null,
+      voce: { posicao: 1, score: 5, eVoce: true, nomePublico: "Você", telefoneMascarado: null },
+      abaixo: null,
+      sozinho: true,
+    });
+  });
+
+  test("alvo e disputa ficam null quando o cliente não participa (sem posição entre participantes)", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 1, score: 5 });
+    topRanking = [{ clienteId, score: 5, posicao: 1 }];
+    rankingCompleto = topRanking;
+    identidadesPublicas.set(clienteId, { participaCampanha: false, nomePublico: null, telefoneMascarado: null, fotoPerfilUrl: null });
+
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.ranking.participantes.alvo).toBeNull();
+    expect(body.ranking.participantes.disputa).toBeNull();
+  });
+
+  test("premio da temporada é fail-closed: null sem aprovação explícita do admin", async () => {
+    temporadaAtiva = {
+      temporadaId: "temp_1",
+      nome: "Temporada",
+      fimEm: null,
+      estado: "ativa",
+      premioDescricao: "1 pizza família",
+      // premioAprovado ausente — não deve declarar prêmio.
+      premioQuantidadePremiados: 3,
+    };
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.temporada.premio).toBeNull();
+  });
+
+  test("premio aparece só quando aprovado e com quantidade > 0", async () => {
+    temporadaAtiva = {
+      temporadaId: "temp_1",
+      nome: "Temporada",
+      fimEm: null,
+      estado: "ativa",
+      premioDescricao: "1 pizza família",
+      premioAprovado: true,
+      premioQuantidadePremiados: 3,
+    };
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.temporada.premio).toEqual({ descricao: "1 pizza família", quantidadePremiados: 3 });
+  });
+
+  test("indicacao expõe a regra oficial (nunca hardcoded no frontend) quando Estrelas V1 está ativa", async () => {
+    configFidelidadeMock = { ativo: true, regraVersao: "estrelas-faixas-v1" };
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.indicacao).toEqual({ ativa: true, estrelasPrimeiraCompra: 6 });
+  });
+
+  test("indicacao fica inativa quando as Estrelas V1 não estão ativas — nunca inventa o valor", async () => {
+    configFidelidadeMock = { ativo: false, regraVersao: "estrelas-faixas-v1" };
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.indicacao).toEqual({ ativa: false, estrelasPrimeiraCompra: null });
+  });
+
+  test("consentimento revogado: cliente some do ranking de participantes (sem alvo/disputa fictícios)", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    // O cliente TEM posição no ranking geral (continua acumulando estrelas),
+    // mas revogou a autorização — não pode aparecer entre participantes.
+    posicaoPorCliente.set(clienteId, { posicao: 2, score: 100 });
+    topRanking = [
+      { clienteId: "ana", score: 200, posicao: 1 },
+      { clienteId, score: 100, posicao: 2 },
+    ];
+    rankingCompleto = topRanking;
+    identidadesPublicas = new Map([
+      ["ana", { participaCampanha: true, nomePublico: "Ana", telefoneMascarado: null, fotoPerfilUrl: null }],
+      [clienteId, { participaCampanha: false, nomePublico: null, telefoneMascarado: null, fotoPerfilUrl: null }],
+    ]);
+
+    const body = await (await GET(req("token-cli-a"))).json();
+    // Posição geral continua real — revogar não apaga estrelas nem histórico.
+    expect(body.ranking.posicao).toBe(2);
+    expect(body.ranking.participaCampanha).toBe(false);
+    // Entre participantes, o cliente simplesmente não existe mais.
+    expect(body.ranking.participantes.posicao).toBeNull();
+    expect(body.ranking.participantes.alvo).toBeNull();
+    expect(body.ranking.participantes.disputa).toBeNull();
+  });
+
+  test("temporada encerrada/expirada (obterTemporadaAtiva retorna null): sem ranking, sem alvo/disputa, sem quebrar", async () => {
+    temporadaAtiva = null; // obterTemporadaAtiva já resolve para null quando a temporada ativa encerrou/expirou
+    const res = await GET(req("token-cli-a"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.temporada).toBeNull();
+    expect(body.ranking).toBeNull();
+    // indicacao é independente de temporada — continua respondendo normalmente.
+    expect(body.indicacao).toEqual({ ativa: true, estrelasPrimeiraCompra: 6 });
   });
 });

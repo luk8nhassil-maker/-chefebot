@@ -7,7 +7,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
-import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
+import { derivarClienteIdPorTelefone, estrelasV1Ativa, obterConfigFidelidadePontos } from "@/lib/fidelidade";
+import { ESTRELAS_INDICACAO_PRIMEIRA_COMPRA } from "@/lib/estrelasIndicacao";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
 import { posicaoClienteRanking, obterTopRanking, obterRankingCompleto, reindexarPorFiltro } from "@/lib/rankingClientes";
 import { projetarIdentidadesPublicasRanking } from "@/lib/rankingPrivacidade";
@@ -18,6 +19,12 @@ import {
   type SnapshotPosicoesDoDia,
   type VariacaoPosicao,
 } from "@/lib/rankingHistorico";
+import {
+  calcularAlvoRankingAtual,
+  montarDisputaRelativa,
+  type AlvoRankingAtual,
+  type DisputaRelativa,
+} from "@/lib/rankingRetencao";
 
 const TENANT_PADRAO = "default";
 
@@ -71,6 +78,12 @@ export async function GET(req: NextRequest) {
         nomePublico?: string;
         telefoneMascarado?: string;
       }[];
+      // Alvo atual ("faltam N estrelas para o #Y") e disputa relativa
+      // (vizinho acima/abaixo), sempre calculados entre PARTICIPANTES — é a
+      // única posição que importa para quem disputa o prêmio da temporada.
+      // `null` só quando o próprio cliente ainda não tem posição aqui.
+      alvo: AlvoRankingAtual | null;
+      disputa: DisputaRelativa | null;
     };
   } | null = null;
 
@@ -155,6 +168,25 @@ export async function GET(req: NextRequest) {
         ? calcularVariacaoPosicao(posicaoAnterior?.participantes, proprioEntreParticipantes.posicao)
         : null;
 
+      // reindexados é 1..N sequencial (reindexarPorFiltro), então o índice do
+      // array já corresponde a posicao-1 — nenhuma busca extra é necessária
+      // para achar quem está imediatamente acima/abaixo do próprio cliente.
+      const meuIndice = proprioEntreParticipantes ? proprioEntreParticipantes.posicao - 1 : -1;
+      const entradaAcima = meuIndice > 0 ? reindexados[meuIndice - 1] : null;
+      const entradaAbaixo = meuIndice >= 0 && meuIndice < reindexados.length - 1 ? reindexados[meuIndice + 1] : null;
+      const alvo = proprioEntreParticipantes
+        ? calcularAlvoRankingAtual({
+            posicaoAtual: proprioEntreParticipantes.posicao,
+            scoreAtual: proprioEntreParticipantes.score,
+            totalParticipantes: reindexados.length,
+            entradaAcima: entradaAcima ? { posicao: entradaAcima.posicao, score: entradaAcima.score } : null,
+            entradaAbaixo: entradaAbaixo ? { posicao: entradaAbaixo.posicao, score: entradaAbaixo.score } : null,
+          })
+        : null;
+      const disputa = proprioEntreParticipantes
+        ? montarDisputaRelativa({ ordenados: reindexados, clienteId, identidades })
+        : null;
+
       ranking = {
         posicao: pos.posicao,
         score: pos.score,
@@ -167,10 +199,20 @@ export async function GET(req: NextRequest) {
           total: reindexados.length,
           variacaoPosicao: variacaoPosicaoParticipantes,
           lista: listaParticipantes,
+          alvo,
+          disputa,
         },
       };
     }
   }
+
+  // Regra oficial de estrelas: nunca hardcoded no frontend. A UI só pode
+  // sugerir "indicar amigo" como caminho para subir quando as Estrelas V1
+  // estão realmente ativas — nunca inventa o valor do crédito.
+  const configFidelidade = await obterConfigFidelidadePontos();
+  const indicacao = estrelasV1Ativa(configFidelidade)
+    ? { ativa: true as const, estrelasPrimeiraCompra: ESTRELAS_INDICACAO_PRIMEIRA_COMPRA }
+    : { ativa: false as const, estrelasPrimeiraCompra: null };
 
   return NextResponse.json({
     temporada: temporada
@@ -179,8 +221,18 @@ export async function GET(req: NextRequest) {
           diasRestantes: temporada.fimEm ? diasRestantes(temporada.fimEm) : null,
           fimEm: temporada.fimEm ?? null,
           estado: temporada.estado,
+          // Fail-closed: só chega premio != null quando o admin aprovou
+          // explicitamente (mesma regra de temporadaResultado.ts) — nunca
+          // promete prêmio a partir de um valor parcialmente configurado.
+          premio: temporada.premioAprovado === true && (temporada.premioQuantidadePremiados ?? 0) > 0
+            ? {
+                descricao: temporada.premioDescricao ?? null,
+                quantidadePremiados: temporada.premioQuantidadePremiados as number,
+              }
+            : null,
         }
       : null,
     ranking,
+    indicacao,
   });
 }

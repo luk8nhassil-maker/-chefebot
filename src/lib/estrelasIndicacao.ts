@@ -8,6 +8,14 @@ import { REGRA_ESTRELAS_V1 } from "./estrelas";
 export type ResultadoCreditoEstrelas = "creditado" | "ja_creditado" | "nao_elegivel";
 
 /**
+ * Regra oficial de estrelas por indicação (primeira compra válida do
+ * indicado). Única fonte da verdade — a UI nunca deve hardcodar este valor;
+ * quando precisar informá-lo, importa esta constante (ex.: agregador do
+ * painel do cliente).
+ */
+export const ESTRELAS_INDICACAO_PRIMEIRA_COMPRA = 6;
+
+/**
  * Crédito do evento de aquisição. A validação de primeira compra deve ser
  * feita pelo chamador que conhece o pedido comercial; este módulo só aceita o
  * fato já qualificado e o torna idempotente no ledger canônico.
@@ -26,7 +34,7 @@ export async function creditarEstrelasIndicacaoValida(params: {
     eventoId: `indicacao:${params.indicadoId}:primeira-compra:${params.pedidoId}`,
     pedidoId: params.pedidoId,
     tipo: "confirmado",
-    pontos: 6,
+    pontos: ESTRELAS_INDICACAO_PRIMEIRA_COMPRA,
     motivo: "Estrelas por indicação válida",
     regraVersao: REGRA_ESTRELAS_V1,
     unidade: "estrelas",
