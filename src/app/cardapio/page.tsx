@@ -3296,14 +3296,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                             )}
                           </div>
                         </div>
-                        <a href="/cliente" className="info-card-v2">
-                          <span className="info-icon-v2"><Gift size={20} aria-hidden="true" /></span>
-                          <span className="info-text-v2">
-                            <strong>Quer que essa compra conte para sua fidelidade?</strong>
-                            <span>Entre com seu WhatsApp e acompanhe seu progresso.</span>
-                          </span>
-                          <ChevronRight size={18} className="info-chevron" aria-hidden="true" />
-                        </a>
                       </>
                     )}
                     {isPagamentoPix && (
