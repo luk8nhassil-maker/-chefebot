@@ -129,6 +129,36 @@ async function escreverRegistroSeDono(
   return resultado === 1;
 }
 
+// Reserva + migalha são uma única transição durável. Sem isso, um crash
+// entre a escrita do estado `processando` e a escrita da migalha deixaria o
+// pedido sem índice para cancelamento/reconciliação.
+const ESCREVER_RESERVA_SE_DONO_SCRIPT = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  redis.call("SET", KEYS[2], ARGV[2])
+  redis.call("SET", KEYS[3], ARGV[3])
+  return 1
+else
+  return 0
+end
+`;
+
+async function escreverReservaSeDono(
+  tenantId: string,
+  temporadaId: string,
+  clienteId: string,
+  token: string,
+  registro: RegistroMissaoSemanal,
+  pedidoId: string,
+  breadcrumb: BreadcrumbPedido,
+): Promise<boolean> {
+  const resultado = await redis.eval(
+    ESCREVER_RESERVA_SE_DONO_SCRIPT,
+    [chaveLock(tenantId, temporadaId, clienteId), chaveRegistro(tenantId, temporadaId, clienteId), chaveBreadcrumbPedido(pedidoId)],
+    [token, JSON.stringify(registro), JSON.stringify(breadcrumb)],
+  );
+  return resultado === 1;
+}
+
 export async function obterEstadoMissaoSemanal(tenantId: string, temporadaId: string, clienteId: string): Promise<EstadoMissaoSemanal> {
   return (await obterRegistro(tenantId, temporadaId, clienteId)).estado;
 }
@@ -277,6 +307,10 @@ async function reconciliarMissaoSemanalOrfa(params: {
         tipo: "missao_semanal",
         pontos: bonusPlanejado,
         motivo: `Caçada ao Pódio — 2x no pedido ${pedidoOrfaoId}`,
+        podeCreditar: async () => {
+          const atual = await obterRegistro(tenantId, temporadaId, clienteId);
+          return atual.estado.status === "processando" && atual.estado.processandoPedidoId === pedidoOrfaoId;
+        },
       });
       // "invalido" nunca deveria acontecer aqui (os parâmetros vêm do
       // próprio sistema, nunca de entrada externa) — mas se acontecer,
@@ -358,31 +392,38 @@ export async function consumirMissaoSemanalNoPedido(params: {
       return { consumida: false, bonusCreditado: 0 };
     }
     const eraProcessandoDoMesmoPedido = registro.estado.status === "processando" && registro.estado.processandoPedidoId === pedidoId;
-    // BLOCKER: escrita CAS da reserva — o TTL do lock expirar aqui nunca
-    // deve permitir sobrescrever um estado mais novo (ex.: um cancelamento
-    // ou reconciliação concorrente que já assumiu o lock).
-    if (!(await escreverRegistroSeDono(tenantId, temporadaId, clienteId, token, {
-      ...atualizado,
-      estado: reservado,
-      processandoDesdeEm: eraProcessandoDoMesmoPedido ? (registro.processandoDesdeEm ?? agora.toISOString()) : agora.toISOString(),
-    }))) {
+    // O cálculo é puro (sem I/O) — feito antes da transição para que a
+    // migalha já grave o `bonusPlanejado` com a base REAL e o multiplicador
+    // VIGENTE. Em retry, preserva o valor original já planejado; nunca usa
+    // uma configuração nova para alterar o crédito de um mesmo pedido.
+    const breadcrumbAtual = eraProcessandoDoMesmoPedido
+      ? await redis.get<BreadcrumbPedido>(chaveBreadcrumbPedido(pedidoId))
+      : null;
+    const bonusCalculado = calcularBonusMissaoSemanal(estrelasBaseDoPedido, config.missaoSemanalMultiplicador);
+    const bonus = Number.isFinite(breadcrumbAtual?.bonusPlanejado)
+      ? (breadcrumbAtual?.bonusPlanejado as number)
+      : bonusCalculado;
+    const breadcrumbReserva: BreadcrumbPedido = breadcrumbAtual
+      ? { ...breadcrumbAtual, bonusPlanejado: bonus }
+      : { tenantId, temporadaId, clienteId, bonus: 0, bonusPlanejado: bonus };
+    // BLOCKER: estado `processando` e migalha são gravados na MESMA operação
+    // CAS. Um crash não pode deixar a reserva sem índice para cancelamento ou
+    // reconciliação, e o TTL do lock nunca permite sobrescrever estado novo.
+    if (!(await escreverReservaSeDono(
+      tenantId,
+      temporadaId,
+      clienteId,
+      token,
+      {
+        ...atualizado,
+        estado: reservado,
+        processandoDesdeEm: eraProcessandoDoMesmoPedido ? (registro.processandoDesdeEm ?? agora.toISOString()) : agora.toISOString(),
+      },
+      pedidoId,
+      breadcrumbReserva,
+    ))) {
       throw new Error("ranking_missao_semanal_lock_perdido_durante_reserva");
     }
-    // O cálculo é puro (sem I/O) — feito ANTES da migalha para que ela já
-    // grave o `bonusPlanejado` com a base de estrelas REAL e o
-    // multiplicador VIGENTE agora, nunca um recalculado depois com uma
-    // config que pode ter mudado.
-    const bonus = calcularBonusMissaoSemanal(estrelasBaseDoPedido, config.missaoSemanalMultiplicador);
-
-    // BLOCKER 6/BLOCKER: migalha ANTES de qualquer efeito financeiro — é o
-    // índice durável que localiza o dono (tenant/temporada/cliente) desta
-    // reserva mesmo que o processo morra exatamente entre reservar e
-    // creditar (antes, só era gravada DEPOIS do crédito, e tanto um
-    // cancelamento quanto uma reconciliação nesse buraco não encontravam
-    // nada para resolver). `bonusPlanejado` é o que permite a reconciliação
-    // de uma reserva órfã "entregue, mas o processo morreu antes do
-    // crédito" creditar exatamente o valor certo, sem recalcular depois.
-    await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus: 0, bonusPlanejado: bonus } satisfies BreadcrumbPedido);
 
     let bonusCreditado = 0;
     if (bonus > 0) {
@@ -394,6 +435,10 @@ export async function consumirMissaoSemanalNoPedido(params: {
         tipo: "missao_semanal",
         pontos: bonus,
         motivo: `Caçada ao Pódio — 2x no pedido ${pedidoId}`,
+        podeCreditar: async () => {
+          const atual = await obterRegistro(tenantId, temporadaId, clienteId);
+          return atual.estado.status === "processando" && atual.estado.processandoPedidoId === pedidoId;
+        },
       });
       // "creditado" (primeira vez) ou "ja_creditado" (retry pós-falha, o
       // bônus já estava garantido) — os dois significam "o ledger tem esse
