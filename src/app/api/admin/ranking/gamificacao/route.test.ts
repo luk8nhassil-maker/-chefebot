@@ -74,31 +74,39 @@ describe("POST /api/admin/ranking/gamificacao", () => {
     expect((await POST(req(null, {}))).status).toBe(401);
   });
 
-  test("ativa a missão semanal com multiplicador e cooldown customizados", async () => {
+  test("ativa a missão semanal com o multiplicador aprovado (2x) e cooldown customizado", async () => {
     const res = await POST(req(adminToken, {
       missaoSemanalAtiva: true,
-      missaoSemanalMultiplicador: 3,
+      missaoSemanalMultiplicador: 2,
       missaoSemanalCooldownDias: 5,
     }));
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.config.missaoSemanalAtiva).toBe(true);
-    expect(body.config.missaoSemanalMultiplicador).toBe(3);
+    expect(body.config.missaoSemanalMultiplicador).toBe(2);
     expect(body.config.missaoSemanalCooldownDias).toBe(5);
   });
 
   test("campos ausentes preservam o valor já salvo", async () => {
-    await POST(req(adminToken, { missaoSemanalAtiva: true, missaoSemanalMultiplicador: 4 }));
+    await POST(req(adminToken, { missaoSemanalAtiva: true, missaoSemanalCooldownDias: 4 }));
     const res = await POST(req(adminToken, { impulsoPodioAtivo: true }));
     const body = await res.json();
     expect(body.config.missaoSemanalAtiva).toBe(true);
-    expect(body.config.missaoSemanalMultiplicador).toBe(4);
+    expect(body.config.missaoSemanalCooldownDias).toBe(4);
     expect(body.config.impulsoPodioAtivo).toBe(true);
   });
 
-  test("carryoverTabela válida (posições únicas, bônus decrescente) é aceita e ordenada", async () => {
+  test("BLOCKER: multiplicador diferente de 2x é sempre rejeitado — a mecânica desta versão é EXATAMENTE 2x", async () => {
+    for (const valor of [1, 3, 4, 5, 1.5, 0]) {
+      const res = await POST(req(adminToken, { missaoSemanalMultiplicador: valor }));
+      expect(res.status).toBe(400);
+    }
+    const ok = await POST(req(adminToken, { missaoSemanalMultiplicador: 2 }));
+    expect(ok.status).toBe(200);
+  });
+
+  test("carryoverTabela válida (posições únicas, bônus decrescente) é aceita e ordenada — sem carryoverAtivo, não precisa cobrir #1..#10", async () => {
     const res = await POST(req(adminToken, {
-      carryoverAtivo: true,
       carryoverTabela: [
         { posicao: 2, bonus: 60 },
         { posicao: 1, bonus: 100 },
@@ -107,6 +115,47 @@ describe("POST /api/admin/ranking/gamificacao", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.config.carryoverTabela).toEqual([{ posicao: 1, bonus: 100 }, { posicao: 2, bonus: 60 }]);
+  });
+
+  function tabelaCompleta10Posicoes(): { posicao: number; bonus: number }[] {
+    return Array.from({ length: 10 }, (_, i) => ({ posicao: i + 1, bonus: 100 - i * 5 }));
+  }
+
+  test("BLOCKER: carryoverAtivo=true com tabela COMPLETA (#1..#10, estritamente decrescente) é aceita", async () => {
+    const res = await POST(req(adminToken, { carryoverAtivo: true, carryoverTabela: tabelaCompleta10Posicoes() }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.config.carryoverTabela).toHaveLength(10);
+  });
+
+  test("BLOCKER: carryoverAtivo=true com tabela INCOMPLETA (faltando posições) é rejeitada por inteiro, nada é salvo", async () => {
+    const parcial = tabelaCompleta10Posicoes().slice(0, 3); // só #1, #2, #3
+    const res = await POST(req(adminToken, { carryoverAtivo: true, carryoverTabela: parcial }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detalhes.join(" ")).toContain("todas as posições 1 a 10 são obrigatórias");
+    const getRes = await GET(req(adminToken));
+    const getBody = await getRes.json();
+    expect(getBody.carryoverAtivo).toBe(false);
+    expect(getBody.carryoverTabela).toEqual([]);
+  });
+
+  test("BLOCKER: empate entre posições adjacentes é sempre rejeitado, mesmo com carryoverAtivo=false — a regra é ESTRITAMENTE decrescente", async () => {
+    const comEmpate = tabelaCompleta10Posicoes();
+    comEmpate[1] = { posicao: 2, bonus: comEmpate[0].bonus }; // #2 empata com #1
+    const res = await POST(req(adminToken, { carryoverTabela: comEmpate }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detalhes.join(" ")).toContain("ESTRITAMENTE decrescente");
+  });
+
+  test("carryoverAtivo=true configurado ANTES, depois enviar uma tabela incompleta numa requisição separada também é rejeitado (regra cruzada usa o estado FINAL)", async () => {
+    await POST(req(adminToken, { carryoverAtivo: true, carryoverTabela: tabelaCompleta10Posicoes() }));
+    const res = await POST(req(adminToken, { carryoverTabela: tabelaCompleta10Posicoes().slice(0, 5) }));
+    expect(res.status).toBe(400);
+    const getRes = await GET(req(adminToken));
+    // Nada foi salvo pela requisição inválida — a tabela completa anterior permanece intacta.
+    expect((await getRes.json()).carryoverTabela).toHaveLength(10);
   });
 
   test("carryoverTabela com posição fora de 1..10 é REJEITADA por inteiro (400), nada é salvo", async () => {
@@ -196,14 +245,14 @@ describe("POST /api/admin/ranking/gamificacao", () => {
   });
 
   test("valor numérico inválido é REJEITADO (400) e nunca sobrescreve o anterior", async () => {
-    await POST(req(adminToken, { missaoSemanalMultiplicador: 3 }));
+    await POST(req(adminToken, { missaoSemanalMultiplicador: 2 }));
     const res = await POST(req(adminToken, { missaoSemanalMultiplicador: "abc" }));
     expect(res.status).toBe(400);
     const getRes = await GET(req(adminToken));
-    expect((await getRes.json()).missaoSemanalMultiplicador).toBe(3);
+    expect((await getRes.json()).missaoSemanalMultiplicador).toBe(2);
   });
 
-  test("multiplicador fora do limite técnico (ex.: 20x por erro de digitação) é rejeitado", async () => {
+  test("multiplicador fora da regra de produto (ex.: 20x por erro de digitação) é rejeitado — só 2x é aceito", async () => {
     const res = await POST(req(adminToken, { missaoSemanalMultiplicador: 20 }));
     expect(res.status).toBe(400);
   });

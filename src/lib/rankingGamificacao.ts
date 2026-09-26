@@ -208,12 +208,29 @@ export function calcularBonusMissaoSemanal(estrelasBaseDoPedido: number, multipl
  * ficaria bloqueado para sempre por nunca ter um "pedido elegível
  * registrado" depois da ativação (mata o próprio objetivo de reativação).
  */
+/**
+ * "Pedido próprio" = crédito de fidelidade que representa uma COMPRA do
+ * próprio cliente — nunca um crédito de indicação (`indicacao:*`) nem de
+ * apoio recorrente (`apoio:*`), que também são movimentos `tipo:
+ * "confirmado"` no mesmo extrato mas não provam que o cliente comprou algo
+ * ele mesmo. Correção de blocker: usar só `eventoId` estruturado (nunca o
+ * texto de `motivo`, que pode mudar de redação sem aviso).
+ */
+function eventoIdRepresentaPedidoProprio(eventoId: string | null | undefined): boolean {
+  // Sem eventoId, nunca há prova de que é indicação/apoio — não exclui
+  // (fail-closed só contra as duas origens conhecidas que contaminam a
+  // data, nunca contra um movimento sem essa metadata).
+  if (!eventoId) return true;
+  return !eventoId.startsWith("indicacao:") && !eventoId.startsWith("apoio:");
+}
+
 export function calcularUltimoPedidoConfirmadoDosMovimentos(
-  movimentos: { tipo: string; createdAt: string }[],
+  movimentos: { tipo: string; createdAt: string; eventoId?: string }[],
 ): string | null {
   let maisRecente: string | null = null;
   for (const m of movimentos) {
     if (m.tipo !== "confirmado") continue;
+    if (!eventoIdRepresentaPedidoProprio(m.eventoId)) continue;
     const ms = new Date(m.createdAt).getTime();
     if (!Number.isFinite(ms)) continue;
     if (!maisRecente || ms > new Date(maisRecente).getTime()) maisRecente = m.createdAt;

@@ -45,7 +45,7 @@ describe("obterConfigGamificacao", () => {
     const config: typeof CONFIG_GAMIFICACAO_PADRAO = {
       ...CONFIG_GAMIFICACAO_PADRAO,
       missaoSemanalAtiva: true,
-      missaoSemanalMultiplicador: 3,
+      missaoSemanalCooldownDias: 14,
       carryoverAtivo: true,
       carryoverTabela: [{ posicao: 1, bonus: 100 }],
     };

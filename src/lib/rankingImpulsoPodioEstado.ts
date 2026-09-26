@@ -37,7 +37,9 @@ export async function aplicarImpulsoPodioSeElegivel(params: {
     pontos: disponivel,
     motivo: "Impulso do Pódio — chegou ao Top 3",
   });
-  if (resultado === "creditado") {
+  // "creditado" ou "ja_creditado" (retry) precisam sincronizar da mesma
+  // forma — nunca só o primeiro. "invalido" nunca credita de verdade.
+  if (resultado === "creditado" || resultado === "ja_creditado") {
     await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
   }
 }

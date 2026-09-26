@@ -124,12 +124,21 @@ export async function obterBonusCompeticaoDaTemporada(
   return calcularTotalBonusTemporada(await obterMovimentosBonusTemporada(tenantId, temporadaId, clienteId));
 }
 
-export type ResultadoCreditoBonus = "creditado" | "ja_creditado";
+export type ResultadoCreditoBonus = "creditado" | "ja_creditado" | "invalido";
 
 /**
- * Credita pontos de bônus, idempotente por `eventoId`. Retorna "ja_creditado"
- * tanto para um retry do mesmo evento quanto para parâmetros inválidos —
- * fail-closed: nunca credita por engano.
+ * Credita pontos de bônus, idempotente por `eventoId`.
+ *
+ * Três resultados com significados DIFERENTES para o chamador (correção de
+ * blocker da auditoria — antes, parâmetro inválido e retry do mesmo evento
+ * eram indistinguíveis, ambos "ja_creditado"):
+ * - "creditado": primeira vez, o movimento foi gravado agora.
+ * - "ja_creditado": o MESMO eventoId já tinha um crédito no ledger — o fato
+ *   já existe de verdade, então o chamador pode confiar nele (breadcrumb,
+ *   sincronizar score, confirmar estado) como se tivesse acabado de creditar.
+ * - "invalido": parâmetros ruins (tenant/temporada/cliente/eventoId ausente,
+ *   pontos não-positivo) — NUNCA existe um crédito real para este eventoId,
+ *   o chamador não pode tratar como se o fato tivesse acontecido.
  */
 export async function creditarBonusCompeticao(params: {
   tenantId: string;
@@ -141,8 +150,8 @@ export async function creditarBonusCompeticao(params: {
   motivo: string;
 }): Promise<ResultadoCreditoBonus> {
   const { tenantId, temporadaId, clienteId, eventoId, tipo, motivo } = params;
-  if (!tenantId || !temporadaId || !clienteId || !eventoId) return "ja_creditado";
-  if (!Number.isFinite(params.pontos) || params.pontos <= 0) return "ja_creditado";
+  if (!tenantId || !temporadaId || !clienteId || !eventoId) return "invalido";
+  if (!Number.isFinite(params.pontos) || params.pontos <= 0) return "invalido";
   return comBloqueioBonus(tenantId, temporadaId, clienteId, async () => {
     const movimentos = await obterMovimentosBonusTemporada(tenantId, temporadaId, clienteId);
     if (movimentos.some((m) => m.eventoId === eventoId)) return "ja_creditado";

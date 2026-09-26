@@ -237,8 +237,21 @@ describe("consumirMissaoSemanalNoPedido", () => {
     });
     expect(resultado).toEqual({ consumida: true, bonusCreditado: 50 });
     expect((await obterEstadoMissaoSemanal(T, TEMP, CLI)).status).toBe("consumida");
-    // "ja_creditado" nunca gera um NOVO registro de fato/breadcrumb — só a primeira vez ("creditado") faz isso.
-    expect(registrarFatoMock).not.toHaveBeenCalled();
+    // Correção de blocker: "ja_creditado" precisa repetir breadcrumb/fato/
+    // sincronização de score da mesma forma que "creditado" — cada uma
+    // dessas operações já é idempotente por si (SET simples, SET NX por
+    // eventoId, recomputo total), então repeti-las num retry é sempre
+    // seguro e necessário (sem isso, um crash bem no meio deixava a missão
+    // "consumida" sem nunca ter breadcrumb para o cancelamento encontrar).
+    expect(registrarFatoMock).toHaveBeenCalledWith("missao_semanal_consumida", "cli_a:temp_1:pedido-1");
+    expect(sincronizarScoreMock).toHaveBeenCalledWith(T, TEMP, CLI);
+    // A prova real: a migalha existe de verdade no Redis (não só "teria
+    // sido escrita na primeira vez") — o cancelamento consegue encontrá-la.
+    expect(store.get(`ranking:missaoSemanal:pedido:pedido-1`)).toEqual({ tenantId: T, temporadaId: TEMP, clienteId: CLI, bonus: 50 });
+
+    await reverterMissaoSemanalDoPedido("pedido-1", "pedido cancelado após o retry");
+    expect(estornarBonusMock).toHaveBeenCalledWith(expect.objectContaining({ eventoIdOriginal: "missaoSemanal:pedido-1" }));
+    expect((await obterEstadoMissaoSemanal(T, TEMP, CLI)).status).toBe("desbloqueada");
   });
 });
 

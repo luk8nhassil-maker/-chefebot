@@ -23,6 +23,10 @@ const {
   registrarConversaoIndicacaoMock,
   obterConversaoIndicacaoMock,
   estornarEstrelasIndicacaoMock,
+  marcarConversaoAtivaMock,
+  obterConversaoAtivaMock,
+  revogarConversaoAtivaMock,
+  estornarApoioMock,
 } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   return {
@@ -48,6 +52,10 @@ const {
     registrarConversaoIndicacaoMock: vi.fn(async (_p: unknown) => undefined),
     obterConversaoIndicacaoMock: vi.fn(async (_pedidoId: string) => null as { indicadorId: string; indicadoId: string; pedidoId: string } | null),
     estornarEstrelasIndicacaoMock: vi.fn(async (_p: unknown) => "estornado" as const),
+    marcarConversaoAtivaMock: vi.fn(async (_indicadoId: string, _p: unknown) => undefined),
+    obterConversaoAtivaMock: vi.fn(async (_indicadoId: string) => ({ indicadorId: "cli_indicador_padrao", pedidoId: "pedido_conversao_original" }) as { indicadorId: string; pedidoId: string } | null),
+    revogarConversaoAtivaMock: vi.fn(async (_indicadoId: string, _pedidoId: string) => undefined),
+    estornarApoioMock: vi.fn(async (_p: unknown) => "nao_encontrado" as const),
   };
 });
 
@@ -97,11 +105,15 @@ vi.mock("./estrelasIndicacao", () => ({
   creditarEstrelasIndicacaoValida: creditarIndicacaoMock,
   creditarEstrelaApoioRecorrente: creditarApoioMock,
   estornarEstrelasIndicacaoValida: estornarEstrelasIndicacaoMock,
+  estornarEstrelaApoioRecorrente: estornarApoioMock,
 }));
 
 vi.mock("./rankingIndicacaoConversao", () => ({
   registrarConversaoIndicacao: registrarConversaoIndicacaoMock,
   obterConversaoIndicacaoDoPedido: obterConversaoIndicacaoMock,
+  marcarConversaoAtivaIndicado: marcarConversaoAtivaMock,
+  obterConversaoAtivaIndicado: obterConversaoAtivaMock,
+  revogarConversaoAtivaIndicadoSePedido: revogarConversaoAtivaMock,
 }));
 
 vi.mock("./expedienteOperacional", () => ({
@@ -167,6 +179,14 @@ beforeEach(() => {
   registrarConversaoIndicacaoMock.mockReset().mockResolvedValue(undefined);
   obterConversaoIndicacaoMock.mockReset().mockResolvedValue(null);
   estornarEstrelasIndicacaoMock.mockReset().mockResolvedValue("estornado");
+  marcarConversaoAtivaMock.mockReset().mockResolvedValue(undefined);
+  // Default truthy: quando `relacao` existe, os testes pré-existentes
+  // (compra posterior = apoio recorrente) continuam tomando esse caminho
+  // sem precisar mockar isto explicitamente. Testes do blocker "nova
+  // conversão após cancelamento" mockam `null` para exercer o outro ramo.
+  obterConversaoAtivaMock.mockReset().mockResolvedValue({ indicadorId: "cli_indicador_padrao", pedidoId: "pedido_conversao_original" });
+  revogarConversaoAtivaMock.mockReset().mockResolvedValue(undefined);
+  estornarApoioMock.mockReset().mockResolvedValue("nao_encontrado");
 });
 
 describe("processarEfeitosPedidoEntregue", () => {

@@ -176,14 +176,21 @@ export async function consumirMissaoSemanalNoPedido(params: {
       });
       // "creditado" (primeira vez) ou "ja_creditado" (retry pós-falha, o
       // bônus já estava garantido) — os dois significam "o ledger tem esse
-      // crédito agora", então os dois avançam para confirmar a missão.
+      // crédito agora", então os dois precisam convergir para o MESMO estado
+      // final íntegro (breadcrumb + fato + score sincronizado), nunca só o
+      // primeiro. Correção de blocker: antes, um crash exatamente entre o
+      // ledger gravar "creditado" e este bloco terminar deixava um retry
+      // receber "ja_creditado" e pular breadcrumb/fato/score — a missão
+      // confirmava sem nunca ter a migalha que o cancelamento precisa, e o
+      // score podia ficar desatualizado. Cada uma das três operações abaixo
+      // já é idempotente por si (SET simples, SET NX por eventoId, e
+      // recomputo total), então repeti-las em todo retry é sempre seguro.
+      // "invalido" (params ruins) nunca cai aqui — não existe crédito real.
       if (resultado === "creditado" || resultado === "ja_creditado") {
         bonusCreditado = bonus;
-        if (resultado === "creditado") {
-          await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus } satisfies BreadcrumbPedido);
-          await registrarFatoRankingGamificacao("missao_semanal_consumida", `${clienteId}:${temporadaId}:${pedidoId}`);
-          await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
-        }
+        await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus } satisfies BreadcrumbPedido);
+        await registrarFatoRankingGamificacao("missao_semanal_consumida", `${clienteId}:${temporadaId}:${pedidoId}`);
+        await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
       }
     }
 
