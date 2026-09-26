@@ -98,7 +98,7 @@ export function FidelidadeRankingScreen({
   onTelemetria,
   onClose,
 }: FidelidadeRankingScreenProps) {
-  const [aba, setAba] = useState<'participantes' | 'minha' | 'geral'>('participantes')
+  const [aba, setAba] = useState<'participantes' | 'minha' | 'geral'>('minha')
   const [sheetSubirAberto, setSheetSubirAberto] = useState(false)
   const emit = (tipo: EventoRankingRetencao) => onTelemetria?.(tipo)
   const lista = [...ranking.lista].sort((a, b) => a.posicao - b.posicao)
@@ -109,9 +109,7 @@ export function FidelidadeRankingScreen({
   // mesmo fora do Top 3 geral, se os primeiros colocados não participarem.
   const participantes = [...ranking.participantes.lista].sort((a, b) => a.posicao - b.posicao)
   const podium = participantes.filter((entrada) => entrada.posicao <= 3)
-  const linhas = aba === 'minha'
-    ? lista.filter((entrada) => entrada.eVoce)
-    : aba === 'geral' ? listaSemPodio : participantes.filter((entrada) => entrada.posicao > 3)
+  const linhas = aba === 'geral' ? listaSemPodio : participantes.filter((entrada) => entrada.posicao > 3)
   const nomeSeguro = (entrada: { eVoce: boolean; participaCampanha: boolean; posicao: number; nomePublico?: string }) => {
     if (entrada.eVoce && !entrada.participaCampanha) return 'Você — fora da disputa'
     if (!entrada.participaCampanha) return 'Fora da disputa'
@@ -207,144 +205,6 @@ export function FidelidadeRankingScreen({
         )}
       </header>
 
-      {gamificacao?.statusSocial && (
-        <section className="cf-ranking-selos" aria-label="Seu status">
-          <span className={`cf-ranking-selo cf-ranking-selo-${gamificacao.statusSocial}`}>
-            <span aria-hidden="true">{ICONE_STATUS_SOCIAL[gamificacao.statusSocial]}</span>
-            {NOME_STATUS_SOCIAL[gamificacao.statusSocial]}
-          </span>
-        </section>
-      )}
-
-      {gamificacao?.nivelChef && (
-        <section className="cf-ranking-nivel" aria-label="Progresso de Nível de Chef">
-          <div className="cf-ranking-nivel-head">
-            <strong>Nível {gamificacao.nivelChef.nivel}{gamificacao.nivelChef.nome ? ` — ${gamificacao.nivelChef.nome}` : ''}</strong>
-            <span>
-              {gamificacao.nivelChef.xpAtual} XP
-              {gamificacao.nivelChef.xpProximoNivel !== null ? ` / ${gamificacao.nivelChef.xpProximoNivel} XP` : ''}
-            </span>
-          </div>
-          <div className="cf-ranking-nivel-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={nivelProgressoPercent}>
-            <div className="cf-ranking-nivel-fill" style={{ width: `${nivelProgressoPercent}%` }} />
-          </div>
-          <small>{gamificacao.nivelChef.xpProximoNivel === null ? 'Nível máximo atingido.' : `Faltam ${Math.max(0, gamificacao.nivelChef.xpProximoNivel - gamificacao.nivelChef.xpAtual)} XP para o próximo nível.`}</small>
-        </section>
-      )}
-
-      {alvo?.estado === 'liderando' && (
-        <section className={`cf-ranking-note cf-ranking-coroa${gamificacao?.coroaAmeacada ? ' cf-ranking-coroa-ameacada' : ''}`} aria-label="Defenda sua coroa">
-          <span aria-hidden="true">👑</span>
-          <div>
-            <strong>{gamificacao?.coroaAmeacada ? 'Coroa ameaçada!' : 'Defenda sua coroa'}</strong>
-            <p>{mensagemMissao}</p>
-          </div>
-        </section>
-      )}
-
-      {gamificacao?.missaoIndicacao && (
-        <section className="cf-ranking-note cf-ranking-missao" aria-label="Missão de indicação da temporada">
-          <span aria-hidden="true">🤝</span>
-          <div>
-            <strong>MISSÃO DA TEMPORADA</strong>
-            <p>{gamificacao.missaoIndicacao.concluida ? 'Indique 1 amigo — 1/1 ✓ Concluída' : 'Indique 1 amigo — 0/1'}</p>
-          </div>
-        </section>
-      )}
-
-      {gamificacao?.missaoSemanal?.status === 'desbloqueada' && (
-        <section className="cf-ranking-note cf-ranking-missao" aria-label="Missão semanal">
-          <span aria-hidden="true">🎯</span>
-          <div>
-            <strong>Caçada ao Pódio liberada!</strong>
-            <p>Seu próximo pedido vale 2x no Ranking desta temporada.</p>
-            <small>Suas Estrelas normais da Fidelidade continuam as mesmas — o bônus 2x conta só para a disputa desta temporada.</small>
-          </div>
-        </section>
-      )}
-
-      {posPedido && (
-        <section className="cf-ranking-note" aria-label="Resultado do pedido" style={{ marginTop: 0, marginBottom: 14 }}>
-          <span aria-hidden="true">{posPedido.estado === 'creditado' ? '⭐' : '⏳'}</span>
-          <div>
-            {posPedido.estado === 'pendente' ? (
-              <strong>Seu pedido foi recebido. Quando as estrelas forem confirmadas, seu progresso será atualizado.</strong>
-            ) : (
-              <>
-                <strong>+{posPedido.estrelasGanhas ?? 0} estrelas</strong>
-                <p>{mensagemMov ?? (mensagemMissao ? `Agora você está em #${ranking.participantes.posicao ?? ranking.posicao}. ${mensagemMissao}` : `Agora você está em #${ranking.participantes.posicao ?? ranking.posicao}.`)}</p>
-              </>
-            )}
-          </div>
-        </section>
-      )}
-
-      <section className="cf-ranking-current" aria-label="Seu status atual">
-        <div>
-          <small>SUA POSIÇÃO</small>
-          <strong>{ranking.participantes.posicao ? `#${ranking.participantes.posicao}` : '—'}</strong>
-          <span>{ranking.score} pontos no Ranking</span>
-          {(gamificacao?.bonusCompeticao ?? 0) > 0 && (
-            <span>{gamificacao?.bonusCompeticao} de bônus na competição; suas Estrelas de Fidelidade não mudam.</span>
-          )}
-        </div>
-        <div className="cf-ranking-current-goal">
-          <small>PRÓXIMO PASSO</small>
-          <strong>{mensagemMissao ?? 'Continue acumulando estrelas para subir.'}</strong>
-        </div>
-      </section>
-
-      {gamificacao?.movimentoRecente && gamificacao.movimentoRecente.variacao.direcao !== 'manteve' && (
-        <p className="cf-ranking-movimento-recente">
-          {gamificacao.movimentoRecente.variacao.direcao === 'subiu' ? '▲' : '▼'} {gamificacao.movimentoRecente.variacao.casas} desde sua última visita
-        </p>
-      )}
-
-      {onNovoPedido && (
-        <button
-          type="button"
-          className="cf-ranking-cta-primary"
-          onClick={() => { emit('cta_subir_clicado'); setSheetSubirAberto(true) }}
-        >
-          Como subir
-        </button>
-      )}
-
-      {conquista && (
-        <section className="cf-ranking-note" aria-label="Conquista recente">
-          <span aria-hidden="true">🎉</span>
-          <div>
-            <strong>{textoConquistaRanking(conquista, ranking.participantes.posicao ?? ranking.posicao)}</strong>
-            {podeCompartilharConquista && (
-              <button
-                type="button"
-                className="cf-ranking-share-btn"
-                disabled={compartilhando}
-                onClick={() => { emit('compartilhamento_clicado'); onCompartilharConquista?.() }}
-              >
-                {compartilhando ? 'Preparando…' : 'Compartilhar'}
-              </button>
-            )}
-          </div>
-        </section>
-      )}
-
-      <section className="cf-ranking-list" aria-label="Sua disputa agora">
-        <p className="cf-ranking-footnote" style={{ marginTop: 0, fontWeight: 700, color: '#40536f' }}>SUA DISPUTA AGORA</p>
-        {disputa ? (
-          <>
-            {disputa.acima && linhaDisputa(disputa.acima)}
-            {linhaDisputa(disputa.voce)}
-            {disputa.abaixo && linhaDisputa(disputa.abaixo)}
-            {disputa.sozinho && <p className="cf-ranking-empty">Você é o único participante desta temporada até agora.</p>}
-          </>
-        ) : (
-          <p className="cf-ranking-empty">Sua disputa aparece assim que você tiver uma posição entre participantes.</p>
-        )}
-      </section>
-
-      <details className="cf-ranking-more">
-        <summary>Ver pódio e classificação completa</summary>
       <section className="cf-ranking-podium" aria-label="Melhores posições">
         {[2, 1, 3].map((posicao) => {
           const entrada = podium.find((item) => item.posicao === posicao)
@@ -365,25 +225,164 @@ export function FidelidadeRankingScreen({
         ))}
       </div>
 
-      <section className="cf-ranking-list" aria-label="Lista de posições">
-        {linhas.length === 0 ? <p className="cf-ranking-empty">Sua posição ainda não apareceu no ranking desta temporada.</p> : linhas.map((entrada) => (
-          <div key={entrada.posicao} className={`cf-ranking-row ${entrada.eVoce ? 'voce' : ''}`}>
-            <strong>{entrada.posicao}</strong>
-            <span className="cf-ranking-row-avatar">{avatarSeguro(entrada) ?? <Star size={15} fill="currentColor" strokeWidth={1.8} aria-hidden="true" />}</span>
-            <span className="cf-ranking-row-name">
-              {nomeSeguro(entrada)} {seloSocialCompacto(statusSocialDaLinha(entrada))}
-              {entrada.eVoce && seloVariacao(variacaoDaAba)}
-              {entrada.telefoneMascarado && <small>{entrada.telefoneMascarado}</small>}
-            </span>
-            <b>{scoreSeguro(entrada.score)}</b>
-          </div>
-        ))}
-        {aba === 'participantes' && <p className="cf-ranking-footnote">Mostrando posições próximas a você.</p>}
-        {aba === 'geral' && <p className="cf-ranking-footnote">Só quem ativou o Ranking participa da disputa.</p>}
-      </section>
-      </details>
+      {aba === 'minha' ? (
+        <section className="cf-ranking-personal" aria-label="Minha posição">
+          <section className="cf-ranking-current" aria-label="Seu status atual">
+            <div>
+              <small>SUA POSIÇÃO</small>
+              <strong>{ranking.participantes.posicao ? `#${ranking.participantes.posicao}` : '—'}</strong>
+              <span>{ranking.score} pontos no Ranking</span>
+              {(gamificacao?.bonusCompeticao ?? 0) > 0 && (
+                <span>{gamificacao?.bonusCompeticao} de bônus na competição; suas Estrelas de Fidelidade não mudam.</span>
+              )}
+            </div>
+            <div className="cf-ranking-current-goal">
+              <small>PRÓXIMO PASSO</small>
+              <strong>{mensagemMissao ?? 'Continue acumulando estrelas para subir.'}</strong>
+            </div>
+          </section>
 
-      <details className="cf-ranking-privacy">
+          {gamificacao?.movimentoRecente && gamificacao.movimentoRecente.variacao.direcao !== 'manteve' && (
+            <p className="cf-ranking-movimento-recente">
+              {gamificacao.movimentoRecente.variacao.direcao === 'subiu' ? '▲' : '▼'} {gamificacao.movimentoRecente.variacao.casas} desde sua última visita
+            </p>
+          )}
+
+          {onNovoPedido && (
+            <button
+              type="button"
+              className="cf-ranking-cta-primary"
+              onClick={() => { emit('cta_subir_clicado'); setSheetSubirAberto(true) }}
+            >
+              Como subir
+            </button>
+          )}
+
+          {conquista && (
+            <section className="cf-ranking-note" aria-label="Conquista recente">
+              <span aria-hidden="true">🎉</span>
+              <div>
+                <strong>{textoConquistaRanking(conquista, ranking.participantes.posicao ?? ranking.posicao)}</strong>
+                {podeCompartilharConquista && (
+                  <button
+                    type="button"
+                    className="cf-ranking-share-btn"
+                    disabled={compartilhando}
+                    onClick={() => { emit('compartilhamento_clicado'); onCompartilharConquista?.() }}
+                  >
+                    {compartilhando ? 'Preparando…' : 'Compartilhar'}
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
+
+          <section className="cf-ranking-list" aria-label="Pessoas próximas de você">
+            <p className="cf-ranking-footnote" style={{ marginTop: 0, fontWeight: 700, color: '#40536f' }}>PERTO DE VOCÊ</p>
+            {disputa ? (
+              <>
+                {disputa.acima && linhaDisputa(disputa.acima)}
+                {disputa.abaixo && linhaDisputa(disputa.abaixo)}
+                {disputa.sozinho && <p className="cf-ranking-empty">Você é o único participante desta temporada até agora.</p>}
+              </>
+            ) : (
+              <p className="cf-ranking-empty">Sua disputa aparece assim que você tiver uma posição entre participantes.</p>
+            )}
+          </section>
+
+          {gamificacao?.statusSocial && (
+            <section className="cf-ranking-selos" aria-label="Seu status">
+              <span className={`cf-ranking-selo cf-ranking-selo-${gamificacao.statusSocial}`}>
+                <span aria-hidden="true">{ICONE_STATUS_SOCIAL[gamificacao.statusSocial]}</span>
+                {NOME_STATUS_SOCIAL[gamificacao.statusSocial]}
+              </span>
+            </section>
+          )}
+
+          {gamificacao?.nivelChef && (
+            <section className="cf-ranking-nivel" aria-label="Progresso de Nível de Chef">
+              <div className="cf-ranking-nivel-head">
+                <strong>Nível {gamificacao.nivelChef.nivel}{gamificacao.nivelChef.nome ? ` — ${gamificacao.nivelChef.nome}` : ''}</strong>
+                <span>
+                  {gamificacao.nivelChef.xpAtual} XP
+                  {gamificacao.nivelChef.xpProximoNivel !== null ? ` / ${gamificacao.nivelChef.xpProximoNivel} XP` : ''}
+                </span>
+              </div>
+              <div className="cf-ranking-nivel-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={nivelProgressoPercent}>
+                <div className="cf-ranking-nivel-fill" style={{ width: `${nivelProgressoPercent}%` }} />
+              </div>
+              <small>{gamificacao.nivelChef.xpProximoNivel === null ? 'Nível máximo atingido.' : `Faltam ${Math.max(0, gamificacao.nivelChef.xpProximoNivel - gamificacao.nivelChef.xpAtual)} XP para o próximo nível.`}</small>
+            </section>
+          )}
+
+          {alvo?.estado === 'liderando' && (
+            <section className={`cf-ranking-note cf-ranking-coroa${gamificacao?.coroaAmeacada ? ' cf-ranking-coroa-ameacada' : ''}`} aria-label="Defenda sua coroa">
+              <span aria-hidden="true">👑</span>
+              <div>
+                <strong>{gamificacao?.coroaAmeacada ? 'Coroa ameaçada!' : 'Defenda sua coroa'}</strong>
+                <p>{mensagemMissao}</p>
+              </div>
+            </section>
+          )}
+
+          {gamificacao?.missaoIndicacao && (
+            <section className="cf-ranking-note cf-ranking-missao" aria-label="Missão de indicação da temporada">
+              <span aria-hidden="true">🤝</span>
+              <div>
+                <strong>MISSÃO DA TEMPORADA</strong>
+                <p>{gamificacao.missaoIndicacao.concluida ? 'Indique 1 amigo — 1/1 ✓ Concluída' : 'Indique 1 amigo — 0/1'}</p>
+              </div>
+            </section>
+          )}
+
+          {gamificacao?.missaoSemanal?.status === 'desbloqueada' && (
+            <section className="cf-ranking-note cf-ranking-missao" aria-label="Missão semanal">
+              <span aria-hidden="true">🎯</span>
+              <div>
+                <strong>Caçada ao Pódio liberada!</strong>
+                <p>Seu próximo pedido vale 2x no Ranking desta temporada.</p>
+                <small>Suas Estrelas normais da Fidelidade continuam as mesmas — o bônus 2x conta só para a disputa desta temporada.</small>
+              </div>
+            </section>
+          )}
+
+          {posPedido && (
+            <section className="cf-ranking-note" aria-label="Resultado do pedido" style={{ marginTop: 0, marginBottom: 14 }}>
+              <span aria-hidden="true">{posPedido.estado === 'creditado' ? '⭐' : '⏳'}</span>
+              <div>
+                {posPedido.estado === 'pendente' ? (
+                  <strong>Seu pedido foi recebido. Quando as estrelas forem confirmadas, seu progresso será atualizado.</strong>
+                ) : (
+                  <>
+                    <strong>+{posPedido.estrelasGanhas ?? 0} estrelas</strong>
+                    <p>{mensagemMov ?? (mensagemMissao ? `Agora você está em #${ranking.participantes.posicao ?? ranking.posicao}. ${mensagemMissao}` : `Agora você está em #${ranking.participantes.posicao ?? ranking.posicao}.`)}</p>
+                  </>
+                )}
+              </div>
+            </section>
+          )}
+
+        </section>
+      ) : (
+        <section className="cf-ranking-list" aria-label="Lista de posições">
+          {linhas.length === 0 ? <p className="cf-ranking-empty">Sua posição ainda não apareceu no ranking desta temporada.</p> : linhas.map((entrada) => (
+            <div key={entrada.posicao} className={`cf-ranking-row ${entrada.eVoce ? 'voce' : ''}`}>
+              <strong>{entrada.posicao}</strong>
+              <span className="cf-ranking-row-avatar">{avatarSeguro(entrada) ?? <Star size={15} fill="currentColor" strokeWidth={1.8} aria-hidden="true" />}</span>
+              <span className="cf-ranking-row-name">
+                {nomeSeguro(entrada)} {seloSocialCompacto(statusSocialDaLinha(entrada))}
+                {entrada.eVoce && seloVariacao(variacaoDaAba)}
+                {entrada.telefoneMascarado && <small>{entrada.telefoneMascarado}</small>}
+              </span>
+              <b>{scoreSeguro(entrada.score)}</b>
+            </div>
+          ))}
+          {aba === 'participantes' && <p className="cf-ranking-footnote">Mostrando posições próximas a você.</p>}
+          {aba === 'geral' && <p className="cf-ranking-footnote">Só quem ativou o Ranking participa da disputa.</p>}
+        </section>
+      )}
+
+      {aba === 'minha' && <details className="cf-ranking-privacy">
         <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Privacidade e participação</summary>
         <p>Você pode disputar anonimamente. Seu nome e telefone só aparecem se você permitir abaixo.</p>
         {privacidadeCarregando && <p>Carregando escolhas…</p>}
@@ -398,7 +397,7 @@ export function FidelidadeRankingScreen({
           {privacidadeSalvando === 'todas' ? 'Saindo…' : 'Sair do Ranking e remover autorizações'}
         </button>
         {privacidadeErro && <p role="alert">{privacidadeErro}</p>}
-      </details>
+      </details>}
 
       {sheetSubirAberto && (
         <div className="cf-ranking-sheet-backdrop" role="presentation" onClick={() => setSheetSubirAberto(false)}>
@@ -503,9 +502,6 @@ export function FidelidadeRankingScreen({
         .cf-ranking-current>div>span { display: block; margin-top: 7px; color: #53657e; font-size: 13px; }
         .cf-ranking-current-goal { border-left: 1px solid #d9e3ef; padding-left: 16px; }
         .cf-ranking-current .cf-ranking-current-goal strong { font-size: 15px; line-height: 1.35; }
-        .cf-ranking-more { margin: 18px 0; border-top: 1px solid #dce2e9; }
-        .cf-ranking-more>summary { padding: 16px 2px; color: #244979; cursor: pointer; font-size: 14px; font-weight: 700; }
-        .cf-ranking-more .cf-ranking-podium { margin-top: 6px; }
         @media (prefers-reduced-motion: reduce) { .cf-ranking-screen * { transition: none !important; } }
         @media (max-width: 420px) {
           .cf-ranking-current { grid-template-columns: minmax(100px, .75fr) 1fr; gap: 8px; padding: 14px 12px; border-radius: 17px; }

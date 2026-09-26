@@ -254,14 +254,38 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     expect(screen.queryByText(/ganhe presentes/)).toBeNull();
   });
 
-  test("posição e próximo passo aparecem antes da classificação opcional", () => {
+  test("pódio aparece primeiro e informações pessoais ficam em Minha posição", () => {
     montar({ onNovoPedido: () => undefined });
+    const podio = screen.getByRole("region", { name: "Melhores posições" });
     const status = screen.getByRole("region", { name: "Seu status atual" });
+    expect(podio.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(status.textContent).toContain("SUA POSIÇÃO#5");
     expect(status.textContent).toContain("100 pontos no Ranking");
     expect(screen.getByText("Como subir")).toBeTruthy();
-    const detalhes = screen.getByText("Ver pódio e classificação completa").closest("details");
-    expect(detalhes?.open).toBe(false);
+    expect(screen.getByRole("tab", { name: "Minha posição" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByRole("region", { name: "Lista de posições" })).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Participando" }));
+    expect(screen.queryByRole("region", { name: "Seu status atual" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Lista de posições" })).toBeTruthy();
+    expect(screen.queryByText("Privacidade e participação")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Minha posição" }));
+    expect(screen.getByText("Privacidade e participação")).toBeTruthy();
+  });
+
+  test("Minha posição mostra rivais sem repetir a linha Você", () => {
+    montar({ ranking: { ...RANKING_BASE, participantes: {
+      ...RANKING_BASE.participantes,
+      disputa: {
+        acima: { posicao: 4, score: 104, eVoce: false, nomePublico: "Rafael", telefoneMascarado: null },
+        voce: { posicao: 5, score: 100, eVoce: true, nomePublico: null, telefoneMascarado: null },
+        abaixo: { posicao: 6, score: 90, eVoce: false, nomePublico: "Julia", telefoneMascarado: null },
+        sozinho: false,
+      },
+    } } });
+    const vizinhos = screen.getByRole("region", { name: "Pessoas próximas de você" });
+    expect(vizinhos.textContent).toContain("Rafael");
+    expect(vizinhos.textContent).toContain("Julia");
+    expect(vizinhos.textContent).not.toContain("Você");
   });
 
   test("bônus de competição não é apresentado como Estrelas reais", () => {
