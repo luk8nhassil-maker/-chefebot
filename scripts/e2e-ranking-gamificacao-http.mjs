@@ -202,6 +202,10 @@ async function main() {
   check("criação do pedido (admin) responde 201", criarPedido.status === 201, String(criarPedido.status));
   const pedido = await criarPedido.json();
   check("pedido criado tem id", typeof pedido?.id === "string" && pedido.id.length > 0);
+  // Nenhum "pagamento" foi enviado no body → criarPixMetadata nunca gera
+  // metadata de Pix para este pedido (prova de que a jornada não cria Pix
+  // real; ver src/lib/pix.ts:criarPixMetadata/temPixNoPagamento).
+  check("pedido criado NÃO tem metadata de Pix (nenhum pagamento foi informado)", pedido?.pix === undefined, JSON.stringify(pedido?.pix));
 
   const entregarPedido = await fetch(`${BASE}/api/orders`, {
     method: "PATCH",
@@ -209,6 +213,12 @@ async function main() {
     body: JSON.stringify({ id: pedido.id, status: "entregue", silent: true }),
   });
   check("marcar pedido como entregue (silent) responde 200", entregarPedido.status === 200, String(entregarPedido.status));
+  const entregueBody = await entregarPedido.json();
+  // silent:true pula toda notificação ao cliente (WhatsApp) e a impressão
+  // automática só dispara na transição novo→em_preparo (nunca novo→entregue,
+  // que é o que este E2E faz) — nenhum aviso operacional de falha de envio
+  // é esperado aqui, o que corrobora que nenhuma tentativa de envio ocorreu.
+  check("PATCH silent:true não reporta nenhum aviso operacional de WhatsApp/impressão", !entregueBody?.avisoOperacional, JSON.stringify(entregueBody?.avisoOperacional));
 
   // -------------------------------------------------------------------------
   // 5) Reload — score persistido no Redis real, lido de volta por HTTP real.

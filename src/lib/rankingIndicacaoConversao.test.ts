@@ -3,8 +3,13 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const store = new Map<string, unknown>();
 vi.mock("./redis", () => ({
   redis: {
-    get: vi.fn(async (key: string) => store.get(key) ?? null),
-    set: vi.fn(async (key: string, value: unknown) => {
+    get: vi.fn(async (key: string) => (store.has(key) ? store.get(key) : null)),
+    // Respeita nx de verdade (não escreve se a chave já existe) — necessário
+    // para o lock de comBloqueioGamificacao (usado por
+    // comReservaConversaoAtiva) funcionar de verdade sob concorrência real
+    // nos testes de blocker 2/3 abaixo, em vez de "sempre adquire".
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
+      if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
       return "OK";
     }),
@@ -12,6 +17,11 @@ vi.mock("./redis", () => ({
       let removidos = 0;
       for (const key of keys) if (store.delete(key)) removidos++;
       return removidos;
+    }),
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (store.get(keys[0]) !== args[0]) return 0;
+      store.delete(keys[0]);
+      return 1;
     }),
   },
 }));
@@ -22,6 +32,7 @@ import {
   marcarConversaoAtivaIndicado,
   obterConversaoAtivaIndicado,
   revogarConversaoAtivaIndicadoSePedido,
+  comReservaConversaoAtiva,
 } from "./rankingIndicacaoConversao";
 
 beforeEach(() => store.clear());
@@ -86,5 +97,95 @@ describe("marcarConversaoAtivaIndicado / obterConversaoAtivaIndicado / revogarCo
     // Uma nova conversão válida substituta (pedido C) para o MESMO indicado.
     await marcarConversaoAtivaIndicado("cli_indicado_A", { indicadorId: "cli_indicador", pedidoId: "pedido-C" });
     expect(await obterConversaoAtivaIndicado("cli_indicado_A")).toEqual({ indicadorId: "cli_indicador", pedidoId: "pedido-C" });
+  });
+});
+
+describe("comReservaConversaoAtiva (blocker 2/3: reserva atômica + compare-and-delete atômico)", () => {
+  test("serializa duas seções concorrentes na MESMA chave — nunca roda os dois 'fn' ao mesmo tempo", async () => {
+    const ordem: string[] = [];
+    let dentro = 0;
+    let maxSimultaneos = 0;
+
+    async function secaoCritica(nome: string) {
+      return comReservaConversaoAtiva("cli_disputado", async () => {
+        dentro++;
+        maxSimultaneos = Math.max(maxSimultaneos, dentro);
+        ordem.push(`${nome}:entrou`);
+        // Cede o event loop propositalmente para dar chance de uma execução
+        // concorrente mal-serializada aparecer, se o lock não funcionasse.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        ordem.push(`${nome}:saiu`);
+        dentro--;
+      });
+    }
+
+    await Promise.all([secaoCritica("A"), secaoCritica("B")]);
+
+    expect(maxSimultaneos).toBe(1);
+    // Uma seção inteira (entrou+saiu) sempre termina antes da outra começar.
+    expect(ordem[0].endsWith(":entrou")).toBe(true);
+    expect(ordem[1]).toBe(`${ordem[0].split(":")[0]}:saiu`);
+  });
+
+  test("BLOCKER 2: dois pedidos concorrentes do mesmo indicado (sem conversão ativa) → exatamente UM vira conversão principal, o outro cai para apoio", async () => {
+    const indicadoId = "cli_indicado_disputa";
+    let creditos = 0;
+
+    async function processarPedido(pedidoId: string, indicadorId: string): Promise<"conversao_principal" | "apoio"> {
+      return comReservaConversaoAtiva(indicadoId, async () => {
+        const ativa = await obterConversaoAtivaIndicado(indicadoId);
+        if (ativa) return "apoio";
+        // Simula o crédito real (+6) — o ponto testado aqui é que só UM dos
+        // dois pedidos concorrentes chega a executar este passo.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        creditos++;
+        await marcarConversaoAtivaIndicado(indicadoId, { indicadorId, pedidoId });
+        return "conversao_principal";
+      });
+    }
+
+    const [resultadoA, resultadoB] = await Promise.all([
+      processarPedido("pedido-A", "cli_indicador"),
+      processarPedido("pedido-B", "cli_indicador"),
+    ]);
+
+    expect(creditos).toBe(1);
+    expect([resultadoA, resultadoB].sort()).toEqual(["apoio", "conversao_principal"]);
+
+    const vencedor = resultadoA === "conversao_principal" ? "pedido-A" : "pedido-B";
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual({ indicadorId: "cli_indicador", pedidoId: vencedor });
+  });
+
+  test("BLOCKER 3: cancelamento de A concorrendo com nova conversão B — B permanece ativa, em QUALQUER ordem de execução real", async () => {
+    const indicadoId = "cli_indicado_cancelamento_concorrente";
+    await marcarConversaoAtivaIndicado(indicadoId, { indicadorId: "cli_indicador", pedidoId: "pedido-A" });
+
+    // Cancelamento de A e a gravação da nova conversão B disputam a MESMA
+    // reserva ao mesmo tempo. Como as duas seções (leitura+comparação+DEL do
+    // cancelamento; e o SET da nova conversão) são mutuamente exclusivas,
+    // não existe intercalação possível: ou o cancelamento roda por inteiro
+    // antes de B ser gravado (B nasce limpo depois), ou B é gravado primeiro
+    // e o cancelamento de A, ao comparar, vê pedidoId="B" e não faz nada.
+    // As duas ordens terminam no MESMO estado final correto.
+    await Promise.all([
+      revogarConversaoAtivaIndicadoSePedido(indicadoId, "pedido-A"),
+      comReservaConversaoAtiva(indicadoId, async () => {
+        await marcarConversaoAtivaIndicado(indicadoId, { indicadorId: "cli_indicador", pedidoId: "pedido-B" });
+      }),
+    ]);
+
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual({ indicadorId: "cli_indicador", pedidoId: "pedido-B" });
+  });
+
+  test("BLOCKER 3: retry do MESMO pedido (crash e reprocessamento) não é bloqueado por sua própria reserva anterior — o lock é liberado ao final de cada 'fn'", async () => {
+    const indicadoId = "cli_indicado_retry";
+    await comReservaConversaoAtiva(indicadoId, async () => {
+      await marcarConversaoAtivaIndicado(indicadoId, { indicadorId: "cli_indicador", pedidoId: "pedido-A" });
+    });
+    // Uma segunda chamada, sequencial, no MESMO indicado precisa conseguir o
+    // lock normalmente (a reserva anterior já foi liberada).
+    await expect(
+      comReservaConversaoAtiva(indicadoId, async () => "ok"),
+    ).resolves.toBe("ok");
   });
 });

@@ -33,6 +33,7 @@ import {
   marcarConversaoAtivaIndicado,
   obterConversaoAtivaIndicado,
   revogarConversaoAtivaIndicadoSePedido,
+  comReservaConversaoAtiva,
 } from "./rankingIndicacaoConversao";
 import { estornarEstrelasIndicacaoValida, estornarEstrelaApoioRecorrente } from "./estrelasIndicacao";
 import type { ItemApp } from "./pedidoAppItens";
@@ -317,6 +318,20 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
       if (!clienteId) return;
 
+      // Todo o ciclo leitura-decisão-escrita (relação existe? conversão
+      // ativa? apoio ou conversão principal? creditar? marcar ativa?) roda
+      // sob RESERVA ATÔMICA por indicadoId — nunca só um GET seguido de um
+      // SET. Sem isso, dois pedidos concorrentes do mesmo indicado (ex.: após
+      // a conversão original ter sido cancelada, ambos observando "sem
+      // conversão ativa" ao mesmo tempo) podiam creditar a conversão
+      // principal (+6) duas vezes (blocker de concorrência da auditoria
+      // final). A revogação em cancelamento usa a MESMA reserva, o que torna
+      // seu compare-and-delete atômico em relação a uma nova conversão sendo
+      // gravada ao mesmo tempo.
+      await comReservaConversaoAtiva(clienteId, () => processarConversaoIndicacao(clienteId));
+    });
+
+    async function processarConversaoIndicacao(clienteId: string): Promise<void> {
       // Conversão principal (+6 ao indicador, SEM apoio) — sempre pelo MESMO
       // caminho, seja a primeira compra de sempre (relação nova) ou uma
       // compra comercial válida substituta depois que a conversão original
@@ -332,12 +347,19 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
           pedidoId: pedido.id,
           primeiraCompraComercialValida: true,
         });
+        // "creditado" e "ja_creditado" (retry do MESMO pedido, ex.: crash
+        // depois do +6 e antes do breadcrumb/conversão ativa/fato/missão)
+        // convergem para o MESMO estado final íntegro — nunca só o primeiro.
+        // Cada passo abaixo é idempotente por si só (SET plano ou SET NX por
+        // eventoId), então repeti-los num retry nunca duplica nada; só
+        // "nao_elegivel" é fail-closed de verdade (nunca houve crédito real).
+        if (resultadoIndicacao === "nao_elegivel") return;
+
         // Fato de negócio "indicação convertida" registrado no MESMO instante
         // idempotente do crédito real — nunca inferido depois por regex/diff
         // de extrato no navegador (correção do #445). O eventoId espelha
         // exatamente a chave de idempotência do próprio ledger, então mesmo
         // um retry deste efeito nunca conta o fato duas vezes.
-        if (resultadoIndicacao !== "creditado") return;
         await registrarFatoRankingGamificacao(
           "indicacao_convertida",
           `indicacao:${clienteId}:primeira-compra:${pedido.id}`,
@@ -401,7 +423,7 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       if (confirmado !== "registrado") return;
 
       await registrarConversaoPrincipal(candidatura.indicadorId);
-    });
+    }
 
     await executarEfeito(chave, estado, "analytics", async () => {
       await registrarEventoEntregue({

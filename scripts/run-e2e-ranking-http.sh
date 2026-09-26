@@ -55,6 +55,16 @@ export KV_REST_API_TOKEN="e2e-ranking-http-local"
 export E2E_BASE_URL="http://127.0.0.1:$NEXT_PORT"
 export CHEFEBOT_E2E=1
 
+# Defesa em profundidade: além do guard em código (enviarOtpPorWhatsapp só
+# roda se CHEFEBOT_E2E !== "1"), este runner nunca deixa uma credencial de
+# integração externa herdada de .env.local (ou do ambiente do host) chegar
+# ao processo do Next.js que ele mesmo sobe — mesmo que uma env var futura
+# passe a lê-la sem o guard. A jornada HTTP testada (login → painel → POST/
+# PATCH /api/orders) nunca precisa de nenhuma delas.
+unset EVOLUTION_API_URL EVOLUTION_API_KEY EVOLUTION_INSTANCE_NAME EVOLUTION_WEBHOOK_URL
+unset MERCADOPAGO_ACCESS_TOKEN MERCADOPAGO_PAYER_EMAIL_FALLBACK
+unset QSTASH_TOKEN QSTASH_URL QSTASH_CURRENT_SIGNING_KEY QSTASH_NEXT_SIGNING_KEY
+
 echo "[run-e2e-ranking-http] subindo Next.js real (next dev, porta $NEXT_PORT)..."
 iniciar_em_grupo bash -c "exec npx next dev --hostname 127.0.0.1 --port '$NEXT_PORT' > '$WORKDIR/next.log' 2>&1"
 

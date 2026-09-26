@@ -31,6 +31,7 @@ function textoDosLogs(logSpy: ReturnType<typeof vi.spyOn>, errorSpy: ReturnType<
 beforeEach(() => {
   redisStore.clear();
   vi.mocked(fetch).mockReset();
+  delete process.env.CHEFEBOT_E2E;
 });
 
 describe("POST /api/cliente/login — nunca vaza telefone ou codigo OTP no log", () => {
@@ -132,5 +133,64 @@ describe("POST /api/cliente/login — fluxo de numero reconhecido (waToken)", ()
 
     const segunda = await POST(requestLogin({ waToken: WA_TOKEN }));
     expect(segunda.status).toBe(429);
+  });
+});
+
+describe("BLOCKER 4 — POST /api/cliente/login — CHEFEBOT_E2E nunca aciona a Evolution real", () => {
+  test("CHEFEBOT_E2E=1 com provider Evolution configurado: NUNCA chama fetch externo, mas ainda grava o OTP no Redis (de teste)", async () => {
+    process.env.CHEFEBOT_E2E = "1";
+    process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
+    process.env.EVOLUTION_API_KEY = "chave-de-teste";
+
+    const res = await POST(requestLogin({ telefone: TELEFONE }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(redisStore.has(`cliente:otp:${TELEFONE}`)).toBe(true);
+  });
+
+  test("CHEFEBOT_E2E=1 no fluxo de waToken reconhecido também nunca chama fetch externo", async () => {
+    process.env.CHEFEBOT_E2E = "1";
+    process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
+    process.env.EVOLUTION_API_KEY = "chave-de-teste";
+    redisStore.set(`cardapio:token:${WA_TOKEN}`, { phone: PHONE_DO_TOKEN, createdAt: Date.now() });
+
+    const res = await POST(requestLogin({ waToken: WA_TOKEN }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(redisStore.has(`cliente:otp:${PHONE_DO_TOKEN}`)).toBe(true);
+  });
+
+  test("CHEFEBOT_E2E ausente preserva o comportamento de produção (chama a Evolution normalmente)", async () => {
+    process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
+    process.env.EVOLUTION_API_KEY = "chave-de-teste";
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({}) } as Response);
+
+    const res = await POST(requestLogin({ telefone: TELEFONE }));
+
+    expect(res.status).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("CHEFEBOT_E2E com qualquer valor diferente de '1' (ex.: 'true', '0') preserva o comportamento de produção — nunca um valor truthy solto libera o guard", async () => {
+    process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
+    process.env.EVOLUTION_API_KEY = "chave-de-teste";
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({}) } as Response);
+
+    // Telefones distintos por valor testado: o cooldown de reenvio é por
+    // telefone (ver teste acima), então reusar o mesmo número entre
+    // iterações daria 429 e mascararia a asserção sobre o fetch.
+    const casos: [string, string][] = [["true", "86988880001"], ["0", "86988880002"], ["yes", "86988880003"]];
+    for (const [valor, telefoneDoCaso] of casos) {
+      process.env.CHEFEBOT_E2E = valor;
+      vi.mocked(fetch).mockClear();
+      await POST(requestLogin({ telefone: telefoneDoCaso }));
+      expect(fetch).toHaveBeenCalledTimes(1);
+    }
   });
 });
