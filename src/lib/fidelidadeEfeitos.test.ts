@@ -114,6 +114,11 @@ vi.mock("./rankingIndicacaoConversao", () => ({
   marcarConversaoAtivaIndicado: marcarConversaoAtivaMock,
   obterConversaoAtivaIndicado: obterConversaoAtivaMock,
   revogarConversaoAtivaIndicadoSePedido: revogarConversaoAtivaMock,
+  // Passthrough: os testes deste arquivo já mockam cada passo individual do
+  // ciclo (obterConversaoAtiva/creditar/marcar); o lock em si (blocker de
+  // concorrência) é testado à parte em rankingIndicacaoConversao.test.ts
+  // contra o Redis real (mockado como store em memória).
+  comReservaConversaoAtiva: vi.fn(async (_indicadoId: string, fn: () => Promise<unknown>) => fn()),
 }));
 
 vi.mock("./expedienteOperacional", () => ({
@@ -499,11 +504,26 @@ describe("efeito indicacao", () => {
     }));
   });
 
-  test("'ja_creditado' (retry) nunca registra a migalha de conversão de novo", async () => {
+  test("BLOCKER 1: 'ja_creditado' (retry após crash entre o +6 e o breadcrumb) AINDA registra a migalha de conversão — nunca deixa o retry incompleto", async () => {
     obterRelacaoMock.mockResolvedValue(null);
     obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
     registrarRelacaoMock.mockResolvedValue("registrado");
     creditarIndicacaoMock.mockResolvedValue("ja_creditado");
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(registrarConversaoIndicacaoMock).toHaveBeenCalledWith(expect.objectContaining({
+      indicadorId: "cli_indicador",
+      indicadoId: "cli_canonico",
+      pedidoId: "ped_entregue",
+    }));
+  });
+
+  test("'nao_elegivel' nunca registra a migalha de conversão (fail-closed de verdade, nunca houve crédito real)", async () => {
+    obterRelacaoMock.mockResolvedValue(null);
+    obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    registrarRelacaoMock.mockResolvedValue("registrado");
+    creditarIndicacaoMock.mockResolvedValue("nao_elegivel");
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
 
@@ -535,11 +555,22 @@ describe("efeito indicacao", () => {
     expect(creditarIndicacaoMock).not.toHaveBeenCalled();
   });
 
-  test("'ja_creditado' (retry interno do ledger) nunca registra o fato de novo", async () => {
+  test("BLOCKER 1: 'ja_creditado' (retry interno do ledger) AINDA registra o fato — o fato em si é idempotente (SET NX), então repetir nunca duplica", async () => {
     obterRelacaoMock.mockResolvedValue(null);
     obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
     registrarRelacaoMock.mockResolvedValue("registrado");
     creditarIndicacaoMock.mockResolvedValue("ja_creditado");
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(store.get("ranking:gamificacao:fato:indicacao_convertida:indicacao:cli_canonico:primeira-compra:ped_entregue")).toBeTruthy();
+  });
+
+  test("'nao_elegivel' nunca registra o fato (fail-closed de verdade)", async () => {
+    obterRelacaoMock.mockResolvedValue(null);
+    obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    registrarRelacaoMock.mockResolvedValue("registrado");
+    creditarIndicacaoMock.mockResolvedValue("nao_elegivel");
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
 
@@ -649,5 +680,62 @@ describe("efeito indicacao", () => {
     expect(jornadaMock).toHaveBeenCalledTimes(1);
     // Apoio executado no retry
     expect(creditarApoioMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("BLOCKER 1 — CRASH INJETADO: falha exatamente depois do +6 e antes do breadcrumb; retry (ledger devolve ja_creditado) reconstrói TUDO que faltou, e o cancelamento posterior encontra a conversão e estorna", async () => {
+    obterRelacaoMock.mockResolvedValue(null);
+    obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    registrarRelacaoMock.mockResolvedValue("registrado");
+    obterTemporadaAtivaMock.mockResolvedValue({ temporadaId: "temp_1", tenantId: "default" });
+
+    // 1ª tentativa: o ledger credita de verdade (+6), mas o processo "morre"
+    // exatamente antes do breadcrumb ser persistido — nenhum efeito auxiliar
+    // (breadcrumb, conversão ativa, fato, missão) chega a rodar.
+    creditarIndicacaoMock.mockResolvedValueOnce("creditado");
+    registrarConversaoIndicacaoMock.mockRejectedValueOnce(new Error("crash simulado antes do breadcrumb"));
+    await expect(processarEfeitosPedidoEntregue(pedidoEntregue)).rejects.toThrow("crash simulado antes do breadcrumb");
+
+    // O que vem DEPOIS do ponto de crash (breadcrumb, conversão ativa,
+    // missão) ainda não foi persistido; o fato (que roda ANTES do breadcrumb
+    // no pipeline real) já foi — é exatamente esse "meio do caminho" que o
+    // retry precisa completar sem duplicar nada.
+    expect(marcarConversaoAtivaMock).not.toHaveBeenCalled();
+    expect(concluirMissaoIndicacaoMock).not.toHaveBeenCalled();
+
+    // Retry: o ledger real, consultado de novo com o MESMO eventoId, devolve
+    // "ja_creditado" (não recredita) — mas os efeitos auxiliares que não
+    // rodaram da vez passada precisam rodar agora.
+    creditarIndicacaoMock.mockResolvedValue("ja_creditado");
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    // Nunca duplica o +6: a segunda chamada ao ledger devolveu "ja_creditado",
+    // nunca um novo "creditado".
+    expect(registrarConversaoIndicacaoMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      indicadorId: "cli_indicador",
+      indicadoId: "cli_canonico",
+      pedidoId: "ped_entregue",
+    }));
+    expect(marcarConversaoAtivaMock).toHaveBeenCalledWith("cli_canonico", expect.objectContaining({
+      indicadorId: "cli_indicador",
+      pedidoId: "ped_entregue",
+    }));
+    expect(concluirMissaoIndicacaoMock).toHaveBeenCalledWith(expect.objectContaining({
+      clienteId: "cli_indicador",
+      pedidoId: "ped_entregue",
+    }));
+    expect(store.get("ranking:gamificacao:fato:indicacao_convertida:indicacao:cli_canonico:primeira-compra:ped_entregue")).toBeTruthy();
+
+    // Cancelamento posterior: a migalha existe (foi recriada no retry), então
+    // o cancelamento encontra a conversão e estorna corretamente.
+    obterConversaoIndicacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", indicadoId: "cli_canonico", pedidoId: "ped_entregue" });
+    const pedidoCancelado = { ...pedidoEntregue, id: "ped_entregue", status: "cancelado", statusAnterior: "entregue" };
+    await processarEfeitosPedidoCancelado(pedidoCancelado);
+
+    expect(estornarEstrelasIndicacaoMock).toHaveBeenCalledWith(expect.objectContaining({
+      indicadorId: "cli_indicador",
+      indicadoId: "cli_canonico",
+      pedidoId: "ped_entregue",
+    }));
+    expect(revogarConversaoAtivaMock).toHaveBeenCalledWith("cli_canonico", "ped_entregue");
   });
 });
