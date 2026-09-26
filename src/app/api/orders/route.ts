@@ -270,7 +270,7 @@ async function notificarConviteRanking(pedido: Pedido, statusAnterior?: Status):
   if (digitos.length < 10) return null
   const phone = sanitizePhone(pedido.telefone)
   const firstName = String(pedido.cliente || 'Cliente').trim().split(/\s+/)[0] || 'Cliente'
-  const linkRank = `${APP_BASE_URL}/cliente?fromOrder=1`
+  const linkRank = `${APP_BASE_URL}/cliente?fromOrder=1&pedido=${encodeURIComponent(pedido.id)}`
   const mensagem = `*${firstName}*, seu pedido foi enviado para a cozinha! 👨‍🍳🍕\n\nJá começamos o preparo e avisaremos você a cada etapa.\n\nE se ele também te aproximasse de uma pizza grátis? 🎁\n\nConfira sua posição no Rank e veja como participar:\n${linkRank}`
   try {
     const resultado = await enviarTextoWhatsApp(phone, mensagem)

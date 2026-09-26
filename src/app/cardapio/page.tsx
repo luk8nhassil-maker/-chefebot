@@ -3359,7 +3359,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-done" && conviteRankingPedido && (
             <RankingInviteModal
-              onParticipar={() => { window.location.href = "/cliente?fromOrder=1" }}
+              onParticipar={() => { window.location.href = `/cliente?fromOrder=1&pedido=${encodeURIComponent(pedidoConfirmado?.id ?? "")}` }}
               onDepois={adiarConviteRankingNestaSessao}
             />
           )}

@@ -4,7 +4,9 @@ import { sanitizeTelefoneCliente, clienteIdDoTelefone } from "./clientes";
 import type { PedidoSnapshotOficial } from "./pedidoSnapshot";
 import { obterRecomendacaoPresente, type RecomendacaoPresente } from "./recompensaInteligente";
 import { obterTemporadaAtiva } from "./temporadas";
-import { atualizarScoreRanking, calcularScoreDaTemporada } from "./rankingClientes";
+import { calcularScoreDaTemporada } from "./rankingClientes";
+import { projetarScoreRankingComBonus } from "./rankingScoreTemporada";
+import { comBloqueioGamificacao, chaveLockScoreRanking } from "./rankingGamificacaoLock";
 
 export type TipoRecompensa = "pizza_gratis" | "desconto_fixo" | "desconto_percentual";
 
@@ -593,6 +595,27 @@ export function construirEventoIdPontos(pedidoId: string, tipo: TipoMovimentoPon
   return sufixo ? `${tipo}:${pedidoId}:${sufixo}` : `${tipo}:${pedidoId}`;
 }
 
+export type OrigemMovimentoPontos = "indicacao" | "apoio" | "pedido" | "outro";
+
+const PREFIXOS_ORIGEM_PEDIDO = ["confirmado:", "cancelado:", "estornado:", "resgatado:", "ajuste:"];
+
+/**
+ * Classifica a origem de um movimento a partir do `eventoId` estruturado —
+ * nunca a partir da descrição em linguagem humana (`motivo`), que é texto
+ * livre para exibição e nunca deve ser usada como fonte de verdade de
+ * negócio (correção do #445: o app do cliente detectava indicação com um
+ * regex sobre a descrição). `estrelasIndicacao.ts` prefixa o eventoId com
+ * `indicacao:`/`apoio:`; créditos e ajustes do pedido em si usam
+ * `construirEventoIdPontos` (prefixo = o próprio `tipo`).
+ */
+export function classificarOrigemMovimentoPontos(eventoId: string | null | undefined): OrigemMovimentoPontos {
+  if (!eventoId) return "outro";
+  if (eventoId.startsWith("indicacao:")) return "indicacao";
+  if (eventoId.startsWith("apoio:")) return "apoio";
+  if (PREFIXOS_ORIGEM_PEDIDO.some((prefixo) => eventoId.startsWith(prefixo))) return "pedido";
+  return "outro";
+}
+
 /**
  * Meta em pontos. Prioridade: `metaPontos` explícito (se > 0) sempre vence;
  * na ausência dele, deriva de `valorPizzaFamiliaReferencia × metaPizzasFamilia`
@@ -706,17 +729,35 @@ export async function obterExtratoPontos(clienteId: string): Promise<MovimentoPo
   return (await obterEstadoPontos(clienteId)).extrato;
 }
 
-/** Atualiza a projeção do ranking sem deixar a infraestrutura de ranking
- * bloquear o crédito ou o estorno do cliente. */
+/**
+ * Recalcula a base de estrelas da temporada e delega a escrita da projeção
+ * de ranking para o único projetor autorizado (rankingScoreTemporada.ts).
+ *
+ * Importante (correção de blocker da Gamificação V2): esta função NUNCA
+ * escreve diretamente na projeção — ela só calcula a base e repassa. Isso
+ * garante que não existe um segundo "gravador base-only" da mesma chave: o
+ * projetor sempre soma o bônus de competição atual antes de gravar, então
+ * nenhum crédito/estorno/ajuste de pontos (fidelidade legada) consegue
+ * apagar um bônus de competição já creditado. fidelidade.ts continua sem
+ * nenhuma regra de negócio de gamificação — só lê o próprio extrato.
+ */
 async function sincronizarRankingCliente(clienteId: string): Promise<void> {
   try {
     const temporada = await obterTemporadaAtiva("default");
     if (!temporada?.ativadaEm) return;
-    const inicioMs = new Date(temporada.ativadaEm).getTime();
-    const fimMs = temporada.fimEm ? new Date(temporada.fimEm).getTime() : Date.now();
-    if (!Number.isFinite(inicioMs) || !Number.isFinite(fimMs)) return;
-    const resultado = calcularScoreDaTemporada(await obterExtratoPontos(clienteId), inicioMs, Math.min(fimMs, Date.now()));
-    await atualizarScoreRanking(temporada.tenantId, temporada.temporadaId, clienteId, resultado.score, resultado.primeiroAtingidoEm ?? Date.now());
+    // Lock compartilhado com rankingScoreTemporadaSync.ts: o extrato só é
+    // relido DEPOIS de garantir a exclusão mútua, para este crédito nunca
+    // escrever uma base desatualizada por cima (nem ser sobrescrito por) um
+    // crédito/estorno de bônus concorrente (residual de concorrência da
+    // auditoria do #446, seção 16 — "fidelidade update at the same instant
+    // as bonus").
+    await comBloqueioGamificacao(chaveLockScoreRanking(temporada.tenantId, temporada.temporadaId, clienteId), async () => {
+      const inicioMs = new Date(temporada.ativadaEm as string).getTime();
+      const fimMs = temporada.fimEm ? new Date(temporada.fimEm).getTime() : Date.now();
+      if (!Number.isFinite(inicioMs) || !Number.isFinite(fimMs)) return;
+      const resultado = calcularScoreDaTemporada(await obterExtratoPontos(clienteId), inicioMs, Math.min(fimMs, Date.now()));
+      await projetarScoreRankingComBonus(temporada.tenantId, temporada.temporadaId, clienteId, resultado.score, resultado.primeiroAtingidoEm ?? Date.now());
+    });
   } catch (erro) {
     console.warn("[ChefeBot] Não foi possível atualizar a projeção do ranking", erro);
   }

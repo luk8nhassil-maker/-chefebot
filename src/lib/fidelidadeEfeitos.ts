@@ -22,6 +22,22 @@ import {
 } from "./jornadaChef";
 import type { PedidoSnapshotOficial } from "./pedidoSnapshot";
 import { registrarEventoEntregue, estornarEventoAnalitico } from "./historicoAnalitico";
+import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
+import { obterTemporadaAtiva } from "./temporadas";
+import { detectarCreditoDoPedido } from "./rankingRetencao";
+import { consumirMissaoSemanalNoPedido, reverterMissaoSemanalDoPedido } from "./rankingMissaoSemanalEstado";
+import { concluirMissaoIndicacaoNoPedido, reverterMissaoIndicacaoDoPedido } from "./rankingMissaoIndicacaoEstado";
+import {
+  registrarConversaoIndicacao,
+  obterConversaoIndicacaoDoPedido,
+  marcarConversaoAtivaIndicado,
+  obterConversaoAtivaIndicado,
+  revogarConversaoAtivaIndicadoSePedido,
+  reservarOuIdentificarConversao,
+  reservaConversaoEhCandidataAOrfandade,
+  type ConversaoAtivaIndicado,
+} from "./rankingIndicacaoConversao";
+import { estornarEstrelasIndicacaoValida, estornarEstrelaApoioRecorrente } from "./estrelasIndicacao";
 import type { ItemApp } from "./pedidoAppItens";
 import type { PedidoRedis } from "@/types/pedidoRedis";
 
@@ -237,6 +253,56 @@ async function novoEstado(
 }
 
 /**
+ * BLOCKER 5: reconcilia uma reserva "processando" candidata técnica a órfã
+ * (ver reservaConversaoEhCandidataAOrfandade) usando SÓ infraestrutura já
+ * existente — o registro real do pedido dono (chave "pedidos"), o próprio
+ * pipeline de efeitos (já idempotente por construção) e a fila de
+ * pendências — nunca um TTL que deixaria outro pedido "roubar" a conversão
+ * do dono legítimo. NUNCA decide nada sozinha: só reprocessa o PRÓPRIO
+ * pedido dono da reserva, que por ser idempotente converge sozinho para o
+ * estado correto (confirma se o crédito real já existe, credita se ainda
+ * não existe, ou estorna/libera se foi cancelado nesse meio tempo). Quando o
+ * pedido dono não é encontrado, ou está num status que não é nem "entregue"
+ * nem "cancelado" (indeterminado para decidir com segurança), NUNCA mexe em
+ * nada — só registra uma pendência operacional explícita para investigação
+ * manual, exatamente como qualquer outra falha deste pipeline.
+ */
+async function reconciliarReservaOrfaIndicacao(reserva: ConversaoAtivaIndicado, tenantIdChamador: string): Promise<void> {
+  const pedidos = (await redis.get<PedidoRedis[]>("pedidos")) ?? [];
+  const pedidoOrfao = pedidos.find((item) => item.id === reserva.pedidoId);
+  if (!pedidoOrfao) {
+    await registrarPendencia(
+      reserva.pedidoId,
+      "entregue",
+      new Error("reserva_indicacao_orfa_pedido_nao_encontrado"),
+      tenantIdChamador
+    ).catch(() => undefined);
+    return;
+  }
+  try {
+    if (pedidoOrfao.status === "cancelado") {
+      await processarEfeitosPedidoCancelado({ ...pedidoOrfao, tenantId: tenantIdChamador } as PedidoParaEfeitosFidelidade);
+      return;
+    }
+    if (pedidoOrfao.status === "entregue") {
+      await processarEfeitosPedidoEntregue({ ...pedidoOrfao, tenantId: tenantIdChamador } as PedidoParaEfeitosFidelidade);
+      return;
+    }
+  } catch (error) {
+    await registrarPendencia(reserva.pedidoId, "entregue", error, tenantIdChamador).catch(() => undefined);
+    return;
+  }
+  // Status do pedido dono não é nem "entregue" nem "cancelado" — indeterminado
+  // para decidir com segurança. Nunca rouba; só deixa um rastro operacional.
+  await registrarPendencia(
+    reserva.pedidoId,
+    "entregue",
+    new Error(`reserva_indicacao_orfa_status_indeterminado:${pedidoOrfao.status}`),
+    tenantIdChamador
+  ).catch(() => undefined);
+}
+
+/**
  * Autoridade única dos efeitos de um pedido entregue. Cada consumidor fica
  * marcado separadamente: se o processo cair depois de um consumidor, o
  * retry retoma o próximo; se cair antes de persistir a marca, o consumidor
@@ -253,7 +319,7 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       await removerPendencia(pedido.id, "entregue", tenantId);
       return;
     }
-    estado = estado ?? (await novoEstado(pedido.id, "entregue", ["fidelidade_legada", "pontos", "jornada", "indicacao", "analytics"]));
+    estado = estado ?? (await novoEstado(pedido.id, "entregue", ["fidelidade_legada", "pontos", "gamificacao", "jornada", "indicacao", "analytics"]));
 
     await executarEfeito(chave, estado, "fidelidade_legada", async () => {
       await creditarFidelidadePedido({
@@ -273,28 +339,197 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
         snapshotOficial: pedido.snapshotOficial,
       });
     });
+    await executarEfeito(chave, estado, "gamificacao", async () => {
+      // Bônus de competição da temporada (Caçada ao Pódio) — nunca toca no
+      // saldo de fidelidade; só lê o que "pontos" acabou de creditar PARA
+      // ESTE pedidoId exato (nunca por janela de tempo, correção do #445) e
+      // credita o dobro num ledger separado quando há missão desbloqueada.
+      const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
+      if (!clienteId) return;
+      const temporada = await obterTemporadaAtiva(tenantId);
+      if (!temporada) return;
+      const extrato = await obterExtratoPontos(clienteId);
+      const credito = detectarCreditoDoPedido(
+        extrato.map((m) => ({ pedidoId: m.pedidoId ?? null, tipo: m.tipo, pontos: m.pontos })),
+        pedido.id,
+      );
+      if (!credito || credito.pontos <= 0) return;
+      await consumirMissaoSemanalNoPedido({
+        tenantId,
+        temporadaId: temporada.temporadaId,
+        clienteId,
+        pedidoId: pedido.id,
+        estrelasBaseDoPedido: credito.pontos,
+        agora: new Date(),
+      });
+    });
     await executarEfeito(chave, estado, "jornada", async () => {
       await processarConclusaoPedidoJornada(pedido);
     });
     await executarEfeito(chave, estado, "indicacao", async () => {
       const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
       if (!clienteId) return;
+      await processarConversaoIndicacao(clienteId);
+    });
 
-      // Relação permanente já existe → compra posterior à aquisição → apoio +1/expediente
-      const relacao = await obterRelacaoIndicacao(clienteId);
-      if (relacao) {
+    async function processarConversaoIndicacao(clienteId: string): Promise<void> {
+      // Conversão principal (+6 ao indicador, SEM apoio) — sempre pelo MESMO
+      // caminho, seja a primeira compra de sempre (relação nova) ou uma
+      // compra comercial válida substituta depois que a conversão original
+      // foi cancelada/estornada (correção de blocker: a RELAÇÃO permanente
+      // indicador→indicado nunca é apagada, mas a marca de "conversão ativa"
+      // sim — sem ela, todo pedido seguinte caía direto em apoio recorrente
+      // para sempre, mesmo sem nenhuma conversão principal ter realmente se
+      // sustentado).
+      //
+      // A reserva (reservarOuIdentificarConversao) é SEMPRE o primeiro passo,
+      // ANTES de qualquer crédito no ledger — ela é o estado DURÁVEL que
+      // sobrevive a um crash do processo entre o +6 e a confirmação
+      // (marcarConversaoAtivaIndicado). O crédito em si roda FORA de
+      // qualquer lock (pode ser lento; a segurança não depende disso), mas
+      // nunca é chamado sem a reserva ter sido concedida a este pedido
+      // primeiro — é isso que impede duas conversões principais simultâneas
+      // mesmo quando o processo morre no meio do caminho.
+      const registrarConversaoPrincipal = async (indicadorId: string) => {
+        const resultadoIndicacao = await creditarEstrelasIndicacaoValida({
+          indicadorId,
+          indicadoId: clienteId,
+          pedidoId: pedido.id,
+          primeiraCompraComercialValida: true,
+        });
+        // "creditado" e "ja_creditado" (retry do MESMO pedido, ex.: crash
+        // depois do +6 e antes do breadcrumb/conversão ativa/fato/missão)
+        // convergem para o MESMO estado final íntegro — nunca só o primeiro.
+        // Cada passo abaixo é idempotente por si só (SET plano ou SET NX por
+        // eventoId), então repeti-los num retry nunca duplica nada; só
+        // "nao_elegivel" é fail-closed de verdade (nunca houve crédito real)
+        // — mas mesmo assim a RESERVA feita por este pedido precisa ser
+        // liberada aqui, senão fica presa em "processando" para sempre e
+        // bloqueia qualquer conversão futura legítima deste indicado
+        // (revogarConversaoAtivaIndicadoSePedido só remove se a reserva
+        // ainda pertencer a este mesmo pedidoId — nunca mexe em outro).
+        if (resultadoIndicacao === "nao_elegivel") {
+          await revogarConversaoAtivaIndicadoSePedido(clienteId, pedido.id);
+          return;
+        }
+
+        // Fato de negócio "indicação convertida" registrado no MESMO instante
+        // idempotente do crédito real — nunca inferido depois por regex/diff
+        // de extrato no navegador (correção do #445). O eventoId espelha
+        // exatamente a chave de idempotência do próprio ledger, então mesmo
+        // um retry deste efeito nunca conta o fato duas vezes.
+        await registrarFatoRankingGamificacao(
+          "indicacao_convertida",
+          `indicacao:${clienteId}:primeira-compra:${pedido.id}`,
+        );
+        // Migalha para o cancelamento tardio (ver "gamificacao" do
+        // cancelado) encontrar indicador/indicado sem reconsultar a relação.
+        await registrarConversaoIndicacao({ indicadorId, indicadoId: clienteId, pedidoId: pedido.id });
+        // Confirma a reserva como a conversão ATIVA do indicado — é o que
+        // permite uma futura conversão substituta se esta também for
+        // cancelada. Só tem efeito se a reserva ainda pertencer a este
+        // MESMO pedido (comReservaConversaoAtiva/marcarConversaoAtivaIndicado
+        // nunca deixam outro pedido roubar ou sobrescrever a reserva).
+        const confirmacao = await marcarConversaoAtivaIndicado(clienteId, { indicadorId, pedidoId: pedido.id });
+        // BLOCKER 4: um worker atrasado deste MESMO pedido pode chegar aqui
+        // depois de um cancelamento já ter estornado o crédito e liberado a
+        // reserva (revogarConversaoAtivaIndicadoSePedido) — "reserva_perdida"
+        // significa que esta conversão não existe mais, então NUNCA declara
+        // ela concluída (a missão da temporada abaixo é parte de "concluir",
+        // nunca roda para uma conversão que já foi desfeita).
+        if (confirmacao === "reserva_perdida") return;
+        // Missão da temporada "Indique um amigo" — reaproveita o MESMO
+        // crédito real de indicação, nunca cria um sistema paralelo. Quem
+        // cumpre a missão é o indicador, não o indicado. Sem temporada
+        // ativa, fica fail-closed (sem missão).
+        const temporadaIndicacao = await obterTemporadaAtiva(tenantId);
+        if (temporadaIndicacao) {
+          await concluirMissaoIndicacaoNoPedido({
+            tenantId,
+            temporadaId: temporadaIndicacao.temporadaId,
+            clienteId: indicadorId,
+            pedidoId: pedido.id,
+            agora: new Date(),
+          });
+        }
+      };
+
+      const creditarApoioRecorrente = async (indicadorId: string) => {
         const snapshotOficial = pedido.snapshotOficial;
         const pedidoTemPartePaga = snapshotOficial
           ? snapshotOficial.subtotalCents > snapshotOficial.descontoFidelidadeCents
           : (pedido.total ?? 0) > (pedido.taxaEntrega ?? 0);
         await creditarEstrelaApoioRecorrente({
-          indicadorId: relacao.indicadorId,
+          indicadorId,
           indicadoId: clienteId,
           pedidoId: pedido.id,
           expedienteId: chaveExpedienteOperacional(),
           pedidoComercialValido: true,
           pedidoTemPartePaga,
         });
+      };
+
+      // Decisão única da máquina de estado — usada pelos DOIS caminhos
+      // (relação já existia; relação acabou de ser criada agora pela
+      // candidatura), nunca duas lógicas divergentes. Correção de blocker:
+      // uma corrida em que a relação é criada por este pedido, mas OUTRO
+      // pedido (que já enxergava a relação) vence a reserva e conclui a
+      // conversão principal antes deste retomar, precisa terminar com este
+      // pedido caindo em apoio recorrente (ativa_outro_pedido) — nunca
+      // creditando uma segunda vez.
+      const processarComReserva = async (indicadorId: string) => {
+        const reserva = await reservarOuIdentificarConversao(clienteId, { indicadorId, pedidoId: pedido.id });
+        if (reserva === "ativa_outro_pedido") {
+          // Já existe uma conversão principal ATIVA e sustentada → esta
+          // compra é apoio recorrente (+1/expediente), nunca uma segunda
+          // conversão.
+          await creditarApoioRecorrente(indicadorId);
+          return;
+        }
+        if (reserva === "ocupada_processando_outro") {
+          // BLOCKER 5: antes de só desistir como retryable, verifica se a
+          // reserva de OUTRO pedido é uma candidata técnica a órfã (bem mais
+          // velha que qualquer crédito real no ledger poderia legitimamente
+          // levar). Se for, reconcilia o DONO da reserva usando só
+          // infraestrutura já existente (o pedido real + o próprio pipeline
+          // idempotente) — nunca uma decisão nova, nunca "rouba" a
+          // conversão: só resolve o que o dono legítimo já deveria ter
+          // resolvido sozinho. Se ainda não for candidata (a grande maioria
+          // dos casos — apenas uma disputa normal e recente), o
+          // comportamento continua idêntico ao de sempre.
+          const atual = await obterConversaoAtivaIndicado(clienteId);
+          if (atual && reservaConversaoEhCandidataAOrfandade(atual)) {
+            await reconciliarReservaOrfaIndicacao(atual, tenantId);
+            const reservaAposReconciliacao = await reservarOuIdentificarConversao(clienteId, { indicadorId, pedidoId: pedido.id });
+            if (reservaAposReconciliacao === "ativa_outro_pedido") {
+              await creditarApoioRecorrente(indicadorId);
+              return;
+            }
+            if (reservaAposReconciliacao !== "ocupada_processando_outro") {
+              await registrarConversaoPrincipal(indicadorId);
+              return;
+            }
+            // A reconciliação não conseguiu decidir (ex.: pedido órfão
+            // ainda num status ambíguo) — nunca rouba; cai no mesmo
+            // retryable de sempre.
+          }
+          // Outro pedido está NO MEIO da própria conversão principal (ainda
+          // não confirmada) — nunca credita, nunca vira apoio "de brinde"
+          // por ter perdido a disputa. Lança para o pipeline de efeitos
+          // tratar como pendência e reprocessar depois, quando a reserva já
+          // tiver sido confirmada (ou liberada por um cancelamento).
+          throw new Error("ranking_indicacao_conversao_em_processamento");
+        }
+        // "reservada_processando" (nova reserva conseguida agora) ou
+        // "mesmo_pedido" (retry do próprio pedido, reserva ainda pertence a
+        // ele em qualquer estado) — prossegue com o crédito real.
+        await registrarConversaoPrincipal(indicadorId);
+      };
+
+      // Relação permanente já existe.
+      const relacao = await obterRelacaoIndicacao(clienteId);
+      if (relacao) {
+        await processarComReserva(relacao.indicadorId);
         return;
       }
 
@@ -302,18 +537,28 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       const candidatura = await obterCandidaturaIndicacao(clienteId);
       if (!candidatura) return;
 
-      // Confirma relação permanente (first-write-wins); se outro worker venceu a corrida, pula
+      // Confirma relação permanente (first-write-wins).
       const confirmado = await registrarRelacaoIndicacao(clienteId, candidatura.indicadorId);
-      if (confirmado !== "registrado") return;
+      // self_referral é fail-closed de verdade: nunca existe relação para
+      // reler, nunca há conversão a reservar.
+      if (confirmado === "self_referral") return;
+      if (confirmado === "ja_existe") {
+        // BLOCKER: outro worker já confirmou a relação ANTES deste (ex.:
+        // esse outro worker morreu logo depois, sem nunca chegar a
+        // reservar a conversão principal). Nunca confia na candidatura
+        // antiga (que pode nem ser o indicadorId vencedor) — relê a
+        // relação CANÔNICA do Redis e passa pela MESMA máquina de reserva
+        // (processarComReserva), exatamente como o caminho "relação já
+        // existia" — nunca uma terceira lógica. Sem isso, a primeira
+        // compra comercial válida podia terminar sem nenhum +6.
+        const relacaoCanonica = await obterRelacaoIndicacao(clienteId);
+        if (!relacaoCanonica) return;
+        await processarComReserva(relacaoCanonica.indicadorId);
+        return;
+      }
 
-      // Primeira compra comercial válida: +6 ao indicador — SEM apoio neste evento
-      await creditarEstrelasIndicacaoValida({
-        indicadorId: candidatura.indicadorId,
-        indicadoId: clienteId,
-        pedidoId: pedido.id,
-        primeiraCompraComercialValida: true,
-      });
-    });
+      await processarComReserva(candidatura.indicadorId);
+    }
 
     await executarEfeito(chave, estado, "analytics", async () => {
       await registrarEventoEntregue({
@@ -356,7 +601,7 @@ export async function processarEfeitosPedidoCancelado(pedido: PedidoParaEfeitosF
       await removerPendencia(pedido.id, "cancelado", tenantId);
       return;
     }
-    estado = estado ?? (await novoEstado(pedido.id, "cancelado", ["pontos", "resgate", "jornada", "analytics"]));
+    estado = estado ?? (await novoEstado(pedido.id, "cancelado", ["pontos", "resgate", "gamificacao", "jornada", "analytics"]));
 
     await executarEfeito(chave, estado, "pontos", async () => {
       const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
@@ -400,6 +645,58 @@ export async function processarEfeitosPedidoCancelado(pedido: PedidoParaEfeitosF
       if (!pedido.resgateId) return;
       const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
       if (clienteId) await reverterResgateConfirmado(clienteId, pedido.resgateId, `Pedido ${pedido.id} cancelado`);
+    });
+    await executarEfeito(chave, estado, "gamificacao", async () => {
+      // Nunca deixa o cliente "perder a chance" da missão semanal por causa
+      // de um cancelamento: se ESTE pedido exato consumiu a missão, o
+      // estorno do bônus e a reabertura da missão acontecem juntos aqui.
+      // Sem migalha para este pedido, é no-op (nunca mexe no estado de
+      // nenhum outro cliente/pedido).
+      await reverterMissaoSemanalDoPedido(pedido.id, `Pedido ${pedido.id} cancelado`);
+      // Cancelamento tardio da indicação: se este pedido (a primeira compra
+      // do indicado) já tinha creditado a indicação real e concluído a
+      // missão da temporada do indicador, reverte os dois — nunca deixa uma
+      // vantagem de jogo (nem de estrelas base, nem de bônus de competição)
+      // baseada num pedido comercial que virou inválido.
+      const motivoCancelamento = `Pedido ${pedido.id} cancelado`;
+      let conversao = await obterConversaoIndicacaoDoPedido(pedido.id);
+      if (!conversao) {
+        // Sem a migalha (breadcrumb): pode ser que este pedido nunca gerou
+        // indicação nenhuma, OU que ele reservou a conversão principal,
+        // creditou o +6, e o processo morreu ANTES de gravar o breadcrumb
+        // (o breadcrumb é escrito DEPOIS do crédito real — nunca depender só
+        // dele, ou um crash exatamente nessa janela deixaria o +6 sem
+        // estorno possível para sempre). O estado DURÁVEL da reserva
+        // (rankingIndicacaoConversao.ts) é escrito ANTES do crédito e por
+        // isso é a fonte de verdade mais confiável para descobrir
+        // indicador/indicado neste caso — indexado por indicadoId, então
+        // primeiro é preciso saber quem é o indicado deste pedido.
+        const indicadoId = derivarClienteIdPorTelefone(pedido.telefone);
+        if (indicadoId) {
+          const reserva = await obterConversaoAtivaIndicado(indicadoId);
+          if (reserva?.pedidoId === pedido.id) {
+            conversao = { indicadorId: reserva.indicadorId, indicadoId, pedidoId: pedido.id };
+          }
+        }
+      }
+      if (conversao) {
+        // Idempotente e seguro mesmo se nenhum crédito real chegou a
+        // acontecer (reserva "processando" cancelada antes do +6): devolve
+        // "credito_nao_encontrado" e não escreve nada no ledger.
+        await estornarEstrelasIndicacaoValida({ ...conversao, motivo: motivoCancelamento });
+        // Libera a marca de conversão (em qualquer estado — processando OU
+        // ativa; só se ainda for esta mesma) — sem isso, uma reserva
+        // "processando" órfã travaria QUALQUER conversão futura deste
+        // indicado para sempre, e uma "ativa" travaria em apoio recorrente
+        // para sempre, mesmo sem nenhuma conversão principal sustentada.
+        await revogarConversaoAtivaIndicadoSePedido(conversao.indicadoId, pedido.id);
+      }
+      await reverterMissaoIndicacaoDoPedido(pedido.id, motivoCancelamento);
+      // Cancelamento tardio do apoio recorrente (+1/expediente): nunca
+      // remove a Estrela quando outro pedido comercial válido do mesmo
+      // expediente ainda a sustenta — no-op para um pedido que nunca
+      // qualificou para apoio nenhum.
+      await estornarEstrelaApoioRecorrente({ pedidoId: pedido.id, motivo: motivoCancelamento });
     });
     await executarEfeito(chave, estado, "jornada", async () => {
       await reverterConclusaoPedidoJornada(pedido.id, `Pedido ${pedido.id} cancelado`);

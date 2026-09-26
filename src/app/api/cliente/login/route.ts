@@ -11,6 +11,17 @@ function sanitizePhoneEnvio(telefone: string): string {
 }
 
 async function enviarOtpPorWhatsapp(telefone: string, codigo: string): Promise<void> {
+  // Guarda de segurança do E2E HTTP local (scripts/e2e-ranking-gamificacao-http.mjs
+  // + scripts/run-e2e-ranking-http.sh): com CHEFEBOT_E2E=1, o código já foi
+  // gerado e gravado no Redis LOCAL de teste por gerarOtp (chamado antes
+  // desta função) — a aplicação NUNCA chama a Evolution API real neste modo,
+  // mesmo que EVOLUTION_API_URL/EVOLUTION_API_KEY estejam configuradas no
+  // ambiente (ex.: herdadas de .env.local). Fora do E2E, CHEFEBOT_E2E nunca é
+  // "1" e este guard não muda nada do comportamento de produção/dev normal.
+  if (process.env.CHEFEBOT_E2E === "1") {
+    console.log("[ChefeBot] CHEFEBOT_E2E=1 — OTP gerado só no Redis de teste; Evolution nunca é chamada.");
+    return;
+  }
   const texto = `Seu código para entrar no ChefeBot é: *${codigo}*\n\nVale por 5 minutos.`;
   const config = obterConfigEvolution();
   if (!config) {

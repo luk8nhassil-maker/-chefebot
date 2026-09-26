@@ -15,6 +15,7 @@ import {
   calcularSaldoEstrelas,
   estrelasV1Ativa,
   metaEstrelasDaConfig,
+  classificarOrigemMovimentoPontos,
 } from "@/lib/fidelidade";
 
 // GET /api/cliente/fidelidade — saldo, progresso e extrato da fidelidade por
@@ -75,6 +76,10 @@ export async function GET(req: NextRequest) {
       ...(m.unidade ? { unidade: m.unidade } : {}),
       descricao: m.motivo,
       criadoEm: m.createdAt,
+      // Origem estruturada (a partir do eventoId interno, nunca da
+      // descrição em texto livre) — usada pelo cliente para reconhecer uma
+      // indicação convertida sem depender de regex sobre `descricao`.
+      origem: classificarOrigemMovimentoPontos(m.eventoId ?? null),
     }));
 
   // Recompensas abertas (ainda resgatáveis) e histórico separado — o front

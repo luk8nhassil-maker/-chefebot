@@ -8,6 +8,21 @@ import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
 import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
 import { destinoNextPermitido } from '@/lib/clientePedidos'
 import { fetchCliente, guardarSessaoFallback, limparSessaoFallback, telemetria } from '@/lib/clienteSessaoFront'
+import {
+  detectarCreditoDoPedido,
+  detectarConquistaRanking,
+  textoConquistaRanking,
+} from '@/lib/rankingRetencao'
+import { NOME_STATUS_TEMPORADA, textoStatusSocialCompartilhavel } from '@/lib/rankingGamificacao'
+import type {
+  PainelFidelidade,
+  VariacaoPosicaoRanking,
+  FinalidadePrivacidadeRanking,
+  PreferenciasPrivacidadeRanking,
+  StatusTemporadaSocial,
+} from './painelFidelidadeTipos'
+import { FidelidadeRankingScreen } from './FidelidadeRankingScreen'
+import type { EventoRankingRetencao } from '@/lib/rankingRetencaoTelemetria'
 
 type Movimento = {
   id: string
@@ -16,6 +31,9 @@ type Movimento = {
   pontos: number
   descricao: string
   criadoEm: string
+  // Origem estruturada (classificada no servidor a partir do eventoId
+  // interno) — nunca inferida no cliente a partir de `descricao`.
+  origem?: 'indicacao' | 'apoio' | 'pedido' | 'outro'
 }
 
 type Recompensa = { recompensaId: string; status: string; criadoEm: string; descricao: string }
@@ -44,60 +62,6 @@ type Fidelidade = {
   metaAtingida: boolean
   extrato: Movimento[]
   recompensas: Recompensa[]
-}
-
-type PainelFidelidade = {
-  temporada: {
-    nome: string | null
-    diasRestantes: number | null
-    fimEm: string | null
-    estado: string
-  } | null
-  ranking: {
-    posicao: number
-    score: number
-    participaCampanha: boolean
-    entorno: { posicao: number; eVoce: boolean }[]
-    lista: {
-      posicao: number
-      score: number
-      eVoce: boolean
-      participaCampanha: boolean
-      nomePublico?: string
-      telefoneMascarado?: string
-    }[]
-    variacaoPosicao: VariacaoPosicaoRanking | null
-    participantes: {
-      posicao: number | null
-      total: number
-      variacaoPosicao: VariacaoPosicaoRanking | null
-      lista: {
-        posicao: number
-        score: number
-        eVoce: boolean
-        participaCampanha: true
-        nomePublico?: string
-        telefoneMascarado?: string
-      }[]
-    }
-  } | null
-}
-
-type VariacaoPosicaoRanking = { direcao: 'subiu' | 'desceu' | 'manteve'; casas: number }
-
-type FinalidadePrivacidadeRanking = 'ranking_primeiro_nome' | 'ranking_telefone_mascarado' | 'ranking_foto_perfil'
-
-type PreferenciasPrivacidadeRanking = {
-  participaCampanha: boolean
-  finalidades: Array<{
-    finalidade: FinalidadePrivacidadeRanking
-    texto: string | null
-    textoVersao: string | null
-    disponivel: boolean
-    motivoIndisponivel: 'texto_nao_aprovado' | 'infraestrutura_nao_configurada' | 'fonte_oficial_indisponivel' | null
-    estado: 'concedido' | 'revogado'
-    atualizadoEm: string | null
-  }>
 }
 
 type PedidoResumo = {
@@ -172,7 +136,13 @@ const FIDELIDADE_PREVIEW: Fidelidade = {
 }
 
 const PAINEL_PREVIEW: PainelFidelidade = {
-  temporada: { nome: 'Temporada Preview', diasRestantes: 30, fimEm: null, estado: 'ativa' },
+  temporada: {
+    nome: 'Temporada Preview',
+    diasRestantes: 30,
+    fimEm: null,
+    estado: 'ativa',
+    premio: { descricao: '1 Pizza Família', quantidadePremiados: 3 },
+  },
   ranking: {
     posicao: 8,
     score: 20,
@@ -204,9 +174,37 @@ const PAINEL_PREVIEW: PainelFidelidade = {
         { posicao: 5, score: 20, eVoce: true, participaCampanha: true, nomePublico: 'Lucas', telefoneMascarado: '(99) 99999-**91' },
         { posicao: 6, score: 18, eVoce: false, participaCampanha: true, nomePublico: 'Julia', telefoneMascarado: '(51) 94444-**26' },
       ],
+      alvo: { estado: 'alcancar', alvoPosicao: 4, necessario: 3, scoreAlvo: 22 },
+      disputa: {
+        acima: { posicao: 4, score: 22, eVoce: false, nomePublico: 'Rafael', telefoneMascarado: '(41) 95555-**63' },
+        voce: { posicao: 5, score: 20, eVoce: true, nomePublico: 'Lucas', telefoneMascarado: '(99) 99999-**91' },
+        abaixo: { posicao: 6, score: 18, eVoce: false, nomePublico: 'Julia', telefoneMascarado: '(51) 94444-**26' },
+        sozinho: false,
+      },
     },
   },
+  indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+  gamificacao: {
+    statusSocial: null,
+    bonusCompeticao: 0,
+    missaoSemanal: { status: 'desbloqueada' },
+    missaoIndicacao: { concluida: false },
+    nivelChef: { nivel: 2, nome: 'Cozinheiro', xpAtual: 240, xpProximoNivel: 500 },
+    movimentoRecente: null,
+    coroaAmeacada: false,
+  },
 }
+
+// Cenários fixture do selo social (Caçada ao Pódio + os 4 status herdados do
+// Top 10 anterior) — só existem no Preview local, para permitir a validação
+// visual dos 5 estados exigidos sem depender de dados reais de temporada.
+const CENARIOS_STATUS_SOCIAL_PREVIEW: { rotulo: string; valor: StatusTemporadaSocial }[] = [
+  { rotulo: 'Caçada ao Pódio', valor: null },
+  { rotulo: 'Campeão', valor: 'campeao' },
+  { rotulo: 'Prata', valor: 'prata' },
+  { rotulo: 'Bronze', valor: 'bronze' },
+  { rotulo: 'Elite Top 10', valor: 'elite' },
+]
 
 type PreviewFidelidadeMobileProps = {
   aviso: string
@@ -218,6 +216,7 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
   const [modalCompartilhar, setModalCompartilhar] = useState(false)
   const [modalRankingConsentimento, setModalRankingConsentimento] = useState(false)
   const [mostrarRanking, setMostrarRanking] = useState(false)
+  const [statusSocialPreview, setStatusSocialPreview] = useState<StatusTemporadaSocial>(null)
   const progresso = Math.max(0, Math.min(100, FIDELIDADE_PREVIEW.progressoPercentual))
   const nome = PERFIL_PREVIEW.cliente.nome ?? 'Cliente'
   const primeiroNome = nome.split(' ')[0]
@@ -231,12 +230,18 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
       <FidelidadeRankingScreen
         ranking={PAINEL_PREVIEW.ranking}
         temporada={PAINEL_PREVIEW.temporada}
+        indicacao={PAINEL_PREVIEW.indicacao}
+        gamificacao={PAINEL_PREVIEW.gamificacao}
         privacidade={null}
         privacidadeCarregando={false}
         privacidadeSalvando={null}
         privacidadeErro=""
         onAlterarPrivacidade={() => undefined}
         onRevogarTodas={() => undefined}
+        onIndicarAmigo={() => onAviso('Indicação simulada no Preview. Nenhum link real foi criado.')}
+        onCompartilharConquista={() => onAviso('Compartilhamento simulado no Preview. Nenhum link real foi criado.')}
+        onNovoPedido={() => onAviso('No Preview, um novo pedido não é criado de verdade.')}
+        onTelemetria={() => undefined}
         onClose={() => {
           setMostrarRanking(false)
           onAviso('')
@@ -263,6 +268,38 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
       </header>
 
       {aviso && <div className="cf-preview-notice" role="status">{aviso}</div>}
+
+      <div role="group" aria-label="Cenário do selo social (Preview)" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '0 0 12px' }}>
+        {CENARIOS_STATUS_SOCIAL_PREVIEW.map((cenario) => (
+          <button
+            key={cenario.rotulo}
+            type="button"
+            onClick={() => setStatusSocialPreview(cenario.valor)}
+            style={{
+              border: `1px solid ${cores.cardBorda}`,
+              borderRadius: 999,
+              padding: '4px 10px',
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: 'pointer',
+              background: statusSocialPreview === cenario.valor ? cores.amarelo : 'transparent',
+              color: statusSocialPreview === cenario.valor ? cores.amareloTexto : cores.textoSecundario,
+            }}
+          >
+            {cenario.rotulo}
+          </button>
+        ))}
+      </div>
+
+      {statusSocialPreview && (
+        <div style={{ margin: '0 0 14px' }}>
+          <StatusSocialFidelidadeBadge
+            status={statusSocialPreview}
+            onCompartilhar={() => onAviso('Compartilhamento do status simulado no Preview. Nenhum link real foi criado ou enviado.')}
+            compartilhando={false}
+          />
+        </div>
+      )}
 
       <section className="cf-preview-stars" aria-label="Resumo das Estrelas">
         <p className="cf-preview-kicker">SUAS ESTRELAS</p>
@@ -338,6 +375,66 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
   )
 }
 
+// Selo do status social (Campeão/Prata/Bronze/Elite) herdado do Top 10 da
+// temporada anterior — concentrado no card de Fidelidade/Ranking da área
+// autenticada /cliente (nunca no checkout/cardápio). Campeão ganha um
+// acabamento premium (fundo navy sólido + coroa); Prata/Bronze/Elite têm um
+// selo compacto próprio, nas mesmas cores já usadas em FidelidadeRankingScreen.
+const CORES_SELO_STATUS_SOCIAL: Record<Exclude<StatusTemporadaSocial, null | 'campeao'>, { bg: string; fg: string }> = {
+  prata: { bg: 'linear-gradient(110deg, #eef2f6, #d9e1e8)', fg: '#4a5568' },
+  bronze: { bg: 'linear-gradient(110deg, #f3ded0, #e6b58b)', fg: '#7b4322' },
+  elite: { bg: 'linear-gradient(110deg, #e7f0ff, #d5e6ff)', fg: '#2a548f' },
+}
+const ICONE_STATUS_SOCIAL: Record<Exclude<StatusTemporadaSocial, null>, string> = {
+  campeao: '👑', prata: '🥈', bronze: '🥉', elite: '✦',
+}
+
+type StatusSocialFidelidadeBadgeProps = {
+  status: StatusTemporadaSocial
+  onCompartilhar: () => void
+  compartilhando: boolean
+}
+
+function StatusSocialFidelidadeBadge({ status, onCompartilhar, compartilhando }: StatusSocialFidelidadeBadgeProps) {
+  if (!status) return null
+  if (status === 'campeao') {
+    return (
+      <div style={{ background: cores.navyCard, color: cores.navyCardTexto, borderRadius: 16, padding: '16px 18px', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ fontSize: 30 }} aria-hidden="true">👑</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <strong style={{ display: 'block', fontSize: 14.5, color: cores.amarelo }}>Campeão da temporada anterior</strong>
+          <span style={{ fontSize: 11.5, opacity: 0.85 }}>Sua vantagem de largada já está aplicada nesta temporada.</span>
+        </div>
+        <button
+          type="button"
+          onClick={onCompartilhar}
+          disabled={compartilhando}
+          style={{ flex: 'none', border: 0, borderRadius: 10, padding: '8px 12px', background: cores.amarelo, color: cores.amareloTexto, fontWeight: 700, fontSize: 11.5, cursor: 'pointer', opacity: compartilhando ? 0.6 : 1 }}
+        >
+          {compartilhando ? '...' : 'Compartilhar'}
+        </button>
+      </div>
+    )
+  }
+  const estilo = CORES_SELO_STATUS_SOCIAL[status]
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 999, background: estilo.bg, color: estilo.fg, fontWeight: 800, fontSize: 12 }}>
+        <span aria-hidden="true">{ICONE_STATUS_SOCIAL[status]}</span>
+        {NOME_STATUS_TEMPORADA[status]} · temporada anterior
+      </span>
+      <button
+        type="button"
+        onClick={onCompartilhar}
+        disabled={compartilhando}
+        style={{ flex: 'none', border: `1px solid ${cores.cardBorda}`, borderRadius: 10, padding: '6px 10px', background: 'transparent', color: cores.textoSecundario, fontWeight: 700, fontSize: 11, cursor: 'pointer', opacity: compartilhando ? 0.6 : 1 }}
+      >
+        {compartilhando ? '...' : 'Compartilhar'}
+      </button>
+    </div>
+  )
+}
+
 type FidelidadeMobileScreenProps = {
   nome: string
   saldo: number
@@ -346,12 +443,15 @@ type FidelidadeMobileScreenProps = {
   progresso: number
   diasRestantes: number | null
   ranking: PainelFidelidade['ranking']
+  statusSocial: StatusTemporadaSocial
   aviso: string
   onSair: () => void
   onPresentes: () => void
   onExtrato: () => void
   onRanking: () => void
   onIndicacao: () => void
+  onCompartilharStatus: () => void
+  compartilhandoStatus: boolean
   indicando: boolean
 }
 
@@ -359,8 +459,8 @@ type FidelidadeMobileScreenProps = {
  * O componente só recebe dados já calculados pelo servidor; não cria regra,
  * pontuação, recompensa ou posição localmente. */
 function FidelidadeMobileScreen({
-  nome, saldo, meta, faltam, progresso, diasRestantes, ranking, aviso,
-  onSair, onPresentes, onExtrato, onRanking, onIndicacao, indicando,
+  nome, saldo, meta, faltam, progresso, diasRestantes, ranking, statusSocial, aviso,
+  onSair, onPresentes, onExtrato, onRanking, onIndicacao, onCompartilharStatus, compartilhandoStatus, indicando,
 }: FidelidadeMobileScreenProps) {
   const primeiroNome = nome.split(' ')[0] || 'Cliente'
   const inicial = primeiroNome.slice(0, 1).toUpperCase()
@@ -376,6 +476,12 @@ function FidelidadeMobileScreen({
       </header>
 
       {aviso && <div className="cf-preview-notice" role="status">{aviso}</div>}
+
+      {statusSocial && (
+        <div style={{ margin: '0 0 14px' }}>
+          <StatusSocialFidelidadeBadge status={statusSocial} onCompartilhar={onCompartilharStatus} compartilhando={compartilhandoStatus} />
+        </div>
+      )}
 
       <section className="cf-preview-stars" aria-label="Resumo das Estrelas">
         <p className="cf-preview-kicker">SUAS ESTRELAS</p>
@@ -414,123 +520,6 @@ function FidelidadeMobileScreen({
         <p>Indique um amigo. Quando ele fizer o primeiro pedido, você avança.</p>
         <button type="button" onClick={onIndicacao} disabled={indicando}>{indicando ? 'Aguarde...' : 'Indicar amigo'}</button>
       </section>
-    </main>
-  )
-}
-
-type FidelidadeRankingScreenProps = {
-  ranking: NonNullable<PainelFidelidade['ranking']>
-  temporada: PainelFidelidade['temporada']
-  privacidade: PreferenciasPrivacidadeRanking | null
-  privacidadeCarregando: boolean
-  privacidadeSalvando: FinalidadePrivacidadeRanking | 'todas' | null
-  privacidadeErro: string
-  onAlterarPrivacidade: (
-    finalidade: FinalidadePrivacidadeRanking,
-    estado: 'concedido' | 'revogado',
-    textoVersao: string | null,
-  ) => void
-  onRevogarTodas: () => void
-  onClose: () => void
-}
-
-/** Pódio detalhado: scores são reais; a identidade opcional ja chega como um
- * DTO minimo produzido pela protecao server-side. */
-function FidelidadeRankingScreen({
-  ranking,
-  temporada,
-  privacidade,
-  privacidadeCarregando,
-  privacidadeSalvando,
-  privacidadeErro,
-  onAlterarPrivacidade,
-  onRevogarTodas,
-  onClose,
-}: FidelidadeRankingScreenProps) {
-  const [aba, setAba] = useState<'participantes' | 'minha' | 'geral'>('participantes')
-  const lista = [...ranking.lista].sort((a, b) => a.posicao - b.posicao)
-  const listaSemPodio = lista.filter((entrada) => entrada.posicao > 3)
-  // Posição própria de quem "Vale prêmio": reindexada só entre participantes
-  // pelo servidor (src/app/api/cliente/fidelidade/painel/route.ts), nunca a
-  // posição do ranking geral — um participante pode estar no pódio aqui
-  // mesmo fora do Top 3 geral, se os primeiros colocados não participarem.
-  const participantes = [...ranking.participantes.lista].sort((a, b) => a.posicao - b.posicao)
-  const podium = participantes.filter((entrada) => entrada.posicao <= 3)
-  const linhas = aba === 'minha'
-    ? lista.filter((entrada) => entrada.eVoce)
-    : aba === 'geral' ? listaSemPodio : participantes.filter((entrada) => entrada.posicao > 3)
-  const nomeSeguro = (entrada: { eVoce: boolean; participaCampanha: boolean; posicao: number; nomePublico?: string }) => {
-    if (entrada.eVoce && !entrada.participaCampanha) return 'Você — não participa do prêmio'
-    if (!entrada.participaCampanha) return 'Fora da disputa'
-    return entrada.eVoce ? 'Você' : entrada.nomePublico || `Participante ${entrada.posicao}`
-  }
-  const avatarSeguro = (entrada: { eVoce: boolean; nomePublico?: string } | undefined) =>
-    entrada?.eVoce ? 'V' : entrada?.nomePublico?.slice(0, 1).toUpperCase() || null
-  const scoreSeguro = (score: number) => (
-    <span className="cf-ranking-score"><Star size={16} fill="currentColor" strokeWidth={1.8} aria-hidden="true" />{score}</span>
-  )
-  // Histórico honesto: só mostra selo quando o servidor tem um snapshot
-  // anterior real para comparar (variacaoPosicao null = sem histórico ainda,
-  // e "manteve" não gera selo — não há o que destacar).
-  const variacaoDaAba = aba === 'participantes' ? ranking.participantes.variacaoPosicao : ranking.variacaoPosicao
-  const seloVariacao = (variacao: VariacaoPosicaoRanking | null) => {
-    if (!variacao || variacao.direcao === 'manteve') return null
-    const cor = variacao.direcao === 'subiu' ? 'var(--success-text)' : 'var(--danger-text)'
-    const seta = variacao.direcao === 'subiu' ? '▲' : '▼'
-    return <small style={{ color: cor, fontWeight: 700 }}>{seta} {variacao.casas} desde ontem</small>
-  }
-
-  return (
-    <main className="cf-ranking-screen" aria-label="Pódio Chefe">
-      <header className="cf-ranking-header">
-        <button type="button" onClick={onClose} aria-label="Voltar para Fidelidade">‹</button>
-        <div>
-          <h1>Rank</h1>
-          <p>Suba com suas estrelas e ganhe presentes.</p>
-        </div>
-      </header>
-
-      <section className="cf-ranking-podium" aria-label="Melhores posições">
-        {[2, 1, 3].map((posicao) => {
-          const entrada = podium.find((item) => item.posicao === posicao)
-          return (
-            <div key={posicao} className={`cf-ranking-podium-item cf-ranking-podium-${posicao}`}>
-              <div className="cf-ranking-medal">{posicao}</div>
-              <div className="cf-ranking-avatar">{avatarSeguro(entrada) ?? <Star size={16} fill="currentColor" strokeWidth={1.8} aria-hidden="true" />}</div>
-              <strong>{entrada ? nomeSeguro(entrada) : `Posição ${posicao}`}</strong>
-              <b>{entrada ? scoreSeguro(entrada.score) : 'Prêmio em breve'}</b>
-            </div>
-          )
-        })}
-      </section>
-
-      <div className="cf-ranking-tabs" role="tablist" aria-label="Filtro do ranking">
-        {([['participantes', 'Participando'], ['minha', 'Minha posição'], ['geral', 'Todos']] as const).map(([id, label]) => (
-          <button key={id} type="button" role="tab" aria-selected={aba === id} className={aba === id ? 'ativo' : ''} onClick={() => setAba(id)}>{label}</button>
-        ))}
-      </div>
-
-      <section className="cf-ranking-list" aria-label="Lista de posições">
-        {linhas.length === 0 ? <p className="cf-ranking-empty">Sua posição ainda não apareceu no ranking desta temporada.</p> : linhas.map((entrada) => (
-          <div key={entrada.posicao} className={`cf-ranking-row ${entrada.eVoce ? 'voce' : ''}`}>
-            <strong>{entrada.posicao}</strong>
-            <span className="cf-ranking-row-avatar">{avatarSeguro(entrada) ?? <Star size={15} fill="currentColor" strokeWidth={1.8} aria-hidden="true" />}</span>
-            <span className="cf-ranking-row-name">
-              {nomeSeguro(entrada)}
-              {entrada.eVoce && seloVariacao(variacaoDaAba)}
-              {entrada.telefoneMascarado && <small>{entrada.telefoneMascarado}</small>}
-            </span>
-            <b>{scoreSeguro(entrada.score)}</b>
-          </div>
-        ))}
-        {aba === 'participantes' && <p className="cf-ranking-footnote">Mostrando posições próximas a você.</p>}
-        {aba === 'geral' && <p className="cf-ranking-footnote">Quem não autorizou não concorre ao prêmio.</p>}
-      </section>
-
-      <section className="cf-ranking-note">
-        <span>🏆</span><div><strong>Acumule estrelas para subir</strong><p>As estrelas desta temporada contam para sua posição.</p></div>
-      </section>
-
     </main>
   )
 }
@@ -700,11 +689,21 @@ export default function ClientePage() {
   const [privacidadeErro, setPrivacidadeErro] = useState('')
   const [indicacaoToken, setIndicacaoToken] = useState<string | null>(null)
   const [compartilhandoIndicacao, setCompartilhandoIndicacao] = useState(false)
+  const [compartilhandoConquista, setCompartilhandoConquista] = useState(false)
+  const [compartilhandoStatus, setCompartilhandoStatus] = useState(false)
+  // Feedback pós-pedido para quem já participa: começa "pendente" ao chegar
+  // de um pedido concluído e só vira "creditado" com dado confirmado real do
+  // extrato (nunca promete crédito antes da confirmação do servidor).
+  const [posPedido, setPosPedido] = useState<{ estado: 'pendente' | 'creditado'; estrelasGanhas?: number; pedidoId: string | null } | null>(null)
   const [resgatando, setResgatando] = useState(false)
   const [resgateErro, setResgateErro] = useState('')
   const [mobilePanel, setMobilePanel] = useState<'presentes' | 'extrato' | 'ranking' | null>(null)
   const [rankingConsentModal, setRankingConsentModal] = useState(false)
   const convitePosPedidoRef = useRef(false)
+  // Pedido exato que trouxe o cliente de volta (query ?pedido=), usado para o
+  // feedback pós-pedido nunca inferir crédito por proximidade de tempo — só
+  // pelo pedidoId real (ver detectarCreditoDoPedido).
+  const pedidoPosPedidoRef = useRef<string | null>(null)
   // Vínculo reconhecido: token opaco + máscaras vindas do servidor.
   const [waToken, setWaToken] = useState('')
   const [waMascarado, setWaMascarado] = useState('')
@@ -789,12 +788,30 @@ export default function ClientePage() {
     setPerfilErro(true)
   }
 
+  // Reconhece indicações convertidas em pedido válido a partir do extrato já
+  // confirmado no servidor — nunca client-side "acha" que converteu; só
+  // confirma um movimento de crédito que já existe no ledger. O marcador
+  // local evita repetir o evento a cada recarregamento da tela.
   async function carregarFidelidade(): Promise<void> {
     setFidelidadeErro(false)
     try {
       const res = await fetchCliente('/api/cliente/fidelidade', { cache: 'no-store' }, sessaoMemRef.current)
       telemetria('fidelity_request_status', { status: res.status, trace: traceId })
-      if (res.ok) { setFidelidade(await res.json()); return }
+      if (res.ok) {
+        const data = await res.json()
+        setFidelidade(data)
+        if (Array.isArray(data?.extrato)) {
+          // "Indicação convertida" agora é um fato registrado no servidor no
+          // exato instante do crédito (fidelidadeEfeitos.ts), nunca inferido
+          // aqui por regex/diff de extrato + localStorage (correção do #445).
+          setPosPedido((atual) => {
+            if (atual?.estado !== 'pendente') return atual
+            const credito = detectarCreditoDoPedido(data.extrato as Movimento[], atual.pedidoId)
+            return credito ? { ...atual, estado: 'creditado', estrelasGanhas: credito.pontos } : atual
+          })
+        }
+        return
+      }
     } catch {}
     setFidelidadeErro(true)
   }
@@ -898,6 +915,8 @@ export default function ClientePage() {
       })
       await carregarPainel()
       setMobilePanel(null)
+      // O fato "participação revogada" agora é registrado no próprio
+      // endpoint DELETE (servidor), nunca a partir do clique no navegador.
     } catch {
       setPrivacidadeErro('Não conseguimos concluir a revogação. Tente novamente.')
     }
@@ -927,8 +946,92 @@ export default function ClientePage() {
       } else {
         await navigator.clipboard.writeText(url)
       }
+      if (!indicacaoToken) telemetriaRanking('link_indicacao_gerado')
     } catch {}
     setCompartilhandoIndicacao(false)
+  }
+
+  // Telemetria da experiência de retenção do ranking — best-effort, nunca em
+  // Preview (nenhuma chamada real deve sair de dados fictícios) e sem
+  // qualquer identificador ou dado pessoal do cliente (ver
+  // rankingRetencaoTelemetria.ts).
+  function telemetriaRanking(tipo: EventoRankingRetencao) {
+    if (modoPreview) return
+    try {
+      fetchCliente('/api/cliente/ranking/evento', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo }),
+      }, sessaoMemRef.current).catch(() => {})
+    } catch {}
+  }
+
+  async function compartilharConquistaRanking() {
+    if (modoPreview) {
+      setPreviewAviso('O compartilhamento foi simulado. Nenhum link real foi criado ou enviado.')
+      return
+    }
+    const conquista = painel?.ranking
+      ? detectarConquistaRanking({
+          posicao: painel.ranking.participantes.posicao ?? painel.ranking.posicao,
+          variacao: painel.ranking.participantes.variacaoPosicao,
+        })
+      : null
+    const posicao = painel?.ranking?.participantes.posicao ?? painel?.ranking?.posicao ?? null
+    if (posicao === null) return
+    setCompartilhandoConquista(true)
+    try {
+      let token = indicacaoToken
+      if (!token) {
+        const res = await fetchCliente('/api/cliente/indicacao', { cache: 'no-store' }, sessaoMemRef.current)
+        if (res.ok) {
+          const data = await res.json()
+          token = typeof data.token === 'string' ? data.token : null
+          if (token) { setIndicacaoToken(token); telemetriaRanking('link_indicacao_gerado') }
+        }
+      }
+      const texto = textoConquistaRanking(conquista, posicao)
+      const url = token ? `${window.location.origin}/pedido?ref=${token}` : undefined
+      if (navigator.share) {
+        await navigator.share({ title: 'Ranking do Chefe', text: texto, ...(url ? { url } : {}) })
+      } else {
+        await navigator.clipboard.writeText(url ? `${texto} ${url}` : texto)
+      }
+    } catch {}
+    setCompartilhandoConquista(false)
+  }
+
+  // Compartilhamento VOLUNTÁRIO do status social (Campeão/Prata/Bronze/
+  // Elite) herdado da temporada anterior — conceito distinto da "conquista"
+  // acima (que é sobre movimento recente). Nunca expõe telefone, nome de
+  // terceiros ou clienteId; anexa o link de indicação só quando disponível.
+  async function compartilharStatusSocial() {
+    const status = painel?.gamificacao?.statusSocial
+    if (!status) return
+    if (modoPreview) {
+      setPreviewAviso('O compartilhamento foi simulado. Nenhum link real foi criado ou enviado.')
+      return
+    }
+    setCompartilhandoStatus(true)
+    try {
+      let token = indicacaoToken
+      if (!token) {
+        const res = await fetchCliente('/api/cliente/indicacao', { cache: 'no-store' }, sessaoMemRef.current)
+        if (res.ok) {
+          const data = await res.json()
+          token = typeof data.token === 'string' ? data.token : null
+          if (token) { setIndicacaoToken(token); telemetriaRanking('link_indicacao_gerado') }
+        }
+      }
+      const texto = textoStatusSocialCompartilhavel(status)
+      const url = token ? `${window.location.origin}/pedido?ref=${token}` : undefined
+      if (navigator.share) {
+        await navigator.share({ title: 'Ranking do Chefe', text: texto, ...(url ? { url } : {}) })
+      } else {
+        await navigator.clipboard.writeText(url ? `${texto} ${url}` : texto)
+      }
+    } catch {}
+    setCompartilhandoStatus(false)
   }
 
   function abrirPontos() {
@@ -943,6 +1046,12 @@ export default function ClientePage() {
       convitePosPedidoRef.current = false
       if (preferencias?.participaCampanha === true) {
         setMobilePanel('ranking')
+        // Cliente que já participa chega direto no ranking depois do pedido.
+        // Começa "pendente" — só vira "creditado" quando o extrato confirmado
+        // do servidor mostrar o crédito do pedido EXATO (pedidoPosPedidoRef),
+        // nunca por proximidade de tempo. Sem pedidoId na URL (link antigo em
+        // cache), fica "pendente" indefinidamente — nunca inventa crédito.
+        setPosPedido({ estado: 'pendente', pedidoId: pedidoPosPedidoRef.current })
       } else {
         setRankingConsentModal(true)
       }
@@ -1020,7 +1129,10 @@ export default function ClientePage() {
       const params = new URLSearchParams(window.location.search)
       if (params.get('fromOrder') === '1') {
         convitePosPedidoRef.current = true
+        const pedidoParam = params.get('pedido')
+        pedidoPosPedidoRef.current = pedidoParam && pedidoParam.trim() ? pedidoParam.trim() : null
         params.delete('fromOrder')
+        params.delete('pedido')
         const qs = params.toString()
         window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
       }
@@ -1532,13 +1644,22 @@ export default function ClientePage() {
               <FidelidadeRankingScreen
                 ranking={painel.ranking}
                 temporada={painel.temporada}
+                indicacao={painel.indicacao}
+                gamificacao={painel.gamificacao}
                 privacidade={privacidadeRanking}
                 privacidadeCarregando={privacidadeCarregando}
                 privacidadeSalvando={privacidadeSalvando}
                 privacidadeErro={privacidadeErro}
+                indicando={compartilhandoIndicacao}
+                compartilhando={compartilhandoConquista}
+                posPedido={posPedido}
                 onAlterarPrivacidade={(finalidade, estado, textoVersao) => void alterarPrivacidadeRanking(finalidade, estado, textoVersao)}
                 onRevogarTodas={() => void revogarTodasPrivacidadesRanking()}
-                onClose={() => setMobilePanel(null)}
+                onIndicarAmigo={() => void compartilharIndicacao()}
+                onCompartilharConquista={() => void compartilharConquistaRanking()}
+                onNovoPedido={abrirSacola}
+                onTelemetria={telemetriaRanking}
+                onClose={() => { setMobilePanel(null); setPosPedido(null) }}
               />
             )}
             {fidelidade && fidelidade.ativo && mobilePanel !== 'ranking' && (
@@ -1551,12 +1672,15 @@ export default function ClientePage() {
                   progresso={fidelidade.progressoPercentual}
                   diasRestantes={painel?.temporada?.diasRestantes ?? null}
                   ranking={painel?.ranking ?? null}
+                  statusSocial={painel?.gamificacao?.statusSocial ?? null}
                   aviso={previewAviso}
                   onSair={() => void sair()}
                   onPresentes={() => setMobilePanel('presentes')}
                   onExtrato={() => setMobilePanel('extrato')}
                   onRanking={abrirRanking}
                   onIndicacao={() => void compartilharIndicacao()}
+                  onCompartilharStatus={() => void compartilharStatusSocial()}
+                  compartilhandoStatus={compartilhandoStatus}
                   indicando={compartilhandoIndicacao}
                 />
               </>
