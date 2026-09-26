@@ -15,6 +15,7 @@ import {
   calcularNivelChef,
   calcularUltimoPedidoConfirmadoDosMovimentos,
   calcularCoroaAmeacada,
+  textoStatusSocialCompartilhavel,
   ESTADO_MISSAO_SEMANAL_INICIAL,
   ESTADO_MISSAO_INDICACAO_INICIAL,
   type EstadoMissaoSemanal,
@@ -442,5 +443,21 @@ describe("calcularCoroaAmeacada", () => {
 
   test("vantagem zero (empate técnico) com config ativa: ameaçada", () => {
     expect(calcularCoroaAmeacada(0, 5)).toBe(true);
+  });
+});
+
+describe("textoStatusSocialCompartilhavel", () => {
+  test("cada status tem um texto próprio, curto e sem PII", () => {
+    expect(textoStatusSocialCompartilhavel("campeao")).toBe("Sou Campeão do Ranking do Chefe 👑");
+    expect(textoStatusSocialCompartilhavel("prata")).toBe("Terminei a temporada no Top 2 do Ranking do Chefe 🥈");
+    expect(textoStatusSocialCompartilhavel("bronze")).toBe("Terminei no Top 3 do Ranking do Chefe 🥉");
+    expect(textoStatusSocialCompartilhavel("elite")).toBe("Entrei no Top 10 do Ranking do Chefe ✦");
+  });
+
+  test("nunca contém telefone, nome ou identificador de cliente", () => {
+    for (const status of ["campeao", "prata", "bronze", "elite"] as const) {
+      const texto = textoStatusSocialCompartilhavel(status);
+      expect(texto).not.toMatch(/cli_|\d{8,}/);
+    }
   });
 });

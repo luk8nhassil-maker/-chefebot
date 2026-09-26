@@ -196,7 +196,11 @@ export function FidelidadeRankingScreen({
         <button type="button" onClick={onClose} aria-label="Voltar para Fidelidade">‹</button>
         <div>
           <h1>Rank</h1>
-          <p>Suba com suas estrelas e ganhe presentes.</p>
+          {/* Copy fail-closed (correção de blocker): "ganhe presentes" só
+              quando existe um prêmio REAL aprovado e configurado pelo admin
+              (temporada.premio, já fail-closed no servidor) — sem isso, a
+              frase nunca promete um presente que pode não existir. */}
+          <p>{temporada?.premio ? 'Suba com suas Estrelas e ganhe presentes.' : 'Suba com suas Estrelas e avance na temporada.'}</p>
         </div>
         {temporada && (
           <div className="cf-ranking-season">

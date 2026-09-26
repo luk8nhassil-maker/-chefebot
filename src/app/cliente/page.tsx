@@ -13,11 +13,13 @@ import {
   detectarConquistaRanking,
   textoConquistaRanking,
 } from '@/lib/rankingRetencao'
+import { NOME_STATUS_TEMPORADA, textoStatusSocialCompartilhavel } from '@/lib/rankingGamificacao'
 import type {
   PainelFidelidade,
   VariacaoPosicaoRanking,
   FinalidadePrivacidadeRanking,
   PreferenciasPrivacidadeRanking,
+  StatusTemporadaSocial,
 } from './painelFidelidadeTipos'
 import { FidelidadeRankingScreen } from './FidelidadeRankingScreen'
 import type { EventoRankingRetencao } from '@/lib/rankingRetencaoTelemetria'
@@ -193,6 +195,17 @@ const PAINEL_PREVIEW: PainelFidelidade = {
   },
 }
 
+// Cenários fixture do selo social (Caçada ao Pódio + os 4 status herdados do
+// Top 10 anterior) — só existem no Preview local, para permitir a validação
+// visual dos 5 estados exigidos sem depender de dados reais de temporada.
+const CENARIOS_STATUS_SOCIAL_PREVIEW: { rotulo: string; valor: StatusTemporadaSocial }[] = [
+  { rotulo: 'Caçada ao Pódio', valor: null },
+  { rotulo: 'Campeão', valor: 'campeao' },
+  { rotulo: 'Prata', valor: 'prata' },
+  { rotulo: 'Bronze', valor: 'bronze' },
+  { rotulo: 'Elite Top 10', valor: 'elite' },
+]
+
 type PreviewFidelidadeMobileProps = {
   aviso: string
   onAviso: (mensagem: string) => void
@@ -203,6 +216,7 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
   const [modalCompartilhar, setModalCompartilhar] = useState(false)
   const [modalRankingConsentimento, setModalRankingConsentimento] = useState(false)
   const [mostrarRanking, setMostrarRanking] = useState(false)
+  const [statusSocialPreview, setStatusSocialPreview] = useState<StatusTemporadaSocial>(null)
   const progresso = Math.max(0, Math.min(100, FIDELIDADE_PREVIEW.progressoPercentual))
   const nome = PERFIL_PREVIEW.cliente.nome ?? 'Cliente'
   const primeiroNome = nome.split(' ')[0]
@@ -254,6 +268,38 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
       </header>
 
       {aviso && <div className="cf-preview-notice" role="status">{aviso}</div>}
+
+      <div role="group" aria-label="Cenário do selo social (Preview)" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '0 0 12px' }}>
+        {CENARIOS_STATUS_SOCIAL_PREVIEW.map((cenario) => (
+          <button
+            key={cenario.rotulo}
+            type="button"
+            onClick={() => setStatusSocialPreview(cenario.valor)}
+            style={{
+              border: `1px solid ${cores.cardBorda}`,
+              borderRadius: 999,
+              padding: '4px 10px',
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: 'pointer',
+              background: statusSocialPreview === cenario.valor ? cores.amarelo : 'transparent',
+              color: statusSocialPreview === cenario.valor ? cores.amareloTexto : cores.textoSecundario,
+            }}
+          >
+            {cenario.rotulo}
+          </button>
+        ))}
+      </div>
+
+      {statusSocialPreview && (
+        <div style={{ margin: '0 0 14px' }}>
+          <StatusSocialFidelidadeBadge
+            status={statusSocialPreview}
+            onCompartilhar={() => onAviso('Compartilhamento do status simulado no Preview. Nenhum link real foi criado ou enviado.')}
+            compartilhando={false}
+          />
+        </div>
+      )}
 
       <section className="cf-preview-stars" aria-label="Resumo das Estrelas">
         <p className="cf-preview-kicker">SUAS ESTRELAS</p>
@@ -329,6 +375,66 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
   )
 }
 
+// Selo do status social (Campeão/Prata/Bronze/Elite) herdado do Top 10 da
+// temporada anterior — concentrado no card de Fidelidade/Ranking da área
+// autenticada /cliente (nunca no checkout/cardápio). Campeão ganha um
+// acabamento premium (fundo navy sólido + coroa); Prata/Bronze/Elite têm um
+// selo compacto próprio, nas mesmas cores já usadas em FidelidadeRankingScreen.
+const CORES_SELO_STATUS_SOCIAL: Record<Exclude<StatusTemporadaSocial, null | 'campeao'>, { bg: string; fg: string }> = {
+  prata: { bg: 'linear-gradient(110deg, #eef2f6, #d9e1e8)', fg: '#4a5568' },
+  bronze: { bg: 'linear-gradient(110deg, #f3ded0, #e6b58b)', fg: '#7b4322' },
+  elite: { bg: 'linear-gradient(110deg, #e7f0ff, #d5e6ff)', fg: '#2a548f' },
+}
+const ICONE_STATUS_SOCIAL: Record<Exclude<StatusTemporadaSocial, null>, string> = {
+  campeao: '👑', prata: '🥈', bronze: '🥉', elite: '✦',
+}
+
+type StatusSocialFidelidadeBadgeProps = {
+  status: StatusTemporadaSocial
+  onCompartilhar: () => void
+  compartilhando: boolean
+}
+
+function StatusSocialFidelidadeBadge({ status, onCompartilhar, compartilhando }: StatusSocialFidelidadeBadgeProps) {
+  if (!status) return null
+  if (status === 'campeao') {
+    return (
+      <div style={{ background: cores.navyCard, color: cores.navyCardTexto, borderRadius: 16, padding: '16px 18px', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ fontSize: 30 }} aria-hidden="true">👑</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <strong style={{ display: 'block', fontSize: 14.5, color: cores.amarelo }}>Campeão da temporada anterior</strong>
+          <span style={{ fontSize: 11.5, opacity: 0.85 }}>Sua vantagem de largada já está aplicada nesta temporada.</span>
+        </div>
+        <button
+          type="button"
+          onClick={onCompartilhar}
+          disabled={compartilhando}
+          style={{ flex: 'none', border: 0, borderRadius: 10, padding: '8px 12px', background: cores.amarelo, color: cores.amareloTexto, fontWeight: 700, fontSize: 11.5, cursor: 'pointer', opacity: compartilhando ? 0.6 : 1 }}
+        >
+          {compartilhando ? '...' : 'Compartilhar'}
+        </button>
+      </div>
+    )
+  }
+  const estilo = CORES_SELO_STATUS_SOCIAL[status]
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 999, background: estilo.bg, color: estilo.fg, fontWeight: 800, fontSize: 12 }}>
+        <span aria-hidden="true">{ICONE_STATUS_SOCIAL[status]}</span>
+        {NOME_STATUS_TEMPORADA[status]} · temporada anterior
+      </span>
+      <button
+        type="button"
+        onClick={onCompartilhar}
+        disabled={compartilhando}
+        style={{ flex: 'none', border: `1px solid ${cores.cardBorda}`, borderRadius: 10, padding: '6px 10px', background: 'transparent', color: cores.textoSecundario, fontWeight: 700, fontSize: 11, cursor: 'pointer', opacity: compartilhando ? 0.6 : 1 }}
+      >
+        {compartilhando ? '...' : 'Compartilhar'}
+      </button>
+    </div>
+  )
+}
+
 type FidelidadeMobileScreenProps = {
   nome: string
   saldo: number
@@ -337,12 +443,15 @@ type FidelidadeMobileScreenProps = {
   progresso: number
   diasRestantes: number | null
   ranking: PainelFidelidade['ranking']
+  statusSocial: StatusTemporadaSocial
   aviso: string
   onSair: () => void
   onPresentes: () => void
   onExtrato: () => void
   onRanking: () => void
   onIndicacao: () => void
+  onCompartilharStatus: () => void
+  compartilhandoStatus: boolean
   indicando: boolean
 }
 
@@ -350,8 +459,8 @@ type FidelidadeMobileScreenProps = {
  * O componente só recebe dados já calculados pelo servidor; não cria regra,
  * pontuação, recompensa ou posição localmente. */
 function FidelidadeMobileScreen({
-  nome, saldo, meta, faltam, progresso, diasRestantes, ranking, aviso,
-  onSair, onPresentes, onExtrato, onRanking, onIndicacao, indicando,
+  nome, saldo, meta, faltam, progresso, diasRestantes, ranking, statusSocial, aviso,
+  onSair, onPresentes, onExtrato, onRanking, onIndicacao, onCompartilharStatus, compartilhandoStatus, indicando,
 }: FidelidadeMobileScreenProps) {
   const primeiroNome = nome.split(' ')[0] || 'Cliente'
   const inicial = primeiroNome.slice(0, 1).toUpperCase()
@@ -367,6 +476,12 @@ function FidelidadeMobileScreen({
       </header>
 
       {aviso && <div className="cf-preview-notice" role="status">{aviso}</div>}
+
+      {statusSocial && (
+        <div style={{ margin: '0 0 14px' }}>
+          <StatusSocialFidelidadeBadge status={statusSocial} onCompartilhar={onCompartilharStatus} compartilhando={compartilhandoStatus} />
+        </div>
+      )}
 
       <section className="cf-preview-stars" aria-label="Resumo das Estrelas">
         <p className="cf-preview-kicker">SUAS ESTRELAS</p>
@@ -575,6 +690,7 @@ export default function ClientePage() {
   const [indicacaoToken, setIndicacaoToken] = useState<string | null>(null)
   const [compartilhandoIndicacao, setCompartilhandoIndicacao] = useState(false)
   const [compartilhandoConquista, setCompartilhandoConquista] = useState(false)
+  const [compartilhandoStatus, setCompartilhandoStatus] = useState(false)
   // Feedback pós-pedido para quem já participa: começa "pendente" ao chegar
   // de um pedido concluído e só vira "creditado" com dado confirmado real do
   // extrato (nunca promete crédito antes da confirmação do servidor).
@@ -883,6 +999,39 @@ export default function ClientePage() {
       }
     } catch {}
     setCompartilhandoConquista(false)
+  }
+
+  // Compartilhamento VOLUNTÁRIO do status social (Campeão/Prata/Bronze/
+  // Elite) herdado da temporada anterior — conceito distinto da "conquista"
+  // acima (que é sobre movimento recente). Nunca expõe telefone, nome de
+  // terceiros ou clienteId; anexa o link de indicação só quando disponível.
+  async function compartilharStatusSocial() {
+    const status = painel?.gamificacao?.statusSocial
+    if (!status) return
+    if (modoPreview) {
+      setPreviewAviso('O compartilhamento foi simulado. Nenhum link real foi criado ou enviado.')
+      return
+    }
+    setCompartilhandoStatus(true)
+    try {
+      let token = indicacaoToken
+      if (!token) {
+        const res = await fetchCliente('/api/cliente/indicacao', { cache: 'no-store' }, sessaoMemRef.current)
+        if (res.ok) {
+          const data = await res.json()
+          token = typeof data.token === 'string' ? data.token : null
+          if (token) { setIndicacaoToken(token); telemetriaRanking('link_indicacao_gerado') }
+        }
+      }
+      const texto = textoStatusSocialCompartilhavel(status)
+      const url = token ? `${window.location.origin}/pedido?ref=${token}` : undefined
+      if (navigator.share) {
+        await navigator.share({ title: 'Ranking do Chefe', text: texto, ...(url ? { url } : {}) })
+      } else {
+        await navigator.clipboard.writeText(url ? `${texto} ${url}` : texto)
+      }
+    } catch {}
+    setCompartilhandoStatus(false)
   }
 
   function abrirPontos() {
@@ -1523,12 +1672,15 @@ export default function ClientePage() {
                   progresso={fidelidade.progressoPercentual}
                   diasRestantes={painel?.temporada?.diasRestantes ?? null}
                   ranking={painel?.ranking ?? null}
+                  statusSocial={painel?.gamificacao?.statusSocial ?? null}
                   aviso={previewAviso}
                   onSair={() => void sair()}
                   onPresentes={() => setMobilePanel('presentes')}
                   onExtrato={() => setMobilePanel('extrato')}
                   onRanking={abrirRanking}
                   onIndicacao={() => void compartilharIndicacao()}
+                  onCompartilharStatus={() => void compartilharStatusSocial()}
+                  compartilhandoStatus={compartilhandoStatus}
                   indicando={compartilhandoIndicacao}
                 />
               </>

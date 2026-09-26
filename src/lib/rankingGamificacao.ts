@@ -32,6 +32,25 @@ export const NOME_STATUS_TEMPORADA: Record<Exclude<StatusTemporada, null>, strin
   elite: "Elite Top 10",
 };
 
+/**
+ * Texto curto e sem PII, pronto para Web Share API / clipboard — para o
+ * cliente compartilhar VOLUNTARIAMENTE o status social (Campeão/Prata/
+ * Bronze/Elite) herdado da temporada anterior. Nunca expõe telefone, nome de
+ * terceiros nem clienteId — só o status do próprio cliente.
+ */
+export function textoStatusSocialCompartilhavel(status: Exclude<StatusTemporada, null>): string {
+  switch (status) {
+    case "campeao":
+      return "Sou Campeão do Ranking do Chefe 👑";
+    case "prata":
+      return "Terminei a temporada no Top 2 do Ranking do Chefe 🥈";
+    case "bronze":
+      return "Terminei no Top 3 do Ranking do Chefe 🥉";
+    case "elite":
+      return "Entrei no Top 10 do Ranking do Chefe ✦";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Missão semanal "Caçada ao Pódio"
 // ---------------------------------------------------------------------------

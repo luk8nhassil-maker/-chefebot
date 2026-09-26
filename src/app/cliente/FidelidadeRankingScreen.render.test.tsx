@@ -220,4 +220,28 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     });
     expect(screen.getByTitle("Campeão")).toBeTruthy();
   });
+
+  test("BLOCKER: sem temporada/prêmio configurado, o header nunca promete 'ganhe presentes'", () => {
+    montar({ temporada: null });
+    expect(screen.queryByText(/ganhe presentes/)).toBeNull();
+    expect(screen.getByText("Suba com suas Estrelas e avance na temporada.")).toBeTruthy();
+  });
+
+  test("BLOCKER: com temporada ativa mas SEM prêmio aprovado, ainda não promete presente", () => {
+    montar({ temporada: { nome: "Temporada X", diasRestantes: 10, fimEm: null, estado: "ativa", premio: null } });
+    expect(screen.queryByText(/ganhe presentes/)).toBeNull();
+  });
+
+  test("com prêmio real aprovado e configurado pelo servidor, mostra a copy de presente", () => {
+    montar({
+      temporada: {
+        nome: "Temporada X",
+        diasRestantes: 10,
+        fimEm: null,
+        estado: "ativa",
+        premio: { descricao: "1 Pizza Família", quantidadePremiados: 3 },
+      },
+    });
+    expect(screen.getByText("Suba com suas Estrelas e ganhe presentes.")).toBeTruthy();
+  });
 });
