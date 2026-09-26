@@ -104,7 +104,7 @@ const TEMPORADA_PADRAO: TemporadaCompleta = {
   diasRestantes: 18,
   fimEm: null,
   estado: "ativa",
-  premio: { descricao: "1 Pizza Família", quantidadePremiados: 3 },
+  premio: null,
 };
 
 const PRIVACIDADE_PARTICIPANTE: PreferenciasPrivacidadeRanking = {
@@ -277,7 +277,7 @@ const CENARIOS: Cenario[] = [
   {
     id: "premio-configurado",
     titulo: "12. Prêmio configurado",
-    detalhe: "Descrição do prêmio vem só de configuração aprovada pelo admin.",
+    detalhe: "Exemplo fictício para testar uma temporada com prêmio configurado.",
     props: {
       ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
       temporada: { ...TEMPORADA_PADRAO, premio: { descricao: "1 Pizza Família + Refrigerante", quantidadePremiados: 3 } },
@@ -700,17 +700,21 @@ export default function RankingRetencaoPreview() {
   }
 
   return (
-    <main style={{ minHeight: "100dvh", background: "#f4f6f9", padding: 24, fontFamily: "Arial, sans-serif", color: "#172945" }}>
-      <section style={{ maxWidth: 1100, margin: "0 auto", display: "grid", gridTemplateColumns: "280px 1fr", gap: 24, alignItems: "start" }}>
-        <div>
-          <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 800, color: "#3972d7" }}>PREVIEW ISOLADO</p>
-          <h1 style={{ margin: "0 0 8px", fontSize: 22 }}>Ranking do Chefe — Retenção + Gamificação V2</h1>
-          <p style={{ margin: "0 0 14px", color: "#61738b", lineHeight: 1.5, fontSize: 13 }}>
-            Fixtures locais. Nenhum pedido, Pix, WhatsApp, impressão, estoque, fidelidade real, indicação real,
-            bônus de competição ou escrita em Redis é criada aqui — o componente renderizado é o mesmo usado em
-            produção (<code>FidelidadeRankingScreen</code>).
+    <main style={{ minHeight: "100dvh", background: "#f4f6f9", padding: "20px 12px", fontFamily: "Arial, sans-serif", color: "#172945" }}>
+      <section style={{ maxWidth: 760, margin: "0 auto" }}>
+        <header style={{ padding: "0 4px 16px" }}>
+          <p style={{ margin: "0 0 5px", fontSize: 11, fontWeight: 800, color: "#3972d7" }}>DEMONSTRAÇÃO ISOLADA</p>
+          <h1 style={{ margin: "0 0 6px", fontSize: 20 }}>Ranking do Chefe</h1>
+          <p style={{ margin: 0, color: "#61738b", lineHeight: 1.45, fontSize: 13 }}>
+            Dados de exemplo. Aqui nenhuma ação cria pedidos, Pix, mensagens ou alterações reais.
           </p>
-          <div style={{ display: "grid", gap: 8, maxHeight: "80dvh", overflow: "auto", paddingRight: 4 }}>
+        </header>
+        <details style={{ margin: "0 4px 16px", padding: "11px 14px", border: "1px solid #d7deea", borderRadius: 12, background: "#fff" }}>
+          <summary style={{ cursor: "pointer", fontSize: 14, fontWeight: 700 }}>Cenários de teste ({CENARIOS.length}) · {cenario.titulo}</summary>
+          <p style={{ color: "#61738b", lineHeight: 1.45, fontSize: 12 }}>
+            Simulação local com o mesmo componente visual do app. Selecione um estado para conferir a tela.
+          </p>
+          <div style={{ display: "grid", gap: 8, maxHeight: "50dvh", overflow: "auto", paddingRight: 4 }}>
             {CENARIOS.map((item) => (
               <button
                 key={item.id}
@@ -730,7 +734,7 @@ export default function RankingRetencaoPreview() {
               </button>
             ))}
           </div>
-        </div>
+        </details>
 
         <div style={{ background: "#fdf6e8", borderRadius: 24, padding: "24px 18px", minHeight: 640 }}>
           {aviso && (

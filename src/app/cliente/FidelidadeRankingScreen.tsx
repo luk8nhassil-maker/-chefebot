@@ -195,12 +195,9 @@ export function FidelidadeRankingScreen({
       <header className="cf-ranking-header">
         <button type="button" onClick={onClose} aria-label="Voltar para Fidelidade">‹</button>
         <div>
-          <h1>Rank</h1>
-          {/* Copy fail-closed (correção de blocker): "ganhe presentes" só
-              quando existe um prêmio REAL aprovado e configurado pelo admin
-              (temporada.premio, já fail-closed no servidor) — sem isso, a
-              frase nunca promete um presente que pode não existir. */}
-          <p>{temporada?.premio ? 'Suba com suas Estrelas e ganhe presentes.' : 'Suba com suas Estrelas e avance na temporada.'}</p>
+          <h1>Ranking do Chefe</h1>
+          {/* A descrição do prêmio só aparece quando o servidor o configurou. */}
+          <p>{temporada?.premio ? 'Suba de posição nesta temporada.' : 'Acompanhe sua posição nesta temporada.'}</p>
         </div>
         {temporada && (
           <div className="cf-ranking-season">
@@ -283,14 +280,18 @@ export function FidelidadeRankingScreen({
       )}
 
       <section className="cf-ranking-current" aria-label="Seu status atual">
-        <div><small>SUAS ESTRELAS</small><strong>{ranking.score}</strong></div>
-        <div className="cf-ranking-current-user">
-          <span aria-hidden="true">V</span>
-          <b>Você<em>{ranking.participantes.variacaoPosicao && ranking.participantes.variacaoPosicao.direcao !== 'manteve'
-            ? `${ranking.participantes.variacaoPosicao.direcao === 'subiu' ? '▲' : '▼'} ${ranking.participantes.variacaoPosicao.casas}`
-            : '—'}</em></b>
+        <div>
+          <small>SUA POSIÇÃO</small>
+          <strong>{ranking.participantes.posicao ? `#${ranking.participantes.posicao}` : '—'}</strong>
+          <span>{ranking.score} pontos no Ranking</span>
+          {(gamificacao?.bonusCompeticao ?? 0) > 0 && (
+            <span>{gamificacao?.bonusCompeticao} de bônus na competição; suas Estrelas de Fidelidade não mudam.</span>
+          )}
         </div>
-        <div><small>MISSÃO ATUAL</small><strong>{mensagemMissao ?? 'Continue acumulando estrelas.'}</strong></div>
+        <div className="cf-ranking-current-goal">
+          <small>PRÓXIMO PASSO</small>
+          <strong>{mensagemMissao ?? 'Continue acumulando estrelas para subir.'}</strong>
+        </div>
       </section>
 
       {gamificacao?.movimentoRecente && gamificacao.movimentoRecente.variacao.direcao !== 'manteve' && (
@@ -305,7 +306,7 @@ export function FidelidadeRankingScreen({
           className="cf-ranking-cta-primary"
           onClick={() => { emit('cta_subir_clicado'); setSheetSubirAberto(true) }}
         >
-          Quero subir
+          Como subir
         </button>
       )}
 
@@ -342,6 +343,8 @@ export function FidelidadeRankingScreen({
         )}
       </section>
 
+      <details className="cf-ranking-more">
+        <summary>Ver pódio e classificação completa</summary>
       <section className="cf-ranking-podium" aria-label="Melhores posições">
         {[2, 1, 3].map((posicao) => {
           const entrada = podium.find((item) => item.posicao === posicao)
@@ -378,6 +381,7 @@ export function FidelidadeRankingScreen({
         {aba === 'participantes' && <p className="cf-ranking-footnote">Mostrando posições próximas a você.</p>}
         {aba === 'geral' && <p className="cf-ranking-footnote">Só quem ativou o Ranking participa da disputa.</p>}
       </section>
+      </details>
 
       <details className="cf-ranking-privacy">
         <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Privacidade e participação</summary>
@@ -395,14 +399,6 @@ export function FidelidadeRankingScreen({
         </button>
         {privacidadeErro && <p role="alert">{privacidadeErro}</p>}
       </details>
-
-      <section className="cf-ranking-note">
-        <span>🏆</span>
-        <div>
-          <strong>{mensagemMov ?? 'Acumule estrelas para subir'}</strong>
-          <p>{mensagemMissao ?? 'As estrelas desta temporada contam para sua posição.'}</p>
-        </div>
-      </section>
 
       {sheetSubirAberto && (
         <div className="cf-ranking-sheet-backdrop" role="presentation" onClick={() => setSheetSubirAberto(false)}>
@@ -500,12 +496,22 @@ export function FidelidadeRankingScreen({
         .cf-ranking-sheet-row span { display: flex; flex-direction: column; gap: 4px; }
         .cf-ranking-sheet-row small { color: #7b8490; font-size: 11px; }
         .cf-ranking-sheet-action { flex: none; padding: 9px 14px; border: 0; border-radius: 12px; background: #ffc900; color: #252a30; font-weight: 700; font-size: 12.5px; cursor: pointer; white-space: nowrap; }.cf-ranking-sheet-action:disabled { opacity: .6; cursor: wait; }
+        .cf-ranking-header h1 { font-size: 23px; }
+        .cf-ranking-header p { white-space: normal; line-height: 1.4; }
+        .cf-ranking-current { grid-template-columns: minmax(110px, .75fr) 1fr; background: #fff; box-shadow: none; border-color: #d9e3ef; }
+        .cf-ranking-current>div>strong { font-size: 38px; }
+        .cf-ranking-current>div>span { display: block; margin-top: 7px; color: #53657e; font-size: 13px; }
+        .cf-ranking-current-goal { border-left: 1px solid #d9e3ef; padding-left: 16px; }
+        .cf-ranking-current .cf-ranking-current-goal strong { font-size: 15px; line-height: 1.35; }
+        .cf-ranking-more { margin: 18px 0; border-top: 1px solid #dce2e9; }
+        .cf-ranking-more>summary { padding: 16px 2px; color: #244979; cursor: pointer; font-size: 14px; font-weight: 700; }
+        .cf-ranking-more .cf-ranking-podium { margin-top: 6px; }
         @media (prefers-reduced-motion: reduce) { .cf-ranking-screen * { transition: none !important; } }
         @media (max-width: 420px) {
-          .cf-ranking-current { grid-template-columns: .72fr 1.08fr 1.2fr; gap: 7px; padding: 12px 11px; border-radius: 17px; }
-          .cf-ranking-current small { font-size: 11px; }.cf-ranking-current>div>strong { font-size: 27px; }
-          .cf-ranking-current-user { gap: 6px; padding: 0 6px; }.cf-ranking-current-user>span { width: 33px; height: 33px; }.cf-ranking-current-user b { font-size: 13px; }.cf-ranking-current-user em { font-size: 11px; }
-          .cf-ranking-current>div:last-child strong { font-size: 13px; line-height: 1.15; }
+          .cf-ranking-current { grid-template-columns: minmax(100px, .75fr) 1fr; gap: 8px; padding: 14px 12px; border-radius: 17px; }
+          .cf-ranking-current>div>strong { font-size: 32px; }
+          .cf-ranking-current .cf-ranking-current-goal strong { font-size: 13px; }
+          .cf-ranking-current-goal { padding-left: 11px; }
           .cf-ranking-season { min-width: 98px; padding: 8px 9px; border-radius: 16px; font-size: 10px; }.cf-ranking-season small { font-size: 11px; margin-top: 2px; }
         }
       `}</style>

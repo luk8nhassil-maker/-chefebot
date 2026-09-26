@@ -100,7 +100,7 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
       gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: { concluida: true }, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
       onNovoPedido: () => undefined,
     });
-    screen.getByText("Quero subir").click();
+    screen.getByText("Como subir").click();
     expect(await screen.findByText("✓ Missão da temporada já concluída.")).toBeTruthy();
   });
 
@@ -109,7 +109,7 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
       gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: { concluida: false }, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
       onNovoPedido: () => undefined,
     });
-    screen.getByText("Quero subir").click();
+    screen.getByText("Como subir").click();
     expect(await screen.findByText(/Estrelas na primeira compra dele/)).toBeTruthy();
   });
 
@@ -232,7 +232,7 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
   test("BLOCKER: sem temporada/prêmio configurado, o header nunca promete 'ganhe presentes'", () => {
     montar({ temporada: null });
     expect(screen.queryByText(/ganhe presentes/)).toBeNull();
-    expect(screen.getByText("Suba com suas Estrelas e avance na temporada.")).toBeTruthy();
+    expect(screen.getByText("Acompanhe sua posição nesta temporada.")).toBeTruthy();
   });
 
   test("BLOCKER: com temporada ativa mas SEM prêmio aprovado, ainda não promete presente", () => {
@@ -240,7 +240,7 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     expect(screen.queryByText(/ganhe presentes/)).toBeNull();
   });
 
-  test("com prêmio real aprovado e configurado pelo servidor, mostra a copy de presente", () => {
+  test("com prêmio configurado pelo servidor, mostra a descrição sem promessa genérica", () => {
     montar({
       temporada: {
         nome: "Temporada X",
@@ -250,6 +250,22 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
         premio: { descricao: "1 Pizza Família", quantidadePremiados: 3 },
       },
     });
-    expect(screen.getByText("Suba com suas Estrelas e ganhe presentes.")).toBeTruthy();
+    expect(screen.getByText("1 Pizza Família")).toBeTruthy();
+    expect(screen.queryByText(/ganhe presentes/)).toBeNull();
+  });
+
+  test("posição e próximo passo aparecem antes da classificação opcional", () => {
+    montar({ onNovoPedido: () => undefined });
+    const status = screen.getByRole("region", { name: "Seu status atual" });
+    expect(status.textContent).toContain("SUA POSIÇÃO#5");
+    expect(status.textContent).toContain("100 pontos no Ranking");
+    expect(screen.getByText("Como subir")).toBeTruthy();
+    const detalhes = screen.getByText("Ver pódio e classificação completa").closest("details");
+    expect(detalhes?.open).toBe(false);
+  });
+
+  test("bônus de competição não é apresentado como Estrelas reais", () => {
+    montar({ gamificacao: { statusSocial: null, bonusCompeticao: 6, missaoSemanal: null, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false } });
+    expect(screen.getByText("6 de bônus na competição; suas Estrelas de Fidelidade não mudam.")).toBeTruthy();
   });
 });
