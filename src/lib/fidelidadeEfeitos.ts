@@ -33,7 +33,7 @@ import {
   marcarConversaoAtivaIndicado,
   obterConversaoAtivaIndicado,
   revogarConversaoAtivaIndicadoSePedido,
-  comReservaConversaoAtiva,
+  reservarOuIdentificarConversao,
 } from "./rankingIndicacaoConversao";
 import { estornarEstrelasIndicacaoValida, estornarEstrelaApoioRecorrente } from "./estrelasIndicacao";
 import type { ItemApp } from "./pedidoAppItens";
@@ -317,18 +317,7 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
     await executarEfeito(chave, estado, "indicacao", async () => {
       const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
       if (!clienteId) return;
-
-      // Todo o ciclo leitura-decisão-escrita (relação existe? conversão
-      // ativa? apoio ou conversão principal? creditar? marcar ativa?) roda
-      // sob RESERVA ATÔMICA por indicadoId — nunca só um GET seguido de um
-      // SET. Sem isso, dois pedidos concorrentes do mesmo indicado (ex.: após
-      // a conversão original ter sido cancelada, ambos observando "sem
-      // conversão ativa" ao mesmo tempo) podiam creditar a conversão
-      // principal (+6) duas vezes (blocker de concorrência da auditoria
-      // final). A revogação em cancelamento usa a MESMA reserva, o que torna
-      // seu compare-and-delete atômico em relação a uma nova conversão sendo
-      // gravada ao mesmo tempo.
-      await comReservaConversaoAtiva(clienteId, () => processarConversaoIndicacao(clienteId));
+      await processarConversaoIndicacao(clienteId);
     });
 
     async function processarConversaoIndicacao(clienteId: string): Promise<void> {
@@ -340,6 +329,15 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       // sim — sem ela, todo pedido seguinte caía direto em apoio recorrente
       // para sempre, mesmo sem nenhuma conversão principal ter realmente se
       // sustentado).
+      //
+      // A reserva (reservarOuIdentificarConversao) é SEMPRE o primeiro passo,
+      // ANTES de qualquer crédito no ledger — ela é o estado DURÁVEL que
+      // sobrevive a um crash do processo entre o +6 e a confirmação
+      // (marcarConversaoAtivaIndicado). O crédito em si roda FORA de
+      // qualquer lock (pode ser lento; a segurança não depende disso), mas
+      // nunca é chamado sem a reserva ter sido concedida a este pedido
+      // primeiro — é isso que impede duas conversões principais simultâneas
+      // mesmo quando o processo morre no meio do caminho.
       const registrarConversaoPrincipal = async (indicadorId: string) => {
         const resultadoIndicacao = await creditarEstrelasIndicacaoValida({
           indicadorId,
@@ -367,8 +365,11 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
         // Migalha para o cancelamento tardio (ver "gamificacao" do
         // cancelado) encontrar indicador/indicado sem reconsultar a relação.
         await registrarConversaoIndicacao({ indicadorId, indicadoId: clienteId, pedidoId: pedido.id });
-        // Marca esta conversão como a ATIVA do indicado — é o que permite
-        // uma futura conversão substituta se esta também for cancelada.
+        // Confirma a reserva como a conversão ATIVA do indicado — é o que
+        // permite uma futura conversão substituta se esta também for
+        // cancelada. Só tem efeito se a reserva ainda pertencer a este
+        // MESMO pedido (comReservaConversaoAtiva/marcarConversaoAtivaIndicado
+        // nunca deixam outro pedido roubar ou sobrescrever a reserva).
         await marcarConversaoAtivaIndicado(clienteId, { indicadorId, pedidoId: pedido.id });
         // Missão da temporada "Indique um amigo" — reaproveita o MESMO
         // crédito real de indicação, nunca cria um sistema paralelo. Quem
@@ -386,30 +387,43 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
         }
       };
 
+      const creditarApoioRecorrente = async (indicadorId: string) => {
+        const snapshotOficial = pedido.snapshotOficial;
+        const pedidoTemPartePaga = snapshotOficial
+          ? snapshotOficial.subtotalCents > snapshotOficial.descontoFidelidadeCents
+          : (pedido.total ?? 0) > (pedido.taxaEntrega ?? 0);
+        await creditarEstrelaApoioRecorrente({
+          indicadorId,
+          indicadoId: clienteId,
+          pedidoId: pedido.id,
+          expedienteId: chaveExpedienteOperacional(),
+          pedidoComercialValido: true,
+          pedidoTemPartePaga,
+        });
+      };
+
       // Relação permanente já existe.
       const relacao = await obterRelacaoIndicacao(clienteId);
       if (relacao) {
-        const conversaoAtiva = await obterConversaoAtivaIndicado(clienteId);
-        if (conversaoAtiva) {
-          // Já existe uma conversão principal sustentada → esta compra é
-          // apoio recorrente (+1/expediente), nunca uma segunda conversão.
-          const snapshotOficial = pedido.snapshotOficial;
-          const pedidoTemPartePaga = snapshotOficial
-            ? snapshotOficial.subtotalCents > snapshotOficial.descontoFidelidadeCents
-            : (pedido.total ?? 0) > (pedido.taxaEntrega ?? 0);
-          await creditarEstrelaApoioRecorrente({
-            indicadorId: relacao.indicadorId,
-            indicadoId: clienteId,
-            pedidoId: pedido.id,
-            expedienteId: chaveExpedienteOperacional(),
-            pedidoComercialValido: true,
-            pedidoTemPartePaga,
-          });
+        const reserva = await reservarOuIdentificarConversao(clienteId, { indicadorId: relacao.indicadorId, pedidoId: pedido.id });
+        if (reserva === "ativa_outro_pedido") {
+          // Já existe uma conversão principal ATIVA e sustentada → esta
+          // compra é apoio recorrente (+1/expediente), nunca uma segunda
+          // conversão.
+          await creditarApoioRecorrente(relacao.indicadorId);
           return;
         }
-        // Relação existe, mas SEM conversão ativa (a original foi cancelada
-        // depois) — esta é a primeira compra comercial válida REAL desde
-        // então, então conta como a conversão principal, exatamente uma vez.
+        if (reserva === "ocupada_processando_outro") {
+          // Outro pedido está NO MEIO da própria conversão principal (ainda
+          // não confirmada) — nunca credita, nunca vira apoio "de brinde"
+          // por ter perdido a disputa. Lança para o pipeline de efeitos
+          // tratar como pendência e reprocessar depois, quando a reserva já
+          // tiver sido confirmada (ou liberada por um cancelamento).
+          throw new Error("ranking_indicacao_conversao_em_processamento");
+        }
+        // "reservada_processando" (nova reserva conseguida agora) ou
+        // "mesmo_pedido" (retry do próprio pedido, reserva ainda pertence a
+        // ele em qualquer estado) — prossegue com o crédito real.
         await registrarConversaoPrincipal(relacao.indicadorId);
         return;
       }
@@ -422,6 +436,16 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       const confirmado = await registrarRelacaoIndicacao(clienteId, candidatura.indicadorId);
       if (confirmado !== "registrado") return;
 
+      // Mesmo aqui (primeiríssima conversão, relação acabou de nascer) a
+      // reserva ainda é necessária: cobre o crash entre o +6 e a confirmação
+      // também neste caminho, exatamente como no caminho de "relação já
+      // existia". Em teoria nenhum outro pedido pode disputar esta reserva
+      // ainda (a relação só agora passou a existir), mas o mesmo contrato
+      // vale por segurança e consistência.
+      const reserva = await reservarOuIdentificarConversao(clienteId, { indicadorId: candidatura.indicadorId, pedidoId: pedido.id });
+      if (reserva === "ocupada_processando_outro") {
+        throw new Error("ranking_indicacao_conversao_em_processamento");
+      }
       await registrarConversaoPrincipal(candidatura.indicadorId);
     }
 
@@ -524,15 +548,36 @@ export async function processarEfeitosPedidoCancelado(pedido: PedidoParaEfeitosF
       // vantagem de jogo (nem de estrelas base, nem de bônus de competição)
       // baseada num pedido comercial que virou inválido.
       const motivoCancelamento = `Pedido ${pedido.id} cancelado`;
-      const conversao = await obterConversaoIndicacaoDoPedido(pedido.id);
+      let conversao = await obterConversaoIndicacaoDoPedido(pedido.id);
+      if (!conversao) {
+        // Sem a migalha (breadcrumb): pode ser que este pedido nunca gerou
+        // indicação nenhuma, OU que ele reservou a conversão principal,
+        // creditou o +6, e o processo morreu ANTES de gravar o breadcrumb
+        // (o breadcrumb é escrito DEPOIS do crédito real — nunca depender só
+        // dele, ou um crash exatamente nessa janela deixaria o +6 sem
+        // estorno possível para sempre). O estado DURÁVEL da reserva
+        // (rankingIndicacaoConversao.ts) é escrito ANTES do crédito e por
+        // isso é a fonte de verdade mais confiável para descobrir
+        // indicador/indicado neste caso — indexado por indicadoId, então
+        // primeiro é preciso saber quem é o indicado deste pedido.
+        const indicadoId = derivarClienteIdPorTelefone(pedido.telefone);
+        if (indicadoId) {
+          const reserva = await obterConversaoAtivaIndicado(indicadoId);
+          if (reserva?.pedidoId === pedido.id) {
+            conversao = { indicadorId: reserva.indicadorId, indicadoId, pedidoId: pedido.id };
+          }
+        }
+      }
       if (conversao) {
+        // Idempotente e seguro mesmo se nenhum crédito real chegou a
+        // acontecer (reserva "processando" cancelada antes do +6): devolve
+        // "credito_nao_encontrado" e não escreve nada no ledger.
         await estornarEstrelasIndicacaoValida({ ...conversao, motivo: motivoCancelamento });
-        // Libera a marca de "conversão ativa" (só se ainda for esta mesma) —
-        // sem isso, a relação permanente ficaria travada em apoio recorrente
-        // para sempre, mesmo sem nenhuma conversão principal sustentada
-        // (correção de blocker: relação nunca é apagada, mas a marca de
-        // conversão ativa precisa liberar espaço para uma futura conversão
-        // substituta legítima).
+        // Libera a marca de conversão (em qualquer estado — processando OU
+        // ativa; só se ainda for esta mesma) — sem isso, uma reserva
+        // "processando" órfã travaria QUALQUER conversão futura deste
+        // indicado para sempre, e uma "ativa" travaria em apoio recorrente
+        // para sempre, mesmo sem nenhuma conversão principal sustentada.
         await revogarConversaoAtivaIndicadoSePedido(conversao.indicadoId, pedido.id);
       }
       await reverterMissaoIndicacaoDoPedido(pedido.id, motivoCancelamento);

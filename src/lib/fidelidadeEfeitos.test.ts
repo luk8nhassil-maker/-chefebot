@@ -27,6 +27,7 @@ const {
   obterConversaoAtivaMock,
   revogarConversaoAtivaMock,
   estornarApoioMock,
+  reservarOuIdentificarConversaoMock,
 } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   return {
@@ -56,6 +57,15 @@ const {
     obterConversaoAtivaMock: vi.fn(async (_indicadoId: string) => ({ indicadorId: "cli_indicador_padrao", pedidoId: "pedido_conversao_original" }) as { indicadorId: string; pedidoId: string } | null),
     revogarConversaoAtivaMock: vi.fn(async (_indicadoId: string, _pedidoId: string) => undefined),
     estornarApoioMock: vi.fn(async (_p: unknown) => "nao_encontrado" as const),
+    // Default = "ativa_outro_pedido": espelha o comportamento anterior (uma
+    // conversão ativa de outro pedido já existe) para que os testes de
+    // "compra posterior = apoio recorrente" continuem funcionando sem
+    // modificação — eles assumem implicitamente que já existe uma conversão
+    // ativa sustentada.
+    reservarOuIdentificarConversaoMock: vi.fn(
+      async (_indicadoId: string, _params: { indicadorId: string; pedidoId: string }) =>
+        "ativa_outro_pedido" as "reservada_processando" | "mesmo_pedido" | "ocupada_processando_outro" | "ativa_outro_pedido",
+    ),
   };
 });
 
@@ -114,11 +124,7 @@ vi.mock("./rankingIndicacaoConversao", () => ({
   marcarConversaoAtivaIndicado: marcarConversaoAtivaMock,
   obterConversaoAtivaIndicado: obterConversaoAtivaMock,
   revogarConversaoAtivaIndicadoSePedido: revogarConversaoAtivaMock,
-  // Passthrough: os testes deste arquivo já mockam cada passo individual do
-  // ciclo (obterConversaoAtiva/creditar/marcar); o lock em si (blocker de
-  // concorrência) é testado à parte em rankingIndicacaoConversao.test.ts
-  // contra o Redis real (mockado como store em memória).
-  comReservaConversaoAtiva: vi.fn(async (_indicadoId: string, fn: () => Promise<unknown>) => fn()),
+  reservarOuIdentificarConversao: reservarOuIdentificarConversaoMock,
 }));
 
 vi.mock("./expedienteOperacional", () => ({
@@ -192,6 +198,7 @@ beforeEach(() => {
   obterConversaoAtivaMock.mockReset().mockResolvedValue({ indicadorId: "cli_indicador_padrao", pedidoId: "pedido_conversao_original" });
   revogarConversaoAtivaMock.mockReset().mockResolvedValue(undefined);
   estornarApoioMock.mockReset().mockResolvedValue("nao_encontrado");
+  reservarOuIdentificarConversaoMock.mockReset().mockResolvedValue("ativa_outro_pedido");
 });
 
 describe("processarEfeitosPedidoEntregue", () => {
@@ -414,6 +421,35 @@ describe("efeito gamificacao (pedido cancelado) — reversão da missão semanal
 
     expect(estornarApoioMock).toHaveBeenCalledWith(expect.objectContaining({ pedidoId: "ped_cancelado" }));
   });
+
+  test("RESERVA DURÁVEL — CRASH ANTES DO BREADCRUMB: sem migalha, mas a reserva durável (processando OU ativa) ainda pertence a este pedido → ainda assim estorna e libera a reserva", async () => {
+    const pedido = { ...pedidoEntregue, id: "ped_cancelado", status: "cancelado", statusAnterior: "entregue" };
+    // Sem breadcrumb (nunca chegou a ser gravado — crash antes dele).
+    obterConversaoIndicacaoMock.mockResolvedValue(null);
+    // Mas o estado durável mostra que ESTE pedido reservou (ou já confirmou)
+    // a conversão principal deste indicado.
+    obterConversaoAtivaMock.mockResolvedValue({ indicadorId: "cli_indicador", pedidoId: "ped_cancelado" });
+
+    await processarEfeitosPedidoCancelado(pedido);
+
+    expect(estornarEstrelasIndicacaoMock).toHaveBeenCalledWith(expect.objectContaining({
+      indicadorId: "cli_indicador",
+      indicadoId: "cli_canonico",
+      pedidoId: "ped_cancelado",
+    }));
+    expect(revogarConversaoAtivaMock).toHaveBeenCalledWith("cli_canonico", "ped_cancelado");
+  });
+
+  test("RESERVA DURÁVEL pertence a OUTRO pedido — cancelamento deste pedido nunca mexe nela", async () => {
+    const pedido = { ...pedidoEntregue, id: "ped_cancelado", status: "cancelado", statusAnterior: "entregue" };
+    obterConversaoIndicacaoMock.mockResolvedValue(null);
+    obterConversaoAtivaMock.mockResolvedValue({ indicadorId: "cli_indicador", pedidoId: "pedido_de_outro_cliente" });
+
+    await processarEfeitosPedidoCancelado(pedido);
+
+    expect(estornarEstrelasIndicacaoMock).not.toHaveBeenCalled();
+    expect(revogarConversaoAtivaMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("efeito indicacao", () => {
@@ -613,10 +649,11 @@ describe("efeito indicacao", () => {
   test("BLOCKER 4: relação existente SEM conversão ativa (original foi cancelada) → esta compra conta como NOVA conversão principal (+6), nunca apoio", async () => {
     // Relação permanente já existe (indicado veio de um indicador há tempos),
     // mas a conversão original foi revogada por um cancelamento anterior —
-    // obterConversaoAtivaIndicado devolve null. Esta é a primeira compra
-    // comercial válida REAL desde então.
+    // a reserva devolve "reservada_processando" (ninguém está processando
+    // nem tem conversão ativa). Esta é a primeira compra comercial válida
+    // REAL desde então.
     obterRelacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
-    obterConversaoAtivaMock.mockResolvedValue(null);
+    reservarOuIdentificarConversaoMock.mockResolvedValue("reservada_processando");
     creditarIndicacaoMock.mockResolvedValue("creditado");
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
@@ -639,6 +676,32 @@ describe("efeito indicacao", () => {
     }));
     // não tenta reconfirmar a relação (ela já existia)
     expect(registrarRelacaoMock).not.toHaveBeenCalled();
+  });
+
+  test("BLOCKER (reserva durável): outro pedido do mesmo indicado está 'processando' a conversão principal → este pedido NUNCA credita +6 nem cai em apoio — vira pendência (retryable)", async () => {
+    obterRelacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    reservarOuIdentificarConversaoMock.mockResolvedValue("ocupada_processando_outro");
+
+    await expect(processarEfeitosPedidoEntregue(pedidoEntregue)).rejects.toThrow(
+      "ranking_indicacao_conversao_em_processamento",
+    );
+
+    // "processando" != "ativa": nunca premia a disputa com apoio recorrente,
+    // que só é válido contra uma conversão já ATIVA e sustentada.
+    expect(creditarIndicacaoMock).not.toHaveBeenCalled();
+    expect(creditarApoioMock).not.toHaveBeenCalled();
+    expect(marcarConversaoAtivaMock).not.toHaveBeenCalled();
+  });
+
+  test("retry do MESMO pedido (reserva 'mesmo_pedido') prossegue normalmente com o crédito", async () => {
+    obterRelacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    reservarOuIdentificarConversaoMock.mockResolvedValue("mesmo_pedido");
+    creditarIndicacaoMock.mockResolvedValue("ja_creditado");
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(creditarIndicacaoMock).toHaveBeenCalledOnce();
+    expect(creditarApoioMock).not.toHaveBeenCalled();
   });
 
   test("retry na compra posterior não duplica +1 apoio (estado persiste concluído)", async () => {
