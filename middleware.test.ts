@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { proxy as middleware } from "./src/proxy";
 import { createToken, type Role } from "@/lib/auth";
@@ -8,6 +8,26 @@ function requestFor(url: string, host: string) {
     headers: { host },
   });
 }
+
+afterEach(() => vi.unstubAllEnvs());
+
+describe("Preview do Ranking isolado", () => {
+  it("libera só as duas páginas de demonstração no ambiente Preview", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    for (const path of ["/dev/ranking-retencao", "/dev/ranking-prospeccao"]) {
+      const res = await middleware(requestFor(`https://preview.example${path}`, "preview.example"));
+      expect(res.headers.get("location")).toBeNull();
+    }
+    const outraRota = await middleware(requestFor("https://preview.example/dev/whatsapp", "preview.example"));
+    expect(outraRota.status).toBe(307);
+  });
+
+  it("mantém as demonstrações protegidas em produção", async () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    const res = await middleware(requestFor("https://chefedapizza.com.br/dev/ranking-retencao", "chefedapizza.com.br"));
+    expect(res.status).toBe(307);
+  });
+});
 
 async function requestComRole(url: string, host: string, role: Role) {
   const token = await createToken({ username: "teste", name: "Teste", role });

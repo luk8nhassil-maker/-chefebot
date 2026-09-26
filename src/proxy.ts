@@ -82,6 +82,13 @@ export async function proxy(req: NextRequest) {
     return bloquearNovoPedidoSeAssinaturaSuspensa(req);
   }
 
+  // Demonstrações com fixtures locais, liberadas somente no Preview Vercel.
+  // Todas as demais rotas /dev e APIs continuam sob a regra de autenticação.
+  if (process.env.VERCEL_ENV === "preview" &&
+    (pathname === "/dev/ranking-retencao" || pathname === "/dev/ranking-prospeccao")) {
+    return NextResponse.next();
+  }
+
   const rule = ROUTE_ROLES.find((route) => pathname.startsWith(route.path));
   if (rule) {
     const token = req.cookies.get("auth-token")?.value;
