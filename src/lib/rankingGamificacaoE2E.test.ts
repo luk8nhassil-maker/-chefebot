@@ -68,15 +68,20 @@ const { redisMock } = vi.hoisted(() => {
       zsets.set(key, filtrado);
       return arr.length - filtrado.length;
     }),
-    // Cobre os dois scripts Lua usados pelos locks (1 key: compare-and-delete
-    // pra liberar; 2 keys: fidelidade.ts persiste-se-dono).
+    // Cobre os TRÊS formatos de script Lua usados pelos locks: 1 key
+    // (compare-and-delete pra liberar); 2 keys + 2 args (fidelidade.ts /
+    // rankingIndicacaoConversao.ts persiste-se-dono); 2 keys + 1 arg
+    // (rankingIndicacaoConversao.ts apaga-se-dono — BLOCKER 8).
     eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
       if (store.get(keys[0]) !== args[0]) return 0;
-      if (keys.length === 1) {
-        store.delete(keys[0]);
+      if (keys.length >= 2 && args.length >= 2) {
+        store.set(keys[1], JSON.parse(args[1]));
         return 1;
       }
-      store.set(keys[1], JSON.parse(args[1]));
+      if (keys.length >= 2) {
+        return store.delete(keys[1]) ? 1 : 0;
+      }
+      store.delete(keys[0]);
       return 1;
     }),
   };

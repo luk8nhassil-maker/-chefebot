@@ -63,11 +63,17 @@ vi.mock("./redis", () => ({
     //     — grava o estado só se o dono do lock ainda bater
     //     (PERSISTIR_ESTADO_SE_DONO_SCRIPT). O valor gravado é a STRING crua
     //     (ver comentário do `get` acima), nunca o objeto já desserializado.
+    // BLOCKER 8: agora também cobre a variante compare-and-delete-ESTADO
+    // (2 keys — lock + estado — mas só 1 arg, o token): apaga keys[1] em vez
+    // de keys[0], usada por apagarConversaoSeDono em rankingIndicacaoConversao.ts.
     eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
       if (store.get(keys[0]) !== args[0]) return 0;
-      if (keys.length >= 2) {
+      if (keys.length >= 2 && args.length >= 2) {
         store.set(keys[1], args[1]);
         return 1;
+      }
+      if (keys.length >= 2) {
+        return store.delete(keys[1]) ? 1 : 0;
       }
       store.delete(keys[0]);
       return 1;
@@ -120,23 +126,39 @@ vi.mock("./fidelidade", async (importOriginal) => {
 });
 
 // rankingIndicacaoConversao.ts fica REAL — é o próprio mecanismo sob teste —
-// exceto registrarConversaoIndicacao (o breadcrumb), que precisa ser
-// interceptável para simular o crash "depois do +6, antes da confirmação".
+// exceto registrarConversaoIndicacao (o breadcrumb), reservarOuIdentificarConversao
+// (a reserva em si) e marcarConversaoAtivaIndicado (a confirmação), que
+// precisam ser interceptáveis para simular o crash "depois do +6, antes da
+// confirmação" e a corrida real do BLOCKER 3 (A pausa entre confirmar a
+// relação e reservar), além do worker atrasado do BLOCKER 4.
 vi.mock("./rankingIndicacaoConversao", async (importOriginal) => {
   const real = await importOriginal<typeof import("./rankingIndicacaoConversao")>();
-  return { ...real, registrarConversaoIndicacao: vi.fn(real.registrarConversaoIndicacao) };
+  return {
+    ...real,
+    registrarConversaoIndicacao: vi.fn(real.registrarConversaoIndicacao),
+    reservarOuIdentificarConversao: vi.fn(real.reservarOuIdentificarConversao),
+    marcarConversaoAtivaIndicado: vi.fn(real.marcarConversaoAtivaIndicado),
+  };
 });
 
-import { processarEfeitosPedidoEntregue, processarEfeitosPedidoCancelado, type PedidoParaEfeitosFidelidade } from "./fidelidadeEfeitos";
-import { obterConversaoAtivaIndicado, registrarConversaoIndicacao } from "./rankingIndicacaoConversao";
+import { processarEfeitosPedidoEntregue, processarEfeitosPedidoCancelado, obterPendenciasEfeitosFidelidade, type PedidoParaEfeitosFidelidade } from "./fidelidadeEfeitos";
+import { obterConversaoAtivaIndicado, registrarConversaoIndicacao, reservarOuIdentificarConversao, marcarConversaoAtivaIndicado } from "./rankingIndicacaoConversao";
 import { derivarClienteIdPorTelefone, obterExtratoPontos } from "./fidelidade";
-import { registrarRelacaoIndicacao } from "./indicacaoToken";
+import { registrarRelacaoIndicacao, salvarCandidaturaIndicacao, obterRelacaoIndicacao } from "./indicacaoToken";
+import type { PedidoRedis } from "@/types/pedidoRedis";
 
 const registrarConversaoIndicacaoMock = vi.mocked(registrarConversaoIndicacao);
+const reservarOuIdentificarConversaoMock = vi.mocked(reservarOuIdentificarConversao);
+const marcarConversaoAtivaIndicadoMock = vi.mocked(marcarConversaoAtivaIndicado);
 
 const INDICADOR_ID = "cli_indicador_real_integracao";
 const TELEFONE_INDICADO = "86988880001";
 const TELEFONE_INDICADO_2 = "86988880002";
+const TELEFONE_INDICADO_3 = "86988880003";
+const TELEFONE_INDICADO_4 = "86988880004";
+const TELEFONE_INDICADO_5 = "86988880005";
+const TELEFONE_INDICADO_6 = "86988880006";
+const TELEFONE_INDICADO_7 = "86988880007";
 
 function pedido(id: string, telefone: string, overrides: Partial<PedidoParaEfeitosFidelidade> = {}): PedidoParaEfeitosFidelidade {
   return {
@@ -149,9 +171,30 @@ function pedido(id: string, telefone: string, overrides: Partial<PedidoParaEfeit
   };
 }
 
+// BLOCKER 5 — helpers só para os testes de reconciliação de reserva órfã:
+// gravam o pedido REAL na chave "pedidos" (a mesma que reconciliarReservaOrfaIndicacao
+// e reprocessarPendenciaEfeitosFidelidade já leem) e envelhecem `reservadaEm`
+// de uma reserva existente, simulando um processo que morreu de verdade (sem
+// nenhum catch/finally rodando) há mais tempo que o limiar técnico.
+function definirPedidoReal(pedido: Pick<PedidoRedis, "id" | "status" | "telefone">) {
+  const pedidos = (store.get("pedidos") as PedidoRedis[] | undefined) ?? [];
+  store.set("pedidos", [...pedidos.filter((p) => p.id !== pedido.id), pedido as PedidoRedis]);
+}
+function envelheceReserva(indicadoId: string, minutosAtras: number) {
+  const chave = `estrelasIndicacao:conversaoAtiva:${indicadoId}`;
+  // BLOCKER 8: agora a reserva é gravada via CAS (eval), então o valor bruto
+  // no Map pode ser uma STRING JSON (nunca mais assumir que é sempre um
+  // objeto já desserializado — mesmo cuidado do `get` mock acima).
+  const bruto = store.get(chave);
+  const atual = (typeof bruto === "string" ? JSON.parse(bruto) : bruto) as { estado: string; indicadorId: string; pedidoId: string; reservadaEm?: string };
+  store.set(chave, { ...atual, reservadaEm: new Date(Date.now() - minutosAtras * 60 * 1000).toISOString() });
+}
+
 beforeEach(() => {
   store.clear();
   registrarConversaoIndicacaoMock.mockClear();
+  reservarOuIdentificarConversaoMock.mockClear();
+  marcarConversaoAtivaIndicadoMock.mockClear();
   // Sistema de Estrelas (V1) ativo — condição real exigida por
   // creditarEstrelasIndicacaoValida (estrelasV1Ativa), sem a qual todo
   // crédito de indicação seria "nao_elegivel".
@@ -172,7 +215,7 @@ describe("BLOCKER (reserva durável) — crash entre o +6 e a confirmação, com
 
     const extratoAposA = await obterExtratoPontos(INDICADOR_ID);
     expect(extratoAposA.filter((m) => m.eventoId === `indicacao:${indicadoId}:primeira-compra:pedido-A`)).toHaveLength(1);
-    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual({ estado: "processando", indicadorId: INDICADOR_ID, pedidoId: "pedido-A" });
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual(expect.objectContaining({ estado: "processando", indicadorId: INDICADOR_ID, pedidoId: "pedido-A" }));
 
     // 2) Pedido B do MESMO indicado chega ANTES do retry de A: nunca credita
     // nada, nunca vira apoio recorrente "de brinde" por ter perdido a
@@ -183,7 +226,7 @@ describe("BLOCKER (reserva durável) — crash entre o +6 e a confirmação, com
 
     const extratoAposB = await obterExtratoPontos(INDICADOR_ID);
     expect(extratoAposB).toHaveLength(1); // nenhum crédito novo (nem +6, nem +1 de apoio)
-    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual({ estado: "processando", indicadorId: INDICADOR_ID, pedidoId: "pedido-A" });
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual(expect.objectContaining({ estado: "processando", indicadorId: INDICADOR_ID, pedidoId: "pedido-A" }));
 
     // 3) Retry de A (o breadcrumb agora funciona normalmente — a rejeição
     // era "once"): o ledger real devolve "ja_creditado" para o mesmo
@@ -201,7 +244,7 @@ describe("BLOCKER (reserva durável) — crash entre o +6 e a confirmação, com
 
     registrarConversaoIndicacaoMock.mockRejectedValueOnce(new Error("crash simulado"));
     await expect(processarEfeitosPedidoEntregue(pedido("pedido-A2", TELEFONE_INDICADO_2))).rejects.toThrow("crash simulado");
-    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual({ estado: "processando", indicadorId: INDICADOR_ID, pedidoId: "pedido-A2" });
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual(expect.objectContaining({ estado: "processando", indicadorId: INDICADOR_ID, pedidoId: "pedido-A2" }));
 
     // Cancelamento chega ANTES de qualquer retry — sem o breadcrumb (nunca
     // foi escrito), o efeito precisa descobrir a conversão pelo estado
@@ -225,5 +268,200 @@ describe("BLOCKER (reserva durável) — crash entre o +6 e a confirmação, com
     expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual({ estado: "ativa", indicadorId: INDICADOR_ID, pedidoId: "pedido-C" });
     const extratoFinal = await obterExtratoPontos(INDICADOR_ID);
     expect(extratoFinal.some((m) => m.eventoId === `indicacao:${indicadoId}:primeira-compra:pedido-C` && m.tipo === "confirmado")).toBe(true);
+  });
+
+  test("BLOCKER 3: A cria a relação (via candidatura) e pausa ANTES de reservar; B, que já enxerga a relação recém-criada, reserva e conclui a conversão ativa primeiro; A retoma e NUNCA credita uma segunda vez", async () => {
+    const indicadoId = derivarClienteIdPorTelefone(TELEFONE_INDICADO_3)!;
+    await salvarCandidaturaIndicacao(indicadoId, INDICADOR_ID);
+
+    // Captura a implementação REAL (não mockada) antes de sobrepor a
+    // chamada de A, para poder repassar a chamada de A a ela depois da
+    // pausa — nunca simula a decisão, só atrasa a chamada real.
+    const reservarReal = reservarOuIdentificarConversaoMock.getMockImplementation()!;
+    let liberarA!: () => void;
+    const pausaA = new Promise<void>((resolve) => {
+      liberarA = resolve;
+    });
+    reservarOuIdentificarConversaoMock.mockImplementationOnce(async (...args) => {
+      await pausaA;
+      return reservarReal(...args);
+    });
+
+    // A começa: confirma a relação permanente (registrarRelacaoIndicacao,
+    // "registrado") e PAUSA exatamente antes de reservar — a relação já
+    // está visível para qualquer outro pedido a partir deste ponto.
+    const promessaA = processarEfeitosPedidoEntregue(pedido("pedido-A3", TELEFONE_INDICADO_3));
+
+    // Dá tempo real de event loop para A avançar até a pausa (confirmar a
+    // relação) antes de B começar — sem isto B não veria a relação ainda.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(await obterRelacaoIndicacao(indicadoId)).toEqual(expect.objectContaining({ indicadorId: INDICADOR_ID }));
+
+    // B chega DEPOIS: já enxerga a relação criada por A, reserva sem
+    // disputa (A ainda não reservou) e conclui a conversão principal.
+    await processarEfeitosPedidoEntregue(pedido("pedido-B3", TELEFONE_INDICADO_3));
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual({ estado: "ativa", indicadorId: INDICADOR_ID, pedidoId: "pedido-B3" });
+
+    // A retoma: reservarOuIdentificarConversao real agora devolve
+    // "ativa_outro_pedido" (B já confirmou) — A nunca pode cair de volta
+    // em registrarConversaoPrincipal.
+    liberarA();
+    await promessaA;
+
+    const extratoFinal = await obterExtratoPontos(INDICADOR_ID);
+    const creditosPrincipais = extratoFinal.filter(
+      (m) => m.tipo === "confirmado" && m.eventoId?.startsWith(`indicacao:${indicadoId}:primeira-compra:`),
+    );
+    // Exatamente UM +6 no total, nunca dois, mesmo com a corrida real.
+    expect(creditosPrincipais).toHaveLength(1);
+    expect(creditosPrincipais[0].eventoId).toBe(`indicacao:${indicadoId}:primeira-compra:pedido-B3`);
+    // A conversão ativa continua sendo a de B — A nunca sobrescreve.
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual({ estado: "ativa", indicadorId: INDICADOR_ID, pedidoId: "pedido-B3" });
+  });
+
+  test("BLOCKER 4: A reserva, credita e grava o breadcrumb, mas 'crasha' exatamente antes de confirmar; um cancelamento real chega antes de qualquer retry e revoga a reserva; a confirmação atrasada do worker original de A NUNCA ressuscita A — e nunca toca uma conversão MAIS NOVA (C) que legitimamente ocupou o lugar depois", async () => {
+    const indicadoId = derivarClienteIdPorTelefone(TELEFONE_INDICADO_4)!;
+    await registrarRelacaoIndicacao(indicadoId, INDICADOR_ID);
+
+    // A: reserva, credita de verdade (+6) e grava o breadcrumb — mas
+    // "crasha" (lança) exatamente na própria confirmação, simulando o
+    // processo morrendo depois do crédito e do breadcrumb, mas antes de
+    // marcar a reserva como "ativa". O lock por pedido é liberado junto
+    // (a chamada inteira lança), exatamente como um crash real faria.
+    marcarConversaoAtivaIndicadoMock.mockRejectedValueOnce(new Error("crash simulado antes da confirmação"));
+    await expect(processarEfeitosPedidoEntregue(pedido("pedido-A4", TELEFONE_INDICADO_4))).rejects.toThrow(
+      "crash simulado antes da confirmação",
+    );
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual(expect.objectContaining({ estado: "processando", indicadorId: INDICADOR_ID, pedidoId: "pedido-A4" }));
+
+    // Um cancelamento de A chega ANTES de qualquer retry: encontra o
+    // breadcrumb (já gravado), estorna o +6 real e revoga a reserva.
+    await processarEfeitosPedidoCancelado({
+      ...pedido("pedido-A4", TELEFONE_INDICADO_4),
+      status: "cancelado",
+      statusAnterior: "entregue",
+    });
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toBeNull();
+
+    // O worker ORIGINAL de A — que já tinha passado da reserva/crédito/
+    // breadcrumb e só não tinha chegado a confirmar — finalmente executa a
+    // sua chamada de confirmação atrasada. Chama a função REAL diretamente
+    // (o mockRejectedValueOnce já foi consumido), exatamente como o worker
+    // antigo faria ao retomar de onde parou.
+    const confirmacaoAtrasada = await marcarConversaoAtivaIndicado(indicadoId, { indicadorId: INDICADOR_ID, pedidoId: "pedido-A4" });
+    expect(confirmacaoAtrasada).toBe("reserva_perdida");
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toBeNull();
+
+    const extratoAposConfirmacaoAtrasada = await obterExtratoPontos(INDICADOR_ID);
+    const eventoOriginal = `indicacao:${indicadoId}:primeira-compra:pedido-A4`;
+    // Exatamente um crédito e um estorno — a confirmação atrasada nunca cria
+    // um terceiro lançamento fantasma.
+    expect(extratoAposConfirmacaoAtrasada.filter((m) => m.eventoId === eventoOriginal)).toHaveLength(1);
+    expect(extratoAposConfirmacaoAtrasada.filter((m) => m.eventoId === `estorno:${eventoOriginal}`)).toHaveLength(1);
+
+    // Uma nova compra comercial válida (pedido C) do MESMO indicado agora
+    // legitimamente ocupa o lugar, do zero.
+    await processarEfeitosPedidoEntregue(pedido("pedido-C4", TELEFONE_INDICADO_4));
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual({ estado: "ativa", indicadorId: INDICADOR_ID, pedidoId: "pedido-C4" });
+
+    // O worker atrasado de A insiste (retry duplicado) DEPOIS de C já ter
+    // assumido — continua "reserva_perdida" e a conversão de C NUNCA é
+    // sobrescrita nem apagada.
+    const segundaTentativaAtrasada = await marcarConversaoAtivaIndicado(indicadoId, { indicadorId: INDICADOR_ID, pedidoId: "pedido-A4" });
+    expect(segundaTentativaAtrasada).toBe("reserva_perdida");
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual({ estado: "ativa", indicadorId: INDICADOR_ID, pedidoId: "pedido-C4" });
+  });
+});
+
+describe("BLOCKER 5 — reconciliação determinística de reserva órfã (processo morreu de verdade, sem catch/finally algum)", () => {
+  test("A órfã + pedido REAL já 'cancelado': B, ao encontrar a reserva velha, reconcilia (estorna se preciso e libera) em vez de ficar bloqueado para sempre", async () => {
+    const indicadoId = derivarClienteIdPorTelefone(TELEFONE_INDICADO_5)!;
+    await registrarRelacaoIndicacao(indicadoId, INDICADOR_ID);
+
+    // A "morre" logo depois de reservar — nem chega a creditar no ledger.
+    await reservarOuIdentificarConversao(indicadoId, { indicadorId: INDICADOR_ID, pedidoId: "pedido-A5" });
+    envelheceReserva(indicadoId, 10);
+    // O pedido real (fora deste pipeline) foi cancelado.
+    definirPedidoReal({ id: "pedido-A5", status: "cancelado", telefone: TELEFONE_INDICADO_5 });
+
+    // B chega bem depois: encontra a reserva "ocupada", mas ela já é
+    // candidata técnica a órfã — reconcilia o dono (A) antes de desistir.
+    await processarEfeitosPedidoEntregue(pedido("pedido-B5", TELEFONE_INDICADO_5));
+
+    // B nunca herdou nada de A "de graça": como A nunca chegou a creditar,
+    // esta é a PRIMEIRA conversão principal legítima — B é quem a recebe.
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual(expect.objectContaining({ estado: "ativa", indicadorId: INDICADOR_ID, pedidoId: "pedido-B5" }));
+    const extrato = await obterExtratoPontos(INDICADOR_ID);
+    expect(extrato.some((m) => m.eventoId === `indicacao:${indicadoId}:primeira-compra:pedido-B5` && m.tipo === "confirmado")).toBe(true);
+  });
+
+  test("A órfã + pedido REAL 'entregue' + crédito (+6) JÁ existe (só faltou o breadcrumb/confirmação): reconciliação retoma A e completa sozinha; B nunca credita — vira apoio", async () => {
+    const indicadoId = derivarClienteIdPorTelefone(TELEFONE_INDICADO_6)!;
+    await registrarRelacaoIndicacao(indicadoId, INDICADOR_ID);
+
+    // A credita de verdade (+6), mas "morre" antes do breadcrumb — igual aos
+    // testes de crash anteriores, só que desta vez NINGUÉM faz retry nem
+    // cancela: a reserva fica genuinamente parada.
+    registrarConversaoIndicacaoMock.mockRejectedValueOnce(new Error("crash simulado — processo morreu de verdade"));
+    await expect(processarEfeitosPedidoEntregue(pedido("pedido-A6", TELEFONE_INDICADO_6))).rejects.toThrow();
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual(expect.objectContaining({ estado: "processando", pedidoId: "pedido-A6" }));
+    envelheceReserva(indicadoId, 10);
+    definirPedidoReal({ id: "pedido-A6", status: "entregue", telefone: TELEFONE_INDICADO_6 });
+
+    // B chega bem depois — a reconciliação retoma o PRÓPRIO pedido A (nunca
+    // decide por conta própria): o ledger devolve "ja_creditado", e desta
+    // vez o breadcrumb e a confirmação completam normalmente.
+    await processarEfeitosPedidoEntregue(pedido("pedido-B6", TELEFONE_INDICADO_6));
+
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual(expect.objectContaining({ estado: "ativa", indicadorId: INDICADOR_ID, pedidoId: "pedido-A6" }));
+    const extrato = await obterExtratoPontos(INDICADOR_ID);
+    // Exatamente um crédito principal — nunca dois.
+    expect(extrato.filter((m) => m.eventoId === `indicacao:${indicadoId}:primeira-compra:pedido-A6` && m.tipo === "confirmado")).toHaveLength(1);
+    // B nunca virou uma segunda conversão principal — no máximo apoio.
+    expect(extrato.some((m) => m.eventoId === `indicacao:${indicadoId}:primeira-compra:pedido-B6`)).toBe(false);
+  });
+
+  test("A órfã + pedido REAL 'entregue' + crédito ainda NÃO existe: reconciliação retoma A com segurança (credita, confirma) — B NUNCA rouba a conversão", async () => {
+    const indicadoId = derivarClienteIdPorTelefone(TELEFONE_INDICADO_7)!;
+    await registrarRelacaoIndicacao(indicadoId, INDICADOR_ID);
+
+    // A reserva e morre IMEDIATAMENTE depois — nem o crédito no ledger chegou
+    // a rodar.
+    await reservarOuIdentificarConversao(indicadoId, { indicadorId: INDICADOR_ID, pedidoId: "pedido-A7" });
+    envelheceReserva(indicadoId, 10);
+    definirPedidoReal({ id: "pedido-A7", status: "entregue", telefone: TELEFONE_INDICADO_7 });
+
+    // B chega bem depois — a reconciliação retoma o pedido A do zero (a
+    // reserva prova que A era o dono legítimo): A credita normalmente.
+    await processarEfeitosPedidoEntregue(pedido("pedido-B7", TELEFONE_INDICADO_7));
+
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual(expect.objectContaining({ estado: "ativa", indicadorId: INDICADOR_ID, pedidoId: "pedido-A7" }));
+    const extrato = await obterExtratoPontos(INDICADOR_ID);
+    expect(extrato.some((m) => m.eventoId === `indicacao:${indicadoId}:primeira-compra:pedido-A7` && m.tipo === "confirmado")).toBe(true);
+    // B nunca recebeu a conversão principal (nem sequer tentou creditar
+    // apoio antes de A confirmar — a mesma disputa "ocupada" original, só
+    // resolvida pela reconciliação).
+    expect(extrato.some((m) => m.eventoId === `indicacao:${indicadoId}:primeira-compra:pedido-B7`)).toBe(false);
+  });
+
+  test("A órfã cujo pedido REAL não existe (indeterminado): NUNCA rouba — registra pendência operacional e continua retryable para B", async () => {
+    const indicadoId = derivarClienteIdPorTelefone("86988880008")!;
+    await registrarRelacaoIndicacao(indicadoId, INDICADOR_ID);
+
+    // Reserva "fantasma": nada em "pedidos" corresponde a este pedidoId (ex.:
+    // um pedido de teste/rascunho que nunca existiu de verdade no sistema).
+    await reservarOuIdentificarConversao(indicadoId, { indicadorId: INDICADOR_ID, pedidoId: "pedido-fantasma" });
+    envelheceReserva(indicadoId, 10);
+    // Nenhum definirPedidoReal() chamado — "pedidos" não tem esse id.
+
+    await expect(processarEfeitosPedidoEntregue(pedido("pedido-B8", "86988880008"))).rejects.toThrow(
+      "ranking_indicacao_conversao_em_processamento",
+    );
+
+    // Nunca rouba: a reserva "fantasma" continua exatamente como estava.
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual(expect.objectContaining({ estado: "processando", pedidoId: "pedido-fantasma" }));
+    // Uma pendência operacional explícita foi registrada — nunca um silêncio.
+    const pendencias = await obterPendenciasEfeitosFidelidade("default");
+    expect(pendencias.some((p) => p.pedidoId === "pedido-fantasma")).toBe(true);
   });
 });

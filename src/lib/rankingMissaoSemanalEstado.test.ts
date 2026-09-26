@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estornarBonusMock, registrarFatoMock, sincronizarScoreMock } = vi.hoisted(() => {
+const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estornarBonusMock, registrarFatoMock, sincronizarScoreMock, obterMovimentosBonusMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
     get: vi.fn(async (key: string) => store.get(key) ?? null),
@@ -27,12 +27,17 @@ const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estorna
     estornarBonusMock: vi.fn(async () => "estornado" as const),
     registrarFatoMock: vi.fn(async () => true),
     sincronizarScoreMock: vi.fn(async () => undefined),
+    obterMovimentosBonusMock: vi.fn(async () => [] as { eventoId: string }[]),
   };
 });
 
 vi.mock("./redis", () => ({ redis: redisMock }));
 vi.mock("./rankingGamificacaoConfig", () => ({ obterConfigGamificacao: obterConfigGamificacaoMock }));
-vi.mock("./rankingBonusTemporada", () => ({ creditarBonusCompeticao: creditarBonusMock, estornarBonusCompeticao: estornarBonusMock }));
+vi.mock("./rankingBonusTemporada", () => ({
+  creditarBonusCompeticao: creditarBonusMock,
+  estornarBonusCompeticao: estornarBonusMock,
+  obterMovimentosBonusTemporada: obterMovimentosBonusMock,
+}));
 vi.mock("./rankingGamificacaoFatos", () => ({ registrarFatoRankingGamificacao: registrarFatoMock }));
 vi.mock("./rankingScoreTemporadaSync", () => ({ sincronizarScoreTemporadaComBonus: sincronizarScoreMock }));
 
@@ -64,7 +69,22 @@ beforeEach(() => {
   estornarBonusMock.mockResolvedValue("estornado");
   registrarFatoMock.mockResolvedValue(true);
   sincronizarScoreMock.mockResolvedValue(undefined);
+  obterMovimentosBonusMock.mockResolvedValue([]);
 });
+
+// BLOCKER 5/6 — helpers só para os testes de reconciliação de reserva órfã:
+// gravam o pedido REAL na chave "pedidos" e envelhecem `processandoDesdeEm`
+// de um registro existente, simulando um processo que morreu de verdade há
+// mais tempo que o limiar técnico.
+function definirPedidoReal(id: string, status: string) {
+  const pedidos = (store.get("pedidos") as { id: string; status: string }[] | undefined) ?? [];
+  store.set("pedidos", [...pedidos.filter((p) => p.id !== id), { id, status }]);
+}
+function envelhecerProcessando(minutosAtras: number) {
+  const chave = `ranking:missaoSemanal:${T}:${TEMP}:${CLI}`;
+  const atual = store.get(chave) as { estado: unknown; ultimoPedidoElegivelEm: string | null; processandoDesdeEm?: string | null };
+  store.set(chave, { ...atual, processandoDesdeEm: new Date(Date.now() - minutosAtras * 60 * 1000).toISOString() });
+}
 
 describe("sincronizarMissaoSemanalCliente", () => {
   test("fail-closed: sem missaoSemanalAtiva, nunca desbloqueia nem escreve no Redis", async () => {
@@ -252,6 +272,112 @@ describe("consumirMissaoSemanalNoPedido", () => {
     await reverterMissaoSemanalDoPedido("pedido-1", "pedido cancelado após o retry");
     expect(estornarBonusMock).toHaveBeenCalledWith(expect.objectContaining({ eventoIdOriginal: "missaoSemanal:pedido-1" }));
     expect((await obterEstadoMissaoSemanal(T, TEMP, CLI)).status).toBe("desbloqueada");
+  });
+
+  test("BLOCKER 6: a migalha existe ANTES do crédito no ledger — crash no próprio crédito ainda deixa rastro para o cancelamento encontrar", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
+    desbloqueada();
+    creditarBonusMock.mockRejectedValueOnce(new Error("ledger indisponível"));
+
+    await expect(consumirMissaoSemanalNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-crash-antes-bonus", estrelasBaseDoPedido: 50, agora: new Date("2026-01-10T00:00:00Z"),
+    })).rejects.toThrow("ledger indisponível");
+
+    // A migalha já existe mesmo sem NENHUM crédito real ter acontecido —
+    // antes desta correção, ela só era gravada DEPOIS do crédito.
+    expect(store.get("ranking:missaoSemanal:pedido:pedido-crash-antes-bonus")).toEqual({ tenantId: T, temporadaId: TEMP, clienteId: CLI, bonus: 0 });
+
+    // Um cancelamento chega antes de qualquer retry: encontra a migalha,
+    // libera a reserva (nada a estornar de verdade) e nunca fica preso.
+    await reverterMissaoSemanalDoPedido("pedido-crash-antes-bonus", "pedido cancelado antes do bônus");
+    expect((await obterEstadoMissaoSemanal(T, TEMP, CLI)).status).toBe("desbloqueada");
+  });
+
+  test("BLOCKER 6: outro pedido encontra a reserva 'processando' RECENTE (nunca stale) — nunca abandona silenciosamente, vira retryable", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
+    desbloqueada();
+    // Estado já em "processando" para pedido-A9, reservado AGORA (sem
+    // envelhecer) — simula B chegando bem depois de A ter reservado, mas
+    // ainda dentro da janela normal de um crédito real em andamento.
+    store.set(`ranking:missaoSemanal:${T}:${TEMP}:${CLI}`, {
+      estado: { status: "processando", desbloqueadaEm: "2026-01-05T00:00:00.000Z", consumidaEm: null, consumidaPedidoId: null, processandoPedidoId: "pedido-A9" },
+      ultimoPedidoElegivelEm: "2026-01-01T00:00:00.000Z",
+      processandoDesdeEm: new Date().toISOString(),
+    });
+
+    // pedido-B chega logo em seguida — a reserva de A é recentíssima, nunca
+    // candidata a órfã. Nunca credita, nunca é tratado como "nada a fazer".
+    await expect(consumirMissaoSemanalNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-B9", estrelasBaseDoPedido: 30, agora: new Date("2026-01-10T00:00:01Z"),
+    })).rejects.toThrow("ranking_missao_semanal_em_processamento");
+
+    expect(creditarBonusMock).not.toHaveBeenCalled();
+    expect((await obterEstadoMissaoSemanal(T, TEMP, CLI)).processandoPedidoId).toBe("pedido-A9");
+  });
+
+  test("BLOCKER 6: reconciliação de reserva órfã — pedido REAL dono já 'cancelado': libera a reserva e uma nova compra converte normalmente", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
+    desbloqueada();
+    store.set(`ranking:missaoSemanal:${T}:${TEMP}:${CLI}`, {
+      estado: { status: "processando", desbloqueadaEm: "2026-01-05T00:00:00.000Z", consumidaEm: null, consumidaPedidoId: null, processandoPedidoId: "pedido-orfao-cancelado" },
+      ultimoPedidoElegivelEm: "2026-01-01T00:00:00.000Z",
+    });
+    envelhecerProcessando(10);
+    definirPedidoReal("pedido-orfao-cancelado", "cancelado");
+    obterMovimentosBonusMock.mockResolvedValue([]); // nada foi creditado de fato
+
+    const resultado = await consumirMissaoSemanalNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-novo-legitimo", estrelasBaseDoPedido: 40, agora: new Date("2026-01-10T00:00:00Z"),
+    });
+
+    expect(resultado).toEqual({ consumida: true, bonusCreditado: 40 });
+    expect(estornarBonusMock).toHaveBeenCalledWith(expect.objectContaining({ eventoIdOriginal: "missaoSemanal:pedido-orfao-cancelado" }));
+    const estadoFinal = await obterEstadoMissaoSemanal(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ status: "consumida", consumidaPedidoId: "pedido-novo-legitimo" }));
+  });
+
+  test("BLOCKER 6: reconciliação de reserva órfã — crédito REAL já existe no ledger (só faltou confirmar): completa sozinha, outro pedido nunca dobra", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
+    desbloqueada();
+    store.set(`ranking:missaoSemanal:${T}:${TEMP}:${CLI}`, {
+      estado: { status: "processando", desbloqueadaEm: "2026-01-05T00:00:00.000Z", consumidaEm: null, consumidaPedidoId: null, processandoPedidoId: "pedido-orfao-creditado" },
+      ultimoPedidoElegivelEm: "2026-01-01T00:00:00.000Z",
+    });
+    envelhecerProcessando(10);
+    definirPedidoReal("pedido-orfao-creditado", "entregue");
+    // O ledger PROVA que o crédito real já aconteceu para este pedido.
+    obterMovimentosBonusMock.mockResolvedValue([{ eventoId: "missaoSemanal:pedido-orfao-creditado" }]);
+
+    const resultado = await consumirMissaoSemanalNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-B10", estrelasBaseDoPedido: 30, agora: new Date("2026-01-10T00:00:00Z"),
+    });
+
+    // pedido-B10 NUNCA credita nada — a reconciliação só completou o dono original.
+    expect(resultado).toEqual({ consumida: false, bonusCreditado: 0 });
+    expect(creditarBonusMock).not.toHaveBeenCalled();
+    const estadoFinal = await obterEstadoMissaoSemanal(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ status: "consumida", consumidaPedidoId: "pedido-orfao-creditado" }));
+    expect(sincronizarScoreMock).toHaveBeenCalledWith(T, TEMP, CLI);
+  });
+
+  test("BLOCKER 6: reconciliação impossível (pedido órfão não encontrado / status indeterminado) — NUNCA rouba, continua retryable", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
+    desbloqueada();
+    store.set(`ranking:missaoSemanal:${T}:${TEMP}:${CLI}`, {
+      estado: { status: "processando", desbloqueadaEm: "2026-01-05T00:00:00.000Z", consumidaEm: null, consumidaPedidoId: null, processandoPedidoId: "pedido-fantasma" },
+      ultimoPedidoElegivelEm: "2026-01-01T00:00:00.000Z",
+    });
+    envelhecerProcessando(10);
+    // Nenhum definirPedidoReal() chamado — "pedidos" não tem esse id.
+    obterMovimentosBonusMock.mockResolvedValue([]);
+
+    await expect(consumirMissaoSemanalNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-B11", estrelasBaseDoPedido: 30, agora: new Date("2026-01-10T00:00:00Z"),
+    })).rejects.toThrow("ranking_missao_semanal_em_processamento");
+
+    // A reserva "fantasma" continua exatamente como estava — nunca roubada.
+    const estadoFinal = await obterEstadoMissaoSemanal(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ status: "processando", processandoPedidoId: "pedido-fantasma" }));
   });
 });
 

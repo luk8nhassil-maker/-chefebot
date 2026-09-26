@@ -58,13 +58,21 @@ export function chaveLockScoreRanking(tenantId: string, temporadaId: string, cli
   return `ranking:score:lock:${tenantId}:${temporadaId}:${clienteId}`;
 }
 
-export async function comBloqueioGamificacao<T>(chave: string, fn: () => Promise<T>): Promise<T> {
+/**
+ * Igual a `comBloqueioGamificacao`, mas expõe o TOKEN desta aquisição a
+ * `fn` — usado por transições que precisam de uma escrita CAS (compare-and-
+ * -set condicionada ao dono do lock, nunca só "rodar dentro da seção
+ * crítica") para nunca escrever/apagar o estado depois que o TTL do lock
+ * expirou e outro worker já assumiu a mesma chave (ver
+ * rankingIndicacaoConversao.ts / BLOCKER 8).
+ */
+export async function comBloqueioGamificacaoComToken<T>(chave: string, fn: (token: string) => Promise<T>): Promise<T> {
   for (let tentativa = 0; tentativa < LOCK_MAX_TENTATIVAS; tentativa++) {
     const token = tokenLock();
     const adquirido = await redis.set(chave, token, { nx: true, ex: LOCK_TTL_SEGUNDOS });
     if (adquirido) {
       try {
-        return await fn();
+        return await fn(token);
       } finally {
         await liberarLock(chave, token);
       }
@@ -72,4 +80,8 @@ export async function comBloqueioGamificacao<T>(chave: string, fn: () => Promise
     await esperar(LOCK_ESPERA_MS);
   }
   throw new Error(`ranking_gamificacao_lock_indisponivel:${chave}`);
+}
+
+export async function comBloqueioGamificacao<T>(chave: string, fn: () => Promise<T>): Promise<T> {
+  return comBloqueioGamificacaoComToken(chave, () => fn());
 }

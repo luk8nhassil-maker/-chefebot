@@ -17,6 +17,7 @@ describe("instrumentation.ts — guard de rede do E2E local (CHEFEBOT_E2E)", () 
     globalThis.fetch = fetchOriginal;
     delete process.env.CHEFEBOT_E2E;
     delete process.env.NEXT_RUNTIME;
+    delete process.env.CHEFEBOT_E2E_ALLOWED_HOSTS;
   });
 
   test("com CHEFEBOT_E2E=1 (runtime nodejs): bloqueia fetch para host externo", async () => {
@@ -55,6 +56,33 @@ describe("instrumentation.ts — guard de rede do E2E local (CHEFEBOT_E2E)", () 
     await register();
 
     expect(globalThis.fetch).toBe(fetchOriginalDoTeste);
+  });
+
+  test("BLOCKER 1 (CI): CHEFEBOT_E2E_ALLOWED_HOSTS libera o host do serviço Redis REST do CI (ex.: 'srh'), mas continua bloqueando host externo", async () => {
+    process.env.CHEFEBOT_E2E = "1";
+    process.env.NEXT_RUNTIME = "nodejs";
+    process.env.CHEFEBOT_E2E_ALLOWED_HOSTS = "srh";
+    const fetchMockado = vi.fn(async () => new Response("ok"));
+    globalThis.fetch = fetchMockado as unknown as typeof fetch;
+
+    const { register } = await import("./instrumentation");
+    await register();
+
+    await expect(fetch("http://srh:80/")).resolves.toBeInstanceOf(Response);
+    await expect(fetch("https://evolution.exemplo.com.br/")).rejects.toThrow(/fetch bloqueado/);
+  });
+
+  test("BLOCKER 1: CHEFEBOT_E2E_ALLOWED_HOSTS nunca libera hosts de nuvem conhecidos, mesmo se alguém colocar lá por engano", async () => {
+    process.env.CHEFEBOT_E2E = "1";
+    process.env.NEXT_RUNTIME = "nodejs";
+    process.env.CHEFEBOT_E2E_ALLOWED_HOSTS = "srh,minha-instancia.upstash.io,chefebot.vercel.app";
+    globalThis.fetch = vi.fn(async () => new Response("ok")) as unknown as typeof fetch;
+
+    const { register } = await import("./instrumentation");
+    await register();
+
+    await expect(fetch("https://minha-instancia.upstash.io/")).rejects.toThrow(/fetch bloqueado/);
+    await expect(fetch("https://chefebot.vercel.app/")).rejects.toThrow(/fetch bloqueado/);
   });
 
   test("CHEFEBOT_E2E=1 mas runtime edge: nunca instrumenta (evita duplicar o wrap)", async () => {

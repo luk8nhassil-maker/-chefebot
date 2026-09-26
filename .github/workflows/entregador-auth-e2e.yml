@@ -33,6 +33,9 @@ env:
   UPSTASH_DISABLE_TELEMETRY: "1"
   VERCEL_ENV: "preview"
   CHEFEBOT_E2E: "1"
+  # Allowlist explícita do guard de rede em instrumentation.ts — só o
+  # hostname Docker do serviço SRH deste workflow, nunca internet real.
+  CHEFEBOT_E2E_ALLOWED_HOSTS: "srh"
   # NODE_ENV=production NÃO fica aqui: `npm ci` interpreta NODE_ENV=production
   # como sinal para pular devDependencies inteiras (vitest, eslint, etc. nunca
   # seriam instalados). `next build`/`next start` já forçam NODE_ENV=production
