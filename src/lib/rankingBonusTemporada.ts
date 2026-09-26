@@ -212,6 +212,55 @@ export async function creditarBonusCompeticao(params: {
   });
 }
 
+/**
+ * Variante de `creditarBonusCompeticao` para bônus com TETO por temporada
+ * (ex.: Impulso do Pódio) — a quantidade a creditar é calculada por
+ * `calcularPontosDisponiveis` a partir do total JÁ aplicado deste `tipo`,
+ * DENTRO da mesma seção crítica que faz a checagem de idempotência e a
+ * escrita. Sem isto, dois eventos DIFERENTES (eventoIds distintos) do mesmo
+ * cliente/temporada podiam, cada um, ler o mesmo "já aplicado" ANTES de
+ * qualquer um creditar, calcular o mesmo espaço disponível sob o teto e
+ * creditar os dois — cada crédito individualmente idempotente por eventoId,
+ * mas a SOMA ultrapassando o teto configurado (o teto nunca era uma decisão
+ * atômica, só a idempotência por evento era). Chamar `creditarBonusCompeticao`
+ * com um valor pré-calculado FORA do lock tem exatamente este buraco.
+ */
+export async function creditarBonusCompeticaoComTeto(params: {
+  tenantId: string;
+  temporadaId: string;
+  clienteId: string;
+  eventoId: string;
+  tipo: TipoBonusCompeticao;
+  calcularPontosDisponiveis: (jaAplicadoNaTemporada: number) => number;
+  motivo: string;
+}): Promise<ResultadoCreditoBonus> {
+  const { tenantId, temporadaId, clienteId, eventoId, tipo, motivo, calcularPontosDisponiveis } = params;
+  if (!tenantId || !temporadaId || !clienteId || !eventoId) return "invalido";
+  return comBloqueioBonus(tenantId, temporadaId, clienteId, async (token) => {
+    const movimentos = await obterMovimentosBonusTemporada(tenantId, temporadaId, clienteId);
+    if (movimentos.some((m) => m.eventoId === eventoId)) return "ja_creditado";
+    // O "já aplicado" é lido e o teto é aplicado NA MESMA seção crítica que
+    // vai escrever — nenhuma outra chamada consegue ler um "já aplicado"
+    // desatualizado entre este cálculo e a escrita (o lock serializa TODAS
+    // as chamadas deste tenant/temporada/cliente, não só a escrita final).
+    const jaAplicado = calcularTotalBonusPorTipo(movimentos, tipo);
+    const pontosDisponiveis = calcularPontosDisponiveis(jaAplicado);
+    if (!Number.isFinite(pontosDisponiveis) || pontosDisponiveis <= 0) return "invalido";
+    const novo: MovimentoBonusTemporada = {
+      movimentoId: `bonus_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      eventoId,
+      tipo,
+      pontos: Math.round(pontosDisponiveis),
+      motivo,
+      createdAt: new Date().toISOString(),
+    };
+    const escrito = await escreverBonusSeDono(tenantId, temporadaId, clienteId, token, { movimentos: [...movimentos, novo] });
+    if (!escrito) throw new Error(`ranking_bonus_temporada_lock_perdido_durante_credito:${eventoId}`);
+    await registrarFatoRankingGamificacao("bonus_competicao_aplicado", eventoId);
+    return "creditado";
+  });
+}
+
 export type ResultadoEstornoBonus = "estornado" | "ja_estornado" | "credito_nao_encontrado";
 
 /**

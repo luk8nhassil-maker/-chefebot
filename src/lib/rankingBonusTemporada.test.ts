@@ -56,6 +56,7 @@ import {
   calcularTotalBonusPorTipo,
   calcularTotalBonusTemporada,
   creditarBonusCompeticao,
+  creditarBonusCompeticaoComTeto,
   estornarBonusCompeticao,
   obterBonusCompeticaoDaTemporada,
   obterMovimentosBonusTemporada,
@@ -195,6 +196,42 @@ describe("concorrência", () => {
     expect(estorno).toBe("estornado");
     expect(await obterBonusCompeticaoDaTemporada(T, TEMP, CLI)).toBe(40);
   });
+
+  test("AUDITORIA — Impulso do Pódio: N eventos concorrentes (eventoIds DIFERENTES) do mesmo cliente/temporada NUNCA ultrapassam o teto configurado", async () => {
+    // Simula 5 fatos "entrou_top3" quase simultâneos (o cliente entra/sai do
+    // Top 3 várias vezes rapidamente) — cada um com seu próprio eventoId,
+    // cada um tentando creditar até 30 pontos, com um teto de 50 na
+    // temporada. Sem a atomicidade de creditarBonusCompeticaoComTeto, cada
+    // chamada podia ler "0 já aplicado" antes de qualquer uma escrever e
+    // todas creditariam 30 (total 150, muito acima do teto).
+    const CAP = 50;
+    const BONUS_POR_EVENTO = 30;
+    const calcularPontosDisponiveis = (jaAplicado: number) => Math.max(0, Math.min(BONUS_POR_EVENTO, CAP - jaAplicado));
+
+    const resultados = await Promise.all(
+      Array.from({ length: 5 }, (_, i) =>
+        creditarBonusCompeticaoComTeto({
+          tenantId: T,
+          temporadaId: TEMP,
+          clienteId: CLI,
+          eventoId: `top3-${i}`,
+          tipo: "impulso_podio",
+          calcularPontosDisponiveis,
+          motivo: "Impulso do Pódio — chegou ao Top 3",
+        }),
+      ),
+    );
+
+    // Todas as 5 chamadas OU creditaram algo (respeitando o espaço restante,
+    // possivelmente 0 pontos → "invalido") OU nunca lançaram sem sentido.
+    expect(resultados.every((r) => r === "creditado" || r === "invalido")).toBe(true);
+
+    // A prova real: a SOMA total de impulso_podio creditado nunca ultrapassa
+    // o teto, não importa quantos eventos concorrentes tentaram.
+    const totalCreditado = calcularTotalBonusPorTipo(await obterMovimentosBonusTemporada(T, TEMP, CLI), "impulso_podio");
+    expect(totalCreditado).toBeLessThanOrEqual(CAP);
+    expect(totalCreditado).toBe(CAP); // o espaço todo foi consumido, mas nunca ultrapassado
+  }, 10000);
 }, 10000);
 
 describe("BLOCKER 8 — atomicidade real: um lock expirado NUNCA permite uma escrita obsoleta no ledger", () => {
