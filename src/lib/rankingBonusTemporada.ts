@@ -73,11 +73,20 @@ async function liberarLock(chave: string, token: string): Promise<void> {
   }
 }
 
+/**
+ * Expõe o TOKEN da aquisição a `fn` — usado pela escrita CAS
+ * (escreverBonusSeDono) para nunca gravar o ledger depois que o TTL deste
+ * lock expirou e outro worker já assumiu a mesma chave (mesmo padrão de
+ * fidelidade.ts/persistirEstadoPontosSeDono e de
+ * rankingIndicacaoConversao.ts). Sem isto, o GET-decide-SET dentro da seção
+ * crítica dependia só do lock "provavelmente" durar mais que a operação —
+ * nunca uma prova real contra um TTL expirado no meio do caminho.
+ */
 async function comBloqueioBonus<T>(
   tenantId: string,
   temporadaId: string,
   clienteId: string,
-  fn: () => Promise<T>,
+  fn: (token: string) => Promise<T>,
 ): Promise<T> {
   const chave = chaveLock(tenantId, temporadaId, clienteId);
   for (let tentativa = 0; tentativa < LOCK_MAX_TENTATIVAS; tentativa++) {
@@ -85,7 +94,7 @@ async function comBloqueioBonus<T>(
     const adquirido = await redis.set(chave, token, { nx: true, ex: LOCK_TTL_SEGUNDOS });
     if (adquirido) {
       try {
-        return await fn();
+        return await fn(token);
       } finally {
         await liberarLock(chave, token);
       }
@@ -93,6 +102,33 @@ async function comBloqueioBonus<T>(
     await esperar(LOCK_ESPERA_MS);
   }
   throw new Error(`ranking_bonus_temporada_lock_indisponivel:${tenantId}:${temporadaId}:${clienteId}`);
+}
+
+// Escreve o ledger (chaveBonus) só se a chave de LOCK ainda contiver
+// exatamente este `token` — verificação e escrita na MESMA operação Lua,
+// sem nenhuma janela entre "checar dono" e "gravar".
+const ESCREVER_BONUS_SE_DONO_SCRIPT = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  redis.call("SET", KEYS[2], ARGV[2])
+  return 1
+else
+  return 0
+end
+`;
+
+async function escreverBonusSeDono(
+  tenantId: string,
+  temporadaId: string,
+  clienteId: string,
+  token: string,
+  estado: EstadoBonusTemporada,
+): Promise<boolean> {
+  const resultado = await redis.eval(
+    ESCREVER_BONUS_SE_DONO_SCRIPT,
+    [chaveLock(tenantId, temporadaId, clienteId), chaveBonus(tenantId, temporadaId, clienteId)],
+    [token, JSON.stringify(estado)],
+  );
+  return resultado === 1;
 }
 
 export async function obterMovimentosBonusTemporada(
@@ -152,7 +188,7 @@ export async function creditarBonusCompeticao(params: {
   const { tenantId, temporadaId, clienteId, eventoId, tipo, motivo } = params;
   if (!tenantId || !temporadaId || !clienteId || !eventoId) return "invalido";
   if (!Number.isFinite(params.pontos) || params.pontos <= 0) return "invalido";
-  return comBloqueioBonus(tenantId, temporadaId, clienteId, async () => {
+  return comBloqueioBonus(tenantId, temporadaId, clienteId, async (token) => {
     const movimentos = await obterMovimentosBonusTemporada(tenantId, temporadaId, clienteId);
     if (movimentos.some((m) => m.eventoId === eventoId)) return "ja_creditado";
     const novo: MovimentoBonusTemporada = {
@@ -163,7 +199,11 @@ export async function creditarBonusCompeticao(params: {
       motivo,
       createdAt: new Date().toISOString(),
     };
-    await redis.set(chaveBonus(tenantId, temporadaId, clienteId), { movimentos: [...movimentos, novo] });
+    const escrito = await escreverBonusSeDono(tenantId, temporadaId, clienteId, token, { movimentos: [...movimentos, novo] });
+    // O TTL do lock expirou entre o GET e este SET — nunca reporta
+    // "creditado" sem ter escrito de verdade (o chamador nunca declara o
+    // fato como concluído; um retry reprocessa com segurança).
+    if (!escrito) throw new Error(`ranking_bonus_temporada_lock_perdido_durante_credito:${eventoId}`);
     // Fato de negócio único para qualquer tipo de bônus — o próprio eventoId
     // do crédito já é a chave de idempotência, então nunca duplica mesmo em
     // retry (Telemetria V2: fato server-side, nunca inferido pelo cliente).
@@ -189,7 +229,7 @@ export async function estornarBonusCompeticao(params: {
   const { tenantId, temporadaId, clienteId, eventoIdOriginal, motivo } = params;
   if (!tenantId || !temporadaId || !clienteId || !eventoIdOriginal) return "credito_nao_encontrado";
   const eventoIdEstorno = `estorno:${eventoIdOriginal}`;
-  return comBloqueioBonus(tenantId, temporadaId, clienteId, async () => {
+  return comBloqueioBonus(tenantId, temporadaId, clienteId, async (token) => {
     const movimentos = await obterMovimentosBonusTemporada(tenantId, temporadaId, clienteId);
     if (movimentos.some((m) => m.eventoId === eventoIdEstorno)) return "ja_estornado";
     const original = movimentos.find((m) => m.eventoId === eventoIdOriginal);
@@ -203,7 +243,8 @@ export async function estornarBonusCompeticao(params: {
       createdAt: new Date().toISOString(),
       estornadoDeEventoId: eventoIdOriginal,
     };
-    await redis.set(chaveBonus(tenantId, temporadaId, clienteId), { movimentos: [...movimentos, estorno] });
+    const escrito = await escreverBonusSeDono(tenantId, temporadaId, clienteId, token, { movimentos: [...movimentos, estorno] });
+    if (!escrito) throw new Error(`ranking_bonus_temporada_lock_perdido_durante_estorno:${eventoIdOriginal}`);
     return "estornado";
   });
 }

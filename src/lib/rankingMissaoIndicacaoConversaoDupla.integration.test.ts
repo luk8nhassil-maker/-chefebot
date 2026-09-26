@@ -15,7 +15,20 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
-    get: vi.fn(async (key: string) => (store.has(key) ? store.get(key) : null)),
+    // Valores gravados via `eval` (BLOCKER 8, escreverBonusSeDono) ficam
+    // como STRING crua no Map — o GET precisa tentar o parse de volta.
+    get: vi.fn(async (key: string) => {
+      if (!store.has(key)) return null;
+      const valor = store.get(key);
+      if (typeof valor === "string") {
+        try {
+          return JSON.parse(valor);
+        } catch {
+          return valor;
+        }
+      }
+      return valor;
+    }),
     set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
       if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
@@ -31,8 +44,14 @@ const { store, redisMock } = vi.hoisted(() => {
       return atual;
     }),
     expire: vi.fn(async () => 1),
+    // BLOCKER 8: compare-and-set (2 keys, 2 args) — grava keys[1] só se
+    // keys[0] (o lock) ainda bater; compare-and-delete-lock (1 key, 1 arg).
     eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
       if (store.get(keys[0]) !== args[0]) return 0;
+      if (keys.length >= 2 && args.length >= 2) {
+        store.set(keys[1], args[1]);
+        return 1;
+      }
       store.delete(keys[0]);
       return 1;
     }),
