@@ -537,9 +537,25 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       const candidatura = await obterCandidaturaIndicacao(clienteId);
       if (!candidatura) return;
 
-      // Confirma relação permanente (first-write-wins); se outro worker venceu a corrida, pula
+      // Confirma relação permanente (first-write-wins).
       const confirmado = await registrarRelacaoIndicacao(clienteId, candidatura.indicadorId);
-      if (confirmado !== "registrado") return;
+      // self_referral é fail-closed de verdade: nunca existe relação para
+      // reler, nunca há conversão a reservar.
+      if (confirmado === "self_referral") return;
+      if (confirmado === "ja_existe") {
+        // BLOCKER: outro worker já confirmou a relação ANTES deste (ex.:
+        // esse outro worker morreu logo depois, sem nunca chegar a
+        // reservar a conversão principal). Nunca confia na candidatura
+        // antiga (que pode nem ser o indicadorId vencedor) — relê a
+        // relação CANÔNICA do Redis e passa pela MESMA máquina de reserva
+        // (processarComReserva), exatamente como o caminho "relação já
+        // existia" — nunca uma terceira lógica. Sem isso, a primeira
+        // compra comercial válida podia terminar sem nenhum +6.
+        const relacaoCanonica = await obterRelacaoIndicacao(clienteId);
+        if (!relacaoCanonica) return;
+        await processarComReserva(relacaoCanonica.indicadorId);
+        return;
+      }
 
       await processarComReserva(candidatura.indicadorId);
     }

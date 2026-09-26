@@ -3,7 +3,17 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estornarBonusMock, registrarFatoMock, sincronizarScoreMock, obterMovimentosBonusMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
-    get: vi.fn(async (key: string) => store.get(key) ?? null),
+    get: vi.fn(async (key: string) => {
+      const bruto = store.get(key) ?? null;
+      if (typeof bruto === "string") {
+        try {
+          return JSON.parse(bruto);
+        } catch {
+          return bruto;
+        }
+      }
+      return bruto;
+    }),
     set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
       if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
@@ -14,6 +24,11 @@ const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estorna
       return 1;
     }),
     eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (keys.length >= 2 && args.length >= 2) {
+        if (store.get(keys[0]) !== args[0]) return 0;
+        store.set(keys[1], args[1]);
+        return 1;
+      }
       if (store.get(keys[0]) !== args[0]) return 0;
       store.delete(keys[0]);
       return 1;
@@ -136,7 +151,7 @@ describe("concluirMissaoIndicacaoNoPedido", () => {
     })).rejects.toThrow("ledger indisponível");
 
     expect(store.get("ranking:missaoIndicacao:pedido:pedido-crash-antes-bonus")).toEqual({
-      tenantId: T, temporadaId: TEMP, clienteId: CLI, bonus: 0, eventoIdBonus: `missaoIndicacao:${TEMP}:${CLI}:pedido-crash-antes-bonus`,
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, bonus: 0, eventoIdBonus: `missaoIndicacao:${TEMP}:${CLI}:pedido-crash-antes-bonus`, bonusPlanejado: 40,
     });
 
     await reverterMissaoIndicacaoDoPedido("pedido-crash-antes-bonus", "cancelado antes do bônus");
@@ -192,6 +207,78 @@ describe("concluirMissaoIndicacaoNoPedido", () => {
     expect(sincronizarScoreMock).toHaveBeenCalledWith(T, TEMP, CLI);
   });
 
+  test("BLOCKER: reconciliação de reserva órfã — pedido REAL 'entregue' SEM crédito no ledger (crash ANTES do bônus): credita exatamente o bonusPlanejado da migalha, uma única vez; outro pedido nunca rouba nem dobra", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 40 });
+    // A reservou de verdade e a migalha foi gravada com bonusPlanejado ANTES
+    // do ledger — só então o processo "morreu" (o crédito nunca rodou).
+    creditarBonusMock.mockRejectedValueOnce(new Error("processo morreu antes do crédito"));
+    await expect(concluirMissaoIndicacaoNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-orfao-sem-credito", agora: new Date("2026-01-10T00:00:00Z"),
+    })).rejects.toThrow("processo morreu antes do crédito");
+    expect(store.get("ranking:missaoIndicacao:pedido:pedido-orfao-sem-credito")).toEqual(
+      expect.objectContaining({ bonusPlanejado: 40 }),
+    );
+    creditarBonusMock.mockClear();
+
+    envelhecerProcessando(10);
+    definirPedidoReal("pedido-orfao-sem-credito", "entregue");
+    obterMovimentosBonusMock.mockResolvedValue([]); // ledger ainda não tem o crédito
+
+    // Mesmo com a config MUDANDO depois (ex.: admin altera o bônus), a
+    // reconciliação usa o valor JÁ PLANEJADO na migalha, nunca recalcula.
+    obterConfigGamificacaoMock.mockResolvedValue({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 999 });
+    const resultado = await concluirMissaoIndicacaoNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-B12", agora: new Date("2026-01-10T00:10:00Z"),
+    });
+
+    // B NUNCA credita nada — a reconciliação só completou o dono original.
+    expect(resultado).toEqual({ concluida: false, bonusCreditado: 0 });
+    expect(creditarBonusMock).toHaveBeenCalledTimes(1);
+    expect(creditarBonusMock).toHaveBeenCalledWith(expect.objectContaining({
+      eventoId: `missaoIndicacao:${TEMP}:${CLI}:pedido-orfao-sem-credito`, pontos: 40,
+    }));
+    const estadoFinal = await obterEstadoMissaoIndicacao(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ concluida: true, pedidoId: "pedido-orfao-sem-credito" }));
+    expect(sincronizarScoreMock).toHaveBeenCalledWith(T, TEMP, CLI);
+  });
+
+  test("BLOCKER: reconciliação de reserva órfã — pedido REAL 'entregue' sem crédito no ledger, mas SEM migalha (registro legado): NUNCA inventa o valor, continua retryable", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 40 });
+    store.set(`ranking:missaoIndicacao:${T}:${TEMP}:${CLI}`, { concluida: false, concluidaEm: null, pedidoId: null, processandoPedidoId: "pedido-legado-sem-migalha" });
+    envelhecerProcessando(10);
+    definirPedidoReal("pedido-legado-sem-migalha", "entregue");
+    obterMovimentosBonusMock.mockResolvedValue([]);
+
+    await expect(concluirMissaoIndicacaoNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-B13", agora: new Date("2026-01-10T00:00:00Z"),
+    })).rejects.toThrow("ranking_missao_indicacao_em_processamento");
+
+    expect(creditarBonusMock).not.toHaveBeenCalled();
+    const estadoFinal = await obterEstadoMissaoIndicacao(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ concluida: false, processandoPedidoId: "pedido-legado-sem-migalha" }));
+  });
+
+  test("BLOCKER: cancelamento de A DEPOIS da reconciliação (entregue sem crédito) estorna o bônus efetivamente creditado e libera a missão para uma nova indicação", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 40 });
+    creditarBonusMock.mockRejectedValueOnce(new Error("processo morreu antes do crédito"));
+    await expect(concluirMissaoIndicacaoNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-A14", agora: new Date("2026-01-10T00:00:00Z"),
+    })).rejects.toThrow();
+
+    envelhecerProcessando(10);
+    definirPedidoReal("pedido-A14", "entregue");
+    obterMovimentosBonusMock.mockResolvedValue([]);
+    await concluirMissaoIndicacaoNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-B14", agora: new Date("2026-01-10T00:10:00Z"),
+    });
+    expect((await obterEstadoMissaoIndicacao(T, TEMP, CLI)).pedidoId).toBe("pedido-A14");
+
+    await reverterMissaoIndicacaoDoPedido("pedido-A14", "pedido A cancelado após reconciliação");
+
+    expect(estornarBonusMock).toHaveBeenCalledWith(expect.objectContaining({ eventoIdOriginal: `missaoIndicacao:${TEMP}:${CLI}:pedido-A14` }));
+    expect((await obterEstadoMissaoIndicacao(T, TEMP, CLI)).concluida).toBe(false);
+  });
+
   test("BLOCKER 7: reconciliação impossível (pedido órfão não encontrado / status indeterminado) — NUNCA rouba, continua retryable", async () => {
     obterConfigGamificacaoMock.mockResolvedValue({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 40 });
     store.set(`ranking:missaoIndicacao:${T}:${TEMP}:${CLI}`, { concluida: false, concluidaEm: null, pedidoId: null, processandoPedidoId: "pedido-fantasma" });
@@ -204,6 +291,82 @@ describe("concluirMissaoIndicacaoNoPedido", () => {
 
     const estadoFinal = await obterEstadoMissaoIndicacao(T, TEMP, CLI);
     expect(estadoFinal).toEqual(expect.objectContaining({ concluida: false, processandoPedidoId: "pedido-fantasma" }));
+  });
+});
+
+describe("BLOCKER 4 — CAS real: lock expirado NUNCA permite uma escrita obsoleta (missão indicação)", () => {
+  // Mesmo princípio adversarial já validado em rankingIndicacaoConversao.ts
+  // (BLOCKER 8) e em rankingMissaoSemanalEstado.ts: simula o TTL do lock
+  // expirando e OUTRO worker assumindo a MESMA chave exatamente entre a
+  // leitura/decisão deste worker e a escrita CAS — nunca simula a decisão em
+  // si, só intercepta o efeito colateral do "roubo" do lock.
+
+  test("reserva: lock roubado entre o GET e o SET — nunca reporta concluída sem escrever, e nunca sobrescreve o que o outro worker já gravou", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 40 });
+
+    const getPadrao = redisMock.get.getMockImplementation()!;
+    redisMock.get.mockImplementationOnce(async (...args: Parameters<typeof getPadrao>) => {
+      const original = await getPadrao(...args);
+      store.set(`ranking:missaoIndicacao:lock:${T}:${TEMP}:${CLI}`, "token-de-outro-worker");
+      store.set(`ranking:missaoIndicacao:${T}:${TEMP}:${CLI}`, JSON.stringify({
+        concluida: true, concluidaEm: "2026-01-09T00:00:00.000Z", pedidoId: "pedido-outro-worker", processandoPedidoId: null,
+      }));
+      return original;
+    });
+
+    await expect(
+      concluirMissaoIndicacaoNoPedido({ tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-A", agora: new Date("2026-01-10T00:00:00Z") }),
+    ).rejects.toThrow("ranking_missao_indicacao_lock_perdido_durante_reserva");
+
+    expect(creditarBonusMock).not.toHaveBeenCalled();
+    // O estado do "outro worker" continua intacto — o worker atrasado nunca
+    // escreveu por cima.
+    const estadoFinal = await obterEstadoMissaoIndicacao(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ concluida: true, pedidoId: "pedido-outro-worker" }));
+  });
+
+  test("confirmação: lock roubado enquanto o crédito no ledger está em andamento — o crédito já aconteceu (idempotente), mas o estado do outro worker nunca é sobrescrito", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 40 });
+
+    // O "outro worker" assume o lock e grava sua própria transição legítima
+    // exatamente enquanto ESTE worker está esperando o crédito no ledger
+    // (TTL do lock expirando durante uma chamada mais lenta que o normal).
+    creditarBonusMock.mockImplementationOnce(async () => {
+      store.set(`ranking:missaoIndicacao:lock:${T}:${TEMP}:${CLI}`, "token-de-outro-worker");
+      store.set(`ranking:missaoIndicacao:${T}:${TEMP}:${CLI}`, JSON.stringify({
+        concluida: true, concluidaEm: "2026-01-09T00:00:00.000Z", pedidoId: "pedido-outro-worker", processandoPedidoId: null,
+      }));
+      return "creditado";
+    });
+
+    await expect(
+      concluirMissaoIndicacaoNoPedido({ tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-A", agora: new Date("2026-01-10T00:00:00Z") }),
+    ).rejects.toThrow("ranking_missao_indicacao_lock_perdido_durante_confirmacao");
+
+    expect(creditarBonusMock).toHaveBeenCalledTimes(1);
+    const estadoFinal = await obterEstadoMissaoIndicacao(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ concluida: true, pedidoId: "pedido-outro-worker" }));
+  });
+
+  test("lock expira e NENHUM outro worker assume a chave — nunca reporta sucesso sem ter escrito, nunca deixa um estado 'processando' fantasma", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 40 });
+
+    const getPadrao = redisMock.get.getMockImplementation()!;
+    redisMock.get.mockImplementationOnce(async (...args: Parameters<typeof getPadrao>) => {
+      const original = await getPadrao(...args);
+      // TTL expira e a chave de lock simplesmente desaparece — nenhum outro
+      // worker a assume.
+      store.delete(`ranking:missaoIndicacao:lock:${T}:${TEMP}:${CLI}`);
+      return original;
+    });
+
+    await expect(
+      concluirMissaoIndicacaoNoPedido({ tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-A", agora: new Date("2026-01-10T00:00:00Z") }),
+    ).rejects.toThrow("ranking_missao_indicacao_lock_perdido_durante_reserva");
+
+    expect(creditarBonusMock).not.toHaveBeenCalled();
+    const estadoFinal = await obterEstadoMissaoIndicacao(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ concluida: false, processandoPedidoId: null }));
   });
 });
 

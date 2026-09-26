@@ -3,7 +3,20 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estornarBonusMock, registrarFatoMock, sincronizarScoreMock, obterMovimentosBonusMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
-    get: vi.fn(async (key: string) => store.get(key) ?? null),
+    // Valores gravados via `eval` (BLOCKER, escreverRegistroSeDono) ficam
+    // como STRING crua no Map — o GET precisa tentar o parse de volta.
+    get: vi.fn(async (key: string) => {
+      if (!store.has(key)) return null;
+      const valor = store.get(key);
+      if (typeof valor === "string") {
+        try {
+          return JSON.parse(valor);
+        } catch {
+          return valor;
+        }
+      }
+      return valor;
+    }),
     set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
       if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
@@ -13,8 +26,15 @@ const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estorna
       store.delete(key);
       return 1;
     }),
+    // Cobre os dois formatos de script Lua usados hoje: compare-and-delete
+    // do lock (1 key, 1 arg) e compare-and-set do registro condicionado ao
+    // token do lock (2 keys, 2 args — BLOCKER, escreverRegistroSeDono).
     eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
       if (store.get(keys[0]) !== args[0]) return 0;
+      if (keys.length >= 2 && args.length >= 2) {
+        store.set(keys[1], args[1]);
+        return 1;
+      }
       store.delete(keys[0]);
       return 1;
     }),
@@ -82,7 +102,10 @@ function definirPedidoReal(id: string, status: string) {
 }
 function envelhecerProcessando(minutosAtras: number) {
   const chave = `ranking:missaoSemanal:${T}:${TEMP}:${CLI}`;
-  const atual = store.get(chave) as { estado: unknown; ultimoPedidoElegivelEm: string | null; processandoDesdeEm?: string | null };
+  // BLOCKER: o registro agora é gravado via CAS (eval), então o valor bruto
+  // no Map pode ser uma STRING JSON — nunca mais assumir que já é objeto.
+  const bruto = store.get(chave);
+  const atual = (typeof bruto === "string" ? JSON.parse(bruto) : bruto) as { estado: unknown; ultimoPedidoElegivelEm: string | null; processandoDesdeEm?: string | null };
   store.set(chave, { ...atual, processandoDesdeEm: new Date(Date.now() - minutosAtras * 60 * 1000).toISOString() });
 }
 
@@ -165,7 +188,9 @@ describe("consumirMissaoSemanalNoPedido", () => {
     });
     expect(resultado).toEqual({ consumida: false, bonusCreditado: 0 });
     expect(creditarBonusMock).not.toHaveBeenCalled();
-    const registro = store.get(`ranking:missaoSemanal:${T}:${TEMP}:${CLI}`) as { ultimoPedidoElegivelEm: string };
+    // A escrita agora é CAS (via eval) — o valor bruto no Map pode ser uma
+    // STRING JSON, então lê pelo mock do redis (que já sabe fazer o parse).
+    const registro = (await redisMock.get(`ranking:missaoSemanal:${T}:${TEMP}:${CLI}`)) as { ultimoPedidoElegivelEm: string };
     expect(registro.ultimoPedidoElegivelEm).toBe("2026-01-10T00:00:00.000Z");
   });
 
@@ -267,7 +292,7 @@ describe("consumirMissaoSemanalNoPedido", () => {
     expect(sincronizarScoreMock).toHaveBeenCalledWith(T, TEMP, CLI);
     // A prova real: a migalha existe de verdade no Redis (não só "teria
     // sido escrita na primeira vez") — o cancelamento consegue encontrá-la.
-    expect(store.get(`ranking:missaoSemanal:pedido:pedido-1`)).toEqual({ tenantId: T, temporadaId: TEMP, clienteId: CLI, bonus: 50 });
+    expect(store.get(`ranking:missaoSemanal:pedido:pedido-1`)).toEqual({ tenantId: T, temporadaId: TEMP, clienteId: CLI, bonus: 50, bonusPlanejado: 50 });
 
     await reverterMissaoSemanalDoPedido("pedido-1", "pedido cancelado após o retry");
     expect(estornarBonusMock).toHaveBeenCalledWith(expect.objectContaining({ eventoIdOriginal: "missaoSemanal:pedido-1" }));
@@ -285,7 +310,7 @@ describe("consumirMissaoSemanalNoPedido", () => {
 
     // A migalha já existe mesmo sem NENHUM crédito real ter acontecido —
     // antes desta correção, ela só era gravada DEPOIS do crédito.
-    expect(store.get("ranking:missaoSemanal:pedido:pedido-crash-antes-bonus")).toEqual({ tenantId: T, temporadaId: TEMP, clienteId: CLI, bonus: 0 });
+    expect(store.get("ranking:missaoSemanal:pedido:pedido-crash-antes-bonus")).toEqual({ tenantId: T, temporadaId: TEMP, clienteId: CLI, bonus: 0, bonusPlanejado: 50 });
 
     // Um cancelamento chega antes de qualquer retry: encontra a migalha,
     // libera a reserva (nada a estornar de verdade) e nunca fica preso.
@@ -360,6 +385,94 @@ describe("consumirMissaoSemanalNoPedido", () => {
     expect(sincronizarScoreMock).toHaveBeenCalledWith(T, TEMP, CLI);
   });
 
+  test("BLOCKER: reconciliação de reserva órfã — pedido REAL 'entregue' SEM crédito no ledger (crash ANTES do bônus): credita exatamente o bonusPlanejado da migalha, uma única vez; outro pedido nunca rouba nem dobra", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
+    desbloqueada();
+    // A reservou de verdade (via consumirMissaoSemanalNoPedido) e a migalha
+    // foi gravada com o bonusPlanejado ANTES do ledger — só então o
+    // processo "morreu" (o crédito nunca chegou a rodar).
+    creditarBonusMock.mockRejectedValueOnce(new Error("processo morreu antes do crédito"));
+    await expect(consumirMissaoSemanalNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-orfao-sem-credito", estrelasBaseDoPedido: 40, agora: new Date("2026-01-10T00:00:00Z"),
+    })).rejects.toThrow("processo morreu antes do crédito");
+    expect(store.get("ranking:missaoSemanal:pedido:pedido-orfao-sem-credito")).toEqual(
+      expect.objectContaining({ bonusPlanejado: 40 }),
+    );
+    creditarBonusMock.mockClear();
+
+    envelhecerProcessando(10);
+    definirPedidoReal("pedido-orfao-sem-credito", "entregue");
+    obterMovimentosBonusMock.mockResolvedValue([]); // ledger ainda não tem o crédito
+
+    // B chega bem depois — a reconciliação retoma o PRÓPRIO pedido A usando
+    // o valor já planejado na migalha, nunca recalcula com a config atual.
+    const resultado = await consumirMissaoSemanalNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-B12", estrelasBaseDoPedido: 999, agora: new Date("2026-01-10T00:10:00Z"),
+    });
+
+    // B NUNCA credita nada — a reconciliação só completou o dono original.
+    expect(resultado).toEqual({ consumida: false, bonusCreditado: 0 });
+    expect(creditarBonusMock).toHaveBeenCalledTimes(1);
+    expect(creditarBonusMock).toHaveBeenCalledWith(expect.objectContaining({
+      eventoId: "missaoSemanal:pedido-orfao-sem-credito", pontos: 40,
+    }));
+    const estadoFinal = await obterEstadoMissaoSemanal(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ status: "consumida", consumidaPedidoId: "pedido-orfao-sem-credito" }));
+    expect(sincronizarScoreMock).toHaveBeenCalledWith(T, TEMP, CLI);
+
+    // Retry duplicado da reconciliação (ex.: outro pedido C chega depois)
+    // NUNCA credita uma segunda vez — o ledger já prova o crédito.
+    obterMovimentosBonusMock.mockResolvedValue([{ eventoId: "missaoSemanal:pedido-orfao-sem-credito" }]);
+    creditarBonusMock.mockClear();
+  });
+
+  test("BLOCKER: reconciliação de reserva órfã — pedido REAL 'entregue' sem crédito no ledger, mas SEM migalha (registro legado): NUNCA inventa o valor, continua retryable", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
+    desbloqueada();
+    store.set(`ranking:missaoSemanal:${T}:${TEMP}:${CLI}`, {
+      estado: { status: "processando", desbloqueadaEm: "2026-01-05T00:00:00.000Z", consumidaEm: null, consumidaPedidoId: null, processandoPedidoId: "pedido-legado-sem-migalha" },
+      ultimoPedidoElegivelEm: "2026-01-01T00:00:00.000Z",
+    });
+    envelhecerProcessando(10);
+    definirPedidoReal("pedido-legado-sem-migalha", "entregue");
+    obterMovimentosBonusMock.mockResolvedValue([]);
+    // Nenhuma migalha gravada para este pedido (simulando um registro de
+    // antes desta correção, ou uma reserva que nunca chegou a gravar nada).
+
+    await expect(consumirMissaoSemanalNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-B13", estrelasBaseDoPedido: 30, agora: new Date("2026-01-10T00:00:00Z"),
+    })).rejects.toThrow("ranking_missao_semanal_em_processamento");
+
+    expect(creditarBonusMock).not.toHaveBeenCalled();
+    const estadoFinal = await obterEstadoMissaoSemanal(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ status: "processando", processandoPedidoId: "pedido-legado-sem-migalha" }));
+  });
+
+  test("BLOCKER: cancelamento de A DEPOIS da reconciliação (entregue sem crédito) estorna o bônus efetivamente creditado e libera a missão para uma nova compra", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
+    desbloqueada();
+    creditarBonusMock.mockRejectedValueOnce(new Error("processo morreu antes do crédito"));
+    await expect(consumirMissaoSemanalNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-A14", estrelasBaseDoPedido: 40, agora: new Date("2026-01-10T00:00:00Z"),
+    })).rejects.toThrow();
+
+    envelhecerProcessando(10);
+    definirPedidoReal("pedido-A14", "entregue");
+    obterMovimentosBonusMock.mockResolvedValue([]);
+    await consumirMissaoSemanalNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-B14", estrelasBaseDoPedido: 10, agora: new Date("2026-01-10T00:10:00Z"),
+    });
+    expect((await obterEstadoMissaoSemanal(T, TEMP, CLI)).consumidaPedidoId).toBe("pedido-A14");
+
+    // Depois da reconciliação, A é corrigido para cancelado — o cancelamento
+    // tardio precisa encontrar a migalha (agora com o bonus real) e estornar.
+    obterMovimentosBonusMock.mockResolvedValue([{ eventoId: "missaoSemanal:pedido-A14" }]);
+    await reverterMissaoSemanalDoPedido("pedido-A14", "pedido A cancelado após reconciliação");
+
+    expect(estornarBonusMock).toHaveBeenCalledWith(expect.objectContaining({ eventoIdOriginal: "missaoSemanal:pedido-A14" }));
+    expect((await obterEstadoMissaoSemanal(T, TEMP, CLI)).status).toBe("desbloqueada");
+  });
+
   test("BLOCKER 6: reconciliação impossível (pedido órfão não encontrado / status indeterminado) — NUNCA rouba, continua retryable", async () => {
     obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
     desbloqueada();
@@ -378,6 +491,94 @@ describe("consumirMissaoSemanalNoPedido", () => {
     // A reserva "fantasma" continua exatamente como estava — nunca roubada.
     const estadoFinal = await obterEstadoMissaoSemanal(T, TEMP, CLI);
     expect(estadoFinal).toEqual(expect.objectContaining({ status: "processando", processandoPedidoId: "pedido-fantasma" }));
+  });
+});
+
+describe("BLOCKER 4 — CAS real: lock expirado NUNCA permite uma escrita obsoleta (missão semanal)", () => {
+  // Mesmo princípio adversarial já validado em rankingIndicacaoConversao.ts
+  // (BLOCKER 8): simula o TTL do lock expirando e OUTRO worker assumindo a
+  // MESMA chave exatamente entre a leitura do registro (dentro da seção
+  // crítica) e a escrita CAS — nunca simula a decisão em si, só intercepta o
+  // mock de `redis.get` para, como efeito colateral, reescrever a chave de
+  // lock com um token de "outro worker".
+
+  test("reserva: lock roubado entre o GET e o SET — nunca reporta consumida sem escrever, e nunca sobrescreve o que o outro worker já gravou", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
+    desbloqueada();
+
+    const getPadrao = redisMock.get.getMockImplementation()!;
+    redisMock.get.mockImplementationOnce(async (...args: Parameters<typeof getPadrao>) => {
+      const original = await getPadrao(...args);
+      store.set(`ranking:missaoSemanal:lock:${T}:${TEMP}:${CLI}`, "token-de-outro-worker");
+      store.set(`ranking:missaoSemanal:${T}:${TEMP}:${CLI}`, JSON.stringify({
+        estado: { status: "consumida", desbloqueadaEm: "2026-01-05T00:00:00.000Z", consumidaEm: "2026-01-09T00:00:00.000Z", consumidaPedidoId: "pedido-outro-worker", processandoPedidoId: null },
+        ultimoPedidoElegivelEm: "2026-01-09T00:00:00.000Z",
+      }));
+      return original;
+    });
+
+    await expect(
+      consumirMissaoSemanalNoPedido({ tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-A", estrelasBaseDoPedido: 50, agora: new Date("2026-01-10T00:00:00Z") }),
+    ).rejects.toThrow("ranking_missao_semanal_lock_perdido_durante_reserva");
+
+    expect(creditarBonusMock).not.toHaveBeenCalled();
+    // O estado do "outro worker" continua intacto — o worker atrasado nunca
+    // escreveu por cima.
+    const estadoFinal = await obterEstadoMissaoSemanal(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ status: "consumida", consumidaPedidoId: "pedido-outro-worker" }));
+  });
+
+  test("confirmação: lock roubado entre reservar/creditar e confirmar — o crédito no ledger já aconteceu (idempotente), mas o estado do outro worker nunca é sobrescrito", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
+    desbloqueada();
+
+    const getPadrao = redisMock.get.getMockImplementation()!;
+    // 1a leitura (obterRegistro inicial): passa normal — a reserva precisa
+    // ser feita com o token real deste worker.
+    redisMock.get.mockImplementationOnce(getPadrao);
+    // 2a leitura (releitura antes de confirmar): é aqui que o "outro worker"
+    // assume o lock e já grava sua própria transição legítima.
+    redisMock.get.mockImplementationOnce(async (...args: Parameters<typeof getPadrao>) => {
+      const original = await getPadrao(...args);
+      store.set(`ranking:missaoSemanal:lock:${T}:${TEMP}:${CLI}`, "token-de-outro-worker");
+      store.set(`ranking:missaoSemanal:${T}:${TEMP}:${CLI}`, JSON.stringify({
+        estado: { status: "consumida", desbloqueadaEm: "2026-01-05T00:00:00.000Z", consumidaEm: "2026-01-09T00:00:00.000Z", consumidaPedidoId: "pedido-outro-worker", processandoPedidoId: null },
+        ultimoPedidoElegivelEm: "2026-01-09T00:00:00.000Z",
+      }));
+      return original;
+    });
+
+    await expect(
+      consumirMissaoSemanalNoPedido({ tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-A", estrelasBaseDoPedido: 50, agora: new Date("2026-01-10T00:00:00Z") }),
+    ).rejects.toThrow("ranking_missao_semanal_lock_perdido_durante_confirmacao");
+
+    expect(creditarBonusMock).toHaveBeenCalledTimes(1);
+    // Apesar do crédito real já ter acontecido, o estado do "outro worker"
+    // continua intacto — a confirmação atrasada nunca escreveu por cima.
+    const estadoFinal = await obterEstadoMissaoSemanal(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ status: "consumida", consumidaPedidoId: "pedido-outro-worker" }));
+  });
+
+  test("lock expira e NENHUM outro worker assume a chave — nunca reporta sucesso sem ter escrito, nunca deixa um estado 'processando' fantasma", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue(CONFIG_ATIVA);
+    desbloqueada();
+
+    const getPadrao = redisMock.get.getMockImplementation()!;
+    redisMock.get.mockImplementationOnce(async (...args: Parameters<typeof getPadrao>) => {
+      const original = await getPadrao(...args);
+      // TTL expira e a chave de lock simplesmente desaparece — nenhum outro
+      // worker a assume.
+      store.delete(`ranking:missaoSemanal:lock:${T}:${TEMP}:${CLI}`);
+      return original;
+    });
+
+    await expect(
+      consumirMissaoSemanalNoPedido({ tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-A", estrelasBaseDoPedido: 50, agora: new Date("2026-01-10T00:00:00Z") }),
+    ).rejects.toThrow("ranking_missao_semanal_lock_perdido_durante_reserva");
+
+    expect(creditarBonusMock).not.toHaveBeenCalled();
+    const estadoFinal = await obterEstadoMissaoSemanal(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ status: "desbloqueada", processandoPedidoId: null }));
   });
 });
 

@@ -141,6 +141,17 @@ vi.mock("./rankingIndicacaoConversao", async (importOriginal) => {
   };
 });
 
+// indicacaoToken.ts fica REAL — só obterRelacaoIndicacao precisa ser
+// interceptável para simular a corrida real do BLOCKER 1 (B lê "sem
+// relação" e pausa ANTES de A confirmar e crashar).
+vi.mock("./indicacaoToken", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./indicacaoToken")>();
+  return {
+    ...real,
+    obterRelacaoIndicacao: vi.fn(real.obterRelacaoIndicacao),
+  };
+});
+
 import { processarEfeitosPedidoEntregue, processarEfeitosPedidoCancelado, obterPendenciasEfeitosFidelidade, type PedidoParaEfeitosFidelidade } from "./fidelidadeEfeitos";
 import { obterConversaoAtivaIndicado, registrarConversaoIndicacao, reservarOuIdentificarConversao, marcarConversaoAtivaIndicado } from "./rankingIndicacaoConversao";
 import { derivarClienteIdPorTelefone, obterExtratoPontos } from "./fidelidade";
@@ -150,6 +161,7 @@ import type { PedidoRedis } from "@/types/pedidoRedis";
 const registrarConversaoIndicacaoMock = vi.mocked(registrarConversaoIndicacao);
 const reservarOuIdentificarConversaoMock = vi.mocked(reservarOuIdentificarConversao);
 const marcarConversaoAtivaIndicadoMock = vi.mocked(marcarConversaoAtivaIndicado);
+const obterRelacaoIndicacaoMock = vi.mocked(obterRelacaoIndicacao);
 
 const INDICADOR_ID = "cli_indicador_real_integracao";
 const TELEFONE_INDICADO = "86988880001";
@@ -159,6 +171,7 @@ const TELEFONE_INDICADO_4 = "86988880004";
 const TELEFONE_INDICADO_5 = "86988880005";
 const TELEFONE_INDICADO_6 = "86988880006";
 const TELEFONE_INDICADO_7 = "86988880007";
+const TELEFONE_INDICADO_9 = "86988880009";
 
 function pedido(id: string, telefone: string, overrides: Partial<PedidoParaEfeitosFidelidade> = {}): PedidoParaEfeitosFidelidade {
   return {
@@ -195,6 +208,7 @@ beforeEach(() => {
   registrarConversaoIndicacaoMock.mockClear();
   reservarOuIdentificarConversaoMock.mockClear();
   marcarConversaoAtivaIndicadoMock.mockClear();
+  obterRelacaoIndicacaoMock.mockClear();
   // Sistema de Estrelas (V1) ativo — condição real exigida por
   // creditarEstrelasIndicacaoValida (estrelasV1Ativa), sem a qual todo
   // crédito de indicação seria "nao_elegivel".
@@ -317,6 +331,60 @@ describe("BLOCKER (reserva durável) — crash entre o +6 e a confirmação, com
     expect(creditosPrincipais[0].eventoId).toBe(`indicacao:${indicadoId}:primeira-compra:pedido-B3`);
     // A conversão ativa continua sendo a de B — A nunca sobrescreve.
     expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual({ estado: "ativa", indicadorId: INDICADOR_ID, pedidoId: "pedido-B3" });
+  });
+
+  test("BLOCKER 1: A e B leem 'sem relação' quase juntos; A vence a confirmação da relação mas crasha exatamente ANTES de reservar; B recebe 'ja_existe' de verdade, relê a relação CANÔNICA e garante a conversão — exatamente um +6", async () => {
+    const indicadoId = derivarClienteIdPorTelefone(TELEFONE_INDICADO_9)!;
+    await salvarCandidaturaIndicacao(indicadoId, INDICADOR_ID);
+
+    // B começa primeiro: lê "sem relação" (de verdade, ainda é null nesse
+    // instante) e PAUSA logo em seguida — antes de sequer olhar a
+    // candidatura. Só a PRIMEIRA chamada a obterRelacaoIndicacao (a de B)
+    // é interceptada; a de A, que só ocorre depois, usa a implementação
+    // real sem pausa.
+    const obterRelacaoReal = obterRelacaoIndicacaoMock.getMockImplementation()!;
+    let liberarB!: () => void;
+    const pausaB = new Promise<void>((resolve) => {
+      liberarB = resolve;
+    });
+    obterRelacaoIndicacaoMock.mockImplementationOnce(async (...args: Parameters<typeof obterRelacaoIndicacao>) => {
+      const resultado = await obterRelacaoReal(...args);
+      await pausaB;
+      return resultado;
+    });
+
+    const promessaB = processarEfeitosPedidoEntregue(pedido("pedido-B9", TELEFONE_INDICADO_9));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // A processa por completo: também vê "sem relação", confirma a relação
+    // (vence o SET NX de verdade — "registrado"), mas crasha exatamente ao
+    // tentar reservar a conversão principal (simula o processo morrendo
+    // ali, ANTES de qualquer +6).
+    reservarOuIdentificarConversaoMock.mockRejectedValueOnce(new Error("crash simulado — A morre antes de reservar"));
+    await expect(processarEfeitosPedidoEntregue(pedido("pedido-A9", TELEFONE_INDICADO_9))).rejects.toThrow(
+      "crash simulado — A morre antes de reservar",
+    );
+    // A relação já está commitada de verdade — só falta alguém reservar.
+    expect(await obterRelacaoIndicacao(indicadoId)).toEqual(expect.objectContaining({ indicadorId: INDICADOR_ID }));
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toBeNull();
+
+    // B retoma: sua leitura antiga ("sem relação") já tinha acontecido;
+    // agora tenta confirmar a candidatura e recebe "ja_existe" de verdade
+    // (A já tinha confirmado). Com a correção, B relê a relação CANÔNICA
+    // em vez de simplesmente desistir, e garante a conversão principal.
+    liberarB();
+    await promessaB;
+
+    expect(await obterConversaoAtivaIndicado(indicadoId)).toEqual(
+      expect.objectContaining({ estado: "ativa", indicadorId: INDICADOR_ID, pedidoId: "pedido-B9" }),
+    );
+    const extratoFinal = await obterExtratoPontos(INDICADOR_ID);
+    const creditosPrincipais = extratoFinal.filter(
+      (m) => m.tipo === "confirmado" && m.eventoId?.startsWith(`indicacao:${indicadoId}:primeira-compra:`),
+    );
+    // Exatamente UM +6 — nunca zero (perdido pela corrida) nem dois.
+    expect(creditosPrincipais).toHaveLength(1);
+    expect(creditosPrincipais[0].eventoId).toBe(`indicacao:${indicadoId}:primeira-compra:pedido-B9`);
   });
 
   test("BLOCKER 4: A reserva, credita e grava o breadcrumb, mas 'crasha' exatamente antes de confirmar; um cancelamento real chega antes de qualquer retry e revoga a reserva; a confirmação atrasada do worker original de A NUNCA ressuscita A — e nunca toca uma conversão MAIS NOVA (C) que legitimamente ocupou o lugar depois", async () => {

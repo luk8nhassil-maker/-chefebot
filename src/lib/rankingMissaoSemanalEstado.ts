@@ -27,7 +27,7 @@ import { obterConfigGamificacao } from "./rankingGamificacaoConfig";
 import { creditarBonusCompeticao, estornarBonusCompeticao, obterMovimentosBonusTemporada } from "./rankingBonusTemporada";
 import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
 import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporadaSync";
-import { comBloqueioGamificacao } from "./rankingGamificacaoLock";
+import { comBloqueioGamificacao, comBloqueioGamificacaoComToken } from "./rankingGamificacaoLock";
 
 type RegistroMissaoSemanal = {
   estado: EstadoMissaoSemanal;
@@ -67,7 +67,23 @@ function chaveBreadcrumbPedido(pedidoId: string): string {
   return `ranking:missaoSemanal:pedido:${pedidoId}`;
 }
 
-type BreadcrumbPedido = { tenantId: string; temporadaId: string; clienteId: string; bonus: number };
+type BreadcrumbPedido = {
+  tenantId: string;
+  temporadaId: string;
+  clienteId: string;
+  bonus: number;
+  /**
+   * BLOCKER: quanto este pedido credita se o crédito real acontecer,
+   * calculado com a base de estrelas REAL do pedido e o multiplicador
+   * vigente NO MOMENTO da reserva — gravado ANTES de qualquer chamada ao
+   * ledger. É o que permite a reconciliação de uma reserva órfã "entregue,
+   * mas o processo morreu antes do crédito" creditar exatamente o valor
+   * correto sem recalcular com uma config que pode ter mudado depois.
+   * Ausente em breadcrumbs gravadas antes desta correção (a reconciliação
+   * nesse caso fica fail-closed — nunca inventa o valor).
+   */
+  bonusPlanejado?: number;
+};
 
 async function obterRegistro(tenantId: string, temporadaId: string, clienteId: string): Promise<RegistroMissaoSemanal> {
   const salvo = await redis.get<RegistroMissaoSemanal>(chaveRegistro(tenantId, temporadaId, clienteId));
@@ -76,6 +92,41 @@ async function obterRegistro(tenantId: string, temporadaId: string, clienteId: s
 
 async function salvarRegistro(tenantId: string, temporadaId: string, clienteId: string, registro: RegistroMissaoSemanal): Promise<void> {
   await redis.set(chaveRegistro(tenantId, temporadaId, clienteId), registro);
+}
+
+// BLOCKER: escreve o registro só se a chave de LOCK ainda contiver
+// exatamente este `token` — verificação e escrita na MESMA operação Lua,
+// sem nenhuma janela entre "checar dono" e "gravar". Usado pelas
+// transições que reservam/confirmam/revertem/reconciliam a missão — nunca
+// pela reavaliação lazy de desbloqueio (sincronizarMissaoSemanalCliente),
+// que não credita nada e cuja pior consequência de perder a escrita é só
+// recalcular no próximo acesso. Sem isto, um `fn()` que por qualquer
+// motivo levasse mais que o TTL do lock (10s) podia ter o lock "roubado"
+// por outro worker (cancelamento, reconciliação) e MESMO ASSIM escrever o
+// registro por cima do estado mais novo (mesmo padrão já usado em
+// rankingIndicacaoConversao.ts/rankingBonusTemporada.ts).
+const ESCREVER_REGISTRO_SE_DONO_SCRIPT = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  redis.call("SET", KEYS[2], ARGV[2])
+  return 1
+else
+  return 0
+end
+`;
+
+async function escreverRegistroSeDono(
+  tenantId: string,
+  temporadaId: string,
+  clienteId: string,
+  token: string,
+  registro: RegistroMissaoSemanal,
+): Promise<boolean> {
+  const resultado = await redis.eval(
+    ESCREVER_REGISTRO_SE_DONO_SCRIPT,
+    [chaveLock(tenantId, temporadaId, clienteId), chaveRegistro(tenantId, temporadaId, clienteId)],
+    [token, JSON.stringify(registro)],
+  );
+  return resultado === 1;
 }
 
 export async function obterEstadoMissaoSemanal(tenantId: string, temporadaId: string, clienteId: string): Promise<EstadoMissaoSemanal> {
@@ -153,8 +204,9 @@ async function reconciliarMissaoSemanalOrfa(params: {
   temporadaId: string;
   clienteId: string;
   registro: RegistroMissaoSemanal;
+  token: string;
 }): Promise<RegistroMissaoSemanal | null> {
-  const { tenantId, temporadaId, clienteId, registro } = params;
+  const { tenantId, temporadaId, clienteId, registro, token } = params;
   const pedidoOrfaoId = registro.estado.processandoPedidoId;
   if (!pedidoOrfaoId) return null;
   const desdeMs = registro.processandoDesdeEm ? new Date(registro.processandoDesdeEm).getTime() : NaN;
@@ -176,7 +228,12 @@ async function reconciliarMissaoSemanalOrfa(params: {
       await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
     }
     const novoRegistro: RegistroMissaoSemanal = { ...registro, estado: revertido ?? registro.estado, processandoDesdeEm: null };
-    await salvarRegistro(tenantId, temporadaId, clienteId, novoRegistro);
+    // BLOCKER: o TTL do lock expirou entre o GET e este SET — nunca reporta
+    // a reconciliação como concluída sem ter escrito de verdade (o estorno
+    // já é idempotente por eventoId, então um retry nunca duplica).
+    if (!(await escreverRegistroSeDono(tenantId, temporadaId, clienteId, token, novoRegistro))) {
+      throw new Error("ranking_missao_semanal_lock_perdido_durante_reconciliacao");
+    }
     return novoRegistro;
   }
 
@@ -191,14 +248,56 @@ async function reconciliarMissaoSemanalOrfa(params: {
     await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
     const confirmado = confirmarConsumoMissaoSemanal({ estadoAtual: registro.estado, pedidoId: pedidoOrfaoId, agora: new Date() });
     const novoRegistro: RegistroMissaoSemanal = { ...registro, estado: confirmado ?? registro.estado, processandoDesdeEm: null };
-    await salvarRegistro(tenantId, temporadaId, clienteId, novoRegistro);
+    if (!(await escreverRegistroSeDono(tenantId, temporadaId, clienteId, token, novoRegistro))) {
+      throw new Error("ranking_missao_semanal_lock_perdido_durante_reconciliacao");
+    }
     return novoRegistro;
   }
 
-  // Pedido não encontrado, ainda "entregue" sem crédito real, ou status
-  // indeterminado — recalcular o bônus do zero exigiria reconstruir a base
-  // de estrelas do pedido, uma decisão de negócio que este reconciliador
-  // nunca deve inventar. Nunca rouba; devolve "não decidível".
+  // BLOCKER: pedido dono ainda "entregue", processo morreu ANTES do
+  // crédito real. Só decide com segurança se a breadcrumb (gravada ANTES
+  // do ledger, ver consumirMissaoSemanalNoPedido) já prova exatamente
+  // quanto creditar — nunca recalcula agora com a base de estrelas ou o
+  // multiplicador atuais, que podem ter mudado desde a reserva.
+  if (pedidoOrfao?.status === "entregue") {
+    const breadcrumb = await redis.get<BreadcrumbPedido>(chaveBreadcrumbPedido(pedidoOrfaoId));
+    if (!breadcrumb || !Number.isFinite(breadcrumb.bonusPlanejado)) {
+      // Breadcrumb ausente (nunca chegou a ser gravada) ou de um registro
+      // legado sem o campo — nunca inventa o valor. Fail-closed.
+      return null;
+    }
+    const bonusPlanejado = breadcrumb.bonusPlanejado as number;
+    let bonusCreditado = 0;
+    if (bonusPlanejado > 0) {
+      const resultado = await creditarBonusCompeticao({
+        tenantId,
+        temporadaId,
+        clienteId,
+        eventoId,
+        tipo: "missao_semanal",
+        pontos: bonusPlanejado,
+        motivo: `Caçada ao Pódio — 2x no pedido ${pedidoOrfaoId}`,
+      });
+      // "invalido" nunca deveria acontecer aqui (os parâmetros vêm do
+      // próprio sistema, nunca de entrada externa) — mas se acontecer,
+      // fail-closed: nunca confirma a missão sem o crédito real.
+      if (resultado !== "creditado" && resultado !== "ja_creditado") return null;
+      bonusCreditado = bonusPlanejado;
+      await redis.set(chaveBreadcrumbPedido(pedidoOrfaoId), { tenantId, temporadaId, clienteId, bonus: bonusCreditado, bonusPlanejado } satisfies BreadcrumbPedido);
+      await registrarFatoRankingGamificacao("missao_semanal_consumida", `${clienteId}:${temporadaId}:${pedidoOrfaoId}`);
+      await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
+    }
+    const confirmado = confirmarConsumoMissaoSemanal({ estadoAtual: registro.estado, pedidoId: pedidoOrfaoId, agora: new Date() });
+    const novoRegistro: RegistroMissaoSemanal = { ...registro, estado: confirmado ?? registro.estado, processandoDesdeEm: null };
+    if (!(await escreverRegistroSeDono(tenantId, temporadaId, clienteId, token, novoRegistro))) {
+      throw new Error("ranking_missao_semanal_lock_perdido_durante_reconciliacao");
+    }
+    return novoRegistro;
+  }
+
+  // Pedido não encontrado ou status indeterminado (nem entregue, nem
+  // cancelado) — nunca decide/credita por conta própria. Nunca rouba;
+  // devolve "não decidível".
   return null;
 }
 
@@ -229,7 +328,7 @@ export async function consumirMissaoSemanalNoPedido(params: {
     return { consumida: false, bonusCreditado: 0 };
   }
 
-  return comBloqueioGamificacao(chaveLock(tenantId, temporadaId, clienteId), async () => {
+  return comBloqueioGamificacaoComToken(chaveLock(tenantId, temporadaId, clienteId), async (token) => {
     let registro = await obterRegistro(tenantId, temporadaId, clienteId);
     const atualizado: RegistroMissaoSemanal = { ...registro, ultimoPedidoElegivelEm: agora.toISOString() };
 
@@ -238,7 +337,7 @@ export async function consumirMissaoSemanalNoPedido(params: {
     // técnica a órfã e tenta reconciliar o DONO usando só o que o ledger e o
     // pedido real já provam. Nunca "rouba" a reserva para ESTE pedido.
     if (registro.estado.status === "processando" && registro.estado.processandoPedidoId !== pedidoId) {
-      const reconciliado = await reconciliarMissaoSemanalOrfa({ tenantId, temporadaId, clienteId, registro });
+      const reconciliado = await reconciliarMissaoSemanalOrfa({ tenantId, temporadaId, clienteId, registro, token });
       if (!reconciliado) {
         // Ainda não é candidata a órfã, ou não foi possível decidir com
         // segurança — NUNCA abandona silenciosamente como "concluído sem
@@ -250,23 +349,41 @@ export async function consumirMissaoSemanalNoPedido(params: {
 
     const reservado = reservarConsumoMissaoSemanal({ estadoAtual: registro.estado, pedidoId });
     if (!reservado) {
-      await salvarRegistro(tenantId, temporadaId, clienteId, { ...atualizado, estado: registro.estado, processandoDesdeEm: registro.processandoDesdeEm });
+      // BLOCKER: escrita CAS mesmo para o "nada a reservar" (só atualiza
+      // ultimoPedidoElegivelEm) — nunca reporta sucesso sem ter escrito de
+      // verdade, mesmo aqui.
+      if (!(await escreverRegistroSeDono(tenantId, temporadaId, clienteId, token, { ...atualizado, estado: registro.estado, processandoDesdeEm: registro.processandoDesdeEm }))) {
+        throw new Error("ranking_missao_semanal_lock_perdido_durante_atualizacao");
+      }
       return { consumida: false, bonusCreditado: 0 };
     }
     const eraProcessandoDoMesmoPedido = registro.estado.status === "processando" && registro.estado.processandoPedidoId === pedidoId;
-    await salvarRegistro(tenantId, temporadaId, clienteId, {
+    // BLOCKER: escrita CAS da reserva — o TTL do lock expirar aqui nunca
+    // deve permitir sobrescrever um estado mais novo (ex.: um cancelamento
+    // ou reconciliação concorrente que já assumiu o lock).
+    if (!(await escreverRegistroSeDono(tenantId, temporadaId, clienteId, token, {
       ...atualizado,
       estado: reservado,
       processandoDesdeEm: eraProcessandoDoMesmoPedido ? (registro.processandoDesdeEm ?? agora.toISOString()) : agora.toISOString(),
-    });
-    // BLOCKER 6: migalha ANTES de qualquer efeito financeiro — é o índice
-    // durável que localiza o dono (tenant/temporada/cliente) desta reserva
-    // mesmo que o processo morra exatamente entre reservar e creditar (antes,
-    // só era gravada DEPOIS do crédito, e tanto um cancelamento quanto uma
-    // reconciliação nesse buraco não encontravam nada para resolver).
-    await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus: 0 } satisfies BreadcrumbPedido);
-
+    }))) {
+      throw new Error("ranking_missao_semanal_lock_perdido_durante_reserva");
+    }
+    // O cálculo é puro (sem I/O) — feito ANTES da migalha para que ela já
+    // grave o `bonusPlanejado` com a base de estrelas REAL e o
+    // multiplicador VIGENTE agora, nunca um recalculado depois com uma
+    // config que pode ter mudado.
     const bonus = calcularBonusMissaoSemanal(estrelasBaseDoPedido, config.missaoSemanalMultiplicador);
+
+    // BLOCKER 6/BLOCKER: migalha ANTES de qualquer efeito financeiro — é o
+    // índice durável que localiza o dono (tenant/temporada/cliente) desta
+    // reserva mesmo que o processo morra exatamente entre reservar e
+    // creditar (antes, só era gravada DEPOIS do crédito, e tanto um
+    // cancelamento quanto uma reconciliação nesse buraco não encontravam
+    // nada para resolver). `bonusPlanejado` é o que permite a reconciliação
+    // de uma reserva órfã "entregue, mas o processo morreu antes do
+    // crédito" creditar exatamente o valor certo, sem recalcular depois.
+    await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus: 0, bonusPlanejado: bonus } satisfies BreadcrumbPedido);
+
     let bonusCreditado = 0;
     if (bonus > 0) {
       const resultado = await creditarBonusCompeticao({
@@ -292,7 +409,7 @@ export async function consumirMissaoSemanalNoPedido(params: {
       // "invalido" (params ruins) nunca cai aqui — não existe crédito real.
       if (resultado === "creditado" || resultado === "ja_creditado") {
         bonusCreditado = bonus;
-        await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus } satisfies BreadcrumbPedido);
+        await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus, bonusPlanejado: bonus } satisfies BreadcrumbPedido);
         await registrarFatoRankingGamificacao("missao_semanal_consumida", `${clienteId}:${temporadaId}:${pedidoId}`);
         await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
       }
@@ -301,7 +418,13 @@ export async function consumirMissaoSemanalNoPedido(params: {
     const confirmado = confirmarConsumoMissaoSemanal({ estadoAtual: reservado, pedidoId, agora });
     if (confirmado) {
       const registroAtual = await obterRegistro(tenantId, temporadaId, clienteId);
-      await salvarRegistro(tenantId, temporadaId, clienteId, { ...registroAtual, estado: confirmado, processandoDesdeEm: null });
+      // BLOCKER: confirmação também é escrita CAS — nunca reporta a missão
+      // como consumida sem ter escrito de verdade (o crédito no ledger, se
+      // houve, já é idempotente por eventoId; um retry reprocessa com
+      // segurança e converge para o mesmo estado final).
+      if (!(await escreverRegistroSeDono(tenantId, temporadaId, clienteId, token, { ...registroAtual, estado: confirmado, processandoDesdeEm: null }))) {
+        throw new Error("ranking_missao_semanal_lock_perdido_durante_confirmacao");
+      }
     }
     return { consumida: true, bonusCreditado };
   });
@@ -319,11 +442,16 @@ export async function reverterMissaoSemanalDoPedido(pedidoId: string, motivo: st
   const breadcrumb = await redis.get<BreadcrumbPedido>(chaveBreadcrumbPedido(pedidoId));
   if (!breadcrumb) return;
 
-  await comBloqueioGamificacao(chaveLock(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId), async () => {
+  await comBloqueioGamificacaoComToken(chaveLock(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId), async (token) => {
     const registro = await obterRegistro(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId);
     const revertido = reverterConsumoMissaoSemanal({ estadoAtual: registro.estado, pedidoId });
     if (revertido) {
-      await salvarRegistro(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId, { ...registro, estado: revertido, processandoDesdeEm: null });
+      // BLOCKER: escrita CAS da reversão — nunca reporta "revertido" sem
+      // ter escrito de verdade (o estorno logo abaixo já é idempotente por
+      // eventoId, então um retry deste cancelamento nunca duplica).
+      if (!(await escreverRegistroSeDono(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId, token, { ...registro, estado: revertido, processandoDesdeEm: null }))) {
+        throw new Error("ranking_missao_semanal_lock_perdido_durante_reversao");
+      }
     }
     const resultado = await estornarBonusCompeticao({
       tenantId: breadcrumb.tenantId,
