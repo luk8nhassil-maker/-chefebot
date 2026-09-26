@@ -125,6 +125,10 @@ vi.mock("./rankingIndicacaoConversao", () => ({
   obterConversaoAtivaIndicado: obterConversaoAtivaMock,
   revogarConversaoAtivaIndicadoSePedido: revogarConversaoAtivaMock,
   reservarOuIdentificarConversao: reservarOuIdentificarConversaoMock,
+  // BLOCKER 5: por padrão nenhuma reserva é "candidata a órfã" — os testes
+  // deste arquivo não exercitam a reconciliação (isso é coberto pelos
+  // testes de integração reais em rankingIndicacaoConversaoCrash.integration.test.ts).
+  reservaConversaoEhCandidataAOrfandade: vi.fn(() => false),
 }));
 
 vi.mock("./expedienteOperacional", () => ({
@@ -478,6 +482,7 @@ describe("efeito indicacao", () => {
     obterRelacaoMock.mockResolvedValue(null); // sem relação permanente ainda
     obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
     registrarRelacaoMock.mockResolvedValue("registrado"); // confirmação bem-sucedida
+    reservarOuIdentificarConversaoMock.mockResolvedValue("reservada_processando"); // reserva nova, sem disputa
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
 
@@ -501,6 +506,7 @@ describe("efeito indicacao", () => {
     obterRelacaoMock.mockResolvedValue(null);
     obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
     registrarRelacaoMock.mockResolvedValue("registrado");
+    reservarOuIdentificarConversaoMock.mockResolvedValue("reservada_processando");
     creditarIndicacaoMock.mockResolvedValue("creditado");
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
@@ -512,6 +518,7 @@ describe("efeito indicacao", () => {
     obterRelacaoMock.mockResolvedValue(null);
     obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
     registrarRelacaoMock.mockResolvedValue("registrado");
+    reservarOuIdentificarConversaoMock.mockResolvedValue("reservada_processando");
     creditarIndicacaoMock.mockResolvedValue("creditado");
     obterTemporadaAtivaMock.mockResolvedValue({ temporadaId: "temp_1", tenantId: "default" });
 
@@ -529,6 +536,7 @@ describe("efeito indicacao", () => {
     obterRelacaoMock.mockResolvedValue(null);
     obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
     registrarRelacaoMock.mockResolvedValue("registrado");
+    reservarOuIdentificarConversaoMock.mockResolvedValue("reservada_processando");
     creditarIndicacaoMock.mockResolvedValue("creditado");
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
@@ -544,6 +552,7 @@ describe("efeito indicacao", () => {
     obterRelacaoMock.mockResolvedValue(null);
     obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
     registrarRelacaoMock.mockResolvedValue("registrado");
+    reservarOuIdentificarConversaoMock.mockResolvedValue("reservada_processando");
     creditarIndicacaoMock.mockResolvedValue("ja_creditado");
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
@@ -555,21 +564,26 @@ describe("efeito indicacao", () => {
     }));
   });
 
-  test("'nao_elegivel' nunca registra a migalha de conversão (fail-closed de verdade, nunca houve crédito real)", async () => {
+  test("'nao_elegivel' nunca registra a migalha de conversão (fail-closed de verdade, nunca houve crédito real) — BLOCKER 2: libera a própria reserva presa", async () => {
     obterRelacaoMock.mockResolvedValue(null);
     obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
     registrarRelacaoMock.mockResolvedValue("registrado");
+    reservarOuIdentificarConversaoMock.mockResolvedValue("reservada_processando");
     creditarIndicacaoMock.mockResolvedValue("nao_elegivel");
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
 
     expect(registrarConversaoIndicacaoMock).not.toHaveBeenCalled();
+    // BLOCKER 2: a reserva feita por ESTE pedido nunca fica presa em
+    // "processando" para sempre quando o ledger recusa o crédito.
+    expect(revogarConversaoAtivaMock).toHaveBeenCalledWith("cli_canonico", "ped_entregue");
   });
 
   test("crédito real sem temporada ativa nunca tenta concluir a missão da temporada (fail-closed)", async () => {
     obterRelacaoMock.mockResolvedValue(null);
     obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
     registrarRelacaoMock.mockResolvedValue("registrado");
+    reservarOuIdentificarConversaoMock.mockResolvedValue("reservada_processando");
     creditarIndicacaoMock.mockResolvedValue("creditado");
     obterTemporadaAtivaMock.mockResolvedValue(null);
 
@@ -582,6 +596,7 @@ describe("efeito indicacao", () => {
     obterRelacaoMock.mockResolvedValue(null);
     obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
     registrarRelacaoMock.mockResolvedValue("registrado");
+    reservarOuIdentificarConversaoMock.mockResolvedValue("reservada_processando");
     creditarIndicacaoMock.mockResolvedValue("creditado");
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
@@ -595,6 +610,7 @@ describe("efeito indicacao", () => {
     obterRelacaoMock.mockResolvedValue(null);
     obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
     registrarRelacaoMock.mockResolvedValue("registrado");
+    reservarOuIdentificarConversaoMock.mockResolvedValue("reservada_processando");
     creditarIndicacaoMock.mockResolvedValue("ja_creditado");
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
@@ -606,6 +622,7 @@ describe("efeito indicacao", () => {
     obterRelacaoMock.mockResolvedValue(null);
     obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
     registrarRelacaoMock.mockResolvedValue("registrado");
+    reservarOuIdentificarConversaoMock.mockResolvedValue("reservada_processando");
     creditarIndicacaoMock.mockResolvedValue("nao_elegivel");
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
@@ -638,6 +655,7 @@ describe("efeito indicacao", () => {
     obterRelacaoMock.mockResolvedValue(null);
     obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
     registrarRelacaoMock.mockResolvedValue("registrado");
+    reservarOuIdentificarConversaoMock.mockResolvedValue("reservada_processando");
 
     await processarEfeitosPedidoEntregue(pedidoEntregue);
     await processarEfeitosPedidoEntregue(pedidoEntregue); // segunda chamada: estado já concluído
@@ -749,6 +767,7 @@ describe("efeito indicacao", () => {
     obterRelacaoMock.mockResolvedValue(null);
     obterCandidaturaMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
     registrarRelacaoMock.mockResolvedValue("registrado");
+    reservarOuIdentificarConversaoMock.mockResolvedValue("reservada_processando");
     obterTemporadaAtivaMock.mockResolvedValue({ temporadaId: "temp_1", tenantId: "default" });
 
     // 1ª tentativa: o ledger credita de verdade (+6), mas o processo "morre"

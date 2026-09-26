@@ -6,7 +6,7 @@
 import "server-only";
 import { calcularImpulsoPodioDisponivel } from "./rankingGamificacao";
 import { obterConfigGamificacao } from "./rankingGamificacaoConfig";
-import { calcularTotalBonusPorTipo, creditarBonusCompeticao, obterMovimentosBonusTemporada } from "./rankingBonusTemporada";
+import { creditarBonusCompeticaoComTeto } from "./rankingBonusTemporada";
 import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporadaSync";
 
 export async function aplicarImpulsoPodioSeElegivel(params: {
@@ -19,22 +19,27 @@ export async function aplicarImpulsoPodioSeElegivel(params: {
   const config = await obterConfigGamificacao();
   if (!config.impulsoPodioAtivo) return;
 
-  const movimentos = await obterMovimentosBonusTemporada(tenantId, temporadaId, clienteId);
-  const jaAplicado = calcularTotalBonusPorTipo(movimentos, "impulso_podio");
-  const disponivel = calcularImpulsoPodioDisponivel({
-    bonusConfigurado: config.impulsoPodioBonus,
-    capMaximoTemporada: config.impulsoPodioCapTemporada,
-    jaAplicadoNaTemporada: jaAplicado,
-  });
-  if (disponivel <= 0) return;
-
-  const resultado = await creditarBonusCompeticao({
+  // BLOCKER: o teto por temporada precisa ser aplicado ATOMICAMENTE junto
+  // com a leitura do "já aplicado" e a escrita — nunca calculado fora do
+  // lock. Dois fatos "entrou_top3" concorrentes (eventoIds diferentes) do
+  // MESMO cliente/temporada, cada um lendo o "já aplicado" ANTES de
+  // qualquer um creditar, podiam ambos calcular espaço sob o teto e
+  // ultrapassá-lo — cada crédito é idempotente por evento, mas a SOMA não
+  // respeitava o cap. creditarBonusCompeticaoComTeto faz a leitura, o
+  // cálculo e a escrita dentro da MESMA seção crítica por
+  // tenant/temporada/cliente.
+  const resultado = await creditarBonusCompeticaoComTeto({
     tenantId,
     temporadaId,
     clienteId,
     eventoId,
     tipo: "impulso_podio",
-    pontos: disponivel,
+    calcularPontosDisponiveis: (jaAplicado) =>
+      calcularImpulsoPodioDisponivel({
+        bonusConfigurado: config.impulsoPodioBonus,
+        capMaximoTemporada: config.impulsoPodioCapTemporada,
+        jaAplicadoNaTemporada: jaAplicado,
+      }),
     motivo: "Impulso do Pódio — chegou ao Top 3",
   });
   // "creditado" ou "ja_creditado" (retry) precisam sincronizar da mesma

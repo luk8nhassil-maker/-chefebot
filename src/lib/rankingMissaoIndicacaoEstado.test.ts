@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estornarBonusMock, registrarFatoMock, sincronizarScoreMock } = vi.hoisted(() => {
+const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estornarBonusMock, registrarFatoMock, sincronizarScoreMock, obterMovimentosBonusMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
     get: vi.fn(async (key: string) => store.get(key) ?? null),
@@ -27,12 +27,17 @@ const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estorna
     estornarBonusMock: vi.fn(async () => "estornado" as const),
     registrarFatoMock: vi.fn(async () => true),
     sincronizarScoreMock: vi.fn(async () => undefined),
+    obterMovimentosBonusMock: vi.fn(async () => [] as { eventoId: string }[]),
   };
 });
 
 vi.mock("./redis", () => ({ redis: redisMock }));
 vi.mock("./rankingGamificacaoConfig", () => ({ obterConfigGamificacao: obterConfigGamificacaoMock }));
-vi.mock("./rankingBonusTemporada", () => ({ creditarBonusCompeticao: creditarBonusMock, estornarBonusCompeticao: estornarBonusMock }));
+vi.mock("./rankingBonusTemporada", () => ({
+  creditarBonusCompeticao: creditarBonusMock,
+  estornarBonusCompeticao: estornarBonusMock,
+  obterMovimentosBonusTemporada: obterMovimentosBonusMock,
+}));
 vi.mock("./rankingGamificacaoFatos", () => ({ registrarFatoRankingGamificacao: registrarFatoMock }));
 vi.mock("./rankingScoreTemporadaSync", () => ({ sincronizarScoreTemporadaComBonus: sincronizarScoreMock }));
 
@@ -49,7 +54,17 @@ beforeEach(() => {
   estornarBonusMock.mockResolvedValue("estornado");
   registrarFatoMock.mockResolvedValue(true);
   sincronizarScoreMock.mockResolvedValue(undefined);
+  obterMovimentosBonusMock.mockResolvedValue([]);
 });
+
+// BLOCKER 7 — helpers só para os testes de reconciliação de reserva órfã.
+function definirPedidoReal(id: string, status: string) {
+  const pedidos = (store.get("pedidos") as { id: string; status: string }[] | undefined) ?? [];
+  store.set("pedidos", [...pedidos.filter((p) => p.id !== id), { id, status }]);
+}
+function envelhecerProcessando(minutosAtras: number) {
+  store.set(`ranking:missaoIndicacao:processandoDesdeEm:${T}:${TEMP}:${CLI}`, new Date(Date.now() - minutosAtras * 60 * 1000).toISOString());
+}
 
 describe("concluirMissaoIndicacaoNoPedido", () => {
   test("fail-closed: sem missaoIndicacaoAtiva, nunca conclui nem credita", async () => {
@@ -110,6 +125,85 @@ describe("concluirMissaoIndicacaoNoPedido", () => {
     const retry = await concluirMissaoIndicacaoNoPedido({ tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-1", agora: new Date() });
     expect(retry).toEqual({ concluida: true, bonusCreditado: 40 });
     expect(creditarBonusMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("BLOCKER 7: a migalha existe ANTES do crédito no ledger — crash no próprio crédito ainda deixa rastro para o cancelamento encontrar", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 40 });
+    creditarBonusMock.mockRejectedValueOnce(new Error("ledger indisponível"));
+
+    await expect(concluirMissaoIndicacaoNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-crash-antes-bonus", agora: new Date("2026-01-10T00:00:00Z"),
+    })).rejects.toThrow("ledger indisponível");
+
+    expect(store.get("ranking:missaoIndicacao:pedido:pedido-crash-antes-bonus")).toEqual({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, bonus: 0, eventoIdBonus: `missaoIndicacao:${TEMP}:${CLI}:pedido-crash-antes-bonus`,
+    });
+
+    await reverterMissaoIndicacaoDoPedido("pedido-crash-antes-bonus", "cancelado antes do bônus");
+    expect((await obterEstadoMissaoIndicacao(T, TEMP, CLI)).concluida).toBe(false);
+    expect((await obterEstadoMissaoIndicacao(T, TEMP, CLI)).processandoPedidoId).toBeNull();
+  });
+
+  test("BLOCKER 7: outro pedido encontra a reserva 'processando' RECENTE (nunca stale) — nunca abandona silenciosamente, vira retryable", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 40 });
+    store.set(`ranking:missaoIndicacao:${T}:${TEMP}:${CLI}`, { concluida: false, concluidaEm: null, pedidoId: null, processandoPedidoId: "pedido-A9" });
+    store.set(`ranking:missaoIndicacao:processandoDesdeEm:${T}:${TEMP}:${CLI}`, new Date().toISOString());
+
+    await expect(concluirMissaoIndicacaoNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-B9", agora: new Date("2026-01-10T00:00:01Z"),
+    })).rejects.toThrow("ranking_missao_indicacao_em_processamento");
+
+    expect(creditarBonusMock).not.toHaveBeenCalled();
+    expect((await obterEstadoMissaoIndicacao(T, TEMP, CLI)).processandoPedidoId).toBe("pedido-A9");
+  });
+
+  test("BLOCKER 7: reconciliação de reserva órfã — pedido REAL dono já 'cancelado': libera a reserva e uma nova indicação conclui normalmente", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 40 });
+    store.set(`ranking:missaoIndicacao:${T}:${TEMP}:${CLI}`, { concluida: false, concluidaEm: null, pedidoId: null, processandoPedidoId: "pedido-orfao-cancelado" });
+    envelhecerProcessando(10);
+    definirPedidoReal("pedido-orfao-cancelado", "cancelado");
+    obterMovimentosBonusMock.mockResolvedValue([]);
+
+    const resultado = await concluirMissaoIndicacaoNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-novo-legitimo", agora: new Date("2026-01-10T00:00:00Z"),
+    });
+
+    expect(resultado).toEqual({ concluida: true, bonusCreditado: 40 });
+    expect(estornarBonusMock).toHaveBeenCalledWith(expect.objectContaining({ eventoIdOriginal: `missaoIndicacao:${TEMP}:${CLI}:pedido-orfao-cancelado` }));
+    const estadoFinal = await obterEstadoMissaoIndicacao(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ concluida: true, pedidoId: "pedido-novo-legitimo" }));
+  });
+
+  test("BLOCKER 7: reconciliação de reserva órfã — crédito REAL já existe no ledger (só faltou confirmar): completa sozinha, outro pedido nunca dobra", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 40 });
+    store.set(`ranking:missaoIndicacao:${T}:${TEMP}:${CLI}`, { concluida: false, concluidaEm: null, pedidoId: null, processandoPedidoId: "pedido-orfao-creditado" });
+    envelhecerProcessando(10);
+    definirPedidoReal("pedido-orfao-creditado", "entregue");
+    obterMovimentosBonusMock.mockResolvedValue([{ eventoId: `missaoIndicacao:${TEMP}:${CLI}:pedido-orfao-creditado` }]);
+
+    const resultado = await concluirMissaoIndicacaoNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-B10", agora: new Date("2026-01-10T00:00:00Z"),
+    });
+
+    expect(resultado).toEqual({ concluida: false, bonusCreditado: 0 });
+    expect(creditarBonusMock).not.toHaveBeenCalled();
+    const estadoFinal = await obterEstadoMissaoIndicacao(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ concluida: true, pedidoId: "pedido-orfao-creditado" }));
+    expect(sincronizarScoreMock).toHaveBeenCalledWith(T, TEMP, CLI);
+  });
+
+  test("BLOCKER 7: reconciliação impossível (pedido órfão não encontrado / status indeterminado) — NUNCA rouba, continua retryable", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 40 });
+    store.set(`ranking:missaoIndicacao:${T}:${TEMP}:${CLI}`, { concluida: false, concluidaEm: null, pedidoId: null, processandoPedidoId: "pedido-fantasma" });
+    envelhecerProcessando(10);
+    obterMovimentosBonusMock.mockResolvedValue([]);
+
+    await expect(concluirMissaoIndicacaoNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-B11", agora: new Date("2026-01-10T00:00:00Z"),
+    })).rejects.toThrow("ranking_missao_indicacao_em_processamento");
+
+    const estadoFinal = await obterEstadoMissaoIndicacao(T, TEMP, CLI);
+    expect(estadoFinal).toEqual(expect.objectContaining({ concluida: false, processandoPedidoId: "pedido-fantasma" }));
   });
 });
 

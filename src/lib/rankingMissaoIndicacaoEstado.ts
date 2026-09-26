@@ -18,7 +18,7 @@ import {
   type EstadoMissaoIndicacaoTemporada,
 } from "./rankingGamificacao";
 import { obterConfigGamificacao } from "./rankingGamificacaoConfig";
-import { creditarBonusCompeticao, estornarBonusCompeticao } from "./rankingBonusTemporada";
+import { creditarBonusCompeticao, estornarBonusCompeticao, obterMovimentosBonusTemporada } from "./rankingBonusTemporada";
 import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
 import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporadaSync";
 import { comBloqueioGamificacao } from "./rankingGamificacaoLock";
@@ -30,6 +30,20 @@ function chaveEstado(tenantId: string, temporadaId: string, clienteId: string): 
 function chaveLock(tenantId: string, temporadaId: string, clienteId: string): string {
   return `ranking:missaoIndicacao:lock:${tenantId}:${temporadaId}:${clienteId}`;
 }
+
+// BLOCKER 7: metadado técnico (nunca de negócio) guardado numa chave
+// SEPARADA do estado principal — nunca muda o formato de `chaveEstado`
+// (evita qualquer risco de migração sobre dados já persistidos em
+// produção). Usado só para decidir se uma reserva "processando" é
+// candidata a reconciliação; ausente = nunca tratada como órfã.
+function chaveProcessandoDesdeEm(tenantId: string, temporadaId: string, clienteId: string): string {
+  return `ranking:missaoIndicacao:processandoDesdeEm:${tenantId}:${temporadaId}:${clienteId}`;
+}
+
+// Limiar técnico (nunca de negócio) — bem acima de qualquer duração real de
+// crédito no ledger, para nunca competir com uma reserva genuinamente em
+// andamento.
+const LIMIAR_MISSAO_INDICACAO_ORFA_MS = 5 * 60 * 1000;
 
 // Migalha por pedido (mesmo padrão da missão semanal): permite reverter no
 // cancelamento tardio sem depender de saber qual é a temporada "atual".
@@ -63,6 +77,71 @@ export async function obterEstadoMissaoIndicacao(
 export type ResultadoMissaoIndicacao = { concluida: boolean; bonusCreditado: number };
 
 /**
+ * BLOCKER 7: reconcilia uma reserva "processando" de OUTRO pedido, candidata
+ * técnica a órfã (processo morreu de verdade). Chamada de DENTRO do lock
+ * exclusivo já adquirido por `concluirMissaoIndicacaoNoPedido` — por isso
+ * NUNCA usa `reverterMissaoIndicacaoDoPedido` nem `comBloqueioGamificacao` de
+ * novo (o mesmo lock não é reentrante). NUNCA decide sozinha nem inventa um
+ * crédito: só conclui o que o ledger já comprova (crédito real já existe →
+ * confirma) ou o que o pedido real já decidiu (cancelado → estorna e
+ * libera). Quando nada é decidível com segurança, devolve `null`.
+ */
+async function reconciliarMissaoIndicacaoOrfa(params: {
+  tenantId: string;
+  temporadaId: string;
+  clienteId: string;
+  estadoAtual: EstadoMissaoIndicacaoTemporada;
+}): Promise<EstadoMissaoIndicacaoTemporada | null> {
+  const { tenantId, temporadaId, clienteId, estadoAtual } = params;
+  const pedidoOrfaoId = estadoAtual.processandoPedidoId;
+  if (!pedidoOrfaoId) return null;
+  const desdeIso = await redis.get<string>(chaveProcessandoDesdeEm(tenantId, temporadaId, clienteId));
+  const desdeMs = desdeIso ? new Date(desdeIso).getTime() : NaN;
+  if (!Number.isFinite(desdeMs) || Date.now() - desdeMs <= LIMIAR_MISSAO_INDICACAO_ORFA_MS) return null;
+
+  const pedidos = (await redis.get<{ id: string; status: string }[]>("pedidos")) ?? [];
+  const pedidoOrfao = pedidos.find((item) => item.id === pedidoOrfaoId);
+  const eventoIdBonus = `missaoIndicacao:${temporadaId}:${clienteId}:${pedidoOrfaoId}`;
+
+  if (pedidoOrfao?.status === "cancelado") {
+    const revertido = reverterMissaoIndicacaoTemporada({ estadoAtual, pedidoId: pedidoOrfaoId });
+    const resultadoEstorno = await estornarBonusCompeticao({
+      tenantId,
+      temporadaId,
+      clienteId,
+      eventoIdOriginal: eventoIdBonus,
+      motivo: "Reserva órfã reconciliada — pedido cancelado",
+    });
+    if (resultadoEstorno === "estornado") {
+      await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
+    }
+    const novoEstado = revertido ?? estadoAtual;
+    await redis.set(chaveEstado(tenantId, temporadaId, clienteId), novoEstado);
+    await redis.del(chaveProcessandoDesdeEm(tenantId, temporadaId, clienteId));
+    return novoEstado;
+  }
+
+  // Se o ledger já tem o crédito real deste pedido (crash entre creditar e
+  // confirmar), só falta completar — nunca recreditar.
+  const movimentos = await obterMovimentosBonusTemporada(tenantId, temporadaId, clienteId);
+  const jaCreditado = movimentos.some((m) => m.eventoId === eventoIdBonus);
+  if (jaCreditado) {
+    await registrarFatoRankingGamificacao("missao_indicacao_concluida", `${clienteId}:${temporadaId}:${pedidoOrfaoId}`);
+    await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
+    const confirmado = confirmarMissaoIndicacaoTemporada({ estadoAtual, pedidoId: pedidoOrfaoId, agora: new Date() });
+    const novoEstado = confirmado ?? estadoAtual;
+    await redis.set(chaveEstado(tenantId, temporadaId, clienteId), novoEstado);
+    await redis.del(chaveProcessandoDesdeEm(tenantId, temporadaId, clienteId));
+    return novoEstado;
+  }
+
+  // Pedido não encontrado, ainda "entregue" sem crédito real, ou status
+  // indeterminado — nunca decide/credita por conta própria. Nunca rouba;
+  // devolve "não decidível".
+  return null;
+}
+
+/**
  * Chamada no MESMO efeito idempotente que credita a indicação real
  * (fidelidadeEfeitos.ts, dentro de `resultadoIndicacao === "creditado"`).
  * `clienteId` aqui é sempre o INDICADOR (quem indicou), nunca o indicado —
@@ -80,24 +159,50 @@ export async function concluirMissaoIndicacaoNoPedido(params: {
   if (!config.missaoIndicacaoAtiva) return { concluida: false, bonusCreditado: 0 };
 
   return comBloqueioGamificacao(chaveLock(tenantId, temporadaId, clienteId), async () => {
-    const estadoAtual = await obterEstadoMissaoIndicacao(tenantId, temporadaId, clienteId);
+    let estadoAtual = await obterEstadoMissaoIndicacao(tenantId, temporadaId, clienteId);
+
+    // BLOCKER 7: outro pedido tem a reserva "processando" — antes de tratar
+    // isso silenciosamente como "nada a concluir", verifica se é candidata
+    // técnica a órfã e tenta reconciliar o DONO usando só o que o ledger e o
+    // pedido real já provam. Nunca "rouba" a reserva para ESTE pedido.
+    if (estadoAtual.processandoPedidoId && estadoAtual.processandoPedidoId !== pedidoId) {
+      const reconciliado = await reconciliarMissaoIndicacaoOrfa({ tenantId, temporadaId, clienteId, estadoAtual });
+      if (!reconciliado) {
+        // Ainda não é candidata a órfã, ou não foi possível decidir com
+        // segurança — NUNCA abandona silenciosamente: vira retryable.
+        throw new Error("ranking_missao_indicacao_em_processamento");
+      }
+      estadoAtual = reconciliado;
+    }
+
     const reservado = reservarMissaoIndicacaoTemporada({ estadoAtual, pedidoId });
     if (!reservado) return { concluida: false, bonusCreditado: 0 };
     await redis.set(chaveEstado(tenantId, temporadaId, clienteId), reservado);
+    const eraProcessandoDoMesmoPedido = estadoAtual.processandoPedidoId === pedidoId;
+    if (!eraProcessandoDoMesmoPedido) {
+      await redis.set(chaveProcessandoDesdeEm(tenantId, temporadaId, clienteId), agora.toISOString());
+    }
+
+    // eventoId inclui o pedidoId (correção de blocker): se uma conversão
+    // anterior já foi creditada e depois ESTORNADA (cancelamento tardio),
+    // uma NOVA conversão válida (outro pedidoId) precisa de um eventoId
+    // diferente para poder creditar de novo — com um eventoId fixo por
+    // (temporada, cliente), o ledger via o crédito antigo ainda presente e
+    // devolvia "ja_creditado" sem nunca escrever o novo movimento, deixando
+    // a missão "concluída" com bônus líquido zero. É determinístico (não
+    // depende do resultado do crédito), então pode ser calculado já aqui.
+    const eventoIdBonus = `missaoIndicacao:${temporadaId}:${clienteId}:${pedidoId}`;
+    // BLOCKER 7: migalha ANTES de qualquer efeito financeiro — é o índice
+    // durável que localiza o dono (tenant/temporada/cliente) e o eventoId
+    // REAL desta reserva mesmo que o processo morra exatamente entre
+    // reservar e creditar (antes, só era gravada DEPOIS do crédito).
+    await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus: 0, eventoIdBonus } satisfies BreadcrumbPedido);
 
     const bonus = Number.isFinite(config.missaoIndicacaoBonus) && config.missaoIndicacaoBonus > 0
       ? Math.round(config.missaoIndicacaoBonus)
       : 0;
     let bonusCreditado = 0;
     if (bonus > 0) {
-      // eventoId inclui o pedidoId (correção de blocker): se uma conversão
-      // anterior já foi creditada e depois ESTORNADA (cancelamento tardio),
-      // uma NOVA conversão válida (outro pedidoId) precisa de um eventoId
-      // diferente para poder creditar de novo — com um eventoId fixo por
-      // (temporada, cliente), o ledger via o crédito antigo ainda presente e
-      // devolvia "ja_creditado" sem nunca escrever o novo movimento, deixando
-      // a missão "concluída" com bônus líquido zero.
-      const eventoIdBonus = `missaoIndicacao:${temporadaId}:${clienteId}:${pedidoId}`;
       const resultado = await creditarBonusCompeticao({
         tenantId,
         temporadaId,
@@ -121,6 +226,7 @@ export async function concluirMissaoIndicacaoNoPedido(params: {
     const confirmado = confirmarMissaoIndicacaoTemporada({ estadoAtual: reservado, pedidoId, agora });
     if (confirmado) {
       await redis.set(chaveEstado(tenantId, temporadaId, clienteId), confirmado);
+      await redis.del(chaveProcessandoDesdeEm(tenantId, temporadaId, clienteId));
     }
     return { concluida: true, bonusCreditado };
   });
@@ -143,6 +249,7 @@ export async function reverterMissaoIndicacaoDoPedido(pedidoId: string, motivo: 
     const revertido = reverterMissaoIndicacaoTemporada({ estadoAtual, pedidoId });
     if (revertido) {
       await redis.set(chaveEstado(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId), revertido);
+      await redis.del(chaveProcessandoDesdeEm(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId));
     }
     const resultado = await estornarBonusCompeticao({
       tenantId: breadcrumb.tenantId,

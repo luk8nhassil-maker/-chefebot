@@ -34,6 +34,8 @@ import {
   obterConversaoAtivaIndicado,
   revogarConversaoAtivaIndicadoSePedido,
   reservarOuIdentificarConversao,
+  reservaConversaoEhCandidataAOrfandade,
+  type ConversaoAtivaIndicado,
 } from "./rankingIndicacaoConversao";
 import { estornarEstrelasIndicacaoValida, estornarEstrelaApoioRecorrente } from "./estrelasIndicacao";
 import type { ItemApp } from "./pedidoAppItens";
@@ -251,6 +253,56 @@ async function novoEstado(
 }
 
 /**
+ * BLOCKER 5: reconcilia uma reserva "processando" candidata técnica a órfã
+ * (ver reservaConversaoEhCandidataAOrfandade) usando SÓ infraestrutura já
+ * existente — o registro real do pedido dono (chave "pedidos"), o próprio
+ * pipeline de efeitos (já idempotente por construção) e a fila de
+ * pendências — nunca um TTL que deixaria outro pedido "roubar" a conversão
+ * do dono legítimo. NUNCA decide nada sozinha: só reprocessa o PRÓPRIO
+ * pedido dono da reserva, que por ser idempotente converge sozinho para o
+ * estado correto (confirma se o crédito real já existe, credita se ainda
+ * não existe, ou estorna/libera se foi cancelado nesse meio tempo). Quando o
+ * pedido dono não é encontrado, ou está num status que não é nem "entregue"
+ * nem "cancelado" (indeterminado para decidir com segurança), NUNCA mexe em
+ * nada — só registra uma pendência operacional explícita para investigação
+ * manual, exatamente como qualquer outra falha deste pipeline.
+ */
+async function reconciliarReservaOrfaIndicacao(reserva: ConversaoAtivaIndicado, tenantIdChamador: string): Promise<void> {
+  const pedidos = (await redis.get<PedidoRedis[]>("pedidos")) ?? [];
+  const pedidoOrfao = pedidos.find((item) => item.id === reserva.pedidoId);
+  if (!pedidoOrfao) {
+    await registrarPendencia(
+      reserva.pedidoId,
+      "entregue",
+      new Error("reserva_indicacao_orfa_pedido_nao_encontrado"),
+      tenantIdChamador
+    ).catch(() => undefined);
+    return;
+  }
+  try {
+    if (pedidoOrfao.status === "cancelado") {
+      await processarEfeitosPedidoCancelado({ ...pedidoOrfao, tenantId: tenantIdChamador } as PedidoParaEfeitosFidelidade);
+      return;
+    }
+    if (pedidoOrfao.status === "entregue") {
+      await processarEfeitosPedidoEntregue({ ...pedidoOrfao, tenantId: tenantIdChamador } as PedidoParaEfeitosFidelidade);
+      return;
+    }
+  } catch (error) {
+    await registrarPendencia(reserva.pedidoId, "entregue", error, tenantIdChamador).catch(() => undefined);
+    return;
+  }
+  // Status do pedido dono não é nem "entregue" nem "cancelado" — indeterminado
+  // para decidir com segurança. Nunca rouba; só deixa um rastro operacional.
+  await registrarPendencia(
+    reserva.pedidoId,
+    "entregue",
+    new Error(`reserva_indicacao_orfa_status_indeterminado:${pedidoOrfao.status}`),
+    tenantIdChamador
+  ).catch(() => undefined);
+}
+
+/**
  * Autoridade única dos efeitos de um pedido entregue. Cada consumidor fica
  * marcado separadamente: se o processo cair depois de um consumidor, o
  * retry retoma o próximo; se cair antes de persistir a marca, o consumidor
@@ -350,8 +402,16 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
         // convergem para o MESMO estado final íntegro — nunca só o primeiro.
         // Cada passo abaixo é idempotente por si só (SET plano ou SET NX por
         // eventoId), então repeti-los num retry nunca duplica nada; só
-        // "nao_elegivel" é fail-closed de verdade (nunca houve crédito real).
-        if (resultadoIndicacao === "nao_elegivel") return;
+        // "nao_elegivel" é fail-closed de verdade (nunca houve crédito real)
+        // — mas mesmo assim a RESERVA feita por este pedido precisa ser
+        // liberada aqui, senão fica presa em "processando" para sempre e
+        // bloqueia qualquer conversão futura legítima deste indicado
+        // (revogarConversaoAtivaIndicadoSePedido só remove se a reserva
+        // ainda pertencer a este mesmo pedidoId — nunca mexe em outro).
+        if (resultadoIndicacao === "nao_elegivel") {
+          await revogarConversaoAtivaIndicadoSePedido(clienteId, pedido.id);
+          return;
+        }
 
         // Fato de negócio "indicação convertida" registrado no MESMO instante
         // idempotente do crédito real — nunca inferido depois por regex/diff
@@ -370,7 +430,14 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
         // cancelada. Só tem efeito se a reserva ainda pertencer a este
         // MESMO pedido (comReservaConversaoAtiva/marcarConversaoAtivaIndicado
         // nunca deixam outro pedido roubar ou sobrescrever a reserva).
-        await marcarConversaoAtivaIndicado(clienteId, { indicadorId, pedidoId: pedido.id });
+        const confirmacao = await marcarConversaoAtivaIndicado(clienteId, { indicadorId, pedidoId: pedido.id });
+        // BLOCKER 4: um worker atrasado deste MESMO pedido pode chegar aqui
+        // depois de um cancelamento já ter estornado o crédito e liberado a
+        // reserva (revogarConversaoAtivaIndicadoSePedido) — "reserva_perdida"
+        // significa que esta conversão não existe mais, então NUNCA declara
+        // ela concluída (a missão da temporada abaixo é parte de "concluir",
+        // nunca roda para uma conversão que já foi desfeita).
+        if (confirmacao === "reserva_perdida") return;
         // Missão da temporada "Indique um amigo" — reaproveita o MESMO
         // crédito real de indicação, nunca cria um sistema paralelo. Quem
         // cumpre a missão é o indicador, não o indicado. Sem temporada
@@ -402,18 +469,50 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
         });
       };
 
-      // Relação permanente já existe.
-      const relacao = await obterRelacaoIndicacao(clienteId);
-      if (relacao) {
-        const reserva = await reservarOuIdentificarConversao(clienteId, { indicadorId: relacao.indicadorId, pedidoId: pedido.id });
+      // Decisão única da máquina de estado — usada pelos DOIS caminhos
+      // (relação já existia; relação acabou de ser criada agora pela
+      // candidatura), nunca duas lógicas divergentes. Correção de blocker:
+      // uma corrida em que a relação é criada por este pedido, mas OUTRO
+      // pedido (que já enxergava a relação) vence a reserva e conclui a
+      // conversão principal antes deste retomar, precisa terminar com este
+      // pedido caindo em apoio recorrente (ativa_outro_pedido) — nunca
+      // creditando uma segunda vez.
+      const processarComReserva = async (indicadorId: string) => {
+        const reserva = await reservarOuIdentificarConversao(clienteId, { indicadorId, pedidoId: pedido.id });
         if (reserva === "ativa_outro_pedido") {
           // Já existe uma conversão principal ATIVA e sustentada → esta
           // compra é apoio recorrente (+1/expediente), nunca uma segunda
           // conversão.
-          await creditarApoioRecorrente(relacao.indicadorId);
+          await creditarApoioRecorrente(indicadorId);
           return;
         }
         if (reserva === "ocupada_processando_outro") {
+          // BLOCKER 5: antes de só desistir como retryable, verifica se a
+          // reserva de OUTRO pedido é uma candidata técnica a órfã (bem mais
+          // velha que qualquer crédito real no ledger poderia legitimamente
+          // levar). Se for, reconcilia o DONO da reserva usando só
+          // infraestrutura já existente (o pedido real + o próprio pipeline
+          // idempotente) — nunca uma decisão nova, nunca "rouba" a
+          // conversão: só resolve o que o dono legítimo já deveria ter
+          // resolvido sozinho. Se ainda não for candidata (a grande maioria
+          // dos casos — apenas uma disputa normal e recente), o
+          // comportamento continua idêntico ao de sempre.
+          const atual = await obterConversaoAtivaIndicado(clienteId);
+          if (atual && reservaConversaoEhCandidataAOrfandade(atual)) {
+            await reconciliarReservaOrfaIndicacao(atual, tenantId);
+            const reservaAposReconciliacao = await reservarOuIdentificarConversao(clienteId, { indicadorId, pedidoId: pedido.id });
+            if (reservaAposReconciliacao === "ativa_outro_pedido") {
+              await creditarApoioRecorrente(indicadorId);
+              return;
+            }
+            if (reservaAposReconciliacao !== "ocupada_processando_outro") {
+              await registrarConversaoPrincipal(indicadorId);
+              return;
+            }
+            // A reconciliação não conseguiu decidir (ex.: pedido órfão
+            // ainda num status ambíguo) — nunca rouba; cai no mesmo
+            // retryable de sempre.
+          }
           // Outro pedido está NO MEIO da própria conversão principal (ainda
           // não confirmada) — nunca credita, nunca vira apoio "de brinde"
           // por ter perdido a disputa. Lança para o pipeline de efeitos
@@ -424,7 +523,13 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
         // "reservada_processando" (nova reserva conseguida agora) ou
         // "mesmo_pedido" (retry do próprio pedido, reserva ainda pertence a
         // ele em qualquer estado) — prossegue com o crédito real.
-        await registrarConversaoPrincipal(relacao.indicadorId);
+        await registrarConversaoPrincipal(indicadorId);
+      };
+
+      // Relação permanente já existe.
+      const relacao = await obterRelacaoIndicacao(clienteId);
+      if (relacao) {
+        await processarComReserva(relacao.indicadorId);
         return;
       }
 
@@ -436,17 +541,7 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       const confirmado = await registrarRelacaoIndicacao(clienteId, candidatura.indicadorId);
       if (confirmado !== "registrado") return;
 
-      // Mesmo aqui (primeiríssima conversão, relação acabou de nascer) a
-      // reserva ainda é necessária: cobre o crash entre o +6 e a confirmação
-      // também neste caminho, exatamente como no caminho de "relação já
-      // existia". Em teoria nenhum outro pedido pode disputar esta reserva
-      // ainda (a relação só agora passou a existir), mas o mesmo contrato
-      // vale por segurança e consistência.
-      const reserva = await reservarOuIdentificarConversao(clienteId, { indicadorId: candidatura.indicadorId, pedidoId: pedido.id });
-      if (reserva === "ocupada_processando_outro") {
-        throw new Error("ranking_indicacao_conversao_em_processamento");
-      }
-      await registrarConversaoPrincipal(candidatura.indicadorId);
+      await processarComReserva(candidatura.indicadorId);
     }
 
     await executarEfeito(chave, estado, "analytics", async () => {

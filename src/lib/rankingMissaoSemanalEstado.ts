@@ -24,7 +24,7 @@ import {
   type EstadoMissaoSemanal,
 } from "./rankingGamificacao";
 import { obterConfigGamificacao } from "./rankingGamificacaoConfig";
-import { creditarBonusCompeticao, estornarBonusCompeticao } from "./rankingBonusTemporada";
+import { creditarBonusCompeticao, estornarBonusCompeticao, obterMovimentosBonusTemporada } from "./rankingBonusTemporada";
 import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
 import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporadaSync";
 import { comBloqueioGamificacao } from "./rankingGamificacaoLock";
@@ -32,7 +32,19 @@ import { comBloqueioGamificacao } from "./rankingGamificacaoLock";
 type RegistroMissaoSemanal = {
   estado: EstadoMissaoSemanal;
   ultimoPedidoElegivelEm: string | null;
+  // BLOCKER 6: metadado técnico (nunca uma regra de negócio) usado só para
+  // decidir se uma reserva "processando" é candidata a reconciliação — sem
+  // ele, nenhuma reserva é considerada órfã. Ausente em registros gravados
+  // antes desta correção, e sempre limpo (`null`) fora do estado
+  // "processando".
+  processandoDesdeEm?: string | null;
 };
+
+// BLOCKER 6: limiar técnico (nunca de negócio) para considerar uma reserva
+// "processando" candidata a reconciliação — bem acima de qualquer duração
+// real de crédito no ledger, para nunca competir com uma reserva
+// genuinamente em andamento.
+const LIMIAR_MISSAO_SEMANAL_ORFA_MS = 5 * 60 * 1000;
 
 const REGISTRO_INICIAL: RegistroMissaoSemanal = {
   estado: ESTADO_MISSAO_SEMANAL_INICIAL,
@@ -125,6 +137,72 @@ export async function sincronizarMissaoSemanalCliente(params: {
 export type ResultadoConsumoMissaoSemanal = { consumida: boolean; bonusCreditado: number };
 
 /**
+ * BLOCKER 6: reconcilia uma reserva "processando" de OUTRO pedido, candidata
+ * técnica a órfã (processo morreu de verdade, sem catch/finally algum).
+ * Chamada de DENTRO do lock exclusivo do cliente já adquirido por
+ * `consumirMissaoSemanalNoPedido` — por isso NUNCA usa `reverterMissaoSemanalDoPedido`
+ * nem `comBloqueioGamificacao` de novo (o mesmo lock não é reentrante),
+ * repetindo aqui só a lógica pura de estado + as chamadas ao ledger.
+ * NUNCA decide sozinha nem inventa um crédito: só conclui o que o ledger já
+ * comprova (crédito real já existe → confirma) ou o que o pedido real já
+ * decidiu (cancelado → estorna e libera). Quando nada disso é decidível com
+ * segurança, devolve `null` e NUNCA mexe em nada.
+ */
+async function reconciliarMissaoSemanalOrfa(params: {
+  tenantId: string;
+  temporadaId: string;
+  clienteId: string;
+  registro: RegistroMissaoSemanal;
+}): Promise<RegistroMissaoSemanal | null> {
+  const { tenantId, temporadaId, clienteId, registro } = params;
+  const pedidoOrfaoId = registro.estado.processandoPedidoId;
+  if (!pedidoOrfaoId) return null;
+  const desdeMs = registro.processandoDesdeEm ? new Date(registro.processandoDesdeEm).getTime() : NaN;
+  if (!Number.isFinite(desdeMs) || Date.now() - desdeMs <= LIMIAR_MISSAO_SEMANAL_ORFA_MS) return null;
+
+  const pedidos = (await redis.get<{ id: string; status: string }[]>("pedidos")) ?? [];
+  const pedidoOrfao = pedidos.find((item) => item.id === pedidoOrfaoId);
+
+  if (pedidoOrfao?.status === "cancelado") {
+    const revertido = reverterConsumoMissaoSemanal({ estadoAtual: registro.estado, pedidoId: pedidoOrfaoId });
+    const resultadoEstorno = await estornarBonusCompeticao({
+      tenantId,
+      temporadaId,
+      clienteId,
+      eventoIdOriginal: `missaoSemanal:${pedidoOrfaoId}`,
+      motivo: "Reserva órfã reconciliada — pedido cancelado",
+    });
+    if (resultadoEstorno === "estornado") {
+      await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
+    }
+    const novoRegistro: RegistroMissaoSemanal = { ...registro, estado: revertido ?? registro.estado, processandoDesdeEm: null };
+    await salvarRegistro(tenantId, temporadaId, clienteId, novoRegistro);
+    return novoRegistro;
+  }
+
+  // Se o ledger já tem o crédito real deste pedido (crash entre creditar e
+  // confirmar), só falta completar — nunca recreditar.
+  const movimentos = await obterMovimentosBonusTemporada(tenantId, temporadaId, clienteId);
+  const eventoId = `missaoSemanal:${pedidoOrfaoId}`;
+  const jaCreditado = movimentos.some((m) => m.eventoId === eventoId);
+  if (jaCreditado) {
+    await redis.set(chaveBreadcrumbPedido(pedidoOrfaoId), { tenantId, temporadaId, clienteId, bonus: 0 } satisfies BreadcrumbPedido);
+    await registrarFatoRankingGamificacao("missao_semanal_consumida", `${clienteId}:${temporadaId}:${pedidoOrfaoId}`);
+    await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
+    const confirmado = confirmarConsumoMissaoSemanal({ estadoAtual: registro.estado, pedidoId: pedidoOrfaoId, agora: new Date() });
+    const novoRegistro: RegistroMissaoSemanal = { ...registro, estado: confirmado ?? registro.estado, processandoDesdeEm: null };
+    await salvarRegistro(tenantId, temporadaId, clienteId, novoRegistro);
+    return novoRegistro;
+  }
+
+  // Pedido não encontrado, ainda "entregue" sem crédito real, ou status
+  // indeterminado — recalcular o bônus do zero exigiria reconstruir a base
+  // de estrelas do pedido, uma decisão de negócio que este reconciliador
+  // nunca deve inventar. Nunca rouba; devolve "não decidível".
+  return null;
+}
+
+/**
  * Chamada pelo efeito "gamificacao" de um pedido entregue. Sempre atualiza
  * "último pedido elegível" (alimenta o cooldown de desbloqueio), e só
  * consome/credita quando havia uma missão desbloqueada — nunca cria bônus a
@@ -152,15 +230,41 @@ export async function consumirMissaoSemanalNoPedido(params: {
   }
 
   return comBloqueioGamificacao(chaveLock(tenantId, temporadaId, clienteId), async () => {
-    const registro = await obterRegistro(tenantId, temporadaId, clienteId);
+    let registro = await obterRegistro(tenantId, temporadaId, clienteId);
     const atualizado: RegistroMissaoSemanal = { ...registro, ultimoPedidoElegivelEm: agora.toISOString() };
+
+    // BLOCKER 6: outro pedido tem a reserva "processando" — antes de tratar
+    // isso silenciosamente como "nada a consumir", verifica se é candidata
+    // técnica a órfã e tenta reconciliar o DONO usando só o que o ledger e o
+    // pedido real já provam. Nunca "rouba" a reserva para ESTE pedido.
+    if (registro.estado.status === "processando" && registro.estado.processandoPedidoId !== pedidoId) {
+      const reconciliado = await reconciliarMissaoSemanalOrfa({ tenantId, temporadaId, clienteId, registro });
+      if (!reconciliado) {
+        // Ainda não é candidata a órfã, ou não foi possível decidir com
+        // segurança — NUNCA abandona silenciosamente como "concluído sem
+        // consumir": vira pendência/retryable, igual ao resto do pipeline.
+        throw new Error("ranking_missao_semanal_em_processamento");
+      }
+      registro = reconciliado;
+    }
 
     const reservado = reservarConsumoMissaoSemanal({ estadoAtual: registro.estado, pedidoId });
     if (!reservado) {
-      await salvarRegistro(tenantId, temporadaId, clienteId, atualizado);
+      await salvarRegistro(tenantId, temporadaId, clienteId, { ...atualizado, estado: registro.estado, processandoDesdeEm: registro.processandoDesdeEm });
       return { consumida: false, bonusCreditado: 0 };
     }
-    await salvarRegistro(tenantId, temporadaId, clienteId, { ...atualizado, estado: reservado });
+    const eraProcessandoDoMesmoPedido = registro.estado.status === "processando" && registro.estado.processandoPedidoId === pedidoId;
+    await salvarRegistro(tenantId, temporadaId, clienteId, {
+      ...atualizado,
+      estado: reservado,
+      processandoDesdeEm: eraProcessandoDoMesmoPedido ? (registro.processandoDesdeEm ?? agora.toISOString()) : agora.toISOString(),
+    });
+    // BLOCKER 6: migalha ANTES de qualquer efeito financeiro — é o índice
+    // durável que localiza o dono (tenant/temporada/cliente) desta reserva
+    // mesmo que o processo morra exatamente entre reservar e creditar (antes,
+    // só era gravada DEPOIS do crédito, e tanto um cancelamento quanto uma
+    // reconciliação nesse buraco não encontravam nada para resolver).
+    await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus: 0 } satisfies BreadcrumbPedido);
 
     const bonus = calcularBonusMissaoSemanal(estrelasBaseDoPedido, config.missaoSemanalMultiplicador);
     let bonusCreditado = 0;
@@ -197,7 +301,7 @@ export async function consumirMissaoSemanalNoPedido(params: {
     const confirmado = confirmarConsumoMissaoSemanal({ estadoAtual: reservado, pedidoId, agora });
     if (confirmado) {
       const registroAtual = await obterRegistro(tenantId, temporadaId, clienteId);
-      await salvarRegistro(tenantId, temporadaId, clienteId, { ...registroAtual, estado: confirmado });
+      await salvarRegistro(tenantId, temporadaId, clienteId, { ...registroAtual, estado: confirmado, processandoDesdeEm: null });
     }
     return { consumida: true, bonusCreditado };
   });
@@ -219,7 +323,7 @@ export async function reverterMissaoSemanalDoPedido(pedidoId: string, motivo: st
     const registro = await obterRegistro(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId);
     const revertido = reverterConsumoMissaoSemanal({ estadoAtual: registro.estado, pedidoId });
     if (revertido) {
-      await salvarRegistro(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId, { ...registro, estado: revertido });
+      await salvarRegistro(breadcrumb.tenantId, breadcrumb.temporadaId, breadcrumb.clienteId, { ...registro, estado: revertido, processandoDesdeEm: null });
     }
     const resultado = await estornarBonusCompeticao({
       tenantId: breadcrumb.tenantId,

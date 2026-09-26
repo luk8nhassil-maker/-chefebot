@@ -3,7 +3,20 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
-    get: vi.fn(async (key: string) => store.get(key) ?? null),
+    // Valores gravados via `eval` (BLOCKER 8, escreverBonusSeDono) ficam
+    // como STRING crua no Map — o GET precisa tentar o parse de volta.
+    get: vi.fn(async (key: string) => {
+      if (!store.has(key)) return null;
+      const valor = store.get(key);
+      if (typeof valor === "string") {
+        try {
+          return JSON.parse(valor);
+        } catch {
+          return valor;
+        }
+      }
+      return valor;
+    }),
     set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
       if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
@@ -21,6 +34,18 @@ const { store, redisMock } = vi.hoisted(() => {
     }),
     expire: vi.fn(async () => 1),
     mget: vi.fn(async (...keys: string[]) => keys.map((k) => store.get(k) ?? null)),
+    // BLOCKER 8: compare-and-set (2 keys, 2 args) — grava keys[1] só se
+    // keys[0] (o lock) ainda bater com args[0]; compare-and-delete-lock
+    // (1 key, 1 arg) — libera o lock só se o dono ainda bater.
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (store.get(keys[0]) !== args[0]) return 0;
+      if (keys.length >= 2 && args.length >= 2) {
+        store.set(keys[1], args[1]);
+        return 1;
+      }
+      store.delete(keys[0]);
+      return 1;
+    }),
   };
   return { store, redisMock };
 });
@@ -31,10 +56,14 @@ import {
   calcularTotalBonusPorTipo,
   calcularTotalBonusTemporada,
   creditarBonusCompeticao,
+  creditarBonusCompeticaoComTeto,
   estornarBonusCompeticao,
   obterBonusCompeticaoDaTemporada,
   obterMovimentosBonusTemporada,
 } from "./rankingBonusTemporada";
+import { redis } from "./redis";
+
+const getMock = vi.mocked(redis.get);
 
 beforeEach(() => {
   store.clear();
@@ -167,7 +196,96 @@ describe("concorrência", () => {
     expect(estorno).toBe("estornado");
     expect(await obterBonusCompeticaoDaTemporada(T, TEMP, CLI)).toBe(40);
   });
+
+  test("AUDITORIA — Impulso do Pódio: N eventos concorrentes (eventoIds DIFERENTES) do mesmo cliente/temporada NUNCA ultrapassam o teto configurado", async () => {
+    // Simula 5 fatos "entrou_top3" quase simultâneos (o cliente entra/sai do
+    // Top 3 várias vezes rapidamente) — cada um com seu próprio eventoId,
+    // cada um tentando creditar até 30 pontos, com um teto de 50 na
+    // temporada. Sem a atomicidade de creditarBonusCompeticaoComTeto, cada
+    // chamada podia ler "0 já aplicado" antes de qualquer uma escrever e
+    // todas creditariam 30 (total 150, muito acima do teto).
+    const CAP = 50;
+    const BONUS_POR_EVENTO = 30;
+    const calcularPontosDisponiveis = (jaAplicado: number) => Math.max(0, Math.min(BONUS_POR_EVENTO, CAP - jaAplicado));
+
+    const resultados = await Promise.all(
+      Array.from({ length: 5 }, (_, i) =>
+        creditarBonusCompeticaoComTeto({
+          tenantId: T,
+          temporadaId: TEMP,
+          clienteId: CLI,
+          eventoId: `top3-${i}`,
+          tipo: "impulso_podio",
+          calcularPontosDisponiveis,
+          motivo: "Impulso do Pódio — chegou ao Top 3",
+        }),
+      ),
+    );
+
+    // Todas as 5 chamadas OU creditaram algo (respeitando o espaço restante,
+    // possivelmente 0 pontos → "invalido") OU nunca lançaram sem sentido.
+    expect(resultados.every((r) => r === "creditado" || r === "invalido")).toBe(true);
+
+    // A prova real: a SOMA total de impulso_podio creditado nunca ultrapassa
+    // o teto, não importa quantos eventos concorrentes tentaram.
+    const totalCreditado = calcularTotalBonusPorTipo(await obterMovimentosBonusTemporada(T, TEMP, CLI), "impulso_podio");
+    expect(totalCreditado).toBeLessThanOrEqual(CAP);
+    expect(totalCreditado).toBe(CAP); // o espaço todo foi consumido, mas nunca ultrapassado
+  }, 10000);
 }, 10000);
+
+describe("BLOCKER 8 — atomicidade real: um lock expirado NUNCA permite uma escrita obsoleta no ledger", () => {
+  test("crédito: lock roubado entre o GET e o SET — nunca reporta 'creditado' sem ter escrito, e nunca apaga o que o outro worker já gravou", async () => {
+    const getPadrao = getMock.getMockImplementation()!;
+    getMock.mockImplementationOnce(async (...args: Parameters<typeof getPadrao>) => {
+      // O código de negócio lê o ledger ORIGINAL (vazio) — só DEPOIS de ler
+      // é que o "outro worker" rouba o lock e já grava o SEU PRÓPRIO
+      // movimento (ex.: uma reconciliação concorrente legítima).
+      const original = await getPadrao(...args);
+      store.set(`ranking:bonus:temporada:lock:${T}:${TEMP}:${CLI}`, "token-de-outro-worker");
+      store.set(`ranking:bonus:temporada:${T}:${TEMP}:${CLI}`, JSON.stringify({
+        movimentos: [{ movimentoId: "outro", eventoId: "evento-outro-worker", tipo: "carryover", pontos: 100, motivo: "x", createdAt: new Date().toISOString() }],
+      }));
+      return original;
+    });
+
+    await expect(
+      creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "evento-A", tipo: "missao_semanal", pontos: 40, motivo: "x" }),
+    ).rejects.toThrow("ranking_bonus_temporada_lock_perdido_durante_credito:evento-A");
+
+    // O movimento do outro worker continua intacto — a escrita atrasada
+    // nunca sobrescreveu por cima.
+    const movimentos = await obterMovimentosBonusTemporada(T, TEMP, CLI);
+    expect(movimentos).toEqual([expect.objectContaining({ eventoId: "evento-outro-worker" })]);
+  });
+
+  test("estorno: lock roubado entre o GET e o SET — nunca reporta 'estornado' sem ter escrito, e nunca apaga o que o outro worker já gravou", async () => {
+    await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "evento-A", tipo: "missao_semanal", pontos: 40, motivo: "x" });
+
+    const getPadrao = getMock.getMockImplementation()!;
+    getMock.mockImplementationOnce(async (...args: Parameters<typeof getPadrao>) => {
+      const original = await getPadrao(...args);
+      store.set(`ranking:bonus:temporada:lock:${T}:${TEMP}:${CLI}`, "token-de-outro-worker");
+      store.set(`ranking:bonus:temporada:${T}:${TEMP}:${CLI}`, JSON.stringify({
+        movimentos: [
+          { movimentoId: "1", eventoId: "evento-A", tipo: "missao_semanal", pontos: 40, motivo: "x", createdAt: new Date().toISOString() },
+          { movimentoId: "outro", eventoId: "evento-outro-worker", tipo: "carryover", pontos: 100, motivo: "x", createdAt: new Date().toISOString() },
+        ],
+      }));
+      return original;
+    });
+
+    await expect(
+      estornarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoIdOriginal: "evento-A", motivo: "cancelado" }),
+    ).rejects.toThrow("ranking_bonus_temporada_lock_perdido_durante_estorno:evento-A");
+
+    // O movimento do outro worker continua intacto — o estorno atrasado
+    // nunca apagou/sobrescreveu por cima.
+    const movimentos = await obterMovimentosBonusTemporada(T, TEMP, CLI);
+    expect(movimentos.some((m) => m.eventoId === "evento-outro-worker")).toBe(true);
+    expect(movimentos.some((m) => m.eventoId === "estorno:evento-A")).toBe(false);
+  });
+});
 
 describe("calcularTotalBonusTemporada / calcularTotalBonusPorTipo", () => {
   test("soma líquida nunca fica negativa mesmo com estornos que superam créditos residuais de outro tipo", () => {
