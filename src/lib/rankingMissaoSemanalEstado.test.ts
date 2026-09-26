@@ -33,6 +33,9 @@ const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estorna
       if (store.get(keys[0]) !== args[0]) return 0;
       if (keys.length >= 2 && args.length >= 2) {
         store.set(keys[1], args[1]);
+        for (let i = 2; i < keys.length && i < args.length; i++) {
+          store.set(keys[i], i === 2 ? JSON.parse(args[i]) : args[i]);
+        }
         return 1;
       }
       store.delete(keys[0]);
@@ -267,6 +270,24 @@ describe("consumirMissaoSemanalNoPedido", () => {
     expect(retry).toEqual({ consumida: true, bonusCreditado: 50 });
     expect(creditarBonusMock).toHaveBeenCalledTimes(2);
     expect((await obterEstadoMissaoSemanal(T, TEMP, CLI)).status).toBe("consumida");
+  });
+
+  test("retry do mesmo pedido preserva o bônus planejado quando a configuração muda", async () => {
+    obterConfigGamificacaoMock.mockResolvedValueOnce(CONFIG_ATIVA).mockResolvedValueOnce({ ...CONFIG_ATIVA, missaoSemanalMultiplicador: 3 });
+    desbloqueada();
+    creditarBonusMock.mockRejectedValueOnce(new Error("timeout no ledger"));
+
+    await expect(consumirMissaoSemanalNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-config", estrelasBaseDoPedido: 50, agora: new Date("2026-01-10T00:00:00Z"),
+    })).rejects.toThrow("timeout no ledger");
+
+    creditarBonusMock.mockResolvedValueOnce("creditado");
+    const retry = await consumirMissaoSemanalNoPedido({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-config", estrelasBaseDoPedido: 50, agora: new Date("2026-01-10T00:05:00Z"),
+    });
+
+    expect(retry).toEqual({ consumida: true, bonusCreditado: 50 });
+    expect(creditarBonusMock).toHaveBeenLastCalledWith(expect.objectContaining({ pontos: 50 }));
   });
 
   test("RECUPERAÇÃO DE FALHA: crédito já tinha sido garantido antes da falha — retry nunca duplica o bônus", async () => {

@@ -76,6 +76,9 @@ const { redisMock } = vi.hoisted(() => {
       if (store.get(keys[0]) !== args[0]) return 0;
       if (keys.length >= 2 && args.length >= 2) {
         store.set(keys[1], JSON.parse(args[1]));
+        for (let i = 2; i < keys.length && i < args.length; i++) {
+          store.set(keys[i], i === 2 ? JSON.parse(args[i]) : args[i]);
+        }
         return 1;
       }
       if (keys.length >= 2) {

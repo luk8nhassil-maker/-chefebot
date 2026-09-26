@@ -91,6 +91,17 @@ describe("creditarBonusCompeticao", () => {
     expect(await obterBonusCompeticaoDaTemporada(T, TEMP, CLI)).toBe(30);
   });
 
+  test("guarda de reserva é avaliada dentro do lock antes de escrever", async () => {
+    const resultado = await creditarBonusCompeticao({
+      tenantId: T, temporadaId: TEMP, clienteId: CLI,
+      eventoId: "missaoSemanal:cancelado", tipo: "missao_semanal", pontos: 50, motivo: "2x no pedido",
+      podeCreditar: async () => false,
+    });
+
+    expect(resultado).toBe("invalido");
+    expect(await obterBonusCompeticaoDaTemporada(T, TEMP, CLI)).toBe(0);
+  });
+
   test("eventos diferentes somam", async () => {
     await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "e1", tipo: "missao_semanal", pontos: 20, motivo: "x" });
     await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "e2", tipo: "missao_indicacao", pontos: 15, motivo: "x" });

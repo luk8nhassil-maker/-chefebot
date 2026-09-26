@@ -59,6 +59,43 @@ async function escreverEstadoSeDono(
   return resultado === 1;
 }
 
+// Reserva, migalha e marcador temporal são uma única transição durável. Sem
+// isso, um crash depois do estado `processando` e antes das chaves auxiliares
+// deixaria o pedido sem índice para cancelamento/reconciliação.
+const ESCREVER_RESERVA_SE_DONO_SCRIPT = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  redis.call("SET", KEYS[2], ARGV[2])
+  redis.call("SET", KEYS[3], ARGV[3])
+  redis.call("SET", KEYS[4], ARGV[4])
+  return 1
+else
+  return 0
+end
+`;
+
+async function escreverReservaSeDono(
+  tenantId: string,
+  temporadaId: string,
+  clienteId: string,
+  token: string,
+  estado: EstadoMissaoIndicacaoTemporada,
+  pedidoId: string,
+  breadcrumb: BreadcrumbPedido,
+  processandoDesdeEm: string,
+): Promise<boolean> {
+  const resultado = await redis.eval(
+    ESCREVER_RESERVA_SE_DONO_SCRIPT,
+    [
+      chaveLock(tenantId, temporadaId, clienteId),
+      chaveEstado(tenantId, temporadaId, clienteId),
+      chaveBreadcrumbPedido(pedidoId),
+      chaveProcessandoDesdeEm(tenantId, temporadaId, clienteId),
+    ],
+    [token, JSON.stringify(estado), JSON.stringify(breadcrumb), processandoDesdeEm],
+  );
+  return resultado === 1;
+}
+
 // BLOCKER 7: metadado técnico (nunca de negócio) guardado numa chave
 // SEPARADA do estado principal — nunca muda o formato de `chaveEstado`
 // (evita qualquer risco de migração sobre dados já persistidos em
@@ -140,7 +177,13 @@ async function reconciliarMissaoIndicacaoOrfa(params: {
 
   const pedidos = (await redis.get<{ id: string; status: string }[]>("pedidos")) ?? [];
   const pedidoOrfao = pedidos.find((item) => item.id === pedidoOrfaoId);
-  const eventoIdBonus = `missaoIndicacao:${temporadaId}:${clienteId}:${pedidoOrfaoId}`;
+  const breadcrumbOrfao = await redis.get<BreadcrumbPedido>(chaveBreadcrumbPedido(pedidoOrfaoId));
+  const eventoIdBonus = breadcrumbOrfao?.tenantId === tenantId
+    && breadcrumbOrfao.temporadaId === temporadaId
+    && breadcrumbOrfao.clienteId === clienteId
+    && breadcrumbOrfao.eventoIdBonus
+    ? breadcrumbOrfao.eventoIdBonus
+    : `missaoIndicacao:${temporadaId}:${clienteId}:${pedidoOrfaoId}`;
 
   if (pedidoOrfao?.status === "cancelado") {
     const revertido = reverterMissaoIndicacaoTemporada({ estadoAtual, pedidoId: pedidoOrfaoId });
@@ -167,6 +210,20 @@ async function reconciliarMissaoIndicacaoOrfa(params: {
   const movimentos = await obterMovimentosBonusTemporada(tenantId, temporadaId, clienteId);
   const jaCreditado = movimentos.some((m) => m.eventoId === eventoIdBonus);
   if (jaCreditado) {
+    const movimentoOriginal = movimentos.find((m) => m.eventoId === eventoIdBonus);
+    const bonusOriginal = Number.isFinite(movimentoOriginal?.pontos) ? Number(movimentoOriginal?.pontos) : 0;
+    // Repara a migalha também no crash legado "crédito garantido, mas a
+    // migalha não foi gravada". Sem esta reconstrução, a missão seria
+    // concluída corretamente, mas um cancelamento tardio não teria como
+    // localizar o evento para estorno.
+    await redis.set(chaveBreadcrumbPedido(pedidoOrfaoId), {
+      tenantId,
+      temporadaId,
+      clienteId,
+      bonus: bonusOriginal,
+      eventoIdBonus,
+      ...(bonusOriginal > 0 ? { bonusPlanejado: bonusOriginal } : {}),
+    } satisfies BreadcrumbPedido);
     await registrarFatoRankingGamificacao("missao_indicacao_concluida", `${clienteId}:${temporadaId}:${pedidoOrfaoId}`);
     await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
     const confirmado = confirmarMissaoIndicacaoTemporada({ estadoAtual, pedidoId: pedidoOrfaoId, agora: new Date() });
@@ -184,7 +241,7 @@ async function reconciliarMissaoIndicacaoOrfa(params: {
   // quanto creditar — nunca recalcula agora com uma config que pode ter
   // mudado desde a reserva.
   if (pedidoOrfao?.status === "entregue") {
-    const breadcrumb = await redis.get<BreadcrumbPedido>(chaveBreadcrumbPedido(pedidoOrfaoId));
+    const breadcrumb = breadcrumbOrfao;
     if (!breadcrumb || !Number.isFinite(breadcrumb.bonusPlanejado)) {
       // Breadcrumb ausente ou de um registro legado sem o campo — nunca
       // inventa o valor. Fail-closed.
@@ -200,6 +257,10 @@ async function reconciliarMissaoIndicacaoOrfa(params: {
         tipo: "missao_indicacao",
         pontos: bonusPlanejado,
         motivo: `Indique um amigo — indicação confirmada no pedido ${pedidoOrfaoId}`,
+        podeCreditar: async () => {
+          const atual = await obterEstadoMissaoIndicacao(tenantId, temporadaId, clienteId);
+          return !atual.concluida && atual.processandoPedidoId === pedidoOrfaoId;
+        },
       });
       // "invalido" nunca deveria acontecer aqui (parâmetros do próprio
       // sistema) — mas fail-closed: nunca confirma sem o crédito real.
@@ -259,13 +320,7 @@ export async function concluirMissaoIndicacaoNoPedido(params: {
 
     const reservado = reservarMissaoIndicacaoTemporada({ estadoAtual, pedidoId });
     if (!reservado) return { concluida: false, bonusCreditado: 0 };
-    if (!(await escreverEstadoSeDono(tenantId, temporadaId, clienteId, token, reservado))) {
-      throw new Error("ranking_missao_indicacao_lock_perdido_durante_reserva");
-    }
     const eraProcessandoDoMesmoPedido = estadoAtual.processandoPedidoId === pedidoId;
-    if (!eraProcessandoDoMesmoPedido) {
-      await redis.set(chaveProcessandoDesdeEm(tenantId, temporadaId, clienteId), agora.toISOString());
-    }
 
     // eventoId inclui o pedidoId (correção de blocker): se uma conversão
     // anterior já foi creditada e depois ESTORNADA (cancelamento tardio),
@@ -276,19 +331,46 @@ export async function concluirMissaoIndicacaoNoPedido(params: {
     // a missão "concluída" com bônus líquido zero. É determinístico (não
     // depende do resultado do crédito), então pode ser calculado já aqui.
     const eventoIdBonus = `missaoIndicacao:${temporadaId}:${clienteId}:${pedidoId}`;
-    // Cálculo puro (sem I/O), feito ANTES da migalha para que ela já grave
-    // o `bonusPlanejado` com o valor VIGENTE agora — nunca recalculado
-    // depois com uma config que pode ter mudado.
-    const bonus = Number.isFinite(config.missaoIndicacaoBonus) && config.missaoIndicacaoBonus > 0
+    // Em retry, preserva o evento e o bônus planejados na migalha original;
+    // nunca altera o crédito de um mesmo pedido por uma configuração nova.
+    const breadcrumbAtual = eraProcessandoDoMesmoPedido
+      ? await redis.get<BreadcrumbPedido>(chaveBreadcrumbPedido(pedidoId))
+      : null;
+    const bonusCalculado = Number.isFinite(config.missaoIndicacaoBonus) && config.missaoIndicacaoBonus > 0
       ? Math.round(config.missaoIndicacaoBonus)
       : 0;
-    // BLOCKER 7/BLOCKER: migalha ANTES de qualquer efeito financeiro — é o
-    // índice durável que localiza o dono (tenant/temporada/cliente) e o
-    // eventoId REAL desta reserva mesmo que o processo morra exatamente
-    // entre reservar e creditar (antes, só era gravada DEPOIS do crédito).
-    // `bonusPlanejado` permite reconciliar uma reserva órfã "entregue, mas
-    // o processo morreu antes do crédito" sem recalcular depois.
-    await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus: 0, eventoIdBonus, bonusPlanejado: bonus } satisfies BreadcrumbPedido);
+    const bonus = Number.isFinite(breadcrumbAtual?.bonusPlanejado)
+      ? (breadcrumbAtual?.bonusPlanejado as number)
+      : bonusCalculado;
+    const eventoIdCanonico = breadcrumbAtual?.tenantId === tenantId
+      && breadcrumbAtual.temporadaId === temporadaId
+      && breadcrumbAtual.clienteId === clienteId
+      && breadcrumbAtual.eventoIdBonus
+      ? breadcrumbAtual.eventoIdBonus
+      : eventoIdBonus;
+    const breadcrumbReserva: BreadcrumbPedido = breadcrumbAtual
+      ? { ...breadcrumbAtual, eventoIdBonus: eventoIdCanonico, bonusPlanejado: bonus }
+      : { tenantId, temporadaId, clienteId, bonus: 0, eventoIdBonus: eventoIdCanonico, bonusPlanejado: bonus };
+    const processandoDesdeEmAtual = await redis.get<string>(chaveProcessandoDesdeEm(tenantId, temporadaId, clienteId));
+    const processandoDesdeEm = eraProcessandoDoMesmoPedido && processandoDesdeEmAtual
+      ? processandoDesdeEmAtual
+      : agora.toISOString();
+    // BLOCKER: estado `processando`, migalha e marcador temporal são
+    // gravados na MESMA operação CAS. Um crash não pode deixar a reserva sem
+    // índice para cancelamento/reconciliação, e o TTL do lock nunca permite
+    // sobrescrever estado novo.
+    if (!(await escreverReservaSeDono(
+      tenantId,
+      temporadaId,
+      clienteId,
+      token,
+      reservado,
+      pedidoId,
+      breadcrumbReserva,
+      processandoDesdeEm,
+    ))) {
+      throw new Error("ranking_missao_indicacao_lock_perdido_durante_reserva");
+    }
 
     let bonusCreditado = 0;
     if (bonus > 0) {
@@ -296,17 +378,21 @@ export async function concluirMissaoIndicacaoNoPedido(params: {
         tenantId,
         temporadaId,
         clienteId,
-        eventoId: eventoIdBonus,
+        eventoId: eventoIdCanonico,
         tipo: "missao_indicacao",
         pontos: bonus,
         motivo: `Indique um amigo — indicação confirmada no pedido ${pedidoId}`,
+        podeCreditar: async () => {
+          const atual = await obterEstadoMissaoIndicacao(tenantId, temporadaId, clienteId);
+          return !atual.concluida && atual.processandoPedidoId === pedidoId;
+        },
       });
       // "creditado" ou "ja_creditado" (retry pós-falha) precisam convergir
       // para o MESMO estado final íntegro — nunca só o primeiro (mesmo
       // blocker do consumo da missão semanal). "invalido" nunca cai aqui.
       if (resultado === "creditado" || resultado === "ja_creditado") {
         bonusCreditado = bonus;
-        await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus, eventoIdBonus, bonusPlanejado: bonus } satisfies BreadcrumbPedido);
+        await redis.set(chaveBreadcrumbPedido(pedidoId), { ...breadcrumbReserva, bonus, eventoIdBonus: eventoIdCanonico, bonusPlanejado: bonus } satisfies BreadcrumbPedido);
         await registrarFatoRankingGamificacao("missao_indicacao_concluida", `${clienteId}:${temporadaId}:${pedidoId}`);
         await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
       }

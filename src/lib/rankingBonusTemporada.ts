@@ -184,11 +184,18 @@ export async function creditarBonusCompeticao(params: {
   tipo: TipoBonusCompeticao;
   pontos: number;
   motivo: string;
+  /** Guarda opcional avaliada dentro do lock do ledger antes do crédito. */
+  podeCreditar?: () => Promise<boolean>;
 }): Promise<ResultadoCreditoBonus> {
-  const { tenantId, temporadaId, clienteId, eventoId, tipo, motivo } = params;
+  const { tenantId, temporadaId, clienteId, eventoId, tipo, motivo, podeCreditar } = params;
   if (!tenantId || !temporadaId || !clienteId || !eventoId) return "invalido";
   if (!Number.isFinite(params.pontos) || params.pontos <= 0) return "invalido";
   return comBloqueioBonus(tenantId, temporadaId, clienteId, async (token) => {
+    // A guarda roda sob o mesmo lock que serializa o ledger. Um cancelamento
+    // que já liberou a reserva da missão fica visível antes da escrita; se o
+    // cancelamento ainda estiver esperando este lock, ele estornará logo após
+    // o crédito, mantendo o resultado líquido correto.
+    if (podeCreditar && !(await podeCreditar())) return "invalido";
     const movimentos = await obterMovimentosBonusTemporada(tenantId, temporadaId, clienteId);
     if (movimentos.some((m) => m.eventoId === eventoId)) return "ja_creditado";
     const novo: MovimentoBonusTemporada = {

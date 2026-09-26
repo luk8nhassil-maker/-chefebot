@@ -27,6 +27,9 @@ const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estorna
       if (keys.length >= 2 && args.length >= 2) {
         if (store.get(keys[0]) !== args[0]) return 0;
         store.set(keys[1], args[1]);
+        for (let i = 2; i < keys.length && i < args.length; i++) {
+          store.set(keys[i], i === 2 ? JSON.parse(args[i]) : args[i]);
+        }
         return 1;
       }
       if (store.get(keys[0]) !== args[0]) return 0;
@@ -42,7 +45,7 @@ const { store, redisMock, obterConfigGamificacaoMock, creditarBonusMock, estorna
     estornarBonusMock: vi.fn(async () => "estornado" as const),
     registrarFatoMock: vi.fn(async () => true),
     sincronizarScoreMock: vi.fn(async () => undefined),
-    obterMovimentosBonusMock: vi.fn(async () => [] as { eventoId: string }[]),
+    obterMovimentosBonusMock: vi.fn(async () => [] as { eventoId: string; pontos?: number }[]),
   };
 });
 
@@ -142,6 +145,21 @@ describe("concluirMissaoIndicacaoNoPedido", () => {
     expect(creditarBonusMock).toHaveBeenCalledTimes(2);
   });
 
+  test("retry do mesmo pedido preserva o bônus e o evento planejados quando a configuração muda", async () => {
+    obterConfigGamificacaoMock
+      .mockResolvedValueOnce({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 40 })
+      .mockResolvedValueOnce({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 999 });
+    creditarBonusMock.mockRejectedValueOnce(new Error("timeout"));
+
+    await expect(concluirMissaoIndicacaoNoPedido({ tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-config", agora: new Date("2026-01-10T00:00:00Z") })).rejects.toThrow("timeout");
+
+    creditarBonusMock.mockResolvedValueOnce("creditado");
+    const retry = await concluirMissaoIndicacaoNoPedido({ tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-config", agora: new Date("2026-01-10T00:05:00Z") });
+
+    expect(retry).toEqual({ concluida: true, bonusCreditado: 40 });
+    expect(creditarBonusMock).toHaveBeenLastCalledWith(expect.objectContaining({ eventoId: `missaoIndicacao:${TEMP}:${CLI}:pedido-config`, pontos: 40 }));
+  });
+
   test("BLOCKER 7: a migalha existe ANTES do crédito no ledger — crash no próprio crédito ainda deixa rastro para o cancelamento encontrar", async () => {
     obterConfigGamificacaoMock.mockResolvedValue({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 40 });
     creditarBonusMock.mockRejectedValueOnce(new Error("ledger indisponível"));
@@ -194,7 +212,7 @@ describe("concluirMissaoIndicacaoNoPedido", () => {
     store.set(`ranking:missaoIndicacao:${T}:${TEMP}:${CLI}`, { concluida: false, concluidaEm: null, pedidoId: null, processandoPedidoId: "pedido-orfao-creditado" });
     envelhecerProcessando(10);
     definirPedidoReal("pedido-orfao-creditado", "entregue");
-    obterMovimentosBonusMock.mockResolvedValue([{ eventoId: `missaoIndicacao:${TEMP}:${CLI}:pedido-orfao-creditado` }]);
+    obterMovimentosBonusMock.mockResolvedValue([{ eventoId: `missaoIndicacao:${TEMP}:${CLI}:pedido-orfao-creditado`, pontos: 40 }]);
 
     const resultado = await concluirMissaoIndicacaoNoPedido({
       tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-B10", agora: new Date("2026-01-10T00:00:00Z"),
@@ -205,6 +223,9 @@ describe("concluirMissaoIndicacaoNoPedido", () => {
     const estadoFinal = await obterEstadoMissaoIndicacao(T, TEMP, CLI);
     expect(estadoFinal).toEqual(expect.objectContaining({ concluida: true, pedidoId: "pedido-orfao-creditado" }));
     expect(sincronizarScoreMock).toHaveBeenCalledWith(T, TEMP, CLI);
+    expect(store.get("ranking:missaoIndicacao:pedido:pedido-orfao-creditado")).toEqual(expect.objectContaining({
+      eventoIdBonus: `missaoIndicacao:${TEMP}:${CLI}:pedido-orfao-creditado`, bonus: 40,
+    }));
   });
 
   test("BLOCKER: reconciliação de reserva órfã — pedido REAL 'entregue' SEM crédito no ledger (crash ANTES do bônus): credita exatamente o bonusPlanejado da migalha, uma única vez; outro pedido nunca rouba nem dobra", async () => {
@@ -240,6 +261,21 @@ describe("concluirMissaoIndicacaoNoPedido", () => {
     const estadoFinal = await obterEstadoMissaoIndicacao(T, TEMP, CLI);
     expect(estadoFinal).toEqual(expect.objectContaining({ concluida: true, pedidoId: "pedido-orfao-sem-credito" }));
     expect(sincronizarScoreMock).toHaveBeenCalledWith(T, TEMP, CLI);
+  });
+
+  test("reconciliação usa o eventoId canônico da migalha, mesmo se o formato atual de evento mudar", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ missaoIndicacaoAtiva: true, missaoIndicacaoBonus: 40 });
+    store.set(`ranking:missaoIndicacao:${T}:${TEMP}:${CLI}`, { concluida: false, concluidaEm: null, pedidoId: null, processandoPedidoId: "pedido-evento-legado" });
+    envelhecerProcessando(10);
+    definirPedidoReal("pedido-evento-legado", "entregue");
+    store.set("ranking:missaoIndicacao:pedido:pedido-evento-legado", {
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, bonus: 0, bonusPlanejado: 40, eventoIdBonus: "evento-canonico-legado-v1",
+    });
+    obterMovimentosBonusMock.mockResolvedValue([]);
+
+    await concluirMissaoIndicacaoNoPedido({ tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-novo", agora: new Date("2026-01-10T00:10:00Z") });
+
+    expect(creditarBonusMock).toHaveBeenCalledWith(expect.objectContaining({ eventoId: "evento-canonico-legado-v1", pontos: 40 }));
   });
 
   test("BLOCKER: reconciliação de reserva órfã — pedido REAL 'entregue' sem crédito no ledger, mas SEM migalha (registro legado): NUNCA inventa o valor, continua retryable", async () => {
