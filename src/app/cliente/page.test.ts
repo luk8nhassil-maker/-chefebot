@@ -468,7 +468,7 @@ describe("/cliente — status social herdado do Top 10 (Campeão/Prata/Bronze/El
   });
 
   test("FidelidadeMobileScreen recebe o statusSocial vindo do servidor (painel.gamificacao), nunca calculado no cliente", () => {
-    expect(fonte).toContain("statusSocial={painel?.gamificacao?.statusSocial ?? null}");
+    expect(fonte).toContain("statusSocial={painel?.ranking?.participaCampanha ? (painel?.gamificacao?.statusSocial ?? null) : null}");
   });
 });
 

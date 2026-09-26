@@ -14,7 +14,7 @@ export default function RankingInviteModal({
   onParticipar,
   onDepois,
   eyebrow = "PEDIDO CONCLUÍDO",
-  description = "Você já está juntando estrelas. Quer ver seu nome no placar e acompanhar suas chances de ganhar?",
+  description = "Quer disputar posições, ver quem está logo acima e acompanhar sua próxima missão?",
 }: RankingInviteModalProps) {
   return (
     <div className="cf-post-order-invite-backdrop" role="presentation">
@@ -27,12 +27,12 @@ export default function RankingInviteModal({
           <img className="invite-soda" src="/assets/ranking/refrigerante-3d.webp" alt="" />
           <span className="invite-spark invite-spark-two">✦</span>
           <div className="invite-people"><i>👩🏻</i><i>🧑🏽</i><i>👨🏾</i><b>+8</b></div>
-          <div className="invite-tour"><span>⭐ Acumule</span><i>→</i><span>📈 Suba</span><i>→</i><span>🎁 Ganhe</span></div>
-          <h2 id="post-order-invite-title">Suas estrelas podem valer prêmios</h2>
+          <div className="invite-tour"><span>⭐ Acumule</span><i>→</i><span>📈 Suba</span><i>→</i><span>🏆 Dispute</span></div>
+          <h2 id="post-order-invite-title">Entre no Ranking do Chefe</h2>
         </div>
         <p className="invite-eyebrow"><Gift size={14} aria-hidden="true" /> {eyebrow}</p>
         <p className="invite-description">{description}</p>
-        <div className="invite-privacy"><span aria-hidden="true">✓</span><strong>Primeiro nome + telefone mascarado</strong><small>você escolhe o que autorizar.</small></div>
+        <div className="invite-privacy"><span aria-hidden="true">✓</span><strong>Você começa anônimo</strong><small>nome e telefone só se autorizar.</small></div>
         <button type="button" className="invite-primary" onClick={onParticipar}>Quero participar<ChevronRight size={18} aria-hidden="true" /></button>
         <button type="button" className="invite-secondary" onClick={onDepois}>Talvez depois</button>
         <small className="invite-footnote">Você pode mudar essa escolha depois.</small>

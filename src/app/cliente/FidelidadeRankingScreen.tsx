@@ -113,7 +113,7 @@ export function FidelidadeRankingScreen({
     ? lista.filter((entrada) => entrada.eVoce)
     : aba === 'geral' ? listaSemPodio : participantes.filter((entrada) => entrada.posicao > 3)
   const nomeSeguro = (entrada: { eVoce: boolean; participaCampanha: boolean; posicao: number; nomePublico?: string }) => {
-    if (entrada.eVoce && !entrada.participaCampanha) return 'Você — não participa do prêmio'
+    if (entrada.eVoce && !entrada.participaCampanha) return 'Você — fora da disputa'
     if (!entrada.participaCampanha) return 'Fora da disputa'
     return entrada.eVoce ? 'Você' : entrada.nomePublico || `Participante ${entrada.posicao}`
   }
@@ -350,7 +350,7 @@ export function FidelidadeRankingScreen({
               <div className="cf-ranking-medal">{posicao}</div>
               <div className="cf-ranking-avatar">{avatarSeguro(entrada) ?? <Star size={16} fill="currentColor" strokeWidth={1.8} aria-hidden="true" />}</div>
               <strong>{entrada ? nomeSeguro(entrada) : `Posição ${posicao}`} {entrada && seloSocialCompacto(entrada.statusSocial)}</strong>
-              <b>{entrada ? scoreSeguro(entrada.score) : 'Prêmio em breve'}</b>
+              <b>{entrada ? scoreSeguro(entrada.score) : 'Vaga aberta'}</b>
             </div>
           )
         })}
@@ -376,8 +376,25 @@ export function FidelidadeRankingScreen({
           </div>
         ))}
         {aba === 'participantes' && <p className="cf-ranking-footnote">Mostrando posições próximas a você.</p>}
-        {aba === 'geral' && <p className="cf-ranking-footnote">Quem não autorizou não concorre ao prêmio.</p>}
+        {aba === 'geral' && <p className="cf-ranking-footnote">Só quem ativou o Ranking participa da disputa.</p>}
       </section>
+
+      <details className="cf-ranking-privacy">
+        <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Privacidade e participação</summary>
+        <p>Você pode disputar anonimamente. Seu nome e telefone só aparecem se você permitir abaixo.</p>
+        {privacidadeCarregando && <p>Carregando escolhas…</p>}
+        {!privacidadeCarregando && privacidade?.finalidades.filter((item) => item.disponivel && item.texto && item.textoVersao).map((item) => (
+          <label key={item.finalidade}>
+            <input type="checkbox" checked={item.estado === 'concedido'} disabled={privacidadeSalvando !== null}
+              onChange={(event) => onAlterarPrivacidade(item.finalidade, event.target.checked ? 'concedido' : 'revogado', item.textoVersao)} />
+            <span>{item.texto}</span>
+          </label>
+        ))}
+        <button type="button" disabled={privacidadeSalvando !== null} onClick={onRevogarTodas}>
+          {privacidadeSalvando === 'todas' ? 'Saindo…' : 'Sair do Ranking e remover autorizações'}
+        </button>
+        {privacidadeErro && <p role="alert">{privacidadeErro}</p>}
+      </details>
 
       <section className="cf-ranking-note">
         <span>🏆</span>
@@ -396,7 +413,7 @@ export function FidelidadeRankingScreen({
               {mensagemMissao ?? 'Continue acumulando estrelas para subir de posição.'}
             </p>
             <div className="cf-ranking-sheet-row">
-              <span><strong>Fazer um novo pedido</strong><small>Cada pedido soma estrelas na temporada.</small></span>
+              <span><strong>Fazer um novo pedido</strong><small>Pedidos elegíveis entregues contam na temporada.</small></span>
               <button
                 type="button"
                 className="cf-ranking-sheet-action"

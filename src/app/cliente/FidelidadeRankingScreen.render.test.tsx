@@ -4,8 +4,8 @@
 // cliente realmente vê na tela (selo, missão, nível), não leitura de
 // código-fonte. Complementa FidelidadeRankingScreen.test.ts (regressões
 // estruturais herdadas do #445).
-import { afterEach, describe, expect, test } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { FidelidadeRankingScreen, type FidelidadeRankingScreenProps } from "./FidelidadeRankingScreen";
 
 afterEach(cleanup);
@@ -46,6 +46,14 @@ function montar(props: Partial<FidelidadeRankingScreenProps> = {}) {
 }
 
 describe("FidelidadeRankingScreen — Gamificação V2", () => {
+  test("participante anônimo vê controle de saída sem consentimento de identidade", () => {
+    const onRevogarTodas = vi.fn();
+    montar({ privacidade: { participaCampanha: true, finalidades: [] }, onRevogarTodas });
+    fireEvent.click(screen.getByText("Privacidade e participação"));
+    expect(screen.getByText(/Você pode disputar anonimamente/)).toBeTruthy();
+    fireEvent.click(screen.getByText("Sair do Ranking e remover autorizações"));
+    expect(onRevogarTodas).toHaveBeenCalledTimes(1);
+  });
   test("sem gamificacao (fail-closed), não mostra nenhum selo nem missão", () => {
     montar({ gamificacao: null });
     expect(screen.queryByText(/Campeão/)).toBeNull();

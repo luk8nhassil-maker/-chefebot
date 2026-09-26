@@ -2,7 +2,7 @@ import "server-only";
 
 import { mascararTelefoneExibicao } from "./cardapioToken";
 import { buscarClientePorId, normalizarNomeCliente } from "./clientes";
-import { obterFinalidadesAtivasRanking, obterFinalidadesAtivasRankingParaClientes } from "./consentimentoRanking";
+import { obterFinalidadesAtivasRanking, obterFinalidadesAtivasRankingParaClientes, obterParticipacaoRanking, obterParticipacaoRankingParaClientes } from "./consentimentoRanking";
 
 export type IdentidadePublicaRanking = {
   participaCampanha: boolean;
@@ -30,11 +30,13 @@ function primeiroNome(nome: unknown): string | null {
  */
 export async function projetarIdentidadePublicaRanking(clienteId: string): Promise<IdentidadePublicaRanking> {
   try {
-    const finalidades = await obterFinalidadesAtivasRanking(clienteId);
+    const [finalidades, participaCampanha] = await Promise.all([
+      obterFinalidadesAtivasRanking(clienteId), obterParticipacaoRanking(clienteId),
+    ]);
     const permiteNome = finalidades.has("ranking_primeiro_nome");
     const permiteTelefone = finalidades.has("ranking_telefone_mascarado");
-    const participaCampanha = permiteNome || permiteTelefone;
     if (!participaCampanha) return { ...IDENTIDADE_ANONIMA };
+    if (!permiteNome && !permiteTelefone) return { ...IDENTIDADE_ANONIMA, participaCampanha: true };
 
     const cliente = await buscarClientePorId(clienteId);
     if (!cliente) return { ...IDENTIDADE_ANONIMA };
@@ -59,12 +61,14 @@ export async function projetarIdentidadesPublicasRanking(
     // Uma unica leitura MGET para todos os consentimentos do Top 10 evita
     // transformar a protecao de privacidade em N+1 no Redis.
     const finalidadesPorCliente = await obterFinalidadesAtivasRankingParaClientes(unicos);
+    const participacoes = await obterParticipacaoRankingParaClientes(unicos, finalidadesPorCliente);
     const pares = await Promise.all(unicos.map(async (clienteId) => {
       const finalidades = finalidadesPorCliente.get(clienteId) ?? new Set();
       const permiteNome = finalidades.has("ranking_primeiro_nome");
       const permiteTelefone = finalidades.has("ranking_telefone_mascarado");
-      const participaCampanha = permiteNome || permiteTelefone;
+      const participaCampanha = participacoes.get(clienteId) === true;
       if (!participaCampanha) return [clienteId, { ...IDENTIDADE_ANONIMA }] as const;
+      if (!permiteNome && !permiteTelefone) return [clienteId, { ...IDENTIDADE_ANONIMA, participaCampanha: true }] as const;
       try {
         const cliente = await buscarClientePorId(clienteId);
         if (!cliente) return [clienteId, { ...IDENTIDADE_ANONIMA }] as const;

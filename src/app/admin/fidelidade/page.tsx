@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import PanelShell from '@/components/PanelShell'
 import FidelidadeAnalyticsDashboard from '@/components/FidelidadeAnalyticsDashboard'
+import GamificacaoConfigPanel from './GamificacaoConfigPanel'
 
 type EstrelasStatus = {
   ativa: boolean
@@ -574,6 +575,8 @@ export default function FidelidadePage() {
                 </div>
               </div>
             </div>
+
+            <GamificacaoConfigPanel />
 
             {/* Módulo Analytics (linha completa) */}
             <div style={cardEstilo}>

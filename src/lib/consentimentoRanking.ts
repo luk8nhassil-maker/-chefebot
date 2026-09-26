@@ -21,6 +21,9 @@ export type RegistroConsentimentoRanking = {
   textoVersao: string | null;
   registradoEm: string;
   origem: "area_cliente_autenticada";
+  /** Vincula a autorização à entrada atual no jogo; impede que um PATCH
+   * atrasado reexponha identidade depois de sair e entrar de novo. */
+  participacaoEventoId?: string;
 };
 
 export type ConfiguracaoFinalidadeRanking = {
@@ -43,6 +46,7 @@ export class ErroConsentimentoRanking extends Error {
       | "infraestrutura_nao_configurada"
       | "texto_nao_aprovado"
       | "versao_texto_desatualizada"
+      | "participacao_inativa"
       | "fonte_oficial_indisponivel",
   ) {
     super(codigo);
@@ -87,6 +91,35 @@ function chaveHistorico(referencia: string): string {
   return `privacidade:ranking:historico:${referencia}`;
 }
 
+function chaveParticipacao(referencia: string): string {
+  return `privacidade:ranking:participacao:${referencia}`;
+}
+
+function chaveHistoricoParticipacao(referencia: string): string {
+  return `privacidade:ranking:participacao:historico:${referencia}`;
+}
+
+type RegistroParticipacao = {
+  ativo: boolean;
+  eventoId: string;
+  registradoEm: string;
+  origem: "area_cliente_autenticada";
+  versao: "ranking-participacao-v1";
+};
+
+function participacaoValida(valor: unknown): valor is RegistroParticipacao {
+  if (!valor || typeof valor !== "object") return false;
+  const item = valor as Partial<RegistroParticipacao>;
+  return typeof item.ativo === "boolean" && typeof item.eventoId === "string" &&
+    typeof item.registradoEm === "string" && item.origem === "area_cliente_autenticada" &&
+    item.versao === "ranking-participacao-v1";
+}
+
+function registroParticipacao(ativo: boolean, eventoId: string = randomUUID()): RegistroParticipacao {
+  return { ativo, eventoId, registradoEm: new Date().toISOString(),
+    origem: "area_cliente_autenticada", versao: "ranking-participacao-v1" };
+}
+
 function finalidadeValida(valor: unknown): valor is FinalidadeConsentimentoRanking {
   return typeof valor === "string" && (FINALIDADES_CONSENTIMENTO_RANKING as readonly string[]).includes(valor);
 }
@@ -102,6 +135,7 @@ function registroValido(valor: unknown, finalidade?: FinalidadeConsentimentoRank
     (registro.textoVersao === null || typeof registro.textoVersao === "string") &&
     typeof registro.registradoEm === "string" &&
     registro.origem === "area_cliente_autenticada"
+    && (registro.participacaoEventoId === undefined || typeof registro.participacaoEventoId === "string")
   );
 }
 
@@ -181,18 +215,26 @@ export async function obterFinalidadesAtivasRanking(clienteId: string): Promise<
 export async function obterFinalidadesAtivasRankingParaClientes(
   clienteIds: string[],
 ): Promise<Map<string, Set<FinalidadeConsentimentoRanking>>> {
-  const registrosPorCliente = await obterRegistrosAtuaisParaClientes(clienteIds);
+  const unicos = Array.from(new Set(clienteIds.filter(Boolean)));
+  const [registrosPorCliente, participacoes] = await Promise.all([
+    obterRegistrosAtuaisParaClientes(unicos),
+    unicos.length && segredoConsentimento()
+      ? redis.mget<Array<RegistroParticipacao | null>>(...unicos.map((id) => chaveParticipacao(exigirReferencia(id))))
+      : Promise.resolve(unicos.map(() => null)),
+  ]);
   const configs = configuracoesRanking();
   const resultado = new Map<string, Set<FinalidadeConsentimentoRanking>>();
-  for (const clienteId of Array.from(new Set(clienteIds.filter(Boolean)))) {
+  for (const [index, clienteId] of unicos.entries()) {
     const registros = registrosPorCliente.get(clienteId) ?? new Map();
+    const estado = participacoes[index];
     const ativas = new Set<FinalidadeConsentimentoRanking>();
     for (const config of configs) {
       const registro = registros.get(config.finalidade);
       if (
         config.disponivel &&
         registro?.estado === "concedido" &&
-        registro.textoVersao === config.textoVersao
+        registro.textoVersao === config.textoVersao &&
+        (estado === null || (participacaoValida(estado) && estado.ativo && registro.participacaoEventoId === estado.eventoId))
       ) {
         ativas.add(config.finalidade);
       }
@@ -200,6 +242,50 @@ export async function obterFinalidadesAtivasRankingParaClientes(
     resultado.set(clienteId, ativas);
   }
   return resultado;
+}
+
+/** Estado explícito prevalece. Ausência preserva a participação dos clientes
+ * que já tinham concedido identidade antes desta separação. Novos clientes
+ * entram anonimamente pelo botão de ativação, sem consentimento implícito. */
+export async function obterParticipacaoRankingParaClientes(
+  clienteIds: string[],
+  finalidadesPorCliente?: Map<string, Set<FinalidadeConsentimentoRanking>>,
+): Promise<Map<string, boolean>> {
+  const unicos = Array.from(new Set(clienteIds.filter(Boolean)));
+  const referencias = unicos.map((clienteId) => exigirReferencia(clienteId));
+  if (unicos.length === 0) return new Map();
+  const [valores, finalidades] = await Promise.all([
+    redis.mget<Array<RegistroParticipacao | null>>(...referencias.map(chaveParticipacao)),
+    finalidadesPorCliente ? Promise.resolve(finalidadesPorCliente) : obterFinalidadesAtivasRankingParaClientes(unicos),
+  ]);
+  return new Map(unicos.map((id, i) => {
+    const valor = valores[i];
+    // Fallback apenas para chave ausente (cliente legado). Registro presente
+    // mas corrompido nunca pode reativar alguém que havia saído.
+    const ativo = participacaoValida(valor) ? valor.ativo
+      : valor === null ? !!(finalidades.get(id)?.has("ranking_primeiro_nome") || finalidades.get(id)?.has("ranking_telefone_mascarado"))
+        : false;
+    return [id, ativo];
+  }));
+}
+
+export async function obterParticipacaoRanking(clienteId: string): Promise<boolean> {
+  return (await obterParticipacaoRankingParaClientes([clienteId])).get(clienteId) ?? false;
+}
+
+export async function registrarParticipacaoRanking(clienteId: string, ativo: boolean): Promise<void> {
+  const referencia = exigirReferencia(clienteId);
+  const anterior = await redis.get<RegistroParticipacao>(chaveParticipacao(referencia));
+  if (ativo && participacaoValida(anterior) && anterior.ativo) return;
+  // Retries/concessões concorrentes da mesma entrada compartilham a época.
+  // Sair gera outra época, invalidando concessões atrasadas da entrada antiga.
+  const registro = registroParticipacao(ativo, ativo
+    ? participacaoValida(anterior) ? anterior.eventoId : "primeira-entrada"
+    : randomUUID());
+  await redis.multi()
+    .set(chaveParticipacao(referencia), registro)
+    .lpush(chaveHistoricoParticipacao(referencia), JSON.stringify(registro))
+    .exec();
 }
 
 function exigirReferencia(clienteId: string): string {
@@ -213,6 +299,7 @@ function criarRegistro(
   estado: EstadoConsentimentoRanking,
   textoVersao: string | null,
   registradoEm = new Date().toISOString(),
+  participacaoEventoId?: string,
 ): RegistroConsentimentoRanking {
   return {
     eventoId: randomUUID(),
@@ -221,6 +308,7 @@ function criarRegistro(
     textoVersao,
     registradoEm,
     origem: "area_cliente_autenticada",
+    ...(participacaoEventoId ? { participacaoEventoId } : {}),
   };
 }
 
@@ -261,7 +349,12 @@ export async function registrarConsentimentoRanking(params: {
     textoVersao = config.textoVersao;
   }
 
-  const registro = criarRegistro(finalidade, params.estado, textoVersao ?? null);
+  const participacao = await redis.get<RegistroParticipacao>(chaveParticipacao(referencia));
+  if (params.estado === "concedido" && participacao !== null && (!participacaoValida(participacao) || !participacao.ativo)) {
+    throw new ErroConsentimentoRanking("participacao_inativa");
+  }
+  const registro = criarRegistro(finalidade, params.estado, textoVersao ?? null, new Date().toISOString(),
+    participacaoValida(participacao) ? participacao.eventoId : undefined);
   await persistirRegistrosAtomicos(referencia, [registro]);
   return registro;
 }
@@ -273,7 +366,16 @@ export async function revogarTodosConsentimentosRanking(clienteId: string): Prom
   const registros = FINALIDADES_CONSENTIMENTO_RANKING.map((finalidade) =>
     criarRegistro(finalidade, "revogado", atuais.get(finalidade)?.textoVersao ?? null, agora),
   );
-  await persistirRegistrosAtomicos(referencia, registros);
+  // Sair do jogo e remover a exposição pública são uma única transação.
+  const participacao = registroParticipacao(false);
+  const transacao = redis.multi();
+  transacao.set(chaveParticipacao(referencia), participacao);
+  transacao.lpush(chaveHistoricoParticipacao(referencia), JSON.stringify(participacao));
+  for (const registro of registros) {
+    transacao.set(chaveEstado(referencia, registro.finalidade), registro);
+    transacao.lpush(chaveHistorico(referencia), JSON.stringify(registro));
+  }
+  await transacao.exec();
   return registros;
 }
 

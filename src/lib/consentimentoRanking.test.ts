@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
+    get: vi.fn(async (key: string) => store.get(key) ?? null),
     mget: vi.fn(async (...keys: string[]) => keys.map((key) => store.get(key) ?? null)),
     lrange: vi.fn(async (key: string, start: number, stop: number) => {
       const lista = (store.get(key) as string[] | undefined) ?? [];
@@ -41,6 +42,8 @@ import {
   obterFinalidadesAtivasRankingParaClientes,
   obterHistoricoConsentimentoRanking,
   obterPreferenciasConsentimentoRanking,
+  obterParticipacaoRanking,
+  registrarParticipacaoRanking,
   registrarConsentimentoRanking,
   revogarTodosConsentimentosRanking,
 } from "./consentimentoRanking";
@@ -65,6 +68,64 @@ beforeEach(() => {
 });
 
 describe("consentimento do ranking", () => {
+  test("ativa participação anônima sem criar autorização de nome ou telefone", async () => {
+    process.env.PRIVACY_CONSENT_HMAC_SECRET = SEGREDO;
+    expect(await obterParticipacaoRanking(CLIENTE_ID)).toBe(false);
+    await registrarParticipacaoRanking(CLIENTE_ID, true);
+    expect(await obterParticipacaoRanking(CLIENTE_ID)).toBe(true);
+    expect((await obterFinalidadesAtivasRanking(CLIENTE_ID)).size).toBe(0);
+    expect(JSON.stringify([...store.entries()])).not.toContain(CLIENTE_ID);
+  });
+
+  test("retry da ativação preserva autorização opcional já concedida", async () => {
+    configurarNome();
+    await registrarParticipacaoRanking(CLIENTE_ID, true);
+    await registrarConsentimentoRanking({ clienteId: CLIENTE_ID, finalidade: "ranking_primeiro_nome", estado: "concedido", textoVersaoInformada: "dpo-2026-09-v1" });
+    await registrarParticipacaoRanking(CLIENTE_ID, true);
+    expect((await obterFinalidadesAtivasRanking(CLIENTE_ID)).has("ranking_primeiro_nome")).toBe(true);
+  });
+
+  test("preserva participantes antigos e saída explícita prevalece sobre o consentimento legado", async () => {
+    configurarNome();
+    await registrarConsentimentoRanking({ clienteId: CLIENTE_ID, finalidade: "ranking_primeiro_nome", estado: "concedido", textoVersaoInformada: "dpo-2026-09-v1" });
+    expect(await obterParticipacaoRanking(CLIENTE_ID)).toBe(true);
+    await registrarParticipacaoRanking(CLIENTE_ID, false);
+    expect(await obterParticipacaoRanking(CLIENTE_ID)).toBe(false);
+  });
+
+  test("registro de participação corrompido falha fechado, mesmo com consentimento antigo", async () => {
+    configurarNome();
+    await registrarConsentimentoRanking({ clienteId: CLIENTE_ID, finalidade: "ranking_primeiro_nome", estado: "concedido", textoVersaoInformada: "dpo-2026-09-v1" });
+    await registrarParticipacaoRanking(CLIENTE_ID, false);
+    // Garante uma chave presente e inválida, sem depender do HMAC exato.
+    const chaveReal = [...store.keys()].find((item) => item.startsWith("privacidade:ranking:participacao:") && !item.includes(":historico:"));
+    expect(chaveReal).toBeTruthy();
+    store.set(chaveReal!, { ativo: true });
+    expect(await obterParticipacaoRanking(CLIENTE_ID)).toBe(false);
+  });
+
+  test("revogar tudo desliga participação e identidade na mesma transação", async () => {
+    configurarNome();
+    await registrarParticipacaoRanking(CLIENTE_ID, true);
+    await registrarConsentimentoRanking({ clienteId: CLIENTE_ID, finalidade: "ranking_primeiro_nome", estado: "concedido", textoVersaoInformada: "dpo-2026-09-v1" });
+    await revogarTodosConsentimentosRanking(CLIENTE_ID);
+    expect(await obterParticipacaoRanking(CLIENTE_ID)).toBe(false);
+    expect((await obterFinalidadesAtivasRanking(CLIENTE_ID)).size).toBe(0);
+  });
+
+  test("PATCH antigo não reexpõe dados após saída e nova ativação", async () => {
+    configurarNome();
+    await registrarParticipacaoRanking(CLIENTE_ID, true);
+    const chaveParticipacao = [...store.keys()].find((item) => item.startsWith("privacidade:ranking:participacao:") && !item.includes(":historico:"))!;
+    const entradaAntiga = store.get(chaveParticipacao);
+    await revogarTodosConsentimentosRanking(CLIENTE_ID);
+    await registrarParticipacaoRanking(CLIENTE_ID, true);
+    // Simula uma concessão atrasada que leu a entrada anterior antes do DELETE.
+    redisMock.get.mockResolvedValueOnce(entradaAntiga as object);
+    await registrarConsentimentoRanking({ clienteId: CLIENTE_ID, finalidade: "ranking_primeiro_nome", estado: "concedido", textoVersaoInformada: "dpo-2026-09-v1" });
+    expect((await obterFinalidadesAtivasRanking(CLIENTE_ID)).size).toBe(0);
+    expect(await obterParticipacaoRanking(CLIENTE_ID)).toBe(true);
+  });
   test("permanece revogado e indisponivel sem segredo e texto aprovados", async () => {
     const preferencias = await obterPreferenciasConsentimentoRanking(CLIENTE_ID);
     expect(preferencias.every((item) => item.estado === "revogado")).toBe(true);
@@ -132,7 +193,9 @@ describe("consentimento do ranking", () => {
     redisMock.mget.mockClear();
 
     const ativos = await obterFinalidadesAtivasRankingParaClientes([CLIENTE_ID, "cli_5511888880000"]);
-    expect(redisMock.mget).toHaveBeenCalledTimes(1);
+    // Uma leitura em lote para consentimentos e outra para participação;
+    // nenhuma consulta por participante.
+    expect(redisMock.mget).toHaveBeenCalledTimes(2);
     expect(ativos.get(CLIENTE_ID)).toContain("ranking_primeiro_nome");
     expect(ativos.get("cli_5511888880000")?.size).toBe(0);
   });
