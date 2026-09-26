@@ -392,6 +392,23 @@ describe("efeito gamificacao (pedido cancelado) — reversão da missão semanal
 
     expect(estornarEstrelasIndicacaoMock).not.toHaveBeenCalled();
   });
+
+  test("BLOCKER 4: cancelamento com conversão registrada revoga a marca de conversão ATIVA do indicado (libera nova conversão futura)", async () => {
+    const pedido = { ...pedidoEntregue, id: "ped_cancelado", status: "cancelado", statusAnterior: "entregue" };
+    obterConversaoIndicacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", indicadoId: "cli_canonico", pedidoId: "ped_cancelado" });
+
+    await processarEfeitosPedidoCancelado(pedido);
+
+    expect(revogarConversaoAtivaMock).toHaveBeenCalledWith("cli_canonico", "ped_cancelado");
+  });
+
+  test("BLOCKER 5: todo cancelamento tenta reavaliar/estornar o apoio recorrente pelo pedidoId (idempotente, nunca invade dados de outro pedido)", async () => {
+    const pedido = { ...pedidoEntregue, id: "ped_cancelado", status: "cancelado", statusAnterior: "entregue" };
+
+    await processarEfeitosPedidoCancelado(pedido);
+
+    expect(estornarApoioMock).toHaveBeenCalledWith(expect.objectContaining({ pedidoId: "ped_cancelado" }));
+  });
 });
 
 describe("efeito indicacao", () => {
@@ -560,6 +577,37 @@ describe("efeito indicacao", () => {
 
     expect(creditarIndicacaoMock).toHaveBeenCalledTimes(1);
     expect(creditarApoioMock).not.toHaveBeenCalled();
+  });
+
+  test("BLOCKER 4: relação existente SEM conversão ativa (original foi cancelada) → esta compra conta como NOVA conversão principal (+6), nunca apoio", async () => {
+    // Relação permanente já existe (indicado veio de um indicador há tempos),
+    // mas a conversão original foi revogada por um cancelamento anterior —
+    // obterConversaoAtivaIndicado devolve null. Esta é a primeira compra
+    // comercial válida REAL desde então.
+    obterRelacaoMock.mockResolvedValue({ indicadorId: "cli_indicador", criadoEm: "2024-01-01" });
+    obterConversaoAtivaMock.mockResolvedValue(null);
+    creditarIndicacaoMock.mockResolvedValue("creditado");
+
+    await processarEfeitosPedidoEntregue(pedidoEntregue);
+
+    expect(creditarIndicacaoMock).toHaveBeenCalledOnce();
+    expect(creditarIndicacaoMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        indicadorId: "cli_indicador",
+        indicadoId: "cli_canonico",
+        pedidoId: "ped_entregue",
+        primeiraCompraComercialValida: true,
+      })
+    );
+    expect(creditarApoioMock).not.toHaveBeenCalled();
+    // marca esta nova conversão como a ativa, para futuras compras caírem
+    // em apoio recorrente normalmente até a próxima reversão, se houver.
+    expect(marcarConversaoAtivaMock).toHaveBeenCalledWith("cli_canonico", expect.objectContaining({
+      indicadorId: "cli_indicador",
+      pedidoId: "ped_entregue",
+    }));
+    // não tenta reconfirmar a relação (ela já existia)
+    expect(registrarRelacaoMock).not.toHaveBeenCalled();
   });
 
   test("retry na compra posterior não duplica +1 apoio (estado persiste concluído)", async () => {
