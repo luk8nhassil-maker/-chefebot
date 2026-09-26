@@ -15,6 +15,7 @@ import {
   calcularNivelChef,
   calcularUltimoPedidoConfirmadoDosMovimentos,
   calcularCoroaAmeacada,
+  textoStatusSocialCompartilhavel,
   ESTADO_MISSAO_SEMANAL_INICIAL,
   ESTADO_MISSAO_INDICACAO_INICIAL,
   type EstadoMissaoSemanal,
@@ -234,6 +235,34 @@ describe("calcularUltimoPedidoConfirmadoDosMovimentos", () => {
     expect(calcularUltimoPedidoConfirmadoDosMovimentos([])).toBeNull();
     expect(calcularUltimoPedidoConfirmadoDosMovimentos([{ tipo: "estornado", createdAt: "2026-01-01T00:00:00.000Z" }])).toBeNull();
   });
+
+  test("BLOCKER: ignora créditos de indicação e apoio recorrente (não são pedido próprio, mesmo sendo 'confirmado')", () => {
+    // Cliente não faz pedido próprio há 10 dias; um amigo indicado por ele
+    // comprou ontem, creditando Estrelas de indicação (tipo 'confirmado',
+    // eventoId 'indicacao:*') — isso NUNCA pode contar como "o cliente fez
+    // um pedido ontem", ou a missão de reativação fica bloqueada por engano.
+    const resultado = calcularUltimoPedidoConfirmadoDosMovimentos([
+      { tipo: "confirmado", createdAt: "2026-01-15T00:00:00.000Z", eventoId: "confirmado:pedido-antigo-1" },
+      { tipo: "confirmado", createdAt: "2026-01-25T00:00:00.000Z", eventoId: "indicacao:cli_amigo:primeira-compra:pedido-999" },
+    ]);
+    expect(resultado).toBe("2026-01-15T00:00:00.000Z");
+  });
+
+  test("BLOCKER: ignora crédito de apoio recorrente pelo mesmo motivo", () => {
+    const resultado = calcularUltimoPedidoConfirmadoDosMovimentos([
+      { tipo: "confirmado", createdAt: "2026-01-15T00:00:00.000Z", eventoId: "confirmado:pedido-antigo-1" },
+      { tipo: "confirmado", createdAt: "2026-01-25T00:00:00.000Z", eventoId: "apoio:cli_amigo:expediente:2026-01-25" },
+    ]);
+    expect(resultado).toBe("2026-01-15T00:00:00.000Z");
+  });
+
+  test("sem NENHUM pedido próprio real (só indicação/apoio), retorna null — nunca inventa data", () => {
+    const resultado = calcularUltimoPedidoConfirmadoDosMovimentos([
+      { tipo: "confirmado", createdAt: "2026-01-25T00:00:00.000Z", eventoId: "indicacao:cli_amigo:primeira-compra:pedido-999" },
+      { tipo: "confirmado", createdAt: "2026-01-20T00:00:00.000Z", eventoId: "apoio:cli_amigo:expediente:2026-01-20" },
+    ]);
+    expect(resultado).toBeNull();
+  });
 });
 
 describe("calcularBonusMissaoSemanal", () => {
@@ -414,5 +443,21 @@ describe("calcularCoroaAmeacada", () => {
 
   test("vantagem zero (empate técnico) com config ativa: ameaçada", () => {
     expect(calcularCoroaAmeacada(0, 5)).toBe(true);
+  });
+});
+
+describe("textoStatusSocialCompartilhavel", () => {
+  test("cada status tem um texto próprio, curto e sem PII", () => {
+    expect(textoStatusSocialCompartilhavel("campeao")).toBe("Sou Campeão do Ranking do Chefe 👑");
+    expect(textoStatusSocialCompartilhavel("prata")).toBe("Terminei a temporada no Top 2 do Ranking do Chefe 🥈");
+    expect(textoStatusSocialCompartilhavel("bronze")).toBe("Terminei no Top 3 do Ranking do Chefe 🥉");
+    expect(textoStatusSocialCompartilhavel("elite")).toBe("Entrei no Top 10 do Ranking do Chefe ✦");
+  });
+
+  test("nunca contém telefone, nome ou identificador de cliente", () => {
+    for (const status of ["campeao", "prata", "bronze", "elite"] as const) {
+      const texto = textoStatusSocialCompartilhavel(status);
+      expect(texto).not.toMatch(/cli_|\d{8,}/);
+    }
   });
 });

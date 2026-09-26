@@ -68,16 +68,24 @@ describe("creditarBonusCompeticao", () => {
     expect(await obterBonusCompeticaoDaTemporada(T, TEMP, CLI)).toBe(35);
   });
 
-  test("nunca credita pontos zero, negativos ou não finitos (fail-closed)", async () => {
-    expect(await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "e1", tipo: "ajuste", pontos: 0, motivo: "x" })).toBe("ja_creditado");
-    expect(await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "e2", tipo: "ajuste", pontos: -10, motivo: "x" })).toBe("ja_creditado");
-    expect(await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "e3", tipo: "ajuste", pontos: NaN, motivo: "x" })).toBe("ja_creditado");
+  test("nunca credita pontos zero, negativos ou não finitos (fail-closed) — retorna 'invalido', nunca 'ja_creditado'", async () => {
+    expect(await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "e1", tipo: "ajuste", pontos: 0, motivo: "x" })).toBe("invalido");
+    expect(await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "e2", tipo: "ajuste", pontos: -10, motivo: "x" })).toBe("invalido");
+    expect(await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "e3", tipo: "ajuste", pontos: NaN, motivo: "x" })).toBe("invalido");
     expect(store.size).toBe(0);
   });
 
-  test("parâmetros vazios nunca creditam", async () => {
-    expect(await creditarBonusCompeticao({ tenantId: "", temporadaId: TEMP, clienteId: CLI, eventoId: "e1", tipo: "ajuste", pontos: 10, motivo: "x" })).toBe("ja_creditado");
-    expect(await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "", tipo: "ajuste", pontos: 10, motivo: "x" })).toBe("ja_creditado");
+  test("parâmetros vazios nunca creditam — retorna 'invalido', nunca 'ja_creditado'", async () => {
+    expect(await creditarBonusCompeticao({ tenantId: "", temporadaId: TEMP, clienteId: CLI, eventoId: "e1", tipo: "ajuste", pontos: 10, motivo: "x" })).toBe("invalido");
+    expect(await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "", tipo: "ajuste", pontos: 10, motivo: "x" })).toBe("invalido");
+  });
+
+  test("'invalido' nunca é confundido com um crédito real: um eventoId usado antes com parâmetros ruins ainda pode ser creditado de verdade depois", async () => {
+    const invalido = await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "e-recuperavel", tipo: "ajuste", pontos: -5, motivo: "x" });
+    expect(invalido).toBe("invalido");
+    const real = await creditarBonusCompeticao({ tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: "e-recuperavel", tipo: "ajuste", pontos: 5, motivo: "x" });
+    expect(real).toBe("creditado");
+    expect(await obterBonusCompeticaoDaTemporada(T, TEMP, CLI)).toBe(5);
   });
 
   test("todo crédito bem-sucedido registra o fato 'bonus_competicao_aplicado' (Telemetria V2)", async () => {

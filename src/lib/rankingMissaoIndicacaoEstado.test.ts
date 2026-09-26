@@ -64,9 +64,10 @@ describe("concluirMissaoIndicacaoNoPedido", () => {
     const resultado = await concluirMissaoIndicacaoNoPedido({ tenantId: T, temporadaId: TEMP, clienteId: CLI, pedidoId: "pedido-1", agora: new Date("2026-01-10T00:00:00Z") });
     expect(resultado).toEqual({ concluida: true, bonusCreditado: 40 });
     expect(creditarBonusMock).toHaveBeenCalledWith(expect.objectContaining({
-      tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: `missaoIndicacao:${TEMP}:${CLI}`, tipo: "missao_indicacao", pontos: 40,
+      // eventoId inclui o pedidoId (correção de blocker — ver rankingMissaoIndicacaoEstado.ts).
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoId: `missaoIndicacao:${TEMP}:${CLI}:pedido-1`, tipo: "missao_indicacao", pontos: 40,
     }));
-    expect(registrarFatoMock).toHaveBeenCalledWith("missao_indicacao_concluida", `${CLI}:${TEMP}`);
+    expect(registrarFatoMock).toHaveBeenCalledWith("missao_indicacao_concluida", `${CLI}:${TEMP}:pedido-1`);
     expect((await obterEstadoMissaoIndicacao(T, TEMP, CLI)).concluida).toBe(true);
   });
 
@@ -120,7 +121,7 @@ describe("reverterMissaoIndicacaoDoPedido (cancelamento tardio)", () => {
     await reverterMissaoIndicacaoDoPedido("pedido-1", "Pedido pedido-1 cancelado");
 
     expect(estornarBonusMock).toHaveBeenCalledWith(expect.objectContaining({
-      tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoIdOriginal: `missaoIndicacao:${TEMP}:${CLI}`,
+      tenantId: T, temporadaId: TEMP, clienteId: CLI, eventoIdOriginal: `missaoIndicacao:${TEMP}:${CLI}:pedido-1`,
     }));
     expect((await obterEstadoMissaoIndicacao(T, TEMP, CLI)).concluida).toBe(false);
   });

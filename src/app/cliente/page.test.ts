@@ -328,7 +328,7 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
   test("indicação nunca expõe telefone no link compartilhado", () => {
     const blocoCompartilhar = fonte.slice(
       fonte.indexOf("async function compartilharIndicacao"),
-      fonte.indexOf("function abrirPontos"),
+      fonte.indexOf("async function compartilharConquistaRanking"),
     );
     // o link usa apenas o token opaco
     expect(blocoCompartilhar).toContain("?ref=");
@@ -393,7 +393,7 @@ describe("/cliente — Correções PR #427: textos comerciais, estados vazios, P
   test("link de indicação usa apenas token opaco, sem telefone ou PII", () => {
     const blocoCompartilhar = fonte.slice(
       fonte.indexOf("async function compartilharIndicacao"),
-      fonte.indexOf("function abrirPontos"),
+      fonte.indexOf("async function compartilharConquistaRanking"),
     );
     expect(blocoCompartilhar).toContain("?ref=");
     expect(blocoCompartilhar).not.toMatch(/telefone/);
@@ -431,5 +431,103 @@ describe("/cliente — prospeccao segura do Ranking no pos-pedido", () => {
     expect(bloco).toContain("if (preferencias?.participaCampanha === true)");
     expect(bloco).toContain("setMobilePanel('ranking')");
     expect(bloco).toContain("setRankingConsentModal(true)");
+  });
+});
+
+describe("/cliente — status social herdado do Top 10 (Campeão/Prata/Bronze/Elite)", () => {
+  const blocoBadge = fonte.slice(
+    fonte.indexOf("function StatusSocialFidelidadeBadge"),
+    fonte.indexOf("type FidelidadeMobileScreenProps"),
+  );
+
+  test("sem status (quinto estado — Caçada ao Pódio), o selo não renderiza nada", () => {
+    expect(blocoBadge).toContain("if (!status) return null");
+  });
+
+  test("Campeão recebe acabamento premium (fundo navy + coroa + texto oficial)", () => {
+    expect(blocoBadge).toContain("if (status === 'campeao')");
+    expect(blocoBadge).toContain("👑");
+    expect(blocoBadge).toContain("Campeão da temporada anterior");
+    expect(blocoBadge).toContain("cores.navyCard");
+  });
+
+  test("Prata, Bronze e Elite têm selo compacto próprio (não reaproveita o card do Campeão)", () => {
+    expect(fonte).toContain("const CORES_SELO_STATUS_SOCIAL");
+    expect(fonte).toMatch(/prata:\s*\{\s*bg:/);
+    expect(fonte).toMatch(/bronze:\s*\{\s*bg:/);
+    expect(fonte).toMatch(/elite:\s*\{\s*bg:/);
+    expect(fonte).toContain("const ICONE_STATUS_SOCIAL");
+    expect(blocoBadge).toContain("NOME_STATUS_TEMPORADA[status]");
+  });
+
+  test("quem não é Top 10 mantém a interface normal focada em 'Caçada ao Pódio' (selo não substitui o restante da tela)", () => {
+    // O selo é condicional e isolado; o resto do card de fidelidade (saldo,
+    // progresso, ranking) continua a renderizar independente do statusSocial.
+    expect(fonte).toContain("{statusSocial && (");
+    expect(fonte).toContain("<StatusSocialFidelidadeBadge status={statusSocial}");
+  });
+
+  test("FidelidadeMobileScreen recebe o statusSocial vindo do servidor (painel.gamificacao), nunca calculado no cliente", () => {
+    expect(fonte).toContain("statusSocial={painel?.gamificacao?.statusSocial ?? null}");
+  });
+});
+
+describe("/cliente — compartilhar status conquistado (voluntário, sem PII)", () => {
+  const blocoCompartilhar = fonte.slice(
+    fonte.indexOf("async function compartilharStatusSocial"),
+    fonte.indexOf("function abrirPontos"),
+  );
+
+  test("nunca expõe telefone, clienteId ou nome de terceiros no compartilhamento", () => {
+    expect(blocoCompartilhar).not.toContain("telefone");
+    expect(blocoCompartilhar).not.toContain("clienteId");
+    expect(blocoCompartilhar).not.toContain("perfil.cliente.nome");
+    expect(blocoCompartilhar).not.toContain("indicadorId");
+  });
+
+  test("usa a copy oficial gerada no domínio (textoStatusSocialCompartilhavel), não texto solto na tela", () => {
+    expect(blocoCompartilhar).toContain("textoStatusSocialCompartilhavel(status)");
+    expect(fonte).toContain("import { NOME_STATUS_TEMPORADA, textoStatusSocialCompartilhavel } from '@/lib/rankingGamificacao'");
+  });
+
+  test("Web Share API com fallback de cópia (nunca envia automaticamente)", () => {
+    expect(blocoCompartilhar).toContain("navigator.share");
+    expect(blocoCompartilhar).toContain("navigator.clipboard.writeText");
+  });
+
+  test("modo preview simula o compartilhamento e nunca gera link real", () => {
+    expect(blocoCompartilhar).toContain("if (modoPreview)");
+    expect(blocoCompartilhar).toContain("O compartilhamento foi simulado. Nenhum link real foi criado ou enviado.");
+  });
+
+  test("anexa o token de indicação oficial já existente quando disponível, sem criar uma rede social interna", () => {
+    expect(blocoCompartilhar).toContain("/api/cliente/indicacao");
+    expect(blocoCompartilhar).toContain("indicacaoToken");
+  });
+});
+
+describe("/cliente — Preview local cobre os 5 estados do selo social", () => {
+  test("cenários fixture cobrem Caçada ao Pódio + Campeão + Prata + Bronze + Elite", () => {
+    const blocoCenarios = fonte.slice(
+      fonte.indexOf("const CENARIOS_STATUS_SOCIAL_PREVIEW"),
+      fonte.indexOf("type PreviewFidelidadeMobileProps"),
+    );
+    expect(blocoCenarios).toContain("valor: null");
+    expect(blocoCenarios).toContain("valor: 'campeao'");
+    expect(blocoCenarios).toContain("valor: 'prata'");
+    expect(blocoCenarios).toContain("valor: 'bronze'");
+    expect(blocoCenarios).toContain("valor: 'elite'");
+  });
+
+  test("PreviewFidelidadeMobile renderiza o selo simulado sem chamar API real ao compartilhar", () => {
+    const blocoPreview = fonte.slice(
+      fonte.indexOf("function PreviewFidelidadeMobile"),
+      fonte.indexOf("// Selo do status social"),
+    );
+    expect(blocoPreview).toContain("CENARIOS_STATUS_SOCIAL_PREVIEW.map");
+    expect(blocoPreview).toContain("<StatusSocialFidelidadeBadge");
+    expect(blocoPreview).toContain("Compartilhamento do status simulado no Preview. Nenhum link real foi criado ou enviado.");
+    expect(blocoPreview).not.toContain("navigator.share");
+    expect(blocoPreview).not.toContain("fetchCliente");
   });
 });

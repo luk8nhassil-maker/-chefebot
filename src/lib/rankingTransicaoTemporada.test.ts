@@ -262,4 +262,38 @@ describe("reconciliarTransicaoTemporada (blocker: independente do login do Top 1
     const chamadasParaCli1 = creditarBonusMock.mock.calls.filter((c) => (c[0] as { clienteId: string }).clienteId === "cli_1");
     expect(chamadasParaCli1).toHaveLength(1);
   });
+
+  test("BLOCKER: crash abrupto no meio do laço (marca 'em andamento' presa) nunca deixa o Top 10 travado para sempre — TTL libera o próximo worker a completar", async () => {
+    obterConfigGamificacaoMock.mockResolvedValue({ carryoverAtivo: true, carryoverTabela: [{ posicao: 1, bonus: 100 }, { posicao: 2, bonus: 60 }] });
+    listarTemporadasMock.mockResolvedValue([{ temporadaId: "temp_1", estado: "encerrada", encerradaEm: "2026-01-31T00:00:00.000Z" }]);
+    obterResultadoTemporadaMock.mockResolvedValue({ participantesTopo: TOP10 });
+
+    // Simula um worker anterior que morreu (SIGKILL/container encerrado) no
+    // meio do laço, DEPOIS de marcar "em andamento" mas SEM nunca rodar seu
+    // catch/finally — a marca ficaria presa no Redis real até o TTL expirar.
+    store.set(`ranking:reconciliacao:andamento:${TENANT}:temp_1:temp_2`, true);
+
+    // Enquanto a marca (TTL) ainda vale, um novo gatilho nunca reprocessa —
+    // isso é o comportamento normal de exclusão mútua, não o bug.
+    await reconciliarTransicaoTemporada(TENANT, atual);
+    expect(creditarBonusMock).not.toHaveBeenCalled();
+    expect(await obterStatusSocialVigente(TENANT, "cli_1")).toBeNull();
+
+    // TTL expira de verdade no Redis (aqui, simulado apagando a marca) — o
+    // PRÓXIMO gatilho (de QUALQUER cliente) precisa completar o Top 10
+    // inteiro, nunca ficar parcialmente reconciliado para sempre.
+    store.delete(`ranking:reconciliacao:andamento:${TENANT}:temp_1:temp_2`);
+    await reconciliarTransicaoTemporada(TENANT, atual);
+
+    expect(creditarBonusMock).toHaveBeenCalledWith(expect.objectContaining({ clienteId: "cli_1", pontos: 100 }));
+    expect(creditarBonusMock).toHaveBeenCalledWith(expect.objectContaining({ clienteId: "cli_2", pontos: 60 }));
+    expect((await obterStatusSocialVigente(TENANT, "cli_10"))?.status).toBe("elite");
+    // Só agora, com o Top 10 inteiro reconciliado, a marca "concluída" existe.
+    expect(store.get(`ranking:reconciliacao:concluida:${TENANT}:temp_1:temp_2`)).toBe(true);
+
+    // E uma terceira chamada depois disso é idempotente (nunca reprocessa).
+    creditarBonusMock.mockClear();
+    await reconciliarTransicaoTemporada(TENANT, atual);
+    expect(creditarBonusMock).not.toHaveBeenCalled();
+  });
 });

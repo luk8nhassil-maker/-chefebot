@@ -37,7 +37,19 @@ function chaveBreadcrumbPedido(pedidoId: string): string {
   return `ranking:missaoIndicacao:pedido:${pedidoId}`;
 }
 
-type BreadcrumbPedido = { tenantId: string; temporadaId: string; clienteId: string; bonus: number };
+type BreadcrumbPedido = {
+  tenantId: string;
+  temporadaId: string;
+  clienteId: string;
+  bonus: number;
+  /**
+   * eventoId REAL usado no crédito do ledger de bônus — guardado aqui (nunca
+   * reconstruído por interpolação de string no momento do estorno) para o
+   * cancelamento tardio sempre estornar o evento certo, mesmo que o formato
+   * do eventoId mude no futuro.
+   */
+  eventoIdBonus: string;
+};
 
 export async function obterEstadoMissaoIndicacao(
   tenantId: string,
@@ -78,22 +90,31 @@ export async function concluirMissaoIndicacaoNoPedido(params: {
       : 0;
     let bonusCreditado = 0;
     if (bonus > 0) {
+      // eventoId inclui o pedidoId (correção de blocker): se uma conversão
+      // anterior já foi creditada e depois ESTORNADA (cancelamento tardio),
+      // uma NOVA conversão válida (outro pedidoId) precisa de um eventoId
+      // diferente para poder creditar de novo — com um eventoId fixo por
+      // (temporada, cliente), o ledger via o crédito antigo ainda presente e
+      // devolvia "ja_creditado" sem nunca escrever o novo movimento, deixando
+      // a missão "concluída" com bônus líquido zero.
+      const eventoIdBonus = `missaoIndicacao:${temporadaId}:${clienteId}:${pedidoId}`;
       const resultado = await creditarBonusCompeticao({
         tenantId,
         temporadaId,
         clienteId,
-        eventoId: `missaoIndicacao:${temporadaId}:${clienteId}`,
+        eventoId: eventoIdBonus,
         tipo: "missao_indicacao",
         pontos: bonus,
         motivo: `Indique um amigo — indicação confirmada no pedido ${pedidoId}`,
       });
+      // "creditado" ou "ja_creditado" (retry pós-falha) precisam convergir
+      // para o MESMO estado final íntegro — nunca só o primeiro (mesmo
+      // blocker do consumo da missão semanal). "invalido" nunca cai aqui.
       if (resultado === "creditado" || resultado === "ja_creditado") {
         bonusCreditado = bonus;
-        if (resultado === "creditado") {
-          await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus } satisfies BreadcrumbPedido);
-          await registrarFatoRankingGamificacao("missao_indicacao_concluida", `${clienteId}:${temporadaId}`);
-          await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
-        }
+        await redis.set(chaveBreadcrumbPedido(pedidoId), { tenantId, temporadaId, clienteId, bonus, eventoIdBonus } satisfies BreadcrumbPedido);
+        await registrarFatoRankingGamificacao("missao_indicacao_concluida", `${clienteId}:${temporadaId}:${pedidoId}`);
+        await sincronizarScoreTemporadaComBonus(tenantId, temporadaId, clienteId);
       }
     }
 
@@ -127,7 +148,11 @@ export async function reverterMissaoIndicacaoDoPedido(pedidoId: string, motivo: 
       tenantId: breadcrumb.tenantId,
       temporadaId: breadcrumb.temporadaId,
       clienteId: breadcrumb.clienteId,
-      eventoIdOriginal: `missaoIndicacao:${breadcrumb.temporadaId}:${breadcrumb.clienteId}`,
+      // Sempre o eventoId REAL guardado na migalha — nunca reconstruído por
+      // interpolação de string aqui (blocker: um formato antigo sem pedidoId
+      // faria o estorno mirar um evento que talvez já não seja o crédito
+      // certo depois de uma segunda conversão válida).
+      eventoIdOriginal: breadcrumb.eventoIdBonus,
       motivo,
     });
     if (resultado === "estornado") {

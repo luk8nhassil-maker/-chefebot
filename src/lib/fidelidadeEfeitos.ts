@@ -27,8 +27,14 @@ import { obterTemporadaAtiva } from "./temporadas";
 import { detectarCreditoDoPedido } from "./rankingRetencao";
 import { consumirMissaoSemanalNoPedido, reverterMissaoSemanalDoPedido } from "./rankingMissaoSemanalEstado";
 import { concluirMissaoIndicacaoNoPedido, reverterMissaoIndicacaoDoPedido } from "./rankingMissaoIndicacaoEstado";
-import { registrarConversaoIndicacao, obterConversaoIndicacaoDoPedido } from "./rankingIndicacaoConversao";
-import { estornarEstrelasIndicacaoValida } from "./estrelasIndicacao";
+import {
+  registrarConversaoIndicacao,
+  obterConversaoIndicacaoDoPedido,
+  marcarConversaoAtivaIndicado,
+  obterConversaoAtivaIndicado,
+  revogarConversaoAtivaIndicadoSePedido,
+} from "./rankingIndicacaoConversao";
+import { estornarEstrelasIndicacaoValida, estornarEstrelaApoioRecorrente } from "./estrelasIndicacao";
 import type { ItemApp } from "./pedidoAppItens";
 import type { PedidoRedis } from "@/types/pedidoRedis";
 
@@ -311,21 +317,78 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
       if (!clienteId) return;
 
-      // Relação permanente já existe → compra posterior à aquisição → apoio +1/expediente
-      const relacao = await obterRelacaoIndicacao(clienteId);
-      if (relacao) {
-        const snapshotOficial = pedido.snapshotOficial;
-        const pedidoTemPartePaga = snapshotOficial
-          ? snapshotOficial.subtotalCents > snapshotOficial.descontoFidelidadeCents
-          : (pedido.total ?? 0) > (pedido.taxaEntrega ?? 0);
-        await creditarEstrelaApoioRecorrente({
-          indicadorId: relacao.indicadorId,
+      // Conversão principal (+6 ao indicador, SEM apoio) — sempre pelo MESMO
+      // caminho, seja a primeira compra de sempre (relação nova) ou uma
+      // compra comercial válida substituta depois que a conversão original
+      // foi cancelada/estornada (correção de blocker: a RELAÇÃO permanente
+      // indicador→indicado nunca é apagada, mas a marca de "conversão ativa"
+      // sim — sem ela, todo pedido seguinte caía direto em apoio recorrente
+      // para sempre, mesmo sem nenhuma conversão principal ter realmente se
+      // sustentado).
+      const registrarConversaoPrincipal = async (indicadorId: string) => {
+        const resultadoIndicacao = await creditarEstrelasIndicacaoValida({
+          indicadorId,
           indicadoId: clienteId,
           pedidoId: pedido.id,
-          expedienteId: chaveExpedienteOperacional(),
-          pedidoComercialValido: true,
-          pedidoTemPartePaga,
+          primeiraCompraComercialValida: true,
         });
+        // Fato de negócio "indicação convertida" registrado no MESMO instante
+        // idempotente do crédito real — nunca inferido depois por regex/diff
+        // de extrato no navegador (correção do #445). O eventoId espelha
+        // exatamente a chave de idempotência do próprio ledger, então mesmo
+        // um retry deste efeito nunca conta o fato duas vezes.
+        if (resultadoIndicacao !== "creditado") return;
+        await registrarFatoRankingGamificacao(
+          "indicacao_convertida",
+          `indicacao:${clienteId}:primeira-compra:${pedido.id}`,
+        );
+        // Migalha para o cancelamento tardio (ver "gamificacao" do
+        // cancelado) encontrar indicador/indicado sem reconsultar a relação.
+        await registrarConversaoIndicacao({ indicadorId, indicadoId: clienteId, pedidoId: pedido.id });
+        // Marca esta conversão como a ATIVA do indicado — é o que permite
+        // uma futura conversão substituta se esta também for cancelada.
+        await marcarConversaoAtivaIndicado(clienteId, { indicadorId, pedidoId: pedido.id });
+        // Missão da temporada "Indique um amigo" — reaproveita o MESMO
+        // crédito real de indicação, nunca cria um sistema paralelo. Quem
+        // cumpre a missão é o indicador, não o indicado. Sem temporada
+        // ativa, fica fail-closed (sem missão).
+        const temporadaIndicacao = await obterTemporadaAtiva(tenantId);
+        if (temporadaIndicacao) {
+          await concluirMissaoIndicacaoNoPedido({
+            tenantId,
+            temporadaId: temporadaIndicacao.temporadaId,
+            clienteId: indicadorId,
+            pedidoId: pedido.id,
+            agora: new Date(),
+          });
+        }
+      };
+
+      // Relação permanente já existe.
+      const relacao = await obterRelacaoIndicacao(clienteId);
+      if (relacao) {
+        const conversaoAtiva = await obterConversaoAtivaIndicado(clienteId);
+        if (conversaoAtiva) {
+          // Já existe uma conversão principal sustentada → esta compra é
+          // apoio recorrente (+1/expediente), nunca uma segunda conversão.
+          const snapshotOficial = pedido.snapshotOficial;
+          const pedidoTemPartePaga = snapshotOficial
+            ? snapshotOficial.subtotalCents > snapshotOficial.descontoFidelidadeCents
+            : (pedido.total ?? 0) > (pedido.taxaEntrega ?? 0);
+          await creditarEstrelaApoioRecorrente({
+            indicadorId: relacao.indicadorId,
+            indicadoId: clienteId,
+            pedidoId: pedido.id,
+            expedienteId: chaveExpedienteOperacional(),
+            pedidoComercialValido: true,
+            pedidoTemPartePaga,
+          });
+          return;
+        }
+        // Relação existe, mas SEM conversão ativa (a original foi cancelada
+        // depois) — esta é a primeira compra comercial válida REAL desde
+        // então, então conta como a conversão principal, exatamente uma vez.
+        await registrarConversaoPrincipal(relacao.indicadorId);
         return;
       }
 
@@ -337,45 +400,7 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       const confirmado = await registrarRelacaoIndicacao(clienteId, candidatura.indicadorId);
       if (confirmado !== "registrado") return;
 
-      // Primeira compra comercial válida: +6 ao indicador — SEM apoio neste evento
-      const resultadoIndicacao = await creditarEstrelasIndicacaoValida({
-        indicadorId: candidatura.indicadorId,
-        indicadoId: clienteId,
-        pedidoId: pedido.id,
-        primeiraCompraComercialValida: true,
-      });
-      // Fato de negócio "indicação convertida" registrado no MESMO instante
-      // idempotente do crédito real — nunca inferido depois por regex/diff de
-      // extrato no navegador (correção do #445). O eventoId espelha
-      // exatamente a chave de idempotência do próprio ledger, então mesmo um
-      // retry deste efeito nunca conta o fato duas vezes.
-      if (resultadoIndicacao === "creditado") {
-        await registrarFatoRankingGamificacao(
-          "indicacao_convertida",
-          `indicacao:${clienteId}:primeira-compra:${pedido.id}`,
-        );
-        // Migalha para o cancelamento tardio (ver "gamificacao" do
-        // cancelado) encontrar indicador/indicado sem reconsultar a relação.
-        await registrarConversaoIndicacao({
-          indicadorId: candidatura.indicadorId,
-          indicadoId: clienteId,
-          pedidoId: pedido.id,
-        });
-        // Missão da temporada "Indique um amigo" — reaproveita o MESMO
-        // crédito real de indicação, nunca cria um sistema paralelo. Quem
-        // cumpre a missão é o indicador (candidatura.indicadorId), não o
-        // indicado. Sem temporada ativa, fica fail-closed (sem missão).
-        const temporadaIndicacao = await obterTemporadaAtiva(tenantId);
-        if (temporadaIndicacao) {
-          await concluirMissaoIndicacaoNoPedido({
-            tenantId,
-            temporadaId: temporadaIndicacao.temporadaId,
-            clienteId: candidatura.indicadorId,
-            pedidoId: pedido.id,
-            agora: new Date(),
-          });
-        }
-      }
+      await registrarConversaoPrincipal(candidatura.indicadorId);
     });
 
     await executarEfeito(chave, estado, "analytics", async () => {
@@ -480,8 +505,20 @@ export async function processarEfeitosPedidoCancelado(pedido: PedidoParaEfeitosF
       const conversao = await obterConversaoIndicacaoDoPedido(pedido.id);
       if (conversao) {
         await estornarEstrelasIndicacaoValida({ ...conversao, motivo: motivoCancelamento });
+        // Libera a marca de "conversão ativa" (só se ainda for esta mesma) —
+        // sem isso, a relação permanente ficaria travada em apoio recorrente
+        // para sempre, mesmo sem nenhuma conversão principal sustentada
+        // (correção de blocker: relação nunca é apagada, mas a marca de
+        // conversão ativa precisa liberar espaço para uma futura conversão
+        // substituta legítima).
+        await revogarConversaoAtivaIndicadoSePedido(conversao.indicadoId, pedido.id);
       }
       await reverterMissaoIndicacaoDoPedido(pedido.id, motivoCancelamento);
+      // Cancelamento tardio do apoio recorrente (+1/expediente): nunca
+      // remove a Estrela quando outro pedido comercial válido do mesmo
+      // expediente ainda a sustenta — no-op para um pedido que nunca
+      // qualificou para apoio nenhum.
+      await estornarEstrelaApoioRecorrente({ pedidoId: pedido.id, motivo: motivoCancelamento });
     });
     await executarEfeito(chave, estado, "jornada", async () => {
       await reverterConclusaoPedidoJornada(pedido.id, `Pedido ${pedido.id} cancelado`);

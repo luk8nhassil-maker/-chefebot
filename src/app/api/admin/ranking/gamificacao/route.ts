@@ -19,8 +19,14 @@ async function checkAuthAdmin(req: NextRequest) {
 // Limites técnicos de segurança — nunca decidem a regra de negócio (isso é
 // do admin), só impedem que um erro de digitação vire incidente (ex.: "2"
 // virar "20" sem querer no multiplicador da missão semanal).
+//
+// missaoSemanalMultiplicador: min=max=2 é DELIBERADO, não um limite técnico
+// comum — a regra de produto aprovada para esta versão da "Caçada ao Pódio"
+// é EXATAMENTE 2x ("Seu próximo pedido vale 2x no Ranking desta
+// temporada."). 3x/4x/5x nunca foram aprovados; o admin pode ativar/
+// desativar a missão e ajustar o cooldown, mas não reinventar a mecânica.
 const LIMITES = {
-  missaoSemanalMultiplicador: { min: 1, max: 5 },
+  missaoSemanalMultiplicador: { min: 2, max: 2 },
   missaoSemanalCooldownDias: { min: 1, max: 90 },
   missaoIndicacaoBonus: { min: 0, max: 100_000 },
   impulsoPodioBonus: { min: 0, max: 100_000 },
@@ -48,10 +54,12 @@ function parseNumero(campo: string, valor: unknown, limites: { min: number; max:
 
 /**
  * Valida a tabela de carryover por inteiro: posições únicas em 1..10,
- * bônus dentro do limite técnico, e ORDEM determinística (bônus nunca
- * decresce ao piorar a posição: #1 nunca pode valer menos que #2). Config
- * incoerente é rejeitada por inteiro — nunca filtra silenciosamente linhas
- * ruins, nunca salva parcialmente.
+ * bônus dentro do limite técnico, e ORDEM ESTRITAMENTE decrescente (regra de
+ * produto: #1 > #2 > #3 > ... > #10 — nunca empate entre posições
+ * adjacentes). Config incoerente é rejeitada por inteiro — nunca filtra
+ * silenciosamente linhas ruins, nunca salva parcialmente. A EXIGÊNCIA de
+ * cobrir todas as 10 posições (quando `carryoverAtivo=true`) é validada à
+ * parte, depois do merge com a config existente (ver regra cruzada no POST).
  */
 function parseCarryoverTabela(valor: unknown): Resultado<ConfigCarryoverPosicao[]> {
   if (!Array.isArray(valor)) return { ok: false, erro: "carryoverTabela deve ser uma lista" };
@@ -76,15 +84,18 @@ function parseCarryoverTabela(valor: unknown): Resultado<ConfigCarryoverPosicao[
   }
   const ordenada = [...tabela].sort((a, b) => a.posicao - b.posicao);
   for (let i = 1; i < ordenada.length; i++) {
-    if (ordenada[i].bonus > ordenada[i - 1].bonus) {
+    if (ordenada[i].bonus >= ordenada[i - 1].bonus) {
       return {
         ok: false,
-        erro: `carryoverTabela: bônus deve ser decrescente por posição (#${ordenada[i].posicao} não pode valer mais que #${ordenada[i - 1].posicao})`,
+        erro: `carryoverTabela: bônus deve ser ESTRITAMENTE decrescente por posição (#${ordenada[i].posicao} precisa valer menos que #${ordenada[i - 1].posicao}, nunca igual ou mais)`,
       };
     }
   }
   return { ok: true, valor: ordenada };
 }
+
+/** As 10 posições que uma tabela de carryover precisa cobrir quando ativa. */
+const POSICOES_CARRYOVER_OBRIGATORIAS = Array.from({ length: 10 }, (_, i) => i + 1);
 
 /** Níveis únicos, nome sanitizado obrigatório, XP estritamente crescente por nível. */
 function parseNivelLimiares(valor: unknown): Resultado<LimiarNivelChef[]> {
@@ -213,6 +224,19 @@ export async function POST(req: NextRequest) {
   // configurada, fail-closed — não é "incoerente", só inativa).
   if (novaConfig.impulsoPodioCapTemporada > 0 && novaConfig.impulsoPodioBonus > novaConfig.impulsoPodioCapTemporada) {
     erros.push("impulsoPodioBonus não pode ser maior que impulsoPodioCapTemporada");
+  }
+
+  // Regra cruzada: com o carryover ATIVO, a tabela precisa cobrir as 10
+  // posições — nunca inventa valor para uma posição que o admin não
+  // configurou, e nunca liga a feature com um "buraco" no meio do Top 10.
+  // Com carryoverAtivo=false a tabela pode ficar vazia/parcial sem problema
+  // (a feature está desligada, então uma tabela incompleta não é incoerente).
+  if (novaConfig.carryoverAtivo) {
+    const posicoesPresentes = new Set(novaConfig.carryoverTabela.map((e) => e.posicao));
+    const faltando = POSICOES_CARRYOVER_OBRIGATORIAS.filter((p) => !posicoesPresentes.has(p));
+    if (faltando.length > 0) {
+      erros.push(`carryoverTabela: com carryoverAtivo=true, todas as posições 1 a 10 são obrigatórias (faltando: #${faltando.join(", #")})`);
+    }
   }
 
   if (erros.length > 0) {
