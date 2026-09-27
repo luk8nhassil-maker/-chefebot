@@ -259,6 +259,7 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
   const [modalPresenteFoto, setModalPresenteFoto] = useState(false)
   const [modalRankingConsentimento, setModalRankingConsentimento] = useState(false)
   const [mostrarRanking, setMostrarRanking] = useState(false)
+  const [participouRankingPreview, setParticipouRankingPreview] = useState(false)
   const [statusSocialPreview, setStatusSocialPreview] = useState<StatusTemporadaSocial>(null)
   const progresso = Math.max(0, Math.min(100, FIDELIDADE_PREVIEW.progressoPercentual))
   const nome = PERFIL_PREVIEW.cliente.nome ?? 'Cliente'
@@ -296,6 +297,32 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
   function simularCompartilhamento(canal: string) {
     setModalCompartilhar(false)
     onAviso(`${canal}: ação simulada. Nenhum link real foi criado ou enviado.`)
+  }
+
+  if (participouRankingPreview && PAINEL_PREVIEW.ranking) {
+    return (
+      <FidelidadeMobileScreen
+        nome={PERFIL_PREVIEW.cliente.nome ?? 'Cliente'}
+        saldo={FIDELIDADE_PREVIEW.saldoPontos}
+        meta={FIDELIDADE_PREVIEW.metaPontos}
+        faltam={FIDELIDADE_PREVIEW.pontosFaltantes}
+        progresso={FIDELIDADE_PREVIEW.progressoPercentual}
+        diasRestantes={PAINEL_PREVIEW.temporada?.diasRestantes ?? null}
+        ranking={PAINEL_PREVIEW.ranking}
+        statusSocial={statusSocialPreview}
+        aviso={aviso}
+        onSair={onClose}
+        onPresentes={() => onAviso('Meus presentes aberto em modo demonstrativo. Nenhuma recompensa real foi reservada.')}
+        onExtrato={() => onAviso('Extrato demonstrativo aberto. Nenhuma movimentação real foi consultada ou alterada.')}
+        onRanking={() => setMostrarRanking(true)}
+        onIndicacao={() => setModalCompartilhar(true)}
+        onCompartilharStatus={() => onAviso('Compartilhamento do status simulado no Preview. Nenhum link real foi criado ou enviado.')}
+        compartilhandoStatus={false}
+        indicando={false}
+        compartilhamentoLiberado={true}
+        fotoPerfilUrl={null}
+      />
+    )
   }
 
   return (
@@ -430,6 +457,7 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
           erro=""
           onAceitar={() => {
             setModalRankingConsentimento(false)
+            setParticipouRankingPreview(true)
             setMostrarRanking(true)
             onAviso('Participação simulada no Preview. Nenhuma autorização real foi salva.')
           }}
