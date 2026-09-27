@@ -7,7 +7,7 @@ import { obterTemporadaAtiva } from "./temporadas";
 import { calcularScoreDaTemporada } from "./rankingClientes";
 import { projetarScoreRankingComBonus } from "./rankingScoreTemporada";
 import { comBloqueioGamificacao, chaveLockScoreRanking } from "./rankingGamificacaoLock";
-import { missaoFotoPerfilConcluida } from "./fotoPerfilCliente";
+import { requisitoFotoPerfilSatisfeito } from "./fotoPerfilCliente";
 
 export type TipoRecompensa = "pizza_gratis" | "desconto_fixo" | "desconto_percentual";
 
@@ -868,7 +868,7 @@ export async function reservarResgatePontos(clienteId: string, recompensaId: str
     if (recompensa.status !== "disponivel" && recompensa.status !== "notificada") {
       throw new Error("Recompensa nao esta mais disponivel para resgate");
     }
-    if (!await missaoFotoPerfilConcluida(clienteId)) {
+    if (!(await requisitoFotoPerfilSatisfeito(clienteId, estado.recompensas)).satisfeito) {
       throw new Error("Adicione uma foto de perfil para liberar seu primeiro presente");
     }
 
@@ -949,7 +949,7 @@ export async function confirmarResgatePontos(
     if (!reserva) throw new Error("Reserva de resgate nao encontrada");
     if (reserva.status !== "reservado") throw new Error(`Reserva nao esta mais disponivel para confirmar (status atual: ${reserva.status})`);
     if (reservaResgateExpirada(reserva)) throw new Error("Reserva de resgate expirada");
-    if (!await missaoFotoPerfilConcluida(clienteId)) {
+    if (!(await requisitoFotoPerfilSatisfeito(clienteId, estado.recompensas)).satisfeito) {
       throw new Error("Adicione uma foto de perfil para liberar seu primeiro presente");
     }
 
