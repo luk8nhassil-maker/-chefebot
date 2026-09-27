@@ -11,6 +11,7 @@ import { fetchCliente, guardarSessaoFallback, limparSessaoFallback, telemetria }
 import {
   detectarCreditoDoPedido,
   detectarConquistaRanking,
+  textoConviteAmigoRanking,
   textoConviteRanking,
 } from '@/lib/rankingRetencao'
 import { NOME_STATUS_TEMPORADA, textoStatusSocialCompartilhavel } from '@/lib/rankingGamificacao'
@@ -183,7 +184,7 @@ const PAINEL_PREVIEW: PainelFidelidade = {
       },
     },
   },
-  indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+  indicacao: { ativa: true, estrelasPrimeiraCompra: 6, compartilhamentoLiberado: true },
   gamificacao: {
     statusSocial: null,
     bonusCompeticao: 0,
@@ -333,9 +334,9 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
       <section className="cf-preview-referral">
         <div className="cf-preview-gift" aria-hidden="true">🎁</div>
         <p className="cf-preview-kicker">INDICAÇÃO</p>
-        <h2>Chegue mais rápido ao seu presente</h2>
-        <p>Indique um amigo. Quando ele fizer o primeiro pedido, você avança.</p>
-        <button type="button" onClick={() => setModalCompartilhar(true)}>Indicar amigo</button>
+        <h2>Fortaleça sua posição</h2>
+        <p>Convide alguém conhecido para conhecer o ChefeBot e fortalecer sua jornada.</p>
+        <button type="button" onClick={() => setModalCompartilhar(true)}>Fortalecer minha posição</button>
       </section>
 
       {modalCompartilhar && (
@@ -453,6 +454,7 @@ type FidelidadeMobileScreenProps = {
   onCompartilharStatus: () => void
   compartilhandoStatus: boolean
   indicando: boolean
+  compartilhamentoLiberado: boolean
 }
 
 /** Tela oficial de Fidelidade usada pelo cliente autenticado e pelo Preview.
@@ -460,7 +462,7 @@ type FidelidadeMobileScreenProps = {
  * pontuação, recompensa ou posição localmente. */
 function FidelidadeMobileScreen({
   nome, saldo, meta, faltam, progresso, diasRestantes, ranking, statusSocial, aviso,
-  onSair, onPresentes, onExtrato, onRanking, onIndicacao, onCompartilharStatus, compartilhandoStatus, indicando,
+  onSair, onPresentes, onExtrato, onRanking, onIndicacao, onCompartilharStatus, compartilhandoStatus, indicando, compartilhamentoLiberado,
 }: FidelidadeMobileScreenProps) {
   const primeiroNome = nome.split(' ')[0] || 'Cliente'
   const inicial = primeiroNome.slice(0, 1).toUpperCase()
@@ -516,9 +518,13 @@ function FidelidadeMobileScreen({
       <section className="cf-preview-referral">
         <div className="cf-preview-gift" aria-hidden="true">🎁</div>
         <p className="cf-preview-kicker">INDICAÇÃO</p>
-        <h2>Chegue mais rápido ao seu presente</h2>
-        <p>Indique um amigo. Quando ele fizer o primeiro pedido, você avança.</p>
-        <button type="button" onClick={onIndicacao} disabled={indicando}>{indicando ? 'Aguarde...' : 'Indicar amigo'}</button>
+        <h2>{compartilhamentoLiberado ? 'Fortaleça sua posição' : 'Libere seus convites'}</h2>
+        <p>{compartilhamentoLiberado
+          ? 'Convide alguém conhecido para conhecer o ChefeBot e fortalecer sua jornada.'
+          : 'Faça seu primeiro pedido confirmado para liberar convites e começar a fortalecer sua posição.'}</p>
+        <button type="button" onClick={compartilhamentoLiberado ? onIndicacao : () => { window.location.href = '/pedido' }} disabled={indicando}>
+          {indicando ? 'Aguarde...' : compartilhamentoLiberado ? 'Fortalecer minha posição' : 'Fazer primeiro pedido'}
+        </button>
       </section>
     </main>
   )
@@ -954,10 +960,7 @@ export default function ClientePage() {
       }
       if (!token) { setCompartilhandoIndicacao(false); return }
       const url = `${window.location.origin}/pedido?ref=${token}`
-      const posicaoRanking = painel?.ranking?.participantes.posicao ?? painel?.ranking?.posicao ?? null
-      const textoConvite = posicaoRanking
-        ? `Você topa entrar no Ranking do Chefe e tentar passar minha posição (#${posicaoRanking})? Faça seu primeiro pedido pelo meu convite.`
-        : 'Você topa conhecer o Chefe da Pizza? Faça seu primeiro pedido pelo meu convite.'
+      const textoConvite = textoConviteAmigoRanking()
       if (navigator.share) {
         await navigator.share({ title: 'Convite do Ranking do Chefe', text: textoConvite, url })
       } else {
@@ -1704,6 +1707,7 @@ export default function ClientePage() {
                   onCompartilharStatus={() => void compartilharStatusSocial()}
                   compartilhandoStatus={compartilhandoStatus}
                   indicando={compartilhandoIndicacao}
+                  compartilhamentoLiberado={painel?.indicacao?.compartilhamentoLiberado === true}
                 />
               </>
             )}
@@ -1951,23 +1955,25 @@ export default function ClientePage() {
                 </div>
               )}
 
-              {/* Indicação: convite claro para a disputa — sem prometer benefício ao indicado */}
-              {fidelidade && fidelidade.ativo && (
+              {/* Indicação: convite amigável, liberado somente após primeiro pedido confirmado. */}
+              {fidelidade && fidelidade.ativo && painel?.indicacao?.ativa === true && (
                 <div className="cf-glass" style={{ borderRadius: 16, padding: 20 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                     <Users size={16} color={cores.textoTerciario} />
-                    <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5 }}>Convide alguém para a disputa</span>
+                    <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5 }}>{painel?.indicacao?.compartilhamentoLiberado === true ? 'FORTALEÇA SUA POSIÇÃO' : 'CONVITES BLOQUEADOS'}</span>
                   </div>
                   <p style={{ fontSize: 14, color: cores.textoSecundario, margin: '0 0 12px' }}>
-                    Mostre sua posição e chame alguém para tentar passar você. No primeiro pedido válido do convidado, você recebe +6 Estrelas.
-                    {estrelasDeIndicacao > 0 && ` Você já ganhou ${estrelasDeIndicacao} ${fidelidade.unidade === 'estrelas' ? 'Estrelas' : 'pontos'} por indicações.`}
+                    {painel?.indicacao?.compartilhamentoLiberado === true
+                      ? 'Convide alguém conhecido para conhecer o ChefeBot. No primeiro pedido válido do convidado, você recebe +6 Estrelas.'
+                      : 'Faça seu primeiro pedido confirmado para liberar convites e começar a fortalecer sua posição.'}
+                    {painel?.indicacao?.compartilhamentoLiberado === true && estrelasDeIndicacao > 0 && ` Você já ganhou ${estrelasDeIndicacao} ${fidelidade.unidade === 'estrelas' ? 'Estrelas' : 'pontos'} por indicações.`}
                   </p>
                   <button
-                    onClick={compartilharIndicacao}
+                    onClick={painel?.indicacao?.compartilhamentoLiberado === true ? compartilharIndicacao : abrirSacola}
                     disabled={compartilhandoIndicacao}
                     style={{ ...botaoPrimario, opacity: compartilhandoIndicacao ? 0.6 : 1 }}
                   >
-                    {compartilhandoIndicacao ? 'Preparando...' : 'Convidar para disputar'}
+                    {compartilhandoIndicacao ? 'Preparando...' : painel?.indicacao?.compartilhamentoLiberado === true ? 'Fortalecer minha posição' : 'Fazer primeiro pedido'}
                   </button>
                 </div>
               )}

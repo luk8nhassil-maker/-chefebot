@@ -49,7 +49,14 @@ export type PainelFidelidade = {
     }
   } | null
   // Regra oficial de indicação — nunca hardcoded no frontend.
-  indicacao?: { ativa: boolean; estrelasPrimeiraCompra: number | null } | null
+  indicacao?: {
+    ativa: boolean
+    estrelasPrimeiraCompra: number | null
+    // Só libera convites depois de um pedido confirmado pelo servidor.
+    // Opcional para preservar fixtures antigas; ausência significa compatibilidade,
+    // enquanto a API real sempre envia o valor explícito.
+    compartilhamentoLiberado?: boolean
+  } | null
   // Gamificação V2 — cada campo fica null/ausente quando o admin não
   // configurou aquela mecânica (fail-closed). Nunca renderizar um selo,
   // missão ou nível a partir de um valor "adivinhado" quando o campo é null.

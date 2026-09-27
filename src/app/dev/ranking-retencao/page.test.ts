@@ -25,8 +25,8 @@ describe("Preview seguro da retenção do ranking (quem já participa)", () => {
 
   test("onNovoPedido, onIndicarAmigo e onCompartilharConquista nunca chamam a implementação real", () => {
     expect(client).toContain('onNovoPedido={() => simular(');
-    expect(client).toContain('onIndicarAmigo={() => simular(');
-    expect(client).toContain('onCompartilharConquista={() => simular(');
+    expect(client).toContain('onIndicarAmigo={() => abrirCompartilhamentoPreview(');
+    expect(client).toContain('onCompartilharConquista={() => abrirCompartilhamentoPreview(');
     expect(client).not.toContain("compartilharIndicacao(");
     expect(client).not.toContain("compartilharConquistaRanking(");
   });

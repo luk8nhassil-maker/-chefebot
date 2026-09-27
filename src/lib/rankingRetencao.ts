@@ -236,6 +236,11 @@ export function textoConquistaRanking(conquista: ConquistaRanking, posicao: numb
   }
 }
 
+/** Mensagem humana, simples e sem promessa comercial para um conhecido. */
+export function textoConviteAmigoRanking(): string {
+  return "Ei! Lembrei de você porque sei que gosta de pizza 🍕\nEu comecei a participar do Ranking do Chefe e queria te convidar para conhecer também.\nEntra pelo meu convite e começa a sua jornada:"
+}
+
 /** Mensagem para quem recebe o convite, sem prometer pontos ou prêmio antes
  * de uma ação comercial válida. */
 export function textoConviteRanking(conquista: ConquistaRanking | null, posicao: number): string {
@@ -248,5 +253,5 @@ export function textoConviteRanking(conquista: ConquistaRanking | null, posicao:
         : conquista?.tipo === "subiu"
           ? `Subi ${conquista.casas} ${conquista.casas === 1 ? "posição" : "posições"} e agora estou em #${posicao} 🔥`
           : `Estou em #${posicao} no Ranking do Chefe ⭐`;
-  return `${marco}\nVocê consegue me passar? Aceite meu desafio e dispute comigo.`;
+  return `${marco}\n${textoConviteAmigoRanking()}`;
 }

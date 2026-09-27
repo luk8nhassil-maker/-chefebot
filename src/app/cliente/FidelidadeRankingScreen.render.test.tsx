@@ -77,7 +77,7 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     expect(screen.getByText("Elite Top 10")).toBeTruthy();
   });
 
-  test("conquista usa convite com desafio, não botão genérico de compartilhar", () => {
+  test("conquista usa convite amigável, não botão genérico de compartilhar", () => {
     montar({
       ranking: {
         ...RANKING_BASE,
@@ -89,9 +89,27 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
       onCompartilharConquista: () => undefined,
     });
     expect(screen.getByText("CONQUISTA RECENTE")).toBeTruthy();
-    expect(screen.getByText("Quem você desafia? Mostre sua posição e convide alguém para tentar passar você.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Desafiar alguém" })).toBeTruthy();
+    expect(screen.getByText("Você pode convidar alguém conhecido para conhecer o ChefeBot e fortalecer sua posição.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Fortalecer minha posição" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Compartilhar" })).toBeNull();
+  });
+
+  test("primeiro pedido libera os convites e mantém a tela clara", () => {
+    montar({
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6, compartilhamentoLiberado: false },
+      ranking: {
+        ...RANKING_BASE,
+        participantes: {
+          ...RANKING_BASE.participantes,
+          variacaoPosicao: { direcao: "subiu", casas: 1 },
+        },
+      },
+      onCompartilharConquista: () => undefined,
+      onNovoPedido: () => undefined,
+    });
+    expect(screen.getByText("Convites bloqueados")).toBeTruthy();
+    expect(screen.getByText("Faça seu primeiro pedido confirmado para liberar o compartilhamento.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Fortalecer minha posição" })).toBeNull();
   });
 
   test("missão semanal desbloqueada mostra o card Caçada ao Pódio", () => {

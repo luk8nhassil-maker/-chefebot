@@ -7,7 +7,7 @@ import type {
   PainelGamificacao,
   PreferenciasPrivacidadeRanking,
 } from "@/app/cliente/painelFidelidadeTipos";
-import { calcularAlvoRankingAtual, montarDisputaRelativa } from "@/lib/rankingRetencao";
+import { calcularAlvoRankingAtual, montarDisputaRelativa, textoConviteAmigoRanking } from "@/lib/rankingRetencao";
 
 type RankingCompleto = NonNullable<PainelFidelidade["ranking"]>;
 type TemporadaCompleta = NonNullable<PainelFidelidade["temporada"]>;
@@ -691,12 +691,24 @@ export default function RankingRetencaoPreview() {
   const [aviso, setAviso] = useState("");
   const [indicando, setIndicando] = useState(false);
   const [compartilhando, setCompartilhando] = useState(false);
+  const [compartilhamentoLiberado, setCompartilhamentoLiberado] = useState(true);
+  const [mostrarMensagem, setMostrarMensagem] = useState(false);
 
   function simular(mensagem: string, setBusy?: (v: boolean) => void) {
     setBusy?.(true);
     setTimeout(() => setBusy?.(false), 600);
     setAviso(mensagem);
     setTimeout(() => setAviso(""), 3200);
+  }
+
+  function abrirCompartilhamentoPreview(setBusy?: (v: boolean) => void) {
+    if (!compartilhamentoLiberado) {
+      simular("Convites bloqueados no Preview: faça o primeiro pedido confirmado para liberar.");
+      return;
+    }
+    setBusy?.(true);
+    setTimeout(() => setBusy?.(false), 600);
+    setMostrarMensagem(true);
   }
 
   return (
@@ -736,6 +748,20 @@ export default function RankingRetencaoPreview() {
           </div>
         </details>
 
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, margin: "0 4px 16px", padding: "10px 12px", border: "1px solid #d7deea", borderRadius: 12, background: "#fff" }}>
+          <div>
+            <strong style={{ display: "block", fontSize: 13 }}>Estado do convite</strong>
+            <span style={{ color: "#61738b", fontSize: 11.5 }}>Simule antes e depois do primeiro pedido confirmado.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCompartilhamentoLiberado((atual) => !atual)}
+            style={{ border: 0, borderRadius: 999, padding: "8px 11px", background: compartilhamentoLiberado ? "#e7f6ee" : "#eef1f6", color: compartilhamentoLiberado ? "#24734a" : "#59687d", fontSize: 11, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}
+          >
+            {compartilhamentoLiberado ? "Liberado" : "Bloqueado"}
+          </button>
+        </div>
+
         <div style={{ background: "#fdf6e8", borderRadius: 24, padding: "24px 18px", minHeight: 640 }}>
           {aviso && (
             <p role="status" style={{ margin: "0 0 12px", padding: "8px 12px", borderRadius: 10, background: "#e9f1ff", color: "#2d609f", fontSize: 12.5 }}>
@@ -746,7 +772,7 @@ export default function RankingRetencaoPreview() {
             key={cenario.id}
             ranking={cenario.props.ranking}
             temporada={cenario.props.temporada}
-            indicacao={cenario.props.indicacao}
+            indicacao={cenario.props.indicacao ? { ...cenario.props.indicacao, compartilhamentoLiberado } : cenario.props.indicacao}
             gamificacao={cenario.props.gamificacao ?? null}
             privacidade={PRIVACIDADE_PARTICIPANTE}
             privacidadeCarregando={false}
@@ -757,13 +783,24 @@ export default function RankingRetencaoPreview() {
             posPedido={cenario.props.posPedido ?? null}
             onAlterarPrivacidade={() => undefined}
             onRevogarTodas={() => simular("Revogação simulada. Nenhuma autorização real foi alterada.")}
-            onIndicarAmigo={() => simular("Indicação simulada. Nenhum link real foi criado ou enviado.", setIndicando)}
-            onCompartilharConquista={() => simular("Compartilhamento simulado. Nenhum link real foi criado ou enviado.", setCompartilhando)}
+            onIndicarAmigo={() => abrirCompartilhamentoPreview(setIndicando)}
+            onCompartilharConquista={() => abrirCompartilhamentoPreview(setCompartilhando)}
             onNovoPedido={() => simular("No Preview, um novo pedido não é criado de verdade.")}
             onTelemetria={() => undefined}
             onClose={() => simular("No fluxo real, isso voltaria para o resumo de Fidelidade.")}
           />
         </div>
+        {mostrarMensagem && (
+          <div role="presentation" onClick={() => setMostrarMensagem(false)} style={{ position: "fixed", inset: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, background: "rgba(23,41,69,.45)" }}>
+            <div role="dialog" aria-modal="true" aria-label="Mensagem de compartilhamento" onClick={(event) => event.stopPropagation()} style={{ width: "min(420px, 100%)", padding: 20, borderRadius: 20, background: "#fff", boxShadow: "0 20px 60px rgba(23,41,69,.25)" }}>
+              <p style={{ margin: "0 0 6px", color: "#3972d7", fontSize: 11, fontWeight: 800, letterSpacing: ".08em" }}>MENSAGEM DO CONVITE</p>
+              <h2 style={{ margin: "0 0 12px", fontSize: 20 }}>Pronta para compartilhar</h2>
+              <p style={{ whiteSpace: "pre-line", margin: "0 0 16px", padding: 14, borderRadius: 14, background: "#f5f8fd", color: "#43566f", fontSize: 14, lineHeight: 1.5 }}>{textoConviteAmigoRanking()} [link]</p>
+              <p style={{ margin: "0 0 14px", color: "#748399", fontSize: 11.5 }}>Preview seguro: nenhuma mensagem foi enviada e nenhum link real foi criado.</p>
+              <button type="button" onClick={() => setMostrarMensagem(false)} style={{ width: "100%", border: 0, borderRadius: 12, padding: 12, background: "#4f86ed", color: "#fff", fontWeight: 800, cursor: "pointer" }}>Fechar Preview</button>
+            </div>
+          </div>
+        )}
       </section>
     </main>
   );

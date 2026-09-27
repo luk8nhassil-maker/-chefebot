@@ -545,13 +545,30 @@ describe("GET /api/cliente/fidelidade/painel", () => {
   test("indicacao expõe a regra oficial (nunca hardcoded no frontend) quando Estrelas V1 está ativa", async () => {
     configFidelidadeMock = { ativo: true, regraVersao: "estrelas-faixas-v1" };
     const body = await (await GET(req("token-cli-a"))).json();
-    expect(body.indicacao).toEqual({ ativa: true, estrelasPrimeiraCompra: 6 });
+    expect(body.indicacao).toEqual({ ativa: true, estrelasPrimeiraCompra: 6, compartilhamentoLiberado: false });
+  });
+
+  test("indicacao libera compartilhamento somente com pedido confirmado ainda válido", async () => {
+    vi.mocked(obterExtratoPontos).mockResolvedValueOnce([
+      { movimentoId: "m-pedido", clienteId: "hashed_11900000001", tipo: "confirmado", pontos: 10, pedidoId: "ped_1", motivo: "Pedido entregue", createdAt: "2026-09-27T10:00:00.000Z", eventoId: "confirmado:ped_1" },
+    ] satisfies MovimentoPontos[]);
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.indicacao.compartilhamentoLiberado).toBe(true);
+  });
+
+  test("estorno do único pedido confirmado bloqueia novamente os convites", async () => {
+    vi.mocked(obterExtratoPontos).mockResolvedValueOnce([
+      { movimentoId: "m-pedido", clienteId: "hashed_11900000001", tipo: "confirmado", pontos: 10, pedidoId: "ped_1", motivo: "Pedido entregue", createdAt: "2026-09-27T10:00:00.000Z", eventoId: "confirmado:ped_1" },
+      { movimentoId: "m-estorno", clienteId: "hashed_11900000001", tipo: "estornado", pontos: -10, pedidoId: "ped_1", motivo: "Pedido cancelado", createdAt: "2026-09-27T11:00:00.000Z", eventoId: "estornado:ped_1" },
+    ] satisfies MovimentoPontos[]);
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.indicacao.compartilhamentoLiberado).toBe(false);
   });
 
   test("indicacao fica inativa quando as Estrelas V1 não estão ativas — nunca inventa o valor", async () => {
     configFidelidadeMock = { ativo: false, regraVersao: "estrelas-faixas-v1" };
     const body = await (await GET(req("token-cli-a"))).json();
-    expect(body.indicacao).toEqual({ ativa: false, estrelasPrimeiraCompra: null });
+    expect(body.indicacao).toEqual({ ativa: false, estrelasPrimeiraCompra: null, compartilhamentoLiberado: false });
   });
 
   test("consentimento revogado: cliente some do ranking de participantes (sem alvo/disputa fictícios)", async () => {
@@ -588,7 +605,7 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     expect(body.temporada).toBeNull();
     expect(body.ranking).toBeNull();
     // indicacao é independente de temporada — continua respondendo normalmente.
-    expect(body.indicacao).toEqual({ ativa: true, estrelasPrimeiraCompra: 6 });
+    expect(body.indicacao).toEqual({ ativa: true, estrelasPrimeiraCompra: 6, compartilhamentoLiberado: false });
   });
 
   describe("gamificacao (V2)", () => {

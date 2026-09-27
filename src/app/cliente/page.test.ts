@@ -263,7 +263,7 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
     expect(fonte).toContain('SUAS ESTRELAS');
     expect(fonte).toContain('Próximo presente');
     expect(fonte).toContain('Sua posição');
-    expect(fonte).toContain('Chegue mais rápido ao seu presente');
+    expect(fonte).toContain('Fortaleça sua posição');
     expect(fonte).toContain("loyaltyLabel={modoPreview ? 'Fidelidade' : 'Pontos'}");
   });
 
@@ -286,7 +286,7 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
   test("compartilharIndicacao usa obterOuCriarTokenIndicacao via GET /api/cliente/indicacao", () => {
     expect(fonte).toContain("async function compartilharIndicacao");
     expect(fonte).toContain("/api/cliente/indicacao");
-    expect(fonte).toContain("Convidar para disputar");
+    expect(fonte).toContain("Fortalecer minha posição");
   });
 
   test("captura ?ref= da URL antes do login e armazena como cf_ref", () => {
@@ -370,7 +370,7 @@ describe("/cliente — Correções PR #427: textos comerciais, estados vazios, P
 
   test("texto de indicação menciona Estrelas e primeiro pedido válido (não benefício ao indicado)", () => {
     expect(fonte).toContain("No primeiro pedido válido do convidado, você recebe +6 Estrelas.");
-    expect(fonte).toContain("Convide alguém para a disputa");
+    expect(fonte).toContain("Convide alguém conhecido para conhecer o ChefeBot");
   });
 
   test("ranking seção sempre visível quando há temporada — estado vazio exibe mensagem de espera", () => {
@@ -386,7 +386,7 @@ describe("/cliente — Correções PR #427: textos comerciais, estados vazios, P
   });
 
   test("texto compartilhado via share API não promete benefícios", () => {
-    expect(fonte).toContain("Você topa entrar no Ranking do Chefe e tentar passar minha posição");
+    expect(fonte).toContain("textoConviteAmigoRanking()");
     expect(fonte).not.toContain("ganhe desconto");
   });
 

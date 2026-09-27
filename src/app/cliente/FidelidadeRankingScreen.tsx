@@ -147,7 +147,8 @@ export function FidelidadeRankingScreen({
     posicao: ranking.participantes.posicao ?? ranking.posicao,
     variacao: ranking.participantes.variacaoPosicao,
   })
-  const podeCompartilharConquista = conquista !== null && !!onCompartilharConquista
+  const compartilhamentoLiberado = indicacao?.compartilhamentoLiberado !== false
+  const podeCompartilharConquista = conquista !== null && indicacao?.ativa === true && !!onCompartilharConquista && compartilhamentoLiberado
   // Progresso absoluto (XP acumulado / XP do próximo nível) — nunca inventa
   // um "início de faixa" que o domínio (calcularNivelChef) não devolve; sem
   // próximo nível (nível máximo), a barra fica cheia.
@@ -259,12 +260,12 @@ export function FidelidadeRankingScreen({
           )}
 
           {conquista && (
-            <section className="cf-ranking-share-card" aria-label="Desafiar alguém no Ranking do Chefe">
+            <section className="cf-ranking-share-card" aria-label="Fortalecer sua posição no Ranking do Chefe">
               <span className="cf-ranking-share-mark" aria-hidden="true">🔥</span>
               <div className="cf-ranking-share-copy">
                 <small>CONQUISTA RECENTE</small>
                 <strong>{textoConquistaRanking(conquista, ranking.participantes.posicao ?? ranking.posicao)}</strong>
-                <p>Quem você desafia? Mostre sua posição e convide alguém para tentar passar você.</p>
+                <p>Você pode convidar alguém conhecido para conhecer o ChefeBot e fortalecer sua posição.</p>
                 {podeCompartilharConquista && (
                   <button
                     type="button"
@@ -272,8 +273,14 @@ export function FidelidadeRankingScreen({
                     disabled={compartilhando}
                     onClick={() => { emit('compartilhamento_clicado'); onCompartilharConquista?.() }}
                   >
-                    {compartilhando ? 'Preparando…' : 'Desafiar alguém'}
+                    {compartilhando ? 'Preparando…' : 'Fortalecer minha posição'}
                   </button>
+                )}
+                {!compartilhamentoLiberado && (
+                  <div className="cf-ranking-share-locked" role="status">
+                    <strong>Convites bloqueados</strong>
+                    <small>Faça seu primeiro pedido confirmado para liberar o compartilhamento.</small>
+                  </div>
                 )}
               </div>
             </section>
@@ -424,7 +431,9 @@ export function FidelidadeRankingScreen({
                 <span>
                   <strong>Indicar um amigo</strong>
                   <small>
-                    {gamificacao?.missaoIndicacao?.concluida
+                    {!compartilhamentoLiberado
+                      ? 'Faça seu primeiro pedido para liberar os convites.'
+                      : gamificacao?.missaoIndicacao?.concluida
                       ? '✓ Missão da temporada já concluída.'
                       : indicacao.estrelasPrimeiraCompra
                         ? `+${indicacao.estrelasPrimeiraCompra} Estrelas na primeira compra dele.`
@@ -435,9 +444,16 @@ export function FidelidadeRankingScreen({
                   type="button"
                   className="cf-ranking-sheet-action"
                   disabled={indicando}
-                  onClick={() => { emit('indicacao_clicada'); onIndicarAmigo?.() }}
+                  onClick={() => {
+                    if (!compartilhamentoLiberado) {
+                      setSheetSubirAberto(false)
+                      onNovoPedido?.()
+                      return
+                    }
+                    emit('indicacao_clicada'); onIndicarAmigo?.()
+                  }}
                 >
-                  {indicando ? 'Aguarde…' : 'Indicar'}
+                  {indicando ? 'Aguarde…' : compartilhamentoLiberado ? 'Indicar' : 'Fazer primeiro pedido'}
                 </button>
               </div>
             )}
@@ -468,6 +484,7 @@ export function FidelidadeRankingScreen({
         .cf-ranking-tabs { display: grid; grid-template-columns: repeat(3,1fr); gap: 2px; margin: 17px 0 11px; padding: 3px; border-radius: 24px; background: rgba(222,227,234,.75); }.cf-ranking-tabs button { min-height: 39px; border: 0; border-radius: 21px; background: transparent; color: #687488; font: 700 12px inherit; cursor: pointer; }.cf-ranking-tabs button.ativo { color: #1f63d6; background: rgba(255,255,255,.98); box-shadow: 0 3px 10px rgba(48,75,108,.1); }
         .cf-ranking-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; }.cf-ranking-row { display: grid; grid-template-columns: 30px 34px 1fr auto; align-items: center; gap: 7px; min-height: 48px; padding: 6px 11px; border: 1px solid rgba(255,255,255,.85); border-radius: 24px; background: rgba(255,255,255,.84); box-shadow: 0 5px 14px rgba(58,78,101,.05); }.cf-ranking-row.voce { border-color: rgba(88,151,247,.4); background: linear-gradient(90deg, rgba(234,244,255,.98), rgba(248,252,255,.9)); }.cf-ranking-row>strong { font-size: 17px; text-align: center; }.cf-ranking-row-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #e8eef5; color: #61738a; font-size: 12px; font-weight: 800; }.cf-ranking-row.voce .cf-ranking-row-avatar { background: #4f86ed; color: #fff; }.cf-ranking-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }.cf-ranking-row-name small{display:block;margin-top:2px;color:#758296;font-size:10px}.cf-ranking-row>b { color: #ae7109; font-size: 12px; white-space: nowrap; }.cf-ranking-empty,.cf-ranking-footnote { margin: 7px 2px; color: #6d7a8c; font-size: 12px; line-height: 1.45; text-align: center; }
         .cf-ranking-note { display: flex; gap: 12px; align-items: center; margin-top: 17px; padding: 14px 15px; border: 1px solid rgba(226,180,55,.38); border-radius: 18px; background: linear-gradient(110deg, rgba(255,252,239,.96), rgba(255,247,218,.75)); }.cf-ranking-note>span { font-size: 25px; }.cf-ranking-note strong { font-size: 13px; display: block; }.cf-ranking-note p { margin: 4px 0 0; color: #697588; font-size: 11.5px; line-height: 1.35; }
+        .cf-ranking-share-locked { display: grid; gap: 3px; margin-top: 10px; padding: 9px 11px; border: 1px solid rgba(180,196,220,.75); border-radius: 12px; background: rgba(247,250,255,.8); color: #52657f; }.cf-ranking-share-locked strong { color: #304d77; font-size: 12px; }.cf-ranking-share-locked small { font-size: 11px; line-height: 1.35; }
         .cf-ranking-selos { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; margin: 0 0 12px; }
         .cf-ranking-selo { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 999px; font-size: 11.5px; font-weight: 800; background: #eef1f5; color: #4a5568; }
         .cf-ranking-selo-campeao { background: linear-gradient(110deg, #fff3c4, #ffe08a); color: #8a5c00; }
