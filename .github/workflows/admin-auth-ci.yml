@@ -1,0 +1,68 @@
+name: admin-auth-ci
+
+on:
+  pull_request:
+    paths:
+      - "src/proxy.ts"
+      - "src/proxy.legacy-login.test.ts"
+      - "middleware.assinatura-alias.test.ts"
+      - "src/lib/auth.ts"
+      - "src/lib/auth.test.ts"
+      - "src/app/login/**"
+      - "src/app/api/auth/**"
+      - ".github/workflows/admin-auth-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-auth-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout do HEAD exato
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados de autenticação e domínio legado
+        run: >-
+          npm test --
+          src/lib/auth.test.ts
+          src/proxy.legacy-login.test.ts
+          middleware.assinatura-alias.test.ts
+
+      - name: Lint do patch de autenticação
+        run: >-
+          npm run lint --
+          src/lib/auth.ts
+          src/lib/auth.test.ts
+          src/proxy.ts
+          src/proxy.legacy-login.test.ts
+          middleware.assinatura-alias.test.ts
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Suíte completa
+        run: npm test
+
+      - name: Build de produção
+        env:
+          VERCEL_ENV: preview
+        run: npm run build
