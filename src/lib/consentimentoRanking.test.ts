@@ -152,6 +152,7 @@ describe("consentimento do ranking", () => {
   test("grava estado e auditoria na mesma transacao sem telefone ou clienteId", async () => {
     configurarNome();
     await registrarParticipacaoRanking(CLIENTE_ID, true);
+    redisMock.multi.mockClear();
     const registro = await registrarConsentimentoRanking({
       clienteId: CLIENTE_ID,
       finalidade: "ranking_primeiro_nome",
