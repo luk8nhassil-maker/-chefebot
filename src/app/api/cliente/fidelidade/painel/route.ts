@@ -88,7 +88,10 @@ export async function GET(req: NextRequest) {
   // auditoria do #446); a chamada por-cliente logo depois garante que o
   // PRÓPRIO cliente autenticado nesta requisição também fica em dia mesmo
   // que a reconciliação em lote já tenha rodado por outra pessoa.
-  if (temporada && participaRanking) {
+  if (temporada) {
+    // Invariante global: a transição da temporada precisa continuar sendo
+    // reconciliada mesmo quando quem abriu o app ainda não participa. Isso
+    // mantém status/carryover corretos para todos sem expor o Ranking.
     await reconciliarTransicaoTemporada(tenantId, temporada);
     await aplicarCarryoverClienteSeNecessario(tenantId, temporada, clienteId);
   }
