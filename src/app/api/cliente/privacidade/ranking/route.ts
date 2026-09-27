@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoCliente } from "@/lib/clienteAuth";
 import {
   ErroConsentimentoRanking,
-  obterFinalidadesAtivasRanking,
   obterHistoricoConsentimentoRanking,
+  obterParticipacaoRanking,
   obterPreferenciasConsentimentoRanking,
+  registrarParticipacaoRanking,
   registrarConsentimentoRanking,
   revogarTodosConsentimentosRanking,
 } from "@/lib/consentimentoRanking";
@@ -26,21 +27,35 @@ async function clienteAutenticado(req: NextRequest): Promise<{ clienteId: string
 function statusErroConsentimento(erro: ErroConsentimentoRanking): number {
   if (erro.codigo === "finalidade_invalida") return 400;
   if (erro.codigo === "versao_texto_desatualizada") return 409;
+  if (erro.codigo === "participacao_inativa") return 409;
   if (erro.codigo === "fonte_oficial_indisponivel") return 409;
   return 503;
 }
 
 async function obterEstadoRankingCliente(clienteId: string) {
-  const [finalidades, ativas] = await Promise.all([
+  const [finalidades, participaCampanha] = await Promise.all([
     obterPreferenciasConsentimentoRanking(clienteId),
-    obterFinalidadesAtivasRanking(clienteId),
+    obterParticipacaoRanking(clienteId),
   ]);
   return {
     finalidades,
-    participaCampanha:
-      ativas.has("ranking_primeiro_nome") ||
-      ativas.has("ranking_telefone_mascarado"),
+    participaCampanha,
   };
+}
+
+/** Ativação voluntária. Não concede nome, telefone, bônus ou recompensa. */
+export async function POST(req: NextRequest) {
+  const cliente = await clienteAutenticado(req);
+  if (!cliente) return respostaJson({ error: "Nao autorizado" }, { status: 401 });
+  try {
+    await registrarParticipacaoRanking(cliente.clienteId, true);
+    return respostaJson({ ok: true, ...await obterEstadoRankingCliente(cliente.clienteId) });
+  } catch (erro) {
+    if (erro instanceof ErroConsentimentoRanking) {
+      return respostaJson({ error: erro.codigo }, { status: statusErroConsentimento(erro) });
+    }
+    return respostaJson({ error: "Erro interno" }, { status: 500 });
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -80,6 +95,9 @@ export async function PATCH(req: NextRequest) {
   }
 
   try {
+    if (body.estado === "concedido" && !await obterParticipacaoRanking(cliente.clienteId)) {
+      return respostaJson({ error: "ranking_inativo" }, { status: 409 });
+    }
     await registrarConsentimentoRanking({
       clienteId: cliente.clienteId,
       finalidade: body.finalidade,
@@ -107,10 +125,15 @@ export async function DELETE(req: NextRequest) {
     // Fato de negócio registrado no servidor (nunca a partir do clique no
     // navegador) — deduplicado por cliente+dia, coerente com o mesmo idioma
     // de "referência diária" já usado no snapshot do histórico do ranking.
-    await registrarFatoRankingGamificacao(
-      "participacao_revogada",
-      `${cliente.clienteId}:${dataReferenciaUtc(new Date())}`,
-    );
+    try {
+      await registrarFatoRankingGamificacao(
+        "participacao_revogada",
+        `${cliente.clienteId}:${dataReferenciaUtc(new Date())}`,
+      );
+    } catch {
+      // A saída já foi confirmada no Redis; uma falha da telemetria não
+      // reverte a decisão nem deve instruir o cliente a repetir a ação.
+    }
     const estadoRanking = await obterEstadoRankingCliente(cliente.clienteId);
     return respostaJson({ ok: true, ...estadoRanking });
   } catch (erro) {

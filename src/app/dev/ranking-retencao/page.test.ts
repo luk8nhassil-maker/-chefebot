@@ -7,7 +7,8 @@ const client = readFileSync(fileURLToPath(new URL("./RankingRetencaoPreview.tsx"
 
 describe("Preview seguro da retenção do ranking (quem já participa)", () => {
   test("fica bloqueado em producao", () => {
-    expect(page).toContain('process.env.VERCEL_ENV === "production"');
+    expect(page).toContain('process.env.NODE_ENV !== "development" && process.env.VERCEL_ENV !== "preview"');
+    expect(page).toContain('await headers()');
     expect(page).toContain("notFound()");
   });
 
@@ -24,8 +25,8 @@ describe("Preview seguro da retenção do ranking (quem já participa)", () => {
 
   test("onNovoPedido, onIndicarAmigo e onCompartilharConquista nunca chamam a implementação real", () => {
     expect(client).toContain('onNovoPedido={() => simular(');
-    expect(client).toContain('onIndicarAmigo={() => simular(');
-    expect(client).toContain('onCompartilharConquista={() => simular(');
+    expect(client).toContain('onIndicarAmigo={() => abrirCompartilhamentoPreview(');
+    expect(client).toContain('onCompartilharConquista={() => abrirCompartilhamentoPreview(');
     expect(client).not.toContain("compartilharIndicacao(");
     expect(client).not.toContain("compartilharConquistaRanking(");
   });

@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
-import { derivarClienteIdPorTelefone, estrelasV1Ativa, obterConfigFidelidadePontos, obterExtratoPontos } from "@/lib/fidelidade";
+import { classificarOrigemMovimentoPontos, derivarClienteIdPorTelefone, estrelasV1Ativa, obterConfigFidelidadePontos, obterExtratoPontos } from "@/lib/fidelidade";
 import { ESTRELAS_INDICACAO_PRIMEIRA_COMPRA } from "@/lib/estrelasIndicacao";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
 import { posicaoClienteRanking, obterTopRanking, obterRankingCompleto, reindexarPorFiltro } from "@/lib/rankingClientes";
@@ -311,10 +311,6 @@ export async function GET(req: NextRequest) {
   // sugerir "indicar amigo" como caminho para subir quando as Estrelas V1
   // estão realmente ativas — nunca inventa o valor do crédito.
   const configFidelidade = await obterConfigFidelidadePontos();
-  const indicacao = estrelasV1Ativa(configFidelidade)
-    ? { ativa: true as const, estrelasPrimeiraCompra: ESTRELAS_INDICACAO_PRIMEIRA_COMPRA }
-    : { ativa: false as const, estrelasPrimeiraCompra: null };
-
   // Extrato completo buscado no máximo uma vez, reaproveitado pelo Nível de
   // Chef (XP) e pelo "batizado" (backdating) da missão semanal — nenhum dos
   // dois inventa dado, os dois só leem o mesmo histórico real do cliente.
@@ -324,6 +320,34 @@ export async function GET(req: NextRequest) {
   if (precisaExtrato) {
     extratoCompleto = await obterExtratoPontos(clienteId);
   }
+
+  // Convites só ficam disponíveis depois de um pedido comercial confirmado.
+  // A origem/evento do ledger é a autoridade: bônus de indicação, apoio e
+  // ajustes nunca podem desbloquear o compartilhamento por engano. Se a
+  // leitura opcional falhar, o estado permanece bloqueado (fail-closed) sem
+  // derrubar o painel do cliente.
+  let extratoParaIndicacao = extratoCompleto;
+  if (estrelasV1Ativa(configFidelidade) && !extratoParaIndicacao) {
+    try {
+      extratoParaIndicacao = await obterExtratoPontos(clienteId);
+    } catch {
+      extratoParaIndicacao = null;
+    }
+  }
+  const pedidosConfirmados = new Set(
+    (extratoParaIndicacao ?? [])
+      .filter((movimento) => movimento.tipo === "confirmado" && movimento.pedidoId && movimento.eventoId?.startsWith("confirmado:") && classificarOrigemMovimentoPontos(movimento.eventoId) === "pedido")
+      .map((movimento) => movimento.pedidoId as string),
+  );
+  const pedidosInvalidados = new Set(
+    (extratoParaIndicacao ?? [])
+      .filter((movimento) => (movimento.tipo === "cancelado" || movimento.tipo === "estornado") && movimento.pedidoId)
+      .map((movimento) => movimento.pedidoId as string),
+  );
+  const compartilhamentoLiberado = [...pedidosConfirmados].some((pedidoId) => !pedidosInvalidados.has(pedidoId));
+  const indicacao = estrelasV1Ativa(configFidelidade)
+    ? { ativa: true as const, estrelasPrimeiraCompra: ESTRELAS_INDICACAO_PRIMEIRA_COMPRA, compartilhamentoLiberado }
+    : { ativa: false as const, estrelasPrimeiraCompra: null, compartilhamentoLiberado: false };
 
   // Nível de Chef — progressão PERMANENTE, independente de temporada/ranking
   // (por isso calculada fora do bloco `if (temporada)`). Fail-closed: sem

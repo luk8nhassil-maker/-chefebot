@@ -4,8 +4,8 @@
 // cliente realmente vê na tela (selo, missão, nível), não leitura de
 // código-fonte. Complementa FidelidadeRankingScreen.test.ts (regressões
 // estruturais herdadas do #445).
-import { afterEach, describe, expect, test } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { FidelidadeRankingScreen, type FidelidadeRankingScreenProps } from "./FidelidadeRankingScreen";
 
 afterEach(cleanup);
@@ -46,6 +46,14 @@ function montar(props: Partial<FidelidadeRankingScreenProps> = {}) {
 }
 
 describe("FidelidadeRankingScreen — Gamificação V2", () => {
+  test("participante anônimo vê controle de saída sem consentimento de identidade", () => {
+    const onRevogarTodas = vi.fn();
+    montar({ privacidade: { participaCampanha: true, finalidades: [] }, onRevogarTodas });
+    fireEvent.click(screen.getByText("Privacidade e participação"));
+    expect(screen.getByText(/Você pode disputar anonimamente/)).toBeTruthy();
+    fireEvent.click(screen.getByText("Sair do Ranking e remover autorizações"));
+    expect(onRevogarTodas).toHaveBeenCalledTimes(1);
+  });
   test("sem gamificacao (fail-closed), não mostra nenhum selo nem missão", () => {
     montar({ gamificacao: null });
     expect(screen.queryByText(/Campeão/)).toBeNull();
@@ -67,6 +75,41 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
   test("statusSocial elite mostra o selo Elite Top 10", () => {
     montar({ gamificacao: { statusSocial: "elite", bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false } });
     expect(screen.getByText("Elite Top 10")).toBeTruthy();
+  });
+
+  test("conquista usa convite amigável, não botão genérico de compartilhar", () => {
+    montar({
+      ranking: {
+        ...RANKING_BASE,
+        participantes: {
+          ...RANKING_BASE.participantes,
+          variacaoPosicao: { direcao: "subiu", casas: 1 },
+        },
+      },
+      onCompartilharConquista: () => undefined,
+    });
+    expect(screen.getByText("CONQUISTA RECENTE")).toBeTruthy();
+    expect(screen.getByText("Você pode convidar alguém conhecido para conhecer o ChefeBot e fortalecer sua posição.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Fortalecer minha posição" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Compartilhar" })).toBeNull();
+  });
+
+  test("primeiro pedido libera os convites e mantém a tela clara", () => {
+    montar({
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6, compartilhamentoLiberado: false },
+      ranking: {
+        ...RANKING_BASE,
+        participantes: {
+          ...RANKING_BASE.participantes,
+          variacaoPosicao: { direcao: "subiu", casas: 1 },
+        },
+      },
+      onCompartilharConquista: () => undefined,
+      onNovoPedido: () => undefined,
+    });
+    expect(screen.getByText("Convites bloqueados")).toBeTruthy();
+    expect(screen.getByText("Faça seu primeiro pedido confirmado para liberar o compartilhamento.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Fortalecer minha posição" })).toBeNull();
   });
 
   test("missão semanal desbloqueada mostra o card Caçada ao Pódio", () => {
@@ -92,7 +135,7 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
       gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: { concluida: true }, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
       onNovoPedido: () => undefined,
     });
-    screen.getByText("Quero subir").click();
+    screen.getByText("Como subir").click();
     expect(await screen.findByText("✓ Missão da temporada já concluída.")).toBeTruthy();
   });
 
@@ -101,7 +144,7 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
       gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: { concluida: false }, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
       onNovoPedido: () => undefined,
     });
-    screen.getByText("Quero subir").click();
+    screen.getByText("Como subir").click();
     expect(await screen.findByText(/Estrelas na primeira compra dele/)).toBeTruthy();
   });
 
@@ -224,7 +267,7 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
   test("BLOCKER: sem temporada/prêmio configurado, o header nunca promete 'ganhe presentes'", () => {
     montar({ temporada: null });
     expect(screen.queryByText(/ganhe presentes/)).toBeNull();
-    expect(screen.getByText("Suba com suas Estrelas e avance na temporada.")).toBeTruthy();
+    expect(screen.getByText("Acompanhe sua posição nesta temporada.")).toBeTruthy();
   });
 
   test("BLOCKER: com temporada ativa mas SEM prêmio aprovado, ainda não promete presente", () => {
@@ -232,7 +275,7 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     expect(screen.queryByText(/ganhe presentes/)).toBeNull();
   });
 
-  test("com prêmio real aprovado e configurado pelo servidor, mostra a copy de presente", () => {
+  test("com prêmio configurado pelo servidor, mostra a descrição sem promessa genérica", () => {
     montar({
       temporada: {
         nome: "Temporada X",
@@ -242,6 +285,46 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
         premio: { descricao: "1 Pizza Família", quantidadePremiados: 3 },
       },
     });
-    expect(screen.getByText("Suba com suas Estrelas e ganhe presentes.")).toBeTruthy();
+    expect(screen.getByText("1 Pizza Família")).toBeTruthy();
+    expect(screen.queryByText(/ganhe presentes/)).toBeNull();
+  });
+
+  test("pódio aparece primeiro e informações pessoais ficam em Minha posição", () => {
+    montar({ onNovoPedido: () => undefined });
+    const podio = screen.getByRole("region", { name: "Melhores posições" });
+    const status = screen.getByRole("region", { name: "Seu status atual" });
+    expect(podio.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(status.textContent).toContain("SUA POSIÇÃO#5");
+    expect(status.textContent).toContain("100 pontos no Ranking");
+    expect(screen.getByText("Como subir")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Minha posição" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByRole("region", { name: "Lista de posições" })).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Participando" }));
+    expect(screen.queryByRole("region", { name: "Seu status atual" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Lista de posições" })).toBeTruthy();
+    expect(screen.queryByText("Privacidade e participação")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Minha posição" }));
+    expect(screen.getByText("Privacidade e participação")).toBeTruthy();
+  });
+
+  test("Minha posição mostra rivais sem repetir a linha Você", () => {
+    montar({ ranking: { ...RANKING_BASE, participantes: {
+      ...RANKING_BASE.participantes,
+      disputa: {
+        acima: { posicao: 4, score: 104, eVoce: false, nomePublico: "Rafael", telefoneMascarado: null },
+        voce: { posicao: 5, score: 100, eVoce: true, nomePublico: null, telefoneMascarado: null },
+        abaixo: { posicao: 6, score: 90, eVoce: false, nomePublico: "Julia", telefoneMascarado: null },
+        sozinho: false,
+      },
+    } } });
+    const vizinhos = screen.getByRole("region", { name: "Pessoas próximas de você" });
+    expect(vizinhos.textContent).toContain("Rafael");
+    expect(vizinhos.textContent).toContain("Julia");
+    expect(vizinhos.textContent).not.toContain("Você");
+  });
+
+  test("bônus de competição não é apresentado como Estrelas reais", () => {
+    montar({ gamificacao: { statusSocial: null, bonusCompeticao: 6, missaoSemanal: null, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false } });
+    expect(screen.getByText("6 de bônus na competição; suas Estrelas de Fidelidade não mudam.")).toBeTruthy();
   });
 });

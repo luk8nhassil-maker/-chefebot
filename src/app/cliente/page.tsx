@@ -11,7 +11,8 @@ import { fetchCliente, guardarSessaoFallback, limparSessaoFallback, telemetria }
 import {
   detectarCreditoDoPedido,
   detectarConquistaRanking,
-  textoConquistaRanking,
+  textoConviteAmigoRanking,
+  textoConviteRanking,
 } from '@/lib/rankingRetencao'
 import { NOME_STATUS_TEMPORADA, textoStatusSocialCompartilhavel } from '@/lib/rankingGamificacao'
 import type {
@@ -183,7 +184,7 @@ const PAINEL_PREVIEW: PainelFidelidade = {
       },
     },
   },
-  indicacao: { ativa: true, estrelasPrimeiraCompra: 6 },
+  indicacao: { ativa: true, estrelasPrimeiraCompra: 6, compartilhamentoLiberado: true },
   gamificacao: {
     statusSocial: null,
     bonusCompeticao: 0,
@@ -333,9 +334,9 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
       <section className="cf-preview-referral">
         <div className="cf-preview-gift" aria-hidden="true">🎁</div>
         <p className="cf-preview-kicker">INDICAÇÃO</p>
-        <h2>Chegue mais rápido ao seu presente</h2>
-        <p>Indique um amigo. Quando ele fizer o primeiro pedido, você avança.</p>
-        <button type="button" onClick={() => setModalCompartilhar(true)}>Indicar amigo</button>
+        <h2>Fortaleça sua posição</h2>
+        <p>Convide alguém conhecido para conhecer o ChefeBot e fortalecer sua jornada.</p>
+        <button type="button" onClick={() => setModalCompartilhar(true)}>Fortalecer minha posição</button>
       </section>
 
       {modalCompartilhar && (
@@ -453,6 +454,7 @@ type FidelidadeMobileScreenProps = {
   onCompartilharStatus: () => void
   compartilhandoStatus: boolean
   indicando: boolean
+  compartilhamentoLiberado: boolean
 }
 
 /** Tela oficial de Fidelidade usada pelo cliente autenticado e pelo Preview.
@@ -460,7 +462,7 @@ type FidelidadeMobileScreenProps = {
  * pontuação, recompensa ou posição localmente. */
 function FidelidadeMobileScreen({
   nome, saldo, meta, faltam, progresso, diasRestantes, ranking, statusSocial, aviso,
-  onSair, onPresentes, onExtrato, onRanking, onIndicacao, onCompartilharStatus, compartilhandoStatus, indicando,
+  onSair, onPresentes, onExtrato, onRanking, onIndicacao, onCompartilharStatus, compartilhandoStatus, indicando, compartilhamentoLiberado,
 }: FidelidadeMobileScreenProps) {
   const primeiroNome = nome.split(' ')[0] || 'Cliente'
   const inicial = primeiroNome.slice(0, 1).toUpperCase()
@@ -501,24 +503,28 @@ function FidelidadeMobileScreen({
         </div>
       </section>
 
-      <button type="button" className="cf-preview-ranking" onClick={onRanking} aria-label="Abrir ranking da temporada">
+      <button type="button" className="cf-preview-ranking" onClick={onRanking} aria-label={ranking?.participaCampanha ? 'Abrir Ranking do Chefe' : 'Ativar Ranking do Chefe'}>
         <div className="cf-preview-ranking-top">
           <span className="cf-preview-trophy"><Trophy size={22} /></span>
-          <span className="cf-preview-ranking-title"><small>RANKING</small><strong>Sua posição</strong>{ranking && <b>#{ranking.posicao}</b>}</span>
+          <span className="cf-preview-ranking-title"><small>RANKING DO CHEFE</small><strong>{ranking?.participaCampanha ? 'Sua posição' : 'Entre na disputa'}</strong>{ranking?.participaCampanha && <b>#{ranking.participantes.posicao ?? ranking.posicao}</b>}</span>
           <span className="cf-preview-faces" aria-label="Participantes anonimizados">
             {participantes.map((participante, index) => <i key={participante.posicao}>{participante.eVoce ? 'L' : String.fromCharCode(65 + index)}</i>)}
           </span>
           <ChevronRight size={21} />
         </div>
-        <div className="cf-preview-ranking-copy"><ArrowUp size={22} /><span>{ranking ? <>{ranking.score} <strong>Estrelas acumuladas</strong></> : 'O ranking começa a aparecer conforme a temporada avança.'}</span></div>
+        <div className="cf-preview-ranking-copy"><ArrowUp size={22} /><span>{ranking?.participaCampanha ? <>{ranking.score} <strong>pontos no Ranking</strong></> : 'Ative para ver sua disputa e o próximo passo.'}</span></div>
       </button>
 
       <section className="cf-preview-referral">
         <div className="cf-preview-gift" aria-hidden="true">🎁</div>
         <p className="cf-preview-kicker">INDICAÇÃO</p>
-        <h2>Chegue mais rápido ao seu presente</h2>
-        <p>Indique um amigo. Quando ele fizer o primeiro pedido, você avança.</p>
-        <button type="button" onClick={onIndicacao} disabled={indicando}>{indicando ? 'Aguarde...' : 'Indicar amigo'}</button>
+        <h2>{compartilhamentoLiberado ? 'Fortaleça sua posição' : 'Libere seus convites'}</h2>
+        <p>{compartilhamentoLiberado
+          ? 'Convide alguém conhecido para conhecer o ChefeBot e fortalecer sua jornada.'
+          : 'Faça seu primeiro pedido confirmado para liberar convites e começar a fortalecer sua posição.'}</p>
+        <button type="button" onClick={compartilhamentoLiberado ? onIndicacao : () => { window.location.href = '/pedido' }} disabled={indicando}>
+          {indicando ? 'Aguarde...' : compartilhamentoLiberado ? 'Fortalecer minha posição' : 'Fazer primeiro pedido'}
+        </button>
       </section>
     </main>
   )
@@ -580,13 +586,12 @@ type RankingConsentModalProps = {
   carregando: boolean
   salvando: FinalidadePrivacidadeRanking | 'todas' | null
   erro: string
-  onAceitar: (finalidades: Array<{ finalidade: FinalidadePrivacidadeRanking; textoVersao: string }>) => void
+  onAceitar: () => void
   onRecusar: () => void
 }
 
 function RankingConsentModal({ privacidade, carregando, salvando, erro, onAceitar, onRecusar }: RankingConsentModalProps) {
-  const opcoesDisponiveis = privacidade?.finalidades.filter((item) => item.disponivel && item.texto && item.textoVersao) ?? []
-  const podeAceitar = opcoesDisponiveis.length > 0 && salvando === null
+  const podeAceitar = !carregando && privacidade !== null && salvando === null
 
   return (
     <div className="cf-ranking-consent-backdrop" role="presentation">
@@ -611,27 +616,27 @@ function RankingConsentModal({ privacidade, carregando, salvando, erro, onAceita
             <i aria-hidden="true">→</i>
             <div className="cf-ranking-consent-tour-step tour-step-two"><span>📈</span><small>Suba</small></div>
             <i aria-hidden="true">→</i>
-            <div className="cf-ranking-consent-tour-step tour-step-three"><span>🎁</span><small>Ganhe</small></div>
+            <div className="cf-ranking-consent-tour-step tour-step-three"><span>🏆</span><small>Dispute</small></div>
           </div>
-          <h2 id="ranking-consent-title">E se o presente for seu?</h2>
+          <h2 id="ranking-consent-title">Entre no Ranking do Chefe</h2>
         </div>
         <div className="cf-ranking-consent-info-card">
-          <p className="cf-ranking-consent-lead"><strong>Entre no ranking e acompanhe sua posição.</strong> Seu nome e telefone aparecem de forma protegida.</p>
-          <div className="cf-ranking-consent-privacy"><span className="cf-ranking-consent-privacy-icon" aria-hidden="true">✓</span><span className="cf-ranking-consent-privacy-copy"><strong>Privacidade protegida</strong><span> · usamos apenas o necessário.</span></span></div>
+          <p className="cf-ranking-consent-lead"><strong>Ative para disputar posições.</strong> Veja quem está acima, quanto falta para subir e as missões disponíveis. Bônus do Ranking não alteram suas Estrelas da fidelidade.</p>
+          <div className="cf-ranking-consent-privacy"><span className="cf-ranking-consent-privacy-icon" aria-hidden="true">✓</span><span className="cf-ranking-consent-privacy-copy"><strong>Você começa anônimo.</strong><span> Nome e telefone só aparecem se você autorizar depois.</span></span></div>
         </div>
         {carregando && <p>Carregando sua autorização…</p>}
-        {!carregando && opcoesDisponiveis.length === 0 && (
-          <p>O ranking ainda não está disponível para autorização. Você pode voltar para sua página de Fidelidade.</p>
+        {!carregando && privacidade === null && (
+          <p>Não foi possível carregar o Ranking agora. Tente novamente pela página de Fidelidade.</p>
         )}
         {erro && <p className="cf-ranking-consent-error" role="alert">{erro}</p>}
-        {opcoesDisponiveis.length > 0 && (
+        {privacidade !== null && (
           <button
             type="button"
             className="cf-ranking-consent-primary"
             disabled={!podeAceitar}
-            onClick={() => onAceitar(opcoesDisponiveis.map((opcao) => ({ finalidade: opcao.finalidade, textoVersao: opcao.textoVersao as string })))}
+            onClick={onAceitar}
           >
-            {salvando ? 'Salvando…' : <><span className="cf-ranking-consent-badge">GRÁTIS</span><span>Participar</span></>}
+            {salvando ? 'Ativando…' : <span>Ativar meu Ranking</span>}
           </button>
         )}
         <button type="button" className="cf-ranking-consent-secondary" onClick={onRecusar} disabled={salvando !== null}>Talvez depois</button>
@@ -826,11 +831,12 @@ export default function ClientePage() {
     } catch {}
   }
 
-  async function carregarPainel(): Promise<void> {
+  async function carregarPainel(): Promise<PainelFidelidade | null> {
     try {
       const res = await fetchCliente('/api/cliente/fidelidade/painel', { cache: 'no-store' }, sessaoMemRef.current)
-      if (res.ok) setPainel(await res.json())
+      if (res.ok) { const dados = await res.json() as PainelFidelidade; setPainel(dados); return dados }
     } catch {}
+    return null
   }
 
   async function carregarPrivacidadeRanking(): Promise<PreferenciasPrivacidadeRanking | null> {
@@ -858,7 +864,9 @@ export default function ClientePage() {
     const jaParticipa = preferencias?.participaCampanha === true
     if (jaParticipa) {
       setRankingConsentModal(false)
-      setMobilePanel('ranking')
+      const rankingAtual = painel?.ranking ?? (await carregarPainel())?.ranking
+      if (rankingAtual) setMobilePanel('ranking')
+      else setPreviewAviso('Você já participa. Sua posição aparece quando houver uma temporada ativa.')
     }
   }
 
@@ -891,15 +899,26 @@ export default function ClientePage() {
     }
   }
 
-  async function aceitarRanking(finalidades: Array<{ finalidade: FinalidadePrivacidadeRanking; textoVersao: string }>) {
+  async function aceitarRanking() {
+    if (privacidadeSalvando !== null) return
+    setPrivacidadeSalvando('todas')
     setPrivacidadeErro('')
-    for (const item of finalidades) {
-      const salvou = await alterarPrivacidadeRanking(item.finalidade, 'concedido', item.textoVersao)
-      if (!salvou) return
+    try {
+      const res = await fetchCliente('/api/cliente/privacidade/ranking', { method: 'POST' }, sessaoMemRef.current)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.participaCampanha !== true) throw new Error('ativacao_nao_salva')
+      setPrivacidadeRanking({ finalidades: data.finalidades, participaCampanha: true })
+      setRankingConsentModal(false)
+      const painelAtual = await carregarPainel()
+      if (painelAtual?.ranking) setMobilePanel('ranking')
+      else setPreviewAviso(painelAtual
+        ? 'Ranking ativado. Sua posição aparece quando houver uma temporada ativa.'
+        : 'Ranking ativado. Não foi possível carregar sua posição agora; tente abrir novamente.')
+    } catch {
+      setPrivacidadeErro('Não conseguimos ativar seu Ranking agora. Tente novamente.')
+    } finally {
+      setPrivacidadeSalvando(null)
     }
-    setRankingConsentModal(false)
-    setMobilePanel('ranking')
-    await carregarPrivacidadeRanking()
   }
 
   async function revogarTodasPrivacidadesRanking() {
@@ -941,10 +960,11 @@ export default function ClientePage() {
       }
       if (!token) { setCompartilhandoIndicacao(false); return }
       const url = `${window.location.origin}/pedido?ref=${token}`
+      const textoConvite = textoConviteAmigoRanking()
       if (navigator.share) {
-        await navigator.share({ title: 'Indique um amigo', text: 'Peça pelo meu link do Chefe da Pizza.', url })
+        await navigator.share({ title: 'Convite do Ranking do Chefe', text: textoConvite, url })
       } else {
-        await navigator.clipboard.writeText(url)
+        await navigator.clipboard.writeText(`${textoConvite} ${url}`)
       }
       if (!indicacaoToken) telemetriaRanking('link_indicacao_gerado')
     } catch {}
@@ -990,7 +1010,7 @@ export default function ClientePage() {
           if (token) { setIndicacaoToken(token); telemetriaRanking('link_indicacao_gerado') }
         }
       }
-      const texto = textoConquistaRanking(conquista, posicao)
+      const texto = textoConviteRanking(conquista, posicao)
       const url = token ? `${window.location.origin}/pedido?ref=${token}` : undefined
       if (navigator.share) {
         await navigator.share({ title: 'Ranking do Chefe', text: texto, ...(url ? { url } : {}) })
@@ -1041,10 +1061,15 @@ export default function ClientePage() {
     carregarFidelidade()
     carregarJornada()
     carregarPainel()
-    carregarPrivacidadeRanking().then((preferencias) => {
+    carregarPrivacidadeRanking().then(async (preferencias) => {
       if (!convitePosPedidoRef.current) return
       convitePosPedidoRef.current = false
       if (preferencias?.participaCampanha === true) {
+        const painelAtual = await carregarPainel()
+        if (!painelAtual?.ranking) {
+          setPreviewAviso('Você já participa. Sua posição aparece quando houver uma temporada ativa.')
+          return
+        }
         setMobilePanel('ranking')
         // Cliente que já participa chega direto no ranking depois do pedido.
         // Começa "pendente" — só vira "creditado" quando o extrato confirmado
@@ -1672,7 +1697,7 @@ export default function ClientePage() {
                   progresso={fidelidade.progressoPercentual}
                   diasRestantes={painel?.temporada?.diasRestantes ?? null}
                   ranking={painel?.ranking ?? null}
-                  statusSocial={painel?.gamificacao?.statusSocial ?? null}
+                  statusSocial={painel?.ranking?.participaCampanha ? (painel?.gamificacao?.statusSocial ?? null) : null}
                   aviso={previewAviso}
                   onSair={() => void sair()}
                   onPresentes={() => setMobilePanel('presentes')}
@@ -1682,6 +1707,7 @@ export default function ClientePage() {
                   onCompartilharStatus={() => void compartilharStatusSocial()}
                   compartilhandoStatus={compartilhandoStatus}
                   indicando={compartilhandoIndicacao}
+                  compartilhamentoLiberado={painel?.indicacao?.compartilhamentoLiberado === true}
                 />
               </>
             )}
@@ -1692,7 +1718,7 @@ export default function ClientePage() {
                 carregando={privacidadeCarregando}
                 salvando={privacidadeSalvando}
                 erro={privacidadeErro}
-                onAceitar={(finalidades) => void aceitarRanking(finalidades)}
+                onAceitar={() => void aceitarRanking()}
                 onRecusar={() => { setRankingConsentModal(false); setMobilePanel(null); setPrivacidadeErro('') }}
               />
             )}
@@ -1929,23 +1955,25 @@ export default function ClientePage() {
                 </div>
               )}
 
-              {/* Indicação: compartilhar link — sem prometer benefício ao indicado */}
-              {fidelidade && fidelidade.ativo && (
+              {/* Indicação: convite amigável, liberado somente após primeiro pedido confirmado. */}
+              {fidelidade && fidelidade.ativo && painel?.indicacao?.ativa === true && (
                 <div className="cf-glass" style={{ borderRadius: 16, padding: 20 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                     <Users size={16} color={cores.textoTerciario} />
-                    <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5 }}>Indique um amigo</span>
+                    <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5 }}>{painel?.indicacao?.compartilhamentoLiberado === true ? 'FORTALEÇA SUA POSIÇÃO' : 'CONVITES BLOQUEADOS'}</span>
                   </div>
                   <p style={{ fontSize: 14, color: cores.textoSecundario, margin: '0 0 12px' }}>
-                    Ganhe +6 Estrelas quando um novo amigo fizer o primeiro pedido válido.
-                    {estrelasDeIndicacao > 0 && ` Você já ganhou ${estrelasDeIndicacao} ${fidelidade.unidade === 'estrelas' ? 'Estrelas' : 'pontos'} por indicações.`}
+                    {painel?.indicacao?.compartilhamentoLiberado === true
+                      ? 'Convide alguém conhecido para conhecer o ChefeBot. No primeiro pedido válido do convidado, você recebe +6 Estrelas.'
+                      : 'Faça seu primeiro pedido confirmado para liberar convites e começar a fortalecer sua posição.'}
+                    {painel?.indicacao?.compartilhamentoLiberado === true && estrelasDeIndicacao > 0 && ` Você já ganhou ${estrelasDeIndicacao} ${fidelidade.unidade === 'estrelas' ? 'Estrelas' : 'pontos'} por indicações.`}
                   </p>
                   <button
-                    onClick={compartilharIndicacao}
+                    onClick={painel?.indicacao?.compartilhamentoLiberado === true ? compartilharIndicacao : abrirSacola}
                     disabled={compartilhandoIndicacao}
                     style={{ ...botaoPrimario, opacity: compartilhandoIndicacao ? 0.6 : 1 }}
                   >
-                    {compartilhandoIndicacao ? 'Aguarde...' : 'Compartilhar meu link'}
+                    {compartilhandoIndicacao ? 'Preparando...' : painel?.indicacao?.compartilhamentoLiberado === true ? 'Fortalecer minha posição' : 'Fazer primeiro pedido'}
                   </button>
                 </div>
               )}

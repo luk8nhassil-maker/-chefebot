@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { lerSessao, preferencias, ativas, registrar, revogarTodos, historico } = vi.hoisted(() => ({
+const { lerSessao, preferencias, ativas, participacao, ativar, registrar, revogarTodos, historico } = vi.hoisted(() => ({
   lerSessao: vi.fn(),
   preferencias: vi.fn(),
   ativas: vi.fn(),
+  participacao: vi.fn(),
+  ativar: vi.fn(),
   registrar: vi.fn(),
   revogarTodos: vi.fn(),
   historico: vi.fn(),
@@ -17,12 +19,14 @@ vi.mock("@/lib/consentimentoRanking", async () => {
     ...actual,
     obterPreferenciasConsentimentoRanking: preferencias,
     obterFinalidadesAtivasRanking: ativas,
+    obterParticipacaoRanking: participacao,
+    registrarParticipacaoRanking: ativar,
     registrarConsentimentoRanking: registrar,
     revogarTodosConsentimentosRanking: revogarTodos,
     obterHistoricoConsentimentoRanking: historico,
   };
 });
-import { DELETE, GET, PATCH } from "./route";
+import { DELETE, GET, PATCH, POST } from "./route";
 import { ErroConsentimentoRanking } from "@/lib/consentimentoRanking";
 
 function req(method = "GET", body?: unknown, query = "") {
@@ -38,6 +42,8 @@ beforeEach(() => {
   lerSessao.mockResolvedValue({ clienteId: "cli_5511999990000", telefone: "5511999990000" });
   preferencias.mockResolvedValue([{ finalidade: "ranking_primeiro_nome", estado: "revogado" }]);
   ativas.mockResolvedValue(new Set());
+  participacao.mockImplementation(async () => (await ativas()).size > 0);
+  ativar.mockImplementation(async () => participacao.mockResolvedValue(true));
   historico.mockResolvedValue({ eventos: [], proximoOffset: null });
   registrar.mockResolvedValue({ estado: "concedido" });
   revogarTodos.mockResolvedValue([]);
@@ -47,6 +53,7 @@ describe("/api/cliente/privacidade/ranking", () => {
   test("exige sessao em todos os metodos", async () => {
     lerSessao.mockResolvedValue(null);
     expect((await GET(req())).status).toBe(401);
+    expect((await POST(req("POST"))).status).toBe(401);
     expect((await PATCH(req("PATCH", { finalidade: "ranking_primeiro_nome", estado: "revogado" }))).status).toBe(401);
     expect((await DELETE(req("DELETE"))).status).toBe(401);
   });
@@ -70,7 +77,16 @@ describe("/api/cliente/privacidade/ranking", () => {
     expect(await ativo.json()).toMatchObject({ participaCampanha: true });
   });
 
+  test("POST exige sessão e ativa só o cliente autenticado, sem conceder PII", async () => {
+    const res = await POST(req("POST"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ participaCampanha: true });
+    expect(ativar).toHaveBeenCalledWith("cli_5511999990000", true);
+    expect(registrar).not.toHaveBeenCalled();
+  });
+
   test("PATCH usa apenas o cliente autenticado e a origem fica no servidor", async () => {
+    participacao.mockResolvedValueOnce(true);
     const res = await PATCH(req("PATCH", {
       clienteId: "cli_de_outro_cliente",
       origem: "forjada",
@@ -88,6 +104,7 @@ describe("/api/cliente/privacidade/ranking", () => {
   });
 
   test("concessao de foto sem fonte oficial responde conflito", async () => {
+    participacao.mockResolvedValueOnce(true);
     registrar.mockRejectedValueOnce(new ErroConsentimentoRanking("fonte_oficial_indisponivel"));
     const res = await PATCH(req("PATCH", {
       finalidade: "ranking_foto_perfil",
@@ -96,6 +113,13 @@ describe("/api/cliente/privacidade/ranking", () => {
     }));
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ ok: false, error: "fonte_oficial_indisponivel" });
+  });
+
+  test("não transforma autorização de PII em ativação implícita do jogo", async () => {
+    participacao.mockResolvedValueOnce(false);
+    const res = await PATCH(req("PATCH", { finalidade: "ranking_primeiro_nome", estado: "concedido", textoVersao: "dpo-v1" }));
+    expect(res.status).toBe(409);
+    expect(registrar).not.toHaveBeenCalled();
   });
 
   test("DELETE revoga tudo, preservando a semantica separada de eliminacao", async () => {

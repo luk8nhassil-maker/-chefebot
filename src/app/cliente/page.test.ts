@@ -263,7 +263,7 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
     expect(fonte).toContain('SUAS ESTRELAS');
     expect(fonte).toContain('Próximo presente');
     expect(fonte).toContain('Sua posição');
-    expect(fonte).toContain('Chegue mais rápido ao seu presente');
+    expect(fonte).toContain('Fortaleça sua posição');
     expect(fonte).toContain("loyaltyLabel={modoPreview ? 'Fidelidade' : 'Pontos'}");
   });
 
@@ -286,7 +286,7 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
   test("compartilharIndicacao usa obterOuCriarTokenIndicacao via GET /api/cliente/indicacao", () => {
     expect(fonte).toContain("async function compartilharIndicacao");
     expect(fonte).toContain("/api/cliente/indicacao");
-    expect(fonte).toContain("Compartilhar meu link");
+    expect(fonte).toContain("Fortalecer minha posição");
   });
 
   test("captura ?ref= da URL antes do login e armazena como cf_ref", () => {
@@ -369,8 +369,8 @@ describe("/cliente — Correções PR #427: textos comerciais, estados vazios, P
   });
 
   test("texto de indicação menciona Estrelas e primeiro pedido válido (não benefício ao indicado)", () => {
-    expect(fonte).toContain("Ganhe +6 Estrelas quando um novo amigo fizer o primeiro pedido válido.");
-    expect(fonte).toContain("Indique um amigo");
+    expect(fonte).toContain("No primeiro pedido válido do convidado, você recebe +6 Estrelas.");
+    expect(fonte).toContain("Convide alguém conhecido para conhecer o ChefeBot");
   });
 
   test("ranking seção sempre visível quando há temporada — estado vazio exibe mensagem de espera", () => {
@@ -386,7 +386,7 @@ describe("/cliente — Correções PR #427: textos comerciais, estados vazios, P
   });
 
   test("texto compartilhado via share API não promete benefícios", () => {
-    expect(fonte).toContain("Peça pelo meu link do Chefe da Pizza.");
+    expect(fonte).toContain("textoConviteAmigoRanking()");
     expect(fonte).not.toContain("ganhe desconto");
   });
 
@@ -468,7 +468,7 @@ describe("/cliente — status social herdado do Top 10 (Campeão/Prata/Bronze/El
   });
 
   test("FidelidadeMobileScreen recebe o statusSocial vindo do servidor (painel.gamificacao), nunca calculado no cliente", () => {
-    expect(fonte).toContain("statusSocial={painel?.gamificacao?.statusSocial ?? null}");
+    expect(fonte).toContain("statusSocial={painel?.ranking?.participaCampanha ? (painel?.gamificacao?.statusSocial ?? null) : null}");
   });
 });
 

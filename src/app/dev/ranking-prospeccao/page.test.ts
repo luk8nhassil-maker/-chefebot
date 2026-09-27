@@ -7,7 +7,8 @@ const client = readFileSync(fileURLToPath(new URL("./RankingProspeccaoPreview.ts
 
 describe("Preview seguro da prospeccao de ranking", () => {
   test("fica bloqueado em producao", () => {
-    expect(page).toContain('process.env.VERCEL_ENV === "production"');
+    expect(page).toContain('process.env.NODE_ENV !== "development" && process.env.VERCEL_ENV !== "preview"');
+    expect(page).toContain('await headers()');
     expect(page).toContain("notFound()");
   });
 

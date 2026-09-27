@@ -7,7 +7,7 @@ import type {
   PainelGamificacao,
   PreferenciasPrivacidadeRanking,
 } from "@/app/cliente/painelFidelidadeTipos";
-import { calcularAlvoRankingAtual, montarDisputaRelativa } from "@/lib/rankingRetencao";
+import { calcularAlvoRankingAtual, montarDisputaRelativa, textoConviteAmigoRanking } from "@/lib/rankingRetencao";
 
 type RankingCompleto = NonNullable<PainelFidelidade["ranking"]>;
 type TemporadaCompleta = NonNullable<PainelFidelidade["temporada"]>;
@@ -104,7 +104,7 @@ const TEMPORADA_PADRAO: TemporadaCompleta = {
   diasRestantes: 18,
   fimEm: null,
   estado: "ativa",
-  premio: { descricao: "1 Pizza Família", quantidadePremiados: 3 },
+  premio: null,
 };
 
 const PRIVACIDADE_PARTICIPANTE: PreferenciasPrivacidadeRanking = {
@@ -257,7 +257,7 @@ const CENARIOS: Cenario[] = [
   {
     id: "top3",
     titulo: "10. Top 3",
-    detalhe: "Conquista real reconhecida — banner + botão de compartilhar aparecem.",
+    detalhe: "Conquista real reconhecida — convite de desafio aparece.",
     props: {
       ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 1, variacaoPosicao: { direcao: "subiu", casas: 1 } }),
       temporada: TEMPORADA_PADRAO,
@@ -277,7 +277,7 @@ const CENARIOS: Cenario[] = [
   {
     id: "premio-configurado",
     titulo: "12. Prêmio configurado",
-    detalhe: "Descrição do prêmio vem só de configuração aprovada pelo admin.",
+    detalhe: "Exemplo fictício para testar uma temporada com prêmio configurado.",
     props: {
       ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 4, variacaoPosicao: { direcao: "manteve", casas: 0 } }),
       temporada: { ...TEMPORADA_PADRAO, premio: { descricao: "1 Pizza Família + Refrigerante", quantidadePremiados: 3 } },
@@ -691,6 +691,8 @@ export default function RankingRetencaoPreview() {
   const [aviso, setAviso] = useState("");
   const [indicando, setIndicando] = useState(false);
   const [compartilhando, setCompartilhando] = useState(false);
+  const [compartilhamentoLiberado, setCompartilhamentoLiberado] = useState(true);
+  const [mostrarMensagem, setMostrarMensagem] = useState(false);
 
   function simular(mensagem: string, setBusy?: (v: boolean) => void) {
     setBusy?.(true);
@@ -699,18 +701,32 @@ export default function RankingRetencaoPreview() {
     setTimeout(() => setAviso(""), 3200);
   }
 
+  function abrirCompartilhamentoPreview(setBusy?: (v: boolean) => void) {
+    if (!compartilhamentoLiberado) {
+      simular("Convites bloqueados no Preview: faça o primeiro pedido confirmado para liberar.");
+      return;
+    }
+    setBusy?.(true);
+    setTimeout(() => setBusy?.(false), 600);
+    setMostrarMensagem(true);
+  }
+
   return (
-    <main style={{ minHeight: "100dvh", background: "#f4f6f9", padding: 24, fontFamily: "Arial, sans-serif", color: "#172945" }}>
-      <section style={{ maxWidth: 1100, margin: "0 auto", display: "grid", gridTemplateColumns: "280px 1fr", gap: 24, alignItems: "start" }}>
-        <div>
-          <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 800, color: "#3972d7" }}>PREVIEW ISOLADO</p>
-          <h1 style={{ margin: "0 0 8px", fontSize: 22 }}>Ranking do Chefe — Retenção + Gamificação V2</h1>
-          <p style={{ margin: "0 0 14px", color: "#61738b", lineHeight: 1.5, fontSize: 13 }}>
-            Fixtures locais. Nenhum pedido, Pix, WhatsApp, impressão, estoque, fidelidade real, indicação real,
-            bônus de competição ou escrita em Redis é criada aqui — o componente renderizado é o mesmo usado em
-            produção (<code>FidelidadeRankingScreen</code>).
+    <main style={{ minHeight: "100dvh", background: "#f4f6f9", padding: "20px 12px", fontFamily: "Arial, sans-serif", color: "#172945" }}>
+      <section style={{ maxWidth: 760, margin: "0 auto" }}>
+        <header style={{ padding: "0 4px 16px" }}>
+          <p style={{ margin: "0 0 5px", fontSize: 11, fontWeight: 800, color: "#3972d7" }}>DEMONSTRAÇÃO ISOLADA</p>
+          <h1 style={{ margin: "0 0 6px", fontSize: 20 }}>Ranking do Chefe</h1>
+          <p style={{ margin: 0, color: "#61738b", lineHeight: 1.45, fontSize: 13 }}>
+            Dados de exemplo. Aqui nenhuma ação cria pedidos, Pix, mensagens ou alterações reais.
           </p>
-          <div style={{ display: "grid", gap: 8, maxHeight: "80dvh", overflow: "auto", paddingRight: 4 }}>
+        </header>
+        <details style={{ margin: "0 4px 16px", padding: "11px 14px", border: "1px solid #d7deea", borderRadius: 12, background: "#fff" }}>
+          <summary style={{ cursor: "pointer", fontSize: 14, fontWeight: 700 }}>Cenários de teste ({CENARIOS.length}) · {cenario.titulo}</summary>
+          <p style={{ color: "#61738b", lineHeight: 1.45, fontSize: 12 }}>
+            Simulação local com o mesmo componente visual do app. Selecione um estado para conferir a tela.
+          </p>
+          <div style={{ display: "grid", gap: 8, maxHeight: "50dvh", overflow: "auto", paddingRight: 4 }}>
             {CENARIOS.map((item) => (
               <button
                 key={item.id}
@@ -730,6 +746,20 @@ export default function RankingRetencaoPreview() {
               </button>
             ))}
           </div>
+        </details>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, margin: "0 4px 16px", padding: "10px 12px", border: "1px solid #d7deea", borderRadius: 12, background: "#fff" }}>
+          <div>
+            <strong style={{ display: "block", fontSize: 13 }}>Estado do convite</strong>
+            <span style={{ color: "#61738b", fontSize: 11.5 }}>Simule antes e depois do primeiro pedido confirmado.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCompartilhamentoLiberado((atual) => !atual)}
+            style={{ border: 0, borderRadius: 999, padding: "8px 11px", background: compartilhamentoLiberado ? "#e7f6ee" : "#eef1f6", color: compartilhamentoLiberado ? "#24734a" : "#59687d", fontSize: 11, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}
+          >
+            {compartilhamentoLiberado ? "Liberado" : "Bloqueado"}
+          </button>
         </div>
 
         <div style={{ background: "#fdf6e8", borderRadius: 24, padding: "24px 18px", minHeight: 640 }}>
@@ -742,7 +772,7 @@ export default function RankingRetencaoPreview() {
             key={cenario.id}
             ranking={cenario.props.ranking}
             temporada={cenario.props.temporada}
-            indicacao={cenario.props.indicacao}
+            indicacao={cenario.props.indicacao ? { ...cenario.props.indicacao, compartilhamentoLiberado } : cenario.props.indicacao}
             gamificacao={cenario.props.gamificacao ?? null}
             privacidade={PRIVACIDADE_PARTICIPANTE}
             privacidadeCarregando={false}
@@ -753,13 +783,24 @@ export default function RankingRetencaoPreview() {
             posPedido={cenario.props.posPedido ?? null}
             onAlterarPrivacidade={() => undefined}
             onRevogarTodas={() => simular("Revogação simulada. Nenhuma autorização real foi alterada.")}
-            onIndicarAmigo={() => simular("Indicação simulada. Nenhum link real foi criado ou enviado.", setIndicando)}
-            onCompartilharConquista={() => simular("Compartilhamento simulado. Nenhum link real foi criado ou enviado.", setCompartilhando)}
+            onIndicarAmigo={() => abrirCompartilhamentoPreview(setIndicando)}
+            onCompartilharConquista={() => abrirCompartilhamentoPreview(setCompartilhando)}
             onNovoPedido={() => simular("No Preview, um novo pedido não é criado de verdade.")}
             onTelemetria={() => undefined}
             onClose={() => simular("No fluxo real, isso voltaria para o resumo de Fidelidade.")}
           />
         </div>
+        {mostrarMensagem && (
+          <div role="presentation" onClick={() => setMostrarMensagem(false)} style={{ position: "fixed", inset: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, background: "rgba(23,41,69,.45)" }}>
+            <div role="dialog" aria-modal="true" aria-label="Mensagem de compartilhamento" onClick={(event) => event.stopPropagation()} style={{ width: "min(420px, 100%)", padding: 20, borderRadius: 20, background: "#fff", boxShadow: "0 20px 60px rgba(23,41,69,.25)" }}>
+              <p style={{ margin: "0 0 6px", color: "#3972d7", fontSize: 11, fontWeight: 800, letterSpacing: ".08em" }}>MENSAGEM DO CONVITE</p>
+              <h2 style={{ margin: "0 0 12px", fontSize: 20 }}>Pronta para compartilhar</h2>
+              <p style={{ whiteSpace: "pre-line", margin: "0 0 16px", padding: 14, borderRadius: 14, background: "#f5f8fd", color: "#43566f", fontSize: 14, lineHeight: 1.5 }}>{textoConviteAmigoRanking()} [link]</p>
+              <p style={{ margin: "0 0 14px", color: "#748399", fontSize: 11.5 }}>Preview seguro: nenhuma mensagem foi enviada e nenhum link real foi criado.</p>
+              <button type="button" onClick={() => setMostrarMensagem(false)} style={{ width: "100%", border: 0, borderRadius: 12, padding: 12, background: "#4f86ed", color: "#fff", fontWeight: 800, cursor: "pointer" }}>Fechar Preview</button>
+            </div>
+          </div>
+        )}
       </section>
     </main>
   );

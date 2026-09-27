@@ -9,6 +9,7 @@ import {
   montarDisputaRelativa,
   necessarioParaUltrapassar,
   textoConquistaRanking,
+  textoConviteRanking,
 } from "./rankingRetencao";
 
 describe("necessarioParaUltrapassar", () => {
@@ -219,6 +220,13 @@ describe("detectarConquistaRanking / textoConquistaRanking", () => {
 
   test("sem conquista ainda gera texto neutro com a posição", () => {
     expect(textoConquistaRanking(null, 12)).toBe("Estou em #12 no Ranking do Chefe ⭐");
+  });
+
+  test("convite é amigável e não promete pontos ou prêmio", () => {
+    const texto = textoConviteRanking({ tipo: "top10" }, 5);
+    expect(texto).toContain("Entrei no Top 10");
+    expect(texto).toContain("queria te convidar para conhecer também.");
+    expect(texto).not.toMatch(/\+?\d+ Estrelas|desconto|prêmio/i);
   });
 });
 
