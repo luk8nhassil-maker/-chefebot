@@ -20,7 +20,13 @@ export class ErroFotoPerfilStorage extends Error {
   }
 }
 
-type EnvBlob = Partial<Pick<NodeJS.ProcessEnv, "BLOB_READ_WRITE_TOKEN" | "BLOB_STORE_ID" | "VERCEL_OIDC_TOKEN" | "PRIVACY_CONSENT_HMAC_SECRET" | "VERCEL_BLOB_API_URL">>;
+type EnvBlob = {
+  BLOB_READ_WRITE_TOKEN?: string;
+  BLOB_STORE_ID?: string;
+  VERCEL_OIDC_TOKEN?: string;
+  PRIVACY_CONSENT_HMAC_SECRET?: string;
+  VERCEL_BLOB_API_URL?: string;
+};
 
 function envTexto(valor: string | undefined): string | null {
   const limpo = valor?.trim();
@@ -32,7 +38,7 @@ function storeIdDoToken(token: string): string | null {
   return partes.length >= 4 && partes[3] ? partes[3] : null;
 }
 
-export function resolverCredenciaisBlob(env: EnvBlob = process.env): { token: string; storeId: string; apiUrl: string } {
+export function resolverCredenciaisBlob(env: EnvBlob = process.env as EnvBlob): { token: string; storeId: string; apiUrl: string } {
   const oidc = envTexto(env.VERCEL_OIDC_TOKEN);
   const storeEnv = envTexto(env.BLOB_STORE_ID)?.replace(/^store_/, "") ?? null;
   if (oidc && storeEnv) {
@@ -47,7 +53,7 @@ export function resolverCredenciaisBlob(env: EnvBlob = process.env): { token: st
   throw new ErroFotoPerfilStorage("storage_nao_configurado");
 }
 
-export function referenciaFotoPerfil(clienteId: string, env: Partial<Pick<NodeJS.ProcessEnv, "PRIVACY_CONSENT_HMAC_SECRET">> = process.env): string {
+export function referenciaFotoPerfil(clienteId: string, env: { PRIVACY_CONSENT_HMAC_SECRET?: string } = process.env as { PRIVACY_CONSENT_HMAC_SECRET?: string }): string {
   const segredo = envTexto(env.PRIVACY_CONSENT_HMAC_SECRET);
   if (!segredo || segredo.length < 16 || !clienteId) {
     throw new ErroFotoPerfilStorage("storage_nao_configurado");
