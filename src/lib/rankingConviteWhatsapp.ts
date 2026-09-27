@@ -151,30 +151,28 @@ export function montarMensagemConviteRankingWhatsapp(params: {
   situacao: SituacaoConviteRankingWhatsapp;
   saldoEstrelas: number;
   metaEstrelas: number;
+  coberturaEconomicaAprovada?: boolean;
 }): string {
   const saldo = Math.max(0, Math.round(params.saldoEstrelas));
-  const meta = Math.max(1, Math.round(params.metaEstrelas));
-  const faltam = Math.max(meta - saldo, 0);
 
-  let abertura: string;
   if (params.situacao === "presente_garantido") {
-    abertura = "Tem coisa boa esperando por você 👀\nVocê já conquistou um presente na sua área.";
-  } else if (params.situacao === "meta_alcancada") {
-    abertura = `Você já chegou à meta atual de Estrelas ⭐\nSeu progresso continua registrado: *${saldo} Estrelas*.`;
-  } else {
-    abertura = `Você já tem *${saldo} Estrelas* no seu progresso ⭐` +
-      (faltam > 0 ? ` e faltam *${faltam}* para a meta atual.` : ".");
+    return [
+      "🎁 Você já tem um presente esperando por você!",
+      `Veja aqui: ${LINK_AREA_CLIENTE}`,
+      "",
+      "Se não quiser mais receber convites do Ranking, responda *SAIR RANKING*.",
+    ].join("\n");
   }
 
+  const chamada = params.coberturaEconomicaAprovada === true
+    ? "🎁 Quer ganhar presentes da pizzaria?"
+    : "⭐ Quer entrar no Ranking do Chefe?";
+
   return [
-    abertura,
+    chamada,
+    `Você já tem *${saldo} Estrelas*. É só clicar: ${LINK_AREA_CLIENTE}`,
     "",
-    "Quer entrar na disputa? No *Ranking do Chefe* você acompanha sua posição, quem está perto e as missões disponíveis.",
-    "",
-    `👉 Ative aqui: ${LINK_AREA_CLIENTE}`,
-    "",
-    "Você começa anônimo. Nome e telefone só aparecem se você autorizar no app.",
-    "Se não quiser mais receber convites do Ranking por aqui, responda *SAIR RANKING*.",
+    "Se não quiser mais receber convites do Ranking, responda *SAIR RANKING*.",
   ].join("\n");
 }
 
@@ -293,6 +291,7 @@ export async function prepararConviteRankingWhatsapp(params: {
         situacao,
         saldoEstrelas: saldo,
         metaEstrelas: meta,
+        coberturaEconomicaAprovada: config.coberturaEconomicaAprovada === true,
       }),
     };
   } finally {
