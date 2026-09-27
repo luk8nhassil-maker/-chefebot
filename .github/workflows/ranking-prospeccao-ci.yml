@@ -17,6 +17,11 @@ on:
       - "src/lib/rankingClientes.test.ts"
       - "src/lib/rankingHistorico.ts"
       - "src/lib/rankingHistorico.test.ts"
+      - "src/lib/rankingCoroaDinamica.ts"
+      - "src/lib/rankingCoroaDinamica.test.ts"
+      - "src/lib/rankingCoroaDinamicaCobertura.test.ts"
+      - "src/lib/historicoAnalitico.ts"
+      - "src/lib/historicoAnalitico.test.ts"
       - "src/lib/rankingPrivacidade.ts"
       - "src/lib/rankingPrivacidade.test.ts"
       - "src/lib/temporadas.ts"
@@ -72,6 +77,9 @@ jobs:
           src/app/dev/ranking-prospeccao/page.test.ts
           src/lib/rankingClientes.test.ts
           src/lib/rankingHistorico.test.ts
+          src/lib/rankingCoroaDinamica.test.ts
+          src/lib/rankingCoroaDinamicaCobertura.test.ts
+          src/lib/historicoAnalitico.test.ts
           src/lib/rankingPrivacidade.test.ts
           src/lib/temporadas.test.ts
           src/lib/temporadaResultado.test.ts
@@ -100,6 +108,11 @@ jobs:
           src/lib/rankingClientes.test.ts
           src/lib/rankingHistorico.ts
           src/lib/rankingHistorico.test.ts
+          src/lib/rankingCoroaDinamica.ts
+          src/lib/rankingCoroaDinamica.test.ts
+          src/lib/rankingCoroaDinamicaCobertura.test.ts
+          src/lib/historicoAnalitico.ts
+          src/lib/historicoAnalitico.test.ts
           src/lib/temporadas.ts
           src/lib/temporadaResultado.ts
           src/lib/temporadaResultado.test.ts
