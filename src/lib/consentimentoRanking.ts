@@ -234,7 +234,9 @@ export async function obterFinalidadesAtivasRankingParaClientes(
         config.disponivel &&
         registro?.estado === "concedido" &&
         registro.textoVersao === config.textoVersao &&
-        (estado === null || (participacaoValida(estado) && estado.ativo && registro.participacaoEventoId === estado.eventoId))
+        participacaoValida(estado) &&
+        estado.ativo &&
+        registro.participacaoEventoId === estado.eventoId
       ) {
         ativas.add(config.finalidade);
       }
@@ -244,28 +246,20 @@ export async function obterFinalidadesAtivasRankingParaClientes(
   return resultado;
 }
 
-/** Estado explícito prevalece. Ausência preserva a participação dos clientes
- * que já tinham concedido identidade antes desta separação. Novos clientes
- * entram anonimamente pelo botão de ativação, sem consentimento implícito. */
+/** Participação é estritamente opt-in: somente o registro explícito criado
+ * pelo clique em "Participar" libera o Ranking. Consentimentos antigos de
+ * nome/telefone nunca contam como entrada no jogo. */
 export async function obterParticipacaoRankingParaClientes(
   clienteIds: string[],
-  finalidadesPorCliente?: Map<string, Set<FinalidadeConsentimentoRanking>>,
+  _finalidadesPorCliente?: Map<string, Set<FinalidadeConsentimentoRanking>>,
 ): Promise<Map<string, boolean>> {
   const unicos = Array.from(new Set(clienteIds.filter(Boolean)));
   const referencias = unicos.map((clienteId) => exigirReferencia(clienteId));
   if (unicos.length === 0) return new Map();
-  const [valores, finalidades] = await Promise.all([
-    redis.mget<Array<RegistroParticipacao | null>>(...referencias.map(chaveParticipacao)),
-    finalidadesPorCliente ? Promise.resolve(finalidadesPorCliente) : obterFinalidadesAtivasRankingParaClientes(unicos),
-  ]);
+  const valores = await redis.mget<Array<RegistroParticipacao | null>>(...referencias.map(chaveParticipacao));
   return new Map(unicos.map((id, i) => {
     const valor = valores[i];
-    // Fallback apenas para chave ausente (cliente legado). Registro presente
-    // mas corrompido nunca pode reativar alguém que havia saído.
-    const ativo = participacaoValida(valor) ? valor.ativo
-      : valor === null ? !!(finalidades.get(id)?.has("ranking_primeiro_nome") || finalidades.get(id)?.has("ranking_telefone_mascarado"))
-        : false;
-    return [id, ativo];
+    return [id, participacaoValida(valor) && valor.ativo];
   }));
 }
 
@@ -350,7 +344,7 @@ export async function registrarConsentimentoRanking(params: {
   }
 
   const participacao = await redis.get<RegistroParticipacao>(chaveParticipacao(referencia));
-  if (params.estado === "concedido" && participacao !== null && (!participacaoValida(participacao) || !participacao.ativo)) {
+  if (params.estado === "concedido" && (!participacaoValida(participacao) || !participacao.ativo)) {
     throw new ErroConsentimentoRanking("participacao_inativa");
   }
   const registro = criarRegistro(finalidade, params.estado, textoVersao ?? null, new Date().toISOString(),
