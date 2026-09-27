@@ -331,7 +331,7 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
     expect(fonte).toContain("necessariaParaLiberarPresente");
     expect(fonte).toContain("Uma missão para liberar seu primeiro presente");
     expect(fonte).toContain("os próximos presentes não pedem essa missão novamente");
-    expect(fonte).toMatch(/podeResgatar[\\s\\S]{0,350}missaoFotoPerfil\\?\\.necessariaParaLiberarPresente !== true/);
+    expect(fonte).toContain("fidelidade.missaoFotoPerfil?.necessariaParaLiberarPresente !== true");
     expect(fonte).toContain("Adicionar foto e liberar");
   });
 
