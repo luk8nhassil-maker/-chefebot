@@ -3,6 +3,7 @@ name: ranking-prospeccao-ci
 on:
   pull_request:
     paths:
+      - "docs/PRODUTO_RANKING_E_PREMIOS.md"
       - "src/lib/rankingProspeccao.ts"
       - "src/lib/rankingProspeccao.test.ts"
       - "src/components/RankingInviteModal.tsx"
