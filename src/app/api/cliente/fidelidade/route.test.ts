@@ -5,6 +5,7 @@ const extratosPorCliente = new Map<string, unknown[]>();
 let configPontos: Record<string, unknown> | null = null;
 let pizzasAntigasPorCliente = new Map<string, number>();
 let recompensasPorCliente = new Map<string, unknown[]>();
+let missaoFotoConcluida = true;
 
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
@@ -29,6 +30,10 @@ vi.mock("@/lib/clientes", async () => {
     }),
   };
 });
+
+vi.mock("@/lib/fotoPerfilCliente", () => ({
+  missaoFotoPerfilConcluida: vi.fn(async () => missaoFotoConcluida),
+}));
 
 vi.mock("@/lib/fidelidade", async () => {
   const actual = await vi.importActual<typeof import("@/lib/fidelidade")>("@/lib/fidelidade");
@@ -64,6 +69,7 @@ beforeEach(() => {
   pizzasAntigasPorCliente = new Map();
   recompensasPorCliente = new Map();
   configPontos = null;
+  missaoFotoConcluida = true;
 });
 
 describe("GET /api/cliente/fidelidade — autenticacao", () => {
@@ -318,6 +324,40 @@ describe("GET /api/cliente/fidelidade — recompensas abertas e historico (CTA n
     expect(body.recompensasHistorico.map((r: { recompensaId: string }) => r.recompensaId).sort()).toEqual(
       ["rcp_usada", "rcp_vencida"].sort()
     );
+  });
+
+  test("primeiro presente aparece conquistado, mas fica bloqueado até concluir a foto", async () => {
+    missaoFotoConcluida = false;
+    configPontos = { ativo: true, metaPontos: 60, descricaoRecompensa: "Presente configurado" };
+    recompensasPorCliente.set("cli_a", [
+      { recompensaId: "rcp_primeiro", status: "disponivel", createdAt: "2026-09-27T12:00:00.000Z" },
+    ]);
+
+    const body = await (await GET(requestComCookie("token-cliente-a"))).json();
+
+    expect(body.recompensas).toHaveLength(1);
+    expect(body.recompensas[0].bloqueadaPorFoto).toBe(true);
+    expect(body.missaoFotoPerfil).toEqual({
+      concluida: false,
+      necessariaParaLiberarPresente: true,
+    });
+  });
+
+  test("depois de concluir a foto, presentes atuais e futuros não recebem mais a trava", async () => {
+    missaoFotoConcluida = true;
+    configPontos = { ativo: true, metaPontos: 60, descricaoRecompensa: "Presente configurado" };
+    recompensasPorCliente.set("cli_a", [
+      { recompensaId: "rcp_atual", status: "disponivel", createdAt: "2026-09-27T12:00:00.000Z" },
+      { recompensaId: "rcp_outro", status: "notificada", createdAt: "2026-09-28T12:00:00.000Z" },
+    ]);
+
+    const body = await (await GET(requestComCookie("token-cliente-a"))).json();
+
+    expect(body.missaoFotoPerfil).toEqual({
+      concluida: true,
+      necessariaParaLiberarPresente: false,
+    });
+    expect(body.recompensas.every((r: { bloqueadaPorFoto: boolean }) => r.bloqueadaPorFoto === false)).toBe(true);
   });
 
   test("recompensa expirada nunca aparece na lista de recompensas abertas, mesmo com saldo alto", async () => {
