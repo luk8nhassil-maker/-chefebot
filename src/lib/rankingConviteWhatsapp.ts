@@ -44,6 +44,7 @@ export type ResultadoPreparacaoConviteRankingWhatsapp =
         | "opt_out"
         | "estrelas_inativas"
         | "sem_progresso_real"
+        | "avaliacao_nao_positiva"
         | "cooldown_14_dias"
         | "limite_3_convites_90_dias"
         | "evento_ja_reservado"
@@ -200,6 +201,7 @@ async function liberarMutex(chave: string, token: string): Promise<void> {
 export async function prepararConviteRankingWhatsapp(params: {
   telefone?: string;
   triggerEventId: string;
+  notaAvaliacao?: number;
   agoraMs?: number;
 }): Promise<ResultadoPreparacaoConviteRankingWhatsapp> {
   const agoraMs = params.agoraMs ?? Date.now();
@@ -209,6 +211,9 @@ export async function prepararConviteRankingWhatsapp(params: {
 
   if (!clienteId || !customerKey || !triggerEventId || !Number.isFinite(agoraMs) || agoraMs <= 0) {
     return { status: "suprimido", motivo: "identidade_incerta" };
+  }
+  if (params.notaAvaliacao !== undefined && (!Number.isFinite(params.notaAvaliacao) || params.notaAvaliacao < 4)) {
+    return { status: "suprimido", motivo: "avaliacao_nao_positiva" };
   }
 
   const mutexKey = chaveMutex(customerKey);
@@ -223,22 +228,24 @@ export async function prepararConviteRankingWhatsapp(params: {
       return { status: "suprimido", motivo: "evento_ja_reservado" };
     }
 
-    const [participa, optOut, config, saldoObj, recompensas, tentativas] = await Promise.all([
+    const [participa, optOut, config] = await Promise.all([
       obterParticipacaoRanking(clienteId).catch(() => false),
       clienteTemOptOutConviteRankingWhatsapp(params.telefone),
       obterConfigFidelidadePontos(),
-      obterSaldoPontos(clienteId),
-      obterRecompensasPontos(clienteId),
-      listarTentativas(customerKey, agoraMs),
     ]);
 
     if (participa) return { status: "suprimido", motivo: "ja_participa" };
     if (optOut) return { status: "suprimido", motivo: "opt_out" };
     if (!estrelasV1Ativa(config)) return { status: "suprimido", motivo: "estrelas_inativas" };
 
+    const [saldoObj, recompensas] = await Promise.all([
+      obterSaldoPontos(clienteId),
+      obterRecompensasPontos(clienteId),
+    ]);
     const saldo = Math.max(0, Math.round(saldoObj.disponivel));
     if (saldo <= 0) return { status: "suprimido", motivo: "sem_progresso_real" };
 
+    const tentativas = await listarTentativas(customerKey, agoraMs);
     const inicioCooldown = agoraMs - POLITICA_CONVITE_RANKING_WHATSAPP.cooldownDias * MS_DIA;
     if (tentativas.some((ts) => ts > inicioCooldown)) {
       return { status: "suprimido", motivo: "cooldown_14_dias" };
