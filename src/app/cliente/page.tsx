@@ -366,11 +366,10 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
       <button type="button" className="cf-preview-ranking" onClick={() => setModalRankingConsentimento(true)}>
         <div className="cf-preview-ranking-top">
           <span className="cf-preview-trophy"><Trophy size={22} /></span>
-          <span className="cf-preview-ranking-title"><small>RANKING</small><strong>Sua posição</strong></span>
-          <span className="cf-preview-faces" aria-label="Participantes anônimos"><i>A</i><i>B</i><i>C</i><i>+27</i></span>
+          <span className="cf-preview-ranking-title"><small>RANKING DO CHEFE</small><strong>Entre na disputa</strong></span>
           <ChevronRight size={21} />
         </div>
-        <div className="cf-preview-ranking-copy"><ArrowUp size={22} /><span>Faltam <strong>4 Estrelas</strong> para subir de posição</span></div>
+        <div className="cf-preview-ranking-copy"><Trophy size={22} /><span>Participe para ver sua posição, rivais e próximo passo.</span></div>
       </button>
 
       <section className="cf-preview-referral">
