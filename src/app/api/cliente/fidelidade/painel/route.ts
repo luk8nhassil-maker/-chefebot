@@ -12,6 +12,7 @@ import { ESTRELAS_INDICACAO_PRIMEIRA_COMPRA } from "@/lib/estrelasIndicacao";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
 import { posicaoClienteRanking, obterTopRanking, obterRankingCompleto, reindexarPorFiltro } from "@/lib/rankingClientes";
 import { projetarIdentidadesPublicasRanking } from "@/lib/rankingPrivacidade";
+import { obterParticipacaoRanking } from "@/lib/consentimentoRanking";
 import {
   calcularVariacaoPosicao,
   garantirSnapshotDiario,
@@ -70,6 +71,15 @@ export async function GET(req: NextRequest) {
 
   const clienteId = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
   const tenantId = TENANT_PADRAO;
+  // Regra de entrada: Ranking é opt-in de verdade. Sem o registro explícito
+  // criado pelo clique em "Participar", nenhuma posição/lista/missão de
+  // competição é calculada ou devolvida ao navegador.
+  let participaRanking = false;
+  try {
+    participaRanking = await obterParticipacaoRanking(clienteId);
+  } catch {
+    participaRanking = false;
+  }
 
   const temporada = await obterTemporadaAtiva(tenantId);
   const configGamificacao = await obterConfigGamificacao();
@@ -84,7 +94,7 @@ export async function GET(req: NextRequest) {
   // auditoria do #446); a chamada por-cliente logo depois garante que o
   // PRÓPRIO cliente autenticado nesta requisição também fica em dia mesmo
   // que a reconciliação em lote já tenha rodado por outra pessoa.
-  if (temporada) {
+  if (temporada && participaRanking) {
     await reconciliarTransicaoTemporada(tenantId, temporada);
     await aplicarCarryoverClienteSeNecessario(tenantId, temporada, clienteId);
   }
@@ -134,7 +144,7 @@ export async function GET(req: NextRequest) {
     };
   } | null = null;
 
-  if (temporada) {
+  if (temporada && participaRanking) {
     const [pos, top, completo] = await Promise.all([
       posicaoClienteRanking(tenantId, temporada.temporadaId, clienteId),
       obterTopRanking(tenantId, temporada.temporadaId, 50),
@@ -354,7 +364,7 @@ export async function GET(req: NextRequest) {
   // limiares configurados pelo admin, o campo fica ausente na resposta e a
   // UI nunca mostra um "Nível 0" inventado.
   let nivelChef: { nivel: number; nome: string | null; xpAtual: number; xpProximoNivel: number | null } | null = null;
-  if (configGamificacao.nivelChefAtivo && configGamificacao.nivelChefLimiares.length > 0 && extratoCompleto) {
+  if (participaRanking && configGamificacao.nivelChefAtivo && configGamificacao.nivelChefLimiares.length > 0 && extratoCompleto) {
     const xp = calcularXpChefDosMovimentos(extratoCompleto);
     const nivel = calcularNivelChef(xp, configGamificacao.nivelChefLimiares);
     if (nivel.nivel > 0) {
@@ -372,7 +382,7 @@ export async function GET(req: NextRequest) {
   let missaoIndicacao: { concluida: boolean } | null = null;
   let movimentoRecente: MovimentoRecente | null = null;
   let coroaAmeacada = false;
-  if (temporada) {
+  if (temporada && participaRanking) {
     const statusVigente = await sincronizarStatusSocialCliente(tenantId, temporada, clienteId);
     statusSocial = statusVigente?.status ?? null;
     bonusCompeticao = await obterBonusCompeticaoDaTemporada(tenantId, temporada.temporadaId, clienteId);
