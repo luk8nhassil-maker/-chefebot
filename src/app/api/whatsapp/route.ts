@@ -45,6 +45,11 @@ import { sanitizeErrorMessage } from "@/lib/sanitizeLog";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import { registrarContatoPesquisaConfirmado } from "@/lib/pesquisaPreferenciaContatosRedis";
 import { consumirRespostaPesquisaPendente } from "@/lib/pesquisaPreferenciaRespostaRedis";
+import {
+  confirmarConviteRankingWhatsapp,
+  consumirOptOutConviteRankingWhatsapp,
+  prepararConviteRankingWhatsapp,
+} from "@/lib/rankingConviteWhatsapp";
 
 export const maxDuration = 30;
 
@@ -1337,7 +1342,7 @@ export async function POST(req: NextRequest) {
           const jaEnviou = await redis.get(chaveAvaliacao)
           if (!jaEnviou) {
             await redis.set(chaveAvaliacao, true, { ex: 86400 })
-            await redis.set(`avaliacao:${pedido.telefone}`, true, { ex: 3600 })
+            await redis.set(`avaliacao:${pedido.telefone}`, pedido.id, { ex: 3600 })
             const avaliacaoEnviada = await enviarMensagem(pedido.telefone, `*${firstName}*, como foi sua experiência hoje? 😊\n\nAvalia nossa pizza de 1 a 5:\n\n  ⭐ 1 — Ruim\n  ⭐⭐ 2 — Regular\n  ⭐⭐⭐ 3 — Bom\n  ⭐⭐⭐⭐ 4 — Muito bom\n  ⭐⭐⭐⭐⭐ 5 — Excelente\n\nÉ só digitar o número! 😄`)
             if (avaliacaoEnviada) {
               try {
@@ -1387,6 +1392,18 @@ export async function POST(req: NextRequest) {
     // Salva a mensagem do cliente antes de qualquer early-return de modo pausado/manual.
     // Garante que o painel Tempo Real veja a mensagem independentemente do estado do bot.
     await registrarMensagem(phone, "cliente", messageText);
+
+    const optOutRanking = await consumirOptOutConviteRankingWhatsapp({
+      telefone: phone,
+      resposta: messageText,
+    });
+    if (optOutRanking) {
+      await enviarMensagem(
+        phone,
+        "Pronto. Você não receberá mais convites do Ranking pelo WhatsApp. Isso não altera sua participação no app."
+      );
+      return NextResponse.json({ ok: true });
+    }
 
     const botAtivo = await redis.get<boolean>("bot_ativo");
     if (botAtivo === false) {
@@ -1454,8 +1471,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Captura avaliacao
-    const aguardandoAvaliacao = await redis.get<boolean>(`avaliacao:${phone}`);
-    if (aguardandoAvaliacao === true) {
+    const aguardandoAvaliacao = await redis.get<boolean | string>(`avaliacao:${phone}`);
+    if (aguardandoAvaliacao === true || typeof aguardandoAvaliacao === "string") {
       const nota = parseInt(messageText.trim());
       if (nota >= 1 && nota <= 5) {
         await redis.del(`avaliacao:${phone}`);
@@ -1467,12 +1484,38 @@ export async function POST(req: NextRequest) {
           `Que bom saber! Obrigado por avaliar, *${nota}/5*! 🙏\n\nTe esperamos na proxima! 🍕`,
           `Valeu pelo feedback! *${nota}/5* anotado. 😊\n\nAte a proxima! 🍕`,
         ];
-        await enviarMensagem(phone, msgs[Math.floor(Math.random() * msgs.length)]);
+
+        let respostaAvaliacao = msgs[Math.floor(Math.random() * msgs.length)];
+        let convitePreparado: Awaited<ReturnType<typeof prepararConviteRankingWhatsapp>> | null = null;
+        try {
+          convitePreparado = await prepararConviteRankingWhatsapp({
+            telefone: phone,
+            triggerEventId: typeof aguardandoAvaliacao === "string"
+              ? `avaliacao:${aguardandoAvaliacao}`
+              : `avaliacao-legado:${phone}`,
+            notaAvaliacao: nota,
+          });
+          if (convitePreparado.status === "pronto") {
+            respostaAvaliacao = `${respostaAvaliacao}\n\n${convitePreparado.mensagem}`;
+          }
+        } catch (err) {
+          console.error("[ChefeBot] Convite do Ranking suprimido por falha interna:", err);
+          convitePreparado = null;
+        }
+
+        const enviado = await enviarMensagem(phone, respostaAvaliacao);
+        if (enviado && convitePreparado?.status === "pronto") {
+          try {
+            await confirmarConviteRankingWhatsapp({ exposureId: convitePreparado.exposureId });
+          } catch (err) {
+            console.error("[ChefeBot] Convite do Ranking enviado, mas confirmação local falhou:", err);
+          }
+        }
         return NextResponse.json({ ok: true });
       } else {
         await redis.del(`avaliacao:${phone}`)
         if (!isNaN(parseInt(messageText.trim()))) {
-          await redis.set(`avaliacao:${phone}`, true, { ex: 3600 })
+          await redis.set(`avaliacao:${phone}`, aguardandoAvaliacao, { ex: 3600 })
           await enviarMensagem(phone, `Por favor, manda um número de 1 a 5! 😊`)
           return NextResponse.json({ ok: true })
         }
