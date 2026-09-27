@@ -20,7 +20,7 @@ export class ErroFotoPerfilStorage extends Error {
   }
 }
 
-type EnvBlob = Partial<Pick<NodeJS.ProcessEnv, "BLOB_READ_WRITE_TOKEN" | "BLOB_STORE_ID" | "VERCEL_OIDC_TOKEN" | "AUTH_SECRET" | "VERCEL_BLOB_API_URL">>;
+type EnvBlob = Partial<Pick<NodeJS.ProcessEnv, "BLOB_READ_WRITE_TOKEN" | "BLOB_STORE_ID" | "VERCEL_OIDC_TOKEN" | "PRIVACY_CONSENT_HMAC_SECRET" | "VERCEL_BLOB_API_URL">>;
 
 function envTexto(valor: string | undefined): string | null {
   const limpo = valor?.trim();
@@ -47,8 +47,8 @@ export function resolverCredenciaisBlob(env: EnvBlob = process.env): { token: st
   throw new ErroFotoPerfilStorage("storage_nao_configurado");
 }
 
-export function referenciaFotoPerfil(clienteId: string, env: Partial<Pick<NodeJS.ProcessEnv, "AUTH_SECRET">> = process.env): string {
-  const segredo = envTexto(env.AUTH_SECRET);
+export function referenciaFotoPerfil(clienteId: string, env: Partial<Pick<NodeJS.ProcessEnv, "PRIVACY_CONSENT_HMAC_SECRET">> = process.env): string {
+  const segredo = envTexto(env.PRIVACY_CONSENT_HMAC_SECRET);
   if (!segredo || segredo.length < 16 || !clienteId) {
     throw new ErroFotoPerfilStorage("storage_nao_configurado");
   }
