@@ -376,7 +376,7 @@ export async function GET(req: NextRequest) {
   let missaoIndicacao: { concluida: boolean } | null = null;
   let movimentoRecente: MovimentoRecente | null = null;
   let coroaAmeacada = false;
-  if (temporada) {
+  if (temporada && participaRanking) {
     const statusVigente = await sincronizarStatusSocialCliente(tenantId, temporada, clienteId);
     statusSocial = statusVigente?.status ?? null;
     bonusCompeticao = await obterBonusCompeticaoDaTemporada(tenantId, temporada.temporadaId, clienteId);
