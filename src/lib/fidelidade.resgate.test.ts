@@ -119,19 +119,27 @@ describe("reservarResgatePontos", () => {
     const primeiraReserva = await reservarResgatePontos(clienteId, recompensaId);
     await confirmarResgatePontos(clienteId, primeiraReserva.resgateId, "ped_legado_1");
 
-    // Gera uma segunda recompensa e simula a nova regra chegando depois do
-    // primeiro resgate. O histórico resgatado preserva o direito existente.
-    const { registrarMovimentoPontosIdempotente } = await import("./fidelidade");
-    await registrarMovimentoPontosIdempotente(clienteId, {
-      eventoId: "confirmado:legado:2",
+    // A finalidade deste teste é a compatibilidade da NOVA trava, não o motor
+    // que cria recompensas. Montamos um segundo presente aberto no mesmo estado
+    // já auditado, preservando o histórico "resgatada" e saldo suficiente.
+    const chaveEstado = `fidelidade:pontos:estado:${clienteId}`;
+    const estado = store.get(chaveEstado) as {
+      recompensas: Array<Record<string, unknown>>;
+    };
+    estado.recompensas.push({
+      recompensaId: "rcp_legado_novo",
+      clienteId,
       pedidoId: "ped_legado_2",
-      tipo: "confirmado",
-      pontos: 100,
-      motivo: "novo pedido",
+      pontosNaDesbloqueio: 100,
+      metaNaDesbloqueio: 100,
+      status: "disponivel",
+      notificacaoStatus: "pendente",
+      createdAt: new Date().toISOString(),
     });
-    const abertas = (await obterRecompensasPontos(clienteId)).filter((r) => r.status === "disponivel");
+    store.set(chaveEstado, estado);
+
     missaoFotoMock.mockResolvedValue(false);
-    await expect(reservarResgatePontos(clienteId, abertas[0].recompensaId)).resolves.toBeTruthy();
+    await expect(reservarResgatePontos(clienteId, "rcp_legado_novo")).resolves.toBeTruthy();
   });
 
   test("recompensa inexistente lança erro", async () => {
