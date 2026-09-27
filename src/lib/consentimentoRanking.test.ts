@@ -108,6 +108,7 @@ describe("consentimento do ranking", () => {
 
   test("registro de participação corrompido falha fechado, mesmo com consentimento antigo", async () => {
     configurarNome();
+    await registrarParticipacaoRanking(CLIENTE_ID, true);
     await registrarConsentimentoRanking({ clienteId: CLIENTE_ID, finalidade: "ranking_primeiro_nome", estado: "concedido", textoVersaoInformada: "dpo-2026-09-v1" });
     await registrarParticipacaoRanking(CLIENTE_ID, false);
     // Garante uma chave presente e inválida, sem depender do HMAC exato.
@@ -150,6 +151,7 @@ describe("consentimento do ranking", () => {
 
   test("grava estado e auditoria na mesma transacao sem telefone ou clienteId", async () => {
     configurarNome();
+    await registrarParticipacaoRanking(CLIENTE_ID, true);
     const registro = await registrarConsentimentoRanking({
       clienteId: CLIENTE_ID,
       finalidade: "ranking_primeiro_nome",
@@ -183,6 +185,7 @@ describe("consentimento do ranking", () => {
 
   test("mudanca da versao aprovada volta a anonimizar ate nova concessao", async () => {
     configurarNome();
+    await registrarParticipacaoRanking(CLIENTE_ID, true);
     await registrarConsentimentoRanking({
       clienteId: CLIENTE_ID,
       finalidade: "ranking_primeiro_nome",
@@ -197,6 +200,7 @@ describe("consentimento do ranking", () => {
 
   test("consulta consentimentos de varios participantes em um unico MGET", async () => {
     configurarNome();
+    await registrarParticipacaoRanking(CLIENTE_ID, true);
     await registrarConsentimentoRanking({
       clienteId: CLIENTE_ID,
       finalidade: "ranking_primeiro_nome",
@@ -225,6 +229,7 @@ describe("consentimento do ranking", () => {
 
   test("revogacao individual funciona mesmo se o texto aprovado for retirado", async () => {
     configurarNome();
+    await registrarParticipacaoRanking(CLIENTE_ID, true);
     await registrarConsentimentoRanking({
       clienteId: CLIENTE_ID,
       finalidade: "ranking_primeiro_nome",
@@ -245,6 +250,7 @@ describe("consentimento do ranking", () => {
 
   test("revogacao total e historico paginado preservam os eventos", async () => {
     configurarNome();
+    await registrarParticipacaoRanking(CLIENTE_ID, true);
     await registrarConsentimentoRanking({
       clienteId: CLIENTE_ID,
       finalidade: "ranking_primeiro_nome",
