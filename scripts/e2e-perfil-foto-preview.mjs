@@ -66,6 +66,19 @@ try {
   await page.locator(".cf-ranking-screen").waitFor({ state: "visible" });
   await page.screenshot({ path: path.join(outDir, "05-ranking-liberado-apos-participar.png"), fullPage: true });
 
+  // 4) Ao voltar para a Fidelidade, o card usa quatro perfis sobrepostos e
+  // o quinto círculo mostra o total real vindo do fixture do servidor (6).
+  await page.getByRole("button", { name: "Voltar para Fidelidade" }).click();
+  const cardRankingAtivo = page.getByRole("button", { name: "Abrir Ranking do Chefe" });
+  await cardRankingAtivo.waitFor({ state: "visible" });
+  const pilha = cardRankingAtivo.locator(".cf-preview-faces");
+  await pilha.waitFor({ state: "visible" });
+  const perfis = pilha.locator(".cf-preview-face:not(.cf-preview-face-total)");
+  if (await perfis.count() !== 4) falhar("Card do Ranking não exibiu exatamente 4 perfis na fixture com 6 participantes");
+  const total = (await pilha.locator(".cf-preview-face-total").innerText()).trim();
+  if (total !== "6") falhar(`Total do Ranking incorreto no card: esperado 6, recebido ${total}`);
+  await page.screenshot({ path: path.join(outDir, "06-card-ranking-pilha-perfis-total-real.png"), fullPage: true });
+
   await fs.writeFile(path.join(outDir, "resultado.json"), JSON.stringify({
     ok: true,
     baseUrl,
@@ -74,7 +87,9 @@ try {
       "missao_foto_unica",
       "ranking_sem_dados_antes_de_participar",
       "ranking_liberado_apos_participacao_explicita",
-      "modal_contextual_com_fundo_apos_animacao"
+      "modal_contextual_com_fundo_apos_animacao",
+      "card_ranking_quatro_perfis_sobrepostos",
+      "card_ranking_total_participantes_vindo_do_servidor"
     ]
   }, null, 2));
 } finally {
