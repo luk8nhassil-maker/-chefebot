@@ -117,19 +117,31 @@ describe("motor de convite do Ranking por WhatsApp", () => {
     });
   });
 
-  test("monta mensagem factual de progresso sem inventar posição ou prêmio", () => {
+  test("monta convite curto, simples e factual quando presentes estão habilitados", () => {
     const msg = montarMensagemConviteRankingWhatsapp({
       situacao: "progresso_estrelas",
       saldoEstrelas: 12,
       metaEstrelas: 20,
+      coberturaEconomicaAprovada: true,
     });
+    expect(msg).toContain("Quer ganhar presentes da pizzaria?");
     expect(msg).toContain("*12 Estrelas*");
-    expect(msg).toContain("faltam *8*");
-    expect(msg).toContain("Ranking do Chefe");
+    expect(msg).toContain("É só clicar");
     expect(msg).toContain("https://chefedapizza.com.br/cliente");
     expect(msg).toContain("SAIR RANKING");
     expect(msg).not.toContain("#1");
-    expect(msg).not.toContain("ganhou");
+    expect(msg.length).toBeLessThan(260);
+  });
+
+  test("sem cobertura econômica não promete presente", () => {
+    const msg = montarMensagemConviteRankingWhatsapp({
+      situacao: "progresso_estrelas",
+      saldoEstrelas: 12,
+      metaEstrelas: 20,
+      coberturaEconomicaAprovada: false,
+    });
+    expect(msg).toContain("Quer entrar no Ranking do Chefe?");
+    expect(msg).not.toContain("ganhar presentes");
   });
 
   test("presente só é citado quando o estado real traz recompensa disponível com cobertura", async () => {
@@ -138,16 +150,17 @@ describe("motor de convite do Ranking por WhatsApp", () => {
     expect(r.status).toBe("pronto");
     if (r.status !== "pronto") return;
     expect(r.situacao).toBe("presente_garantido");
-    expect(r.mensagem).toContain("já conquistou um presente");
+    expect(r.mensagem).toContain("já tem um presente esperando");
   });
 
-  test("sem presente usa saldo e meta reais", async () => {
+  test("sem presente usa saldo real e convite curto", async () => {
     const r = await prepararConviteRankingWhatsapp({ telefone: PHONE, triggerEventId: "pedido-2", agoraMs: T0 });
     expect(r.status).toBe("pronto");
     if (r.status !== "pronto") return;
     expect(r.situacao).toBe("progresso_estrelas");
     expect(r.mensagem).toContain("*12 Estrelas*");
-    expect(r.mensagem).toContain("*8*");
+    expect(r.mensagem).toContain("Quer ganhar presentes da pizzaria?");
+    expect(r.mensagem.length).toBeLessThan(260);
   });
 
   test("nota 1, 2 ou 3 nunca vira convite persuasivo", async () => {
