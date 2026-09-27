@@ -4,6 +4,8 @@ import { buscarClientePorId } from "@/lib/clientes";
 import {
   derivarClienteIdPorTelefone,
   obterRecompensasPontos,
+  obterConfigFidelidadePontos,
+  estrelasV1Ativa,
   reservarResgatePontos,
 } from "@/lib/fidelidade";
 
@@ -29,6 +31,14 @@ export async function POST(req: NextRequest) {
   if (!cliente) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
 
   const clienteIdPontos = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
+
+  // Regra server-side: na experiência de Estrelas, a missão da foto é
+  // obrigatória uma única vez antes do primeiro presente. O marcador é
+  // permanente; trocar/remover a imagem depois não recria a missão.
+  const config = await obterConfigFidelidadePontos();
+  if (estrelasV1Ativa(config) && !cliente.fotoPerfilMissaoConcluidaEm) {
+    return NextResponse.json({ error: "Adicione uma foto ao perfil para desbloquear seu primeiro presente", code: "foto_perfil_obrigatoria_primeiro_presente" }, { status: 409 });
+  }
 
   let body: { recompensaId?: string };
   try {
