@@ -138,3 +138,33 @@ decidir nenhuma regra comercial nova:
   vencedores) é recalculada a partir do consentimento **atual** a cada
   leitura, nunca do momento do encerramento — quem revoga depois passa a
   aparecer anonimizado também no histórico.
+
+
+## Adendo (2026-09-27) — entrada explícita e missão única da foto
+
+Decisão aprovada para a gamificação:
+
+1. **Ranking fechado até participação explícita.** O cliente só recebe e
+   visualiza a experiência completa do Ranking do Chefe depois de tocar em
+   **Participar**. Consentimentos antigos de nome/telefone não substituem esse
+   opt-in.
+2. **Foto não cria prêmio extra.** Quando um cliente novo conquista o primeiro
+   presente elegível da fidelidade ativa, o presente continua garantido, mas o
+   resgate fica bloqueado até ele adicionar uma foto de perfil.
+3. **Missão feita uma única vez.** O primeiro upload válido grava um marco
+   permanente. Trocar a foto depois não reinicia a missão e presentes futuros
+   não voltam a exigir foto.
+4. **Sem punição retroativa.** Cliente que já possuía histórico de presente
+   efetivamente resgatado antes da entrada dessa regra não é bloqueado por uma
+   missão criada depois.
+5. **Custo econômico zero da missão.** A foto não credita Estrelas, não dobra
+   pontuação, não cria desconto e não gera um segundo item gratuito. Ela apenas
+   libera o uso do presente que o cliente já conquistou pelas regras vigentes.
+6. **Armazenamento de mídia separado.** Os bytes da foto ficam em Vercel Blob
+   privado. Redis guarda somente metadados mínimos e o marco da missão; nunca a
+   imagem em base64.
+7. **Privacidade separada do Ranking.** Ter foto no perfil não autoriza
+   publicação no Ranking. Exibição pública de foto continua bloqueada até uma
+   decisão e consentimento específicos.
+8. **Fail-closed.** Se o storage de fotos estiver indisponível, a missão não é
+   marcada como concluída. O presente permanece garantido e não é consumido.
