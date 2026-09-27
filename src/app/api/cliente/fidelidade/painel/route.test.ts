@@ -107,6 +107,7 @@ const {
   sincronizarNivelChefMock,
   obterStatusSocialVigenteMock,
   sincronizarMovimentoRecenteMock,
+  obterReferenciaCoroaDinamicaMock,
 } = vi.hoisted(() => ({
   obterConfigGamificacaoMock: vi.fn(),
   obterBonusMock: vi.fn(async () => 0),
@@ -128,6 +129,7 @@ const {
   sincronizarNivelChefMock: vi.fn(async () => undefined),
   obterStatusSocialVigenteMock: vi.fn(async (_tenantId: string, _clienteId: string) => null as { status: string | null; temporadaOrigemId: string; atribuidoEm: string } | null),
   sincronizarMovimentoRecenteMock: vi.fn(async () => null as { variacao: { direcao: string; casas: number }; desde: string } | null),
+  obterReferenciaCoroaDinamicaMock: vi.fn(async () => null as { maxGapEstrelas: number } | null),
 }));
 
 vi.mock("@/lib/rankingGamificacaoConfig", () => ({ obterConfigGamificacao: obterConfigGamificacaoMock }));
@@ -143,6 +145,7 @@ vi.mock("@/lib/rankingMissaoIndicacaoEstado", () => ({ obterEstadoMissaoIndicaca
 vi.mock("@/lib/rankingImpulsoPodioEstado", () => ({ aplicarImpulsoPodioSeElegivel: aplicarImpulsoPodioMock }));
 vi.mock("@/lib/rankingNivelChefEstado", () => ({ sincronizarNivelChefCliente: sincronizarNivelChefMock }));
 vi.mock("@/lib/rankingMovimentoRecenteEstado", () => ({ sincronizarMovimentoRecente: sincronizarMovimentoRecenteMock }));
+vi.mock("@/lib/rankingCoroaDinamica", () => ({ obterReferenciaCoroaDinamica: obterReferenciaCoroaDinamicaMock }));
 
 import { GET } from "./route";
 import { obterExtratoPontos, type MovimentoPontos } from "@/lib/fidelidade";
@@ -183,6 +186,7 @@ beforeEach(() => {
   sincronizarNivelChefMock.mockReset().mockResolvedValue(undefined);
   obterStatusSocialVigenteMock.mockReset().mockResolvedValue(null);
   sincronizarMovimentoRecenteMock.mockReset().mockResolvedValue(null);
+  obterReferenciaCoroaDinamicaMock.mockReset().mockResolvedValue(null);
 });
 
 describe("GET /api/cliente/fidelidade/painel", () => {
@@ -770,9 +774,9 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       expect(sincronizarMovimentoRecenteMock).not.toHaveBeenCalled();
     });
 
-    test("coroa ameaçada: true quando líder e vantagem real está dentro do ameacaPodioMaxGap configurado", async () => {
+    test("coroa ameaçada usa a distância dinâmica derivada do ticket médio da semana anterior", async () => {
       temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
-      configGamificacaoMock.ameacaPodioMaxGap = 5;
+      obterReferenciaCoroaDinamicaMock.mockResolvedValue({ maxGapEstrelas: 5 });
       const clienteId = "hashed_11900000001";
       posicaoPorCliente.set(clienteId, { posicao: 1, score: 100 });
       topRanking = [
@@ -784,11 +788,13 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       identidadesPublicas.set("outro_2", { participaCampanha: true, nomePublico: "Outro", telefoneMascarado: null, fotoPerfilUrl: null });
       const res = await GET(req("token-cli-a"));
       const body = await res.json();
+      expect(obterReferenciaCoroaDinamicaMock).toHaveBeenCalledWith("default");
       expect(body.gamificacao.coroaAmeacada).toBe(true);
     });
 
-    test("coroa nunca ameaçada sem ameacaPodioMaxGap configurado (fail-closed), mesmo líder por pouco", async () => {
+    test("coroa dinâmica fica neutra quando não existe referência semanal válida", async () => {
       temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      obterReferenciaCoroaDinamicaMock.mockResolvedValue(null);
       const clienteId = "hashed_11900000001";
       posicaoPorCliente.set(clienteId, { posicao: 1, score: 100 });
       topRanking = [
@@ -800,6 +806,24 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       identidadesPublicas.set("outro_2", { participaCampanha: true, nomePublico: "Outro", telefoneMascarado: null, fotoPerfilUrl: null });
       const res = await GET(req("token-cli-a"));
       const body = await res.json();
+      expect(body.gamificacao.coroaAmeacada).toBe(false);
+    });
+
+    test("coroa dinâmica falha fechada sem derrubar o painel se a leitura analítica falhar", async () => {
+      temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+      obterReferenciaCoroaDinamicaMock.mockRejectedValue(new Error("redis indisponível"));
+      const clienteId = "hashed_11900000001";
+      posicaoPorCliente.set(clienteId, { posicao: 1, score: 100 });
+      topRanking = [
+        { clienteId, score: 100, posicao: 1 },
+        { clienteId: "outro_2", score: 99, posicao: 2 },
+      ];
+      rankingCompleto = topRanking;
+      identidadesPublicas.set(clienteId, { participaCampanha: true, nomePublico: "Eu", telefoneMascarado: null, fotoPerfilUrl: null });
+      identidadesPublicas.set("outro_2", { participaCampanha: true, nomePublico: "Outro", telefoneMascarado: null, fotoPerfilUrl: null });
+      const res = await GET(req("token-cli-a"));
+      const body = await res.json();
+      expect(res.status).toBe(200);
       expect(body.gamificacao.coroaAmeacada).toBe(false);
     });
 
