@@ -48,6 +48,23 @@ const { redisMock } = vi.hoisted(() => {
 
   const redisMock = {
     get: vi.fn(async (key: string) => (store.has(key) ? store.get(key) : null)),
+    mget: vi.fn(async (...keys: string[]) => keys.map((key) => store.has(key) ? store.get(key) : null)),
+    multi: vi.fn(() => {
+      const ops: Array<() => unknown> = [];
+      const chain = {
+        set(key: string, value: unknown) { ops.push(() => store.set(key, value)); return chain; },
+        lpush(key: string, value: unknown) {
+          ops.push(() => {
+            const atual = Array.isArray(store.get(key)) ? [...store.get(key) as unknown[]] : [];
+            atual.unshift(value);
+            store.set(key, atual);
+          });
+          return chain;
+        },
+        async exec() { ops.forEach((op) => op()); return ops.map(() => "OK"); },
+      };
+      return chain;
+    }),
     set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
       if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
@@ -151,6 +168,7 @@ import { creditarEstrelasIndicacaoValida } from "./estrelasIndicacao";
 import { registrarConversaoIndicacao } from "./rankingIndicacaoConversao";
 import { obterBonusCompeticaoDaTemporada } from "./rankingBonusTemporada";
 import { obterStatusSocialVigente } from "./rankingTransicaoTemporada";
+import { registrarParticipacaoRanking } from "./consentimentoRanking";
 
 const TENANT = "default";
 const TEMP1 = "temp_e2e_1";
@@ -173,6 +191,8 @@ function abrirPainel(token: string): NextRequest {
 }
 
 beforeAll(async () => {
+  vi.stubEnv("PRIVACY_CONSENT_HMAC_SECRET", "e2e-ranking-gamificacao-secret-32-chars");
+  await registrarParticipacaoRanking(CLI_A, true);
   await salvarConfigFidelidadePontos({
     ativo: true,
     regraVersao: REGRA_ESTRELAS_V1,
