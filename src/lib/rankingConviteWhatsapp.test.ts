@@ -150,6 +150,23 @@ describe("motor de convite do Ranking por WhatsApp", () => {
     expect(r.mensagem).toContain("*8*");
   });
 
+  test("nota 1, 2 ou 3 nunca vira convite persuasivo", async () => {
+    for (const nota of [1, 2, 3]) {
+      expect(await prepararConviteRankingWhatsapp({
+        telefone: PHONE,
+        triggerEventId: `nota-${nota}`,
+        notaAvaliacao: nota,
+        agoraMs: T0,
+      })).toEqual({ status: "suprimido", motivo: "avaliacao_nao_positiva" });
+    }
+    expect((await prepararConviteRankingWhatsapp({
+      telefone: PHONE,
+      triggerEventId: "nota-4",
+      notaAvaliacao: 4,
+      agoraMs: T0,
+    })).status).toBe("pronto");
+  });
+
   test("não convida quem já participa", async () => {
     h.estado.participa = true;
     await expect(prepararConviteRankingWhatsapp({ telefone: PHONE, triggerEventId: "pedido-3", agoraMs: T0 }))
