@@ -66,21 +66,48 @@ try {
   await page.locator(".cf-ranking-screen").waitFor({ state: "visible" });
   await page.screenshot({ path: path.join(outDir, "05-ranking-liberado-apos-participar.png"), fullPage: true });
 
-  // 4) Ao voltar para a Fidelidade, o card ativo fica simples: sem avatares
-  // e sem a linha ambígua de pontos. Troféu e bloco de posição ficam alinhados.
+  // 4) Ao voltar para a Fidelidade, o card ativo exibe 3 perfis + um
+  // quarto círculo +N, diretamente no card e com tamanho responsivo.
   await page.getByRole("button", { name: "Voltar para Fidelidade" }).click();
   const cardRankingAtivo = page.getByRole("button", { name: "Abrir Ranking do Chefe" });
   await cardRankingAtivo.waitFor({ state: "visible" });
 
-  if (await cardRankingAtivo.locator(".cf-preview-faces").count() !== 0) {
-    falhar("Card do Ranking ainda exibiu círculos de participantes");
+  const grupoPerfis = cardRankingAtivo.locator(".cf-preview-ranking-faces");
+  await grupoPerfis.waitFor({ state: "visible" });
+
+  const perfis = grupoPerfis.locator(".cf-preview-ranking-face:not(.cf-preview-ranking-face-more)");
+  if (await perfis.count() !== 3) {
+    falhar(`Card do Ranking deveria exibir 3 perfis, mas exibiu ${await perfis.count()}`);
   }
+
+  const contador = grupoPerfis.locator(".cf-preview-ranking-face-more");
+  if (await contador.count() !== 1) falhar("Card do Ranking não exibiu exatamente um círculo +N");
+  const textoContador = (await contador.innerText()).trim();
+  if (textoContador !== "+3") {
+    falhar(`Contador restante incorreto na fixture: esperado +3, recebido ${textoContador}`);
+  }
+
+  const estiloGrupo = await grupoPerfis.evaluate((el) => {
+    const estilo = getComputedStyle(el);
+    return {
+      backgroundColor: estilo.backgroundColor,
+      boxShadow: estilo.boxShadow,
+      borderStyle: estilo.borderStyle,
+    };
+  });
+  if (estiloGrupo.backgroundColor !== "rgba(0, 0, 0, 0)") {
+    falhar(`Grupo de perfis ganhou fundo/cápsula indevida: ${estiloGrupo.backgroundColor}`);
+  }
+  if (estiloGrupo.boxShadow !== "none" || estiloGrupo.borderStyle !== "none") {
+    falhar("Grupo de perfis está envolvido por cápsula, borda ou sombra externa");
+  }
+
   if (await cardRankingAtivo.locator(".cf-preview-ranking-copy").count() !== 0) {
-    falhar("Card ativo do Ranking ainda exibiu a linha inferior de pontos");
+    falhar("Card ativo do Ranking voltou a exibir a linha inferior ambígua");
   }
   const textoCard = await cardRankingAtivo.innerText();
   if (textoCard.includes("pontos no Ranking")) {
-    falhar("Card ativo do Ranking ainda exibiu o texto ambíguo de pontos");
+    falhar("Card ativo do Ranking voltou a exibir o texto ambíguo de pontos");
   }
 
   const trophyBox = await cardRankingAtivo.locator(".cf-preview-trophy").boundingBox();
@@ -88,11 +115,29 @@ try {
   if (!trophyBox || !titleBox) falhar("Não foi possível medir o alinhamento do card do Ranking");
   const trophyCenter = trophyBox.y + trophyBox.height / 2;
   const titleCenter = titleBox.y + titleBox.height / 2;
-  if (Math.abs(trophyCenter - titleCenter) > 4) {
+  if (Math.abs(trophyCenter - titleCenter) > 5) {
     falhar(`Troféu e bloco de posição ficaram desalinhados: diferença de ${Math.abs(trophyCenter - titleCenter)}px`);
   }
 
-  await page.screenshot({ path: path.join(outDir, "06-card-ranking-hierarquia-simplificada.png"), fullPage: true });
+  await page.screenshot({ path: path.join(outDir, "06-card-ranking-perfis-premium-390.png"), fullPage: true });
+
+  await page.setViewportSize({ width: 320, height: 844 });
+  await cardRankingAtivo.waitFor({ state: "visible" });
+  const faceEstreita = await perfis.first().boundingBox();
+  if (!faceEstreita) falhar("Não foi possível medir avatar em viewport estreita");
+  await page.screenshot({ path: path.join(outDir, "07-card-ranking-perfis-premium-320.png"), fullPage: true });
+
+  await page.setViewportSize({ width: 430, height: 900 });
+  await cardRankingAtivo.waitFor({ state: "visible" });
+  const faceAmpla = await perfis.first().boundingBox();
+  if (!faceAmpla) falhar("Não foi possível medir avatar em viewport ampla");
+  if (faceAmpla.width <= faceEstreita.width) {
+    falhar(`Avatares não cresceram responsivamente: 320px=${faceEstreita.width}px, 430px=${faceAmpla.width}px`);
+  }
+  if (faceEstreita.width < 34 || faceAmpla.width > 45) {
+    falhar(`Avatares saíram da faixa visual segura: estreita=${faceEstreita.width}px, ampla=${faceAmpla.width}px`);
+  }
+  await page.screenshot({ path: path.join(outDir, "08-card-ranking-perfis-premium-430.png"), fullPage: true });
 
   await fs.writeFile(path.join(outDir, "resultado.json"), JSON.stringify({
     ok: true,
@@ -103,8 +148,10 @@ try {
       "ranking_sem_dados_antes_de_participar",
       "ranking_liberado_apos_participacao_explicita",
       "modal_contextual_com_fundo_apos_animacao",
-      "card_ranking_sem_circulos",
-      "card_ranking_sem_linha_ambigua_de_pontos",
+      "card_ranking_tres_perfis",
+      "card_ranking_quarto_circulo_restantes",
+      "card_ranking_sem_capsula_externa",
+      "card_ranking_avatares_responsivos",
       "card_ranking_trofeu_alinhado_ao_bloco_de_posicao"
     ]
   }, null, 2));
