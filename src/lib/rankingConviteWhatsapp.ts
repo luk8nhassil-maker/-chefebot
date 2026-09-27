@@ -229,7 +229,8 @@ export async function prepararConviteRankingWhatsapp(params: {
     }
 
     const [participa, optOut, config] = await Promise.all([
-      obterParticipacaoRanking(clienteId).catch(() => false),
+      // Falha fechada: se não for possível provar que NÃO participa, não convida.
+      obterParticipacaoRanking(clienteId).catch(() => true),
       clienteTemOptOutConviteRankingWhatsapp(params.telefone),
       obterConfigFidelidadePontos(),
     ]);
