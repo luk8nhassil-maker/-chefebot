@@ -5,7 +5,7 @@
 // código-fonte. Complementa FidelidadeRankingScreen.test.ts (regressões
 // estruturais herdadas do #445).
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, within, waitFor } from "@testing-library/react";
 import { FidelidadeRankingScreen, type FidelidadeRankingScreenProps } from "./FidelidadeRankingScreen";
 
 afterEach(cleanup);
@@ -27,7 +27,7 @@ const RANKING_BASE: FidelidadeRankingScreenProps["ranking"] = {
   },
 };
 
-function montar(props: Partial<FidelidadeRankingScreenProps> = {}) {
+function montar(props: Partial<FidelidadeRankingScreenProps> = {}, manterModal = false) {
   render(
     <FidelidadeRankingScreen
       ranking={RANKING_BASE}
@@ -43,9 +43,82 @@ function montar(props: Partial<FidelidadeRankingScreenProps> = {}) {
       {...props}
     />
   );
+  if (!manterModal) {
+    const dialog = screen.queryByRole("dialog");
+    if (dialog) fireEvent.click(within(dialog).getByRole("button", { name: /^Voltar ao ranking$/ }));
+    const outros = screen.queryByText("Outras informações do Ranking");
+    if (outros) fireEvent.click(outros);
+  }
 }
 
 describe("FidelidadeRankingScreen — Gamificação V2", () => {
+  test("ao abrir o Ranking escolhe uma missão real, sem lista nem ação automática", () => {
+    const onNovoPedido = vi.fn();
+    montar({
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "desbloqueada" }, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
+      onNovoPedido,
+    }, true);
+    const dialog = screen.getByRole("dialog", { name: "Caçada ao Pódio liberada!" });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(within(dialog).getByText(/2x no Ranking desta temporada/)).toBeTruthy();
+    expect(screen.queryByText("Sua próxima jogada")).toBeNull();
+    expect(onNovoPedido).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /^Voltar ao ranking$/ }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Caçada ao Pódio liberada/ }));
+    expect(screen.getByRole("dialog", { name: "Caçada ao Pódio liberada!" })).toBeTruthy();
+  });
+
+  test("sem situação acionável abre o Ranking direto, sem modal inventado", () => {
+    montar({ gamificacao: null }, true);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  test("pedido pendente vem antes da missão e nunca promete crédito", () => {
+    montar({
+      posPedido: { estado: "pendente" },
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "desbloqueada" }, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
+    }, true);
+    const dialog = screen.getByRole("dialog", { name: "Pedido recebido" });
+    expect(within(dialog).getByText(/Quando as estrelas forem confirmadas/)).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Caçada ao Pódio liberada!" })).toBeNull();
+  });
+
+  test("alerta de coroa só vence a missão quando há ameaça confirmada", () => {
+    montar({
+      ranking: { ...RANKING_BASE, participantes: { ...RANKING_BASE.participantes, alvo: { estado: "liderando", vantagem: 2 } } },
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "desbloqueada" }, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: true },
+    }, true);
+    const dialog = screen.getByRole("dialog", { name: "Coroa ameaçada!" });
+    expect(within(dialog).getByRole("button", { name: "Ver como subir" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Caçada ao Pódio liberada!" })).toBeNull();
+  });
+
+  test("indicação bloqueada não ganha destaque automático", () => {
+    montar({
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6, compartilhamentoLiberado: false },
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: { concluida: false }, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
+    }, true);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  test("modal removido por atualização do painel não reaparece sozinho", async () => {
+    const base = {
+      ranking: RANKING_BASE, temporada: null, indicacao: null, privacidade: null,
+      privacidadeCarregando: false, privacidadeSalvando: null, privacidadeErro: "",
+      onAlterarPrivacidade: () => undefined, onRevogarTodas: () => undefined,
+      onNovoPedido: () => undefined, onClose: () => undefined,
+    } satisfies FidelidadeRankingScreenProps;
+    const ativa = { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "desbloqueada" as const }, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false };
+    const consumida = { ...ativa, missaoSemanal: { status: "consumida" as const } };
+    const { rerender } = render(<FidelidadeRankingScreen {...base} gamificacao={ativa} />);
+    expect(screen.getByRole("dialog", { name: "Caçada ao Pódio liberada!" })).toBeTruthy();
+    rerender(<FidelidadeRankingScreen {...base} gamificacao={consumida} />);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    rerender(<FidelidadeRankingScreen {...base} gamificacao={ativa} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
   test("participante anônimo vê controle de saída sem consentimento de identidade", () => {
     const onRevogarTodas = vi.fn();
     montar({ privacidade: { participaCampanha: true, finalidades: [] }, onRevogarTodas });
@@ -88,7 +161,9 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
       },
       onCompartilharConquista: () => undefined,
     });
-    expect(screen.getByText("CONQUISTA RECENTE")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Sua posição merece destaque/ }));
+    expect(screen.getByRole("dialog", { name: "Sua posição merece destaque" })).toBeTruthy();
+    expect(within(screen.getByRole("dialog")).getByText("CONQUISTA RECENTE")).toBeTruthy();
     expect(screen.getByText("Você pode convidar alguém conhecido para conhecer o ChefeBot e fortalecer sua posição.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Fortalecer minha posição" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Compartilhar" })).toBeNull();
@@ -107,9 +182,39 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
       onCompartilharConquista: () => undefined,
       onNovoPedido: () => undefined,
     });
-    expect(screen.getByText("Convites bloqueados")).toBeTruthy();
-    expect(screen.getByText("Faça seu primeiro pedido confirmado para liberar o compartilhamento.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Sua posição merece destaque/ }));
+    expect(screen.getByText(/Convites bloqueados/)).toBeTruthy();
+    expect(screen.getByText(/Faça seu primeiro pedido confirmado para liberar o compartilhamento/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Fortalecer minha posição" })).toBeNull();
+  });
+
+  test("modal de conquista cobre o ranking, fecha com Escape e devolve o foco", () => {
+    montar({
+      ranking: { ...RANKING_BASE, participantes: { ...RANKING_BASE.participantes, variacaoPosicao: { direcao: "subiu", casas: 1 } } },
+      onCompartilharConquista: () => undefined,
+    });
+    const gatilho = screen.getByRole("button", { name: /Sua posição merece destaque/ });
+    gatilho.focus();
+    fireEvent.click(gatilho);
+    expect(screen.getByRole("dialog", { name: "Sua posição merece destaque" }).getAttribute("aria-modal")).toBe("true");
+    expect(screen.getByRole("main", { name: "Pódio Chefe", hidden: true }).hasAttribute("inert")).toBe(true);
+    expect(document.body.style.overflow).toBe("hidden");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(gatilho);
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  test("convite bloqueado não dispara compartilhamento pelo modal", () => {
+    const onCompartilharConquista = vi.fn();
+    montar({
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6, compartilhamentoLiberado: false },
+      ranking: { ...RANKING_BASE, participantes: { ...RANKING_BASE.participantes, variacaoPosicao: { direcao: "subiu", casas: 1 } } },
+      onCompartilharConquista,
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Sua posição merece destaque/ }));
+    expect(screen.queryByRole("button", { name: "Fortalecer minha posição" })).toBeNull();
+    expect(onCompartilharConquista).not.toHaveBeenCalled();
   });
 
   test("missão semanal desbloqueada mostra o card Caçada ao Pódio", () => {
@@ -153,6 +258,7 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
       gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: { concluida: false }, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
     });
     expect(screen.getByText("MISSÃO DA TEMPORADA")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Indique 1 amigo/ }));
     expect(screen.getByText("Indique 1 amigo — 0/1")).toBeTruthy();
   });
 
@@ -160,6 +266,7 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     montar({
       gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: { concluida: true }, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
     });
+    fireEvent.click(screen.getByRole("button", { name: /Indique 1 amigo/ }));
     expect(screen.getByText("Indique 1 amigo — 1/1 ✓ Concluída")).toBeTruthy();
   });
 
@@ -172,21 +279,24 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
 
   test("copy da missão semanal nunca confunde o bônus do Ranking com Estrelas normais da Fidelidade", () => {
     montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "desbloqueada" }, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false } });
+    fireEvent.click(screen.getByRole("button", { name: /Caçada ao Pódio liberada!/ }));
     expect(screen.getByText("Seu próximo pedido vale 2x no Ranking desta temporada.")).toBeTruthy();
     expect(screen.getByText(/Suas Estrelas normais da Fidelidade continuam as mesmas/)).toBeTruthy();
   });
 
   test("nível de chef mostra XP atual, XP do próximo nível e barra de progresso proporcional", () => {
     montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: { nivel: 2, nome: "Cozinheiro", xpAtual: 50, xpProximoNivel: 100 }, movimentoRecente: null, coroaAmeacada: false } });
-    expect(screen.getByText("50 XP / 100 XP")).toBeTruthy();
-    const barra = screen.getByRole("progressbar");
+    fireEvent.click(screen.getByRole("button", { name: /Nível 2 — Cozinheiro/ }));
+    expect(within(screen.getByRole("dialog")).getByText("50 XP / 100 XP")).toBeTruthy();
+    const barra = within(screen.getByRole("dialog")).getByRole("progressbar");
     expect(barra.getAttribute("aria-valuenow")).toBe("50");
   });
 
   test("nível máximo (sem próximo nível) mostra barra cheia e nunca pede XP restante inventado", () => {
     montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: null, nivelChef: { nivel: 5, nome: "Lenda", xpAtual: 9999, xpProximoNivel: null }, movimentoRecente: null, coroaAmeacada: false } });
-    expect(screen.getByText("Nível máximo atingido.")).toBeTruthy();
-    const barra = screen.getByRole("progressbar");
+    fireEvent.click(screen.getByRole("button", { name: /Nível 5 — Lenda/ }));
+    expect(within(screen.getByRole("dialog")).getByText("Nível máximo atingido.")).toBeTruthy();
+    const barra = within(screen.getByRole("dialog")).getByRole("progressbar");
     expect(barra.getAttribute("aria-valuenow")).toBe("100");
   });
 

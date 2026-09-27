@@ -4,7 +4,8 @@
 // cliente/page.tsx (que crescia demais) para um módulo dedicado — mesmo
 // comportamento e tipos, reaproveitado tanto pela página real quanto pelo
 // Preview isolado (/dev/ranking-retencao), que importa este mesmo arquivo.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { createPortal } from 'react-dom'
 import { Star } from 'lucide-react'
 import {
   detectarConquistaRanking,
@@ -35,6 +36,30 @@ const ICONE_STATUS_SOCIAL: Record<NonNullable<PainelGamificacao['statusSocial']>
   bronze: '🥉',
   elite: '✦',
 }
+
+type MomentoRanking = 'conquista' | 'nivel' | 'coroa' | 'indicacao' | 'semanal' | 'pedido'
+function escolherMomentoPrincipal(
+  ranking: NonNullable<PainelFidelidade['ranking']>,
+  gamificacao: PainelGamificacao | null | undefined,
+  indicacao: PainelFidelidade['indicacao'] | undefined,
+  posPedido: FidelidadeRankingScreenProps['posPedido'],
+  podeCompartilhar: boolean,
+  podeIndicar: boolean,
+  podePedir: boolean,
+): MomentoRanking | null {
+  if (posPedido) return 'pedido'
+  if (gamificacao?.coroaAmeacada && ranking.participantes.alvo?.estado === 'liderando') return 'coroa'
+  if (podePedir && gamificacao?.missaoSemanal?.status === 'desbloqueada') return 'semanal'
+  if (podeIndicar && gamificacao?.missaoIndicacao && !gamificacao.missaoIndicacao.concluida && indicacao?.ativa && indicacao.compartilhamentoLiberado !== false) return 'indicacao'
+  if (podeCompartilhar && detectarConquistaRanking({
+    posicao: ranking.participantes.posicao ?? ranking.posicao,
+    variacao: ranking.participantes.variacaoPosicao,
+  })) return 'conquista'
+  return null
+}
+const subscribeToDocument = () => () => {}
+const documentDisponivel = () => true
+const documentIndisponivel = () => false
 
 // Selo compacto (só ícone) para OUTROS membros do Top 10 dentro das listas —
 // distinto do selo "cf-ranking-selo" (ícone+nome) usado no card do próprio
@@ -100,6 +125,15 @@ export function FidelidadeRankingScreen({
 }: FidelidadeRankingScreenProps) {
   const [aba, setAba] = useState<'participantes' | 'minha' | 'geral'>('minha')
   const [sheetSubirAberto, setSheetSubirAberto] = useState(false)
+  const [momentoAberto, setMomentoAberto] = useState<MomentoRanking | null>(() => escolherMomentoPrincipal(ranking, gamificacao, indicacao, posPedido, !!onCompartilharConquista && indicacao?.ativa === true && indicacao.compartilhamentoLiberado !== false, !!onIndicarAmigo, !!onNovoPedido))
+  const podeCriarPortal = useSyncExternalStore(subscribeToDocument, documentDisponivel, documentIndisponivel)
+  const momentoDialogRef = useRef<HTMLDivElement>(null)
+  const momentoGatilhoRef = useRef<HTMLElement | null>(null)
+  const rankingRef = useRef<HTMLElement>(null)
+  const abrirMomento = (momento: MomentoRanking) => {
+    if (!momentoAberto) momentoGatilhoRef.current = document.activeElement as HTMLElement | null
+    setMomentoAberto(momento)
+  }
   const emit = (tipo: EventoRankingRetencao) => onTelemetria?.(tipo)
   const lista = [...ranking.lista].sort((a, b) => a.posicao - b.posicao)
   const listaSemPodio = lista.filter((entrada) => entrada.posicao > 3)
@@ -157,6 +191,22 @@ export function FidelidadeRankingScreen({
       ? Math.max(0, Math.min(100, Math.round((gamificacao.nivelChef.xpAtual / gamificacao.nivelChef.xpProximoNivel) * 100)))
       : 100
     : 0
+  const momentos: { id: MomentoRanking; eyebrow: string; titulo: string; resumo: string; simbolo: string }[] = []
+  if (posPedido) momentos.push({
+    id: 'pedido', eyebrow: 'SEU PEDIDO',
+    titulo: posPedido.estado === 'creditado' ? (posPedido.estrelasGanhas == null ? 'Estrelas confirmadas' : `+${posPedido.estrelasGanhas} estrelas`) : 'Pedido recebido',
+    resumo: posPedido.estado === 'creditado' ? 'Veja o que mudou na sua posição.' : 'Acompanhe a confirmação das estrelas.',
+    simbolo: posPedido.estado === 'creditado' ? '✦' : '◷',
+  })
+  if (conquista) momentos.push({ id: 'conquista', eyebrow: 'CONQUISTA RECENTE', titulo: 'Sua posição merece destaque', resumo: podeCompartilharConquista ? 'Veja sua conquista e convide alguém conhecido.' : 'Veja sua conquista no Ranking.', simbolo: '✦' })
+  if (gamificacao?.missaoSemanal?.status === 'desbloqueada') momentos.push({ id: 'semanal', eyebrow: 'MISSÃO SEMANAL', titulo: 'Caçada ao Pódio liberada!', resumo: 'Seu próximo pedido vale 2x no Ranking.', simbolo: '↗' })
+  if (alvo?.estado === 'liderando') momentos.push({ id: 'coroa', eyebrow: 'NA LIDERANÇA', titulo: gamificacao?.coroaAmeacada ? 'Coroa ameaçada!' : 'Defenda sua coroa', resumo: mensagemMissao ?? 'Acompanhe sua vantagem.', simbolo: '♛' })
+  if (gamificacao?.missaoIndicacao) momentos.push({ id: 'indicacao', eyebrow: 'MISSÃO DA TEMPORADA', titulo: 'Indique 1 amigo', resumo: gamificacao.missaoIndicacao.concluida ? '1/1 ✓ Concluída' : '0/1 · Veja como participar', simbolo: '↗' })
+  if (gamificacao?.nivelChef) momentos.push({ id: 'nivel', eyebrow: 'SEU NÍVEL', titulo: `Nível ${gamificacao.nivelChef.nivel}${gamificacao.nivelChef.nome ? ` — ${gamificacao.nivelChef.nome}` : ''}`, resumo: gamificacao.nivelChef.xpProximoNivel === null ? 'Nível máximo atingido.' : `${gamificacao.nivelChef.xpAtual} XP / ${gamificacao.nivelChef.xpProximoNivel} XP`, simbolo: '✶' })
+  const momentoAtual = momentos.find((item) => item.id === momentoAberto)
+  const modalAtivo = !!momentoAtual
+  const focoAtual = momentos.find((item) => item.id === escolherMomentoPrincipal(ranking, gamificacao, indicacao, posPedido, podeCompartilharConquista, !!onIndicarAmigo, !!onNovoPedido))
+  const outrosMomentos = momentos.filter((item) => item.id !== focoAtual?.id)
 
   // Telemetria da abertura — dispara uma vez por montagem (o usuário abriu a
   // tela agora). "Retorno" é reconhecido por um marcador local no aparelho,
@@ -175,6 +225,40 @@ export function FidelidadeRankingScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    if (!modalAtivo || !podeCriarPortal) return
+    const rankingAtual = rankingRef.current
+    const overflowAnterior = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    momentoDialogRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setMomentoAberto(null); return }
+      if (event.key !== 'Tab') return
+      const focaveis = Array.from(momentoDialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])') ?? [])
+      if (focaveis.length === 0) { event.preventDefault(); return }
+      const primeiro = focaveis[0]
+      const ultimo = focaveis[focaveis.length - 1]
+      if (event.shiftKey && (document.activeElement === primeiro || document.activeElement === momentoDialogRef.current)) {
+        event.preventDefault(); ultimo.focus()
+      } else if (!event.shiftKey && document.activeElement === ultimo) {
+        event.preventDefault(); primeiro.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = overflowAnterior
+      document.removeEventListener('keydown', onKeyDown);
+      (momentoGatilhoRef.current ?? rankingAtual)?.focus()
+    }
+  }, [momentoAberto, modalAtivo, podeCriarPortal])
+
+  useEffect(() => {
+    if (!momentoAberto || modalAtivo) return
+    let ativo = true
+    queueMicrotask(() => { if (ativo) setMomentoAberto(null) })
+    return () => { ativo = false }
+  }, [momentoAberto, modalAtivo])
+
   const linhaDisputa = (participante: ParticipanteDisputa) => (
     <div key={`disputa-${participante.posicao}`} className={`cf-ranking-row ${participante.eVoce ? 'voce' : ''}`}>
       <strong>{participante.posicao}</strong>
@@ -190,7 +274,7 @@ export function FidelidadeRankingScreen({
   )
 
   return (
-    <main className="cf-ranking-screen" aria-label="Pódio Chefe">
+    <main ref={rankingRef} tabIndex={-1} className="cf-ranking-screen" aria-label="Pódio Chefe" inert={modalAtivo ? true : undefined}>
       <header className="cf-ranking-header">
         <button type="button" onClick={onClose} aria-label="Voltar para Fidelidade">‹</button>
         <div>
@@ -259,33 +343,6 @@ export function FidelidadeRankingScreen({
             </button>
           )}
 
-          {conquista && (
-            <section className="cf-ranking-share-card" aria-label="Fortalecer sua posição no Ranking do Chefe">
-              <span className="cf-ranking-share-mark" aria-hidden="true">🔥</span>
-              <div className="cf-ranking-share-copy">
-                <small>CONQUISTA RECENTE</small>
-                <strong>{textoConquistaRanking(conquista, ranking.participantes.posicao ?? ranking.posicao)}</strong>
-                <p>Você pode convidar alguém conhecido para conhecer o ChefeBot e fortalecer sua posição.</p>
-                {podeCompartilharConquista && (
-                  <button
-                    type="button"
-                    className="cf-ranking-share-btn"
-                    disabled={compartilhando}
-                    onClick={() => { emit('compartilhamento_clicado'); onCompartilharConquista?.() }}
-                  >
-                    {compartilhando ? 'Preparando…' : 'Fortalecer minha posição'}
-                  </button>
-                )}
-                {!compartilhamentoLiberado && (
-                  <div className="cf-ranking-share-locked" role="status">
-                    <strong>Convites bloqueados</strong>
-                    <small>Faça seu primeiro pedido confirmado para liberar o compartilhamento.</small>
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
-
           <section className="cf-ranking-list" aria-label="Pessoas próximas de você">
             <p className="cf-ranking-footnote" style={{ marginTop: 0, fontWeight: 700, color: '#40536f' }}>PERTO DE VOCÊ</p>
             {disputa ? (
@@ -308,66 +365,23 @@ export function FidelidadeRankingScreen({
             </section>
           )}
 
-          {gamificacao?.nivelChef && (
-            <section className="cf-ranking-nivel" aria-label="Progresso de Nível de Chef">
-              <div className="cf-ranking-nivel-head">
-                <strong>Nível {gamificacao.nivelChef.nivel}{gamificacao.nivelChef.nome ? ` — ${gamificacao.nivelChef.nome}` : ''}</strong>
-                <span>
-                  {gamificacao.nivelChef.xpAtual} XP
-                  {gamificacao.nivelChef.xpProximoNivel !== null ? ` / ${gamificacao.nivelChef.xpProximoNivel} XP` : ''}
-                </span>
-              </div>
-              <div className="cf-ranking-nivel-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={nivelProgressoPercent}>
-                <div className="cf-ranking-nivel-fill" style={{ width: `${nivelProgressoPercent}%` }} />
-              </div>
-              <small>{gamificacao.nivelChef.xpProximoNivel === null ? 'Nível máximo atingido.' : `Faltam ${Math.max(0, gamificacao.nivelChef.xpProximoNivel - gamificacao.nivelChef.xpAtual)} XP para o próximo nível.`}</small>
-            </section>
-          )}
-
-          {alvo?.estado === 'liderando' && (
-            <section className={`cf-ranking-note cf-ranking-coroa${gamificacao?.coroaAmeacada ? ' cf-ranking-coroa-ameacada' : ''}`} aria-label="Defenda sua coroa">
-              <span aria-hidden="true">👑</span>
-              <div>
-                <strong>{gamificacao?.coroaAmeacada ? 'Coroa ameaçada!' : 'Defenda sua coroa'}</strong>
-                <p>{mensagemMissao}</p>
-              </div>
-            </section>
-          )}
-
-          {gamificacao?.missaoIndicacao && (
-            <section className="cf-ranking-note cf-ranking-missao" aria-label="Missão de indicação da temporada">
-              <span aria-hidden="true">🤝</span>
-              <div>
-                <strong>MISSÃO DA TEMPORADA</strong>
-                <p>{gamificacao.missaoIndicacao.concluida ? 'Indique 1 amigo — 1/1 ✓ Concluída' : 'Indique 1 amigo — 0/1'}</p>
-              </div>
-            </section>
-          )}
-
-          {gamificacao?.missaoSemanal?.status === 'desbloqueada' && (
-            <section className="cf-ranking-note cf-ranking-missao" aria-label="Missão semanal">
-              <span aria-hidden="true">🎯</span>
-              <div>
-                <strong>Caçada ao Pódio liberada!</strong>
-                <p>Seu próximo pedido vale 2x no Ranking desta temporada.</p>
-                <small>Suas Estrelas normais da Fidelidade continuam as mesmas — o bônus 2x conta só para a disputa desta temporada.</small>
-              </div>
-            </section>
-          )}
-
-          {posPedido && (
-            <section className="cf-ranking-note" aria-label="Resultado do pedido" style={{ marginTop: 0, marginBottom: 14 }}>
-              <span aria-hidden="true">{posPedido.estado === 'creditado' ? '⭐' : '⏳'}</span>
-              <div>
-                {posPedido.estado === 'pendente' ? (
-                  <strong>Seu pedido foi recebido. Quando as estrelas forem confirmadas, seu progresso será atualizado.</strong>
-                ) : (
-                  <>
-                    <strong>+{posPedido.estrelasGanhas ?? 0} estrelas</strong>
-                    <p>{mensagemMov ?? (mensagemMissao ? `Agora você está em #${ranking.participantes.posicao ?? ranking.posicao}. ${mensagemMissao}` : `Agora você está em #${ranking.participantes.posicao ?? ranking.posicao}.`)}</p>
-                  </>
-                )}
-              </div>
+          {momentos.length > 0 && (
+            <section className="cf-ranking-momentos" aria-label="Suas novidades no Ranking">
+              {focoAtual && <>
+                <div className="cf-ranking-momentos-head"><span>SEU FOCO AGORA</span></div>
+                <button type="button" className={`cf-ranking-momento-teaser cf-ranking-momento-${focoAtual.id}`} onClick={() => abrirMomento(focoAtual.id)}>
+                  <span className="cf-ranking-momento-icon" aria-hidden="true">{focoAtual.simbolo}</span>
+                  <span className="cf-ranking-momento-words"><small>{focoAtual.eyebrow}</small><strong>{focoAtual.titulo}</strong><span>{focoAtual.resumo}</span></span>
+                  <span className="cf-ranking-momento-arrow" aria-hidden="true">↗</span>
+                </button>
+              </>}
+              {outrosMomentos.length > 0 && <details className="cf-ranking-momentos-outros"><summary>Outras informações do Ranking</summary>
+                {outrosMomentos.map((momento) => <button key={momento.id} type="button" className={`cf-ranking-momento-teaser cf-ranking-momento-${momento.id}`} onClick={() => abrirMomento(momento.id)}>
+                  <span className="cf-ranking-momento-icon" aria-hidden="true">{momento.simbolo}</span>
+                  <span className="cf-ranking-momento-words"><small>{momento.eyebrow}</small><strong>{momento.titulo}</strong><span>{momento.resumo}</span></span>
+                  <span className="cf-ranking-momento-arrow" aria-hidden="true">↗</span>
+                </button>)}
+              </details>}
             </section>
           )}
 
@@ -465,6 +479,67 @@ export function FidelidadeRankingScreen({
         </div>
       )}
 
+      {momentoAtual && podeCriarPortal && createPortal(
+        <div className={`cf-ranking-momento-backdrop cf-ranking-momento-backdrop-${momentoAtual.id}`} onMouseDown={(event) => { if (event.target === event.currentTarget) setMomentoAberto(null) }}>
+          <div ref={momentoDialogRef} className="cf-ranking-momento-dialog" role="dialog" aria-modal="true" aria-labelledby="cf-ranking-momento-title" tabIndex={-1}>
+            <button type="button" className="cf-ranking-momento-close" aria-label="Fechar e voltar ao ranking" onClick={() => setMomentoAberto(null)}>×</button>
+            <div className="cf-ranking-momento-emblem" aria-hidden="true">{momentoAtual.simbolo}</div>
+            <span className="cf-ranking-momento-kicker">{momentoAtual.eyebrow}</span>
+            <h2 id="cf-ranking-momento-title">{momentoAtual.titulo}</h2>
+            <div className="cf-ranking-momento-detail">
+              {momentoAberto === 'conquista' && conquista && (
+                <>
+                  <p className="cf-ranking-momento-lead">{textoConquistaRanking(conquista, ranking.participantes.posicao ?? ranking.posicao)}</p>
+                  {podeCompartilharConquista && <p>Você pode convidar alguém conhecido para conhecer o ChefeBot e fortalecer sua posição.</p>}
+                  {!compartilhamentoLiberado && <p className="cf-ranking-momento-notice">Convites bloqueados. Faça seu primeiro pedido confirmado para liberar o compartilhamento.</p>}
+                </>
+              )}
+              {momentoAberto === 'nivel' && gamificacao?.nivelChef && (
+                <>
+                  <p className="cf-ranking-momento-lead">{gamificacao.nivelChef.xpAtual} XP{gamificacao.nivelChef.xpProximoNivel !== null ? ` / ${gamificacao.nivelChef.xpProximoNivel} XP` : ''}</p>
+                  <div className="cf-ranking-nivel-bar" role="progressbar" aria-label="Progresso do Nível de Chef" aria-valuemin={0} aria-valuemax={100} aria-valuenow={nivelProgressoPercent}><div className="cf-ranking-nivel-fill" style={{ width: `${nivelProgressoPercent}%` }} /></div>
+                  <p>{gamificacao.nivelChef.xpProximoNivel === null ? 'Nível máximo atingido.' : `Faltam ${Math.max(0, gamificacao.nivelChef.xpProximoNivel - gamificacao.nivelChef.xpAtual)} XP para o próximo nível.`}</p>
+                </>
+              )}
+              {momentoAberto === 'coroa' && <p className="cf-ranking-momento-lead">{mensagemMissao}</p>}
+              {momentoAberto === 'indicacao' && gamificacao?.missaoIndicacao && (
+                <>
+                  <p className="cf-ranking-momento-lead">Indique 1 amigo — {gamificacao.missaoIndicacao.concluida ? '1/1 ✓ Concluída' : '0/1'}</p>
+                  <p>{gamificacao.missaoIndicacao.concluida ? 'Sua missão desta temporada foi concluída.' : 'A missão avança quando a primeira compra elegível do amigo for confirmada.'}</p>
+                  {!compartilhamentoLiberado && <p className="cf-ranking-momento-notice">Convites bloqueados. Faça seu primeiro pedido confirmado para liberar o compartilhamento.</p>}
+                </>
+              )}
+              {momentoAberto === 'semanal' && (
+                <>
+                  <p className="cf-ranking-momento-lead">Seu próximo pedido vale 2x no Ranking desta temporada.</p>
+                  <p>Suas Estrelas normais da Fidelidade continuam as mesmas — o bônus 2x conta só para a disputa desta temporada.</p>
+                </>
+              )}
+              {momentoAberto === 'pedido' && posPedido && (
+                <p className="cf-ranking-momento-lead">{posPedido.estado === 'pendente'
+                  ? 'Seu pedido foi recebido. Quando as estrelas forem confirmadas, seu progresso será atualizado.'
+                  : mensagemMov ?? (mensagemMissao ? `Agora você está em #${ranking.participantes.posicao ?? ranking.posicao}. ${mensagemMissao}` : `Agora você está em #${ranking.participantes.posicao ?? ranking.posicao}.`)}</p>
+              )}
+            </div>
+            <div className="cf-ranking-momento-actions">
+              {momentoAberto === 'conquista' && podeCompartilharConquista && (
+                <button type="button" className="cf-ranking-momento-primary" disabled={compartilhando} onClick={() => { setMomentoAberto(null); emit('compartilhamento_clicado'); onCompartilharConquista?.() }}>{compartilhando ? 'Preparando…' : 'Fortalecer minha posição'}</button>
+              )}
+              {momentoAberto === 'indicacao' && !gamificacao?.missaoIndicacao?.concluida && indicacao?.ativa && (compartilhamentoLiberado ? !!onIndicarAmigo : !!onNovoPedido) && (
+                <button type="button" className="cf-ranking-momento-primary" disabled={indicando} onClick={() => {
+                  setMomentoAberto(null)
+                  if (!compartilhamentoLiberado) onNovoPedido?.()
+                  else { emit('indicacao_clicada'); onIndicarAmigo?.() }
+                }}>{compartilhamentoLiberado ? 'Convidar um amigo' : 'Fazer primeiro pedido'}</button>
+              )}
+              {momentoAberto === 'semanal' && onNovoPedido && <button type="button" className="cf-ranking-momento-primary" onClick={() => { setMomentoAberto(null); onNovoPedido() }}>Fazer pedido</button>}
+              {momentoAberto === 'coroa' && gamificacao?.coroaAmeacada && <button type="button" className="cf-ranking-momento-primary" onClick={() => { setMomentoAberto(null); setSheetSubirAberto(true) }}>Ver como subir</button>}
+              <button type="button" className="cf-ranking-momento-secondary" onClick={() => setMomentoAberto(null)}>Voltar ao ranking</button>
+            </div>
+          </div>
+        </div>, document.body,
+      )}
+
       <style>{`
         .cf-ranking-screen { width: 100%; max-width: 720px; margin: -4px auto 0; color: #1e2a3b; }
         .cf-ranking-header { display: grid; grid-template-columns: 52px 1fr auto; align-items: start; gap: 8px; margin-bottom: 16px; }
@@ -527,6 +602,56 @@ export function FidelidadeRankingScreen({
         .cf-ranking-current>div>span { display: block; margin-top: 7px; color: #53657e; font-size: 13px; }
         .cf-ranking-current-goal { border-left: 1px solid #d9e3ef; padding-left: 16px; }
         .cf-ranking-current .cf-ranking-current-goal strong { font-size: 15px; line-height: 1.35; }
+        .cf-ranking-momentos { display: grid; gap: 8px; margin: 22px 0 16px; }
+        .cf-ranking-momentos-head { display: flex; justify-content: space-between; align-items: center; padding: 0 3px 3px; color: #304562; font-size: 11px; font-weight: 800; letter-spacing: .08em; }
+        .cf-ranking-momentos-head small { color: #6d7a8c; font-size: 11px; font-weight: 500; letter-spacing: 0; }
+        .cf-ranking-momento-teaser { display: flex; align-items: center; gap: 13px; width: 100%; min-height: 72px; padding: 12px 15px; border: 1px solid #d9e3ef; border-radius: 17px; background: #fff; color: #17263d; text-align: left; cursor: pointer; transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease; }
+        .cf-ranking-momento-teaser:hover { transform: translateY(-2px); border-color: #8eb4f3; box-shadow: 0 12px 24px rgba(31,66,112,.1); }
+        .cf-ranking-momento-teaser:focus-visible, .cf-ranking-momento-close:focus-visible, .cf-ranking-momento-actions button:focus-visible { outline: 3px solid #306cce; outline-offset: 3px; }
+        .cf-ranking-momento-semanal, .cf-ranking-momento-coroa { background: #fffcf3; border-color: #f0dfa8; }
+        .cf-ranking-momento-conquista { background: #f5f9ff; border-color: #b5cef4; }
+        .cf-ranking-momento-icon { display: grid; flex: none; place-items: center; width: 42px; height: 42px; border-radius: 13px; background: #e9f1ff; color: #2860ba; font-size: 24px; font-weight: 800; }
+        .cf-ranking-momento-semanal .cf-ranking-momento-icon, .cf-ranking-momento-coroa .cf-ranking-momento-icon { color: #8b5e00; background: #ffefb3; }
+        .cf-ranking-momento-words { display: grid; gap: 2px; min-width: 0; flex: 1; }
+        .cf-ranking-momento-words small { color: #4a70a8; font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+        .cf-ranking-momento-words strong { font-size: 15px; line-height: 1.2; letter-spacing: -.02em; }
+        .cf-ranking-momento-words>span { color: #5b6b80; font-size: 12px; line-height: 1.35; }
+        .cf-ranking-momento-arrow { align-self: center; color: #58759d; font-size: 22px; }
+        .cf-ranking-momento-backdrop { position: fixed; inset: 0; z-index: 500; display: grid; place-items: center; padding: 20px; background: rgba(11,27,49,.92); animation: cf-momento-fundo .28s ease-out both; }
+        .cf-ranking-momento-dialog { position: relative; display: flex; flex-direction: column; width: min(100%, 550px); max-height: min(760px, 94dvh); overflow-y: auto; box-sizing: border-box; padding: clamp(28px, 5vw, 48px); border-radius: 28px; background: #fffdf7; color: #142640; box-shadow: 0 36px 100px rgba(0,0,0,.32); outline: none; animation: cf-momento-entrada .5s cubic-bezier(.17,.85,.24,1) both; }
+        .cf-ranking-momento-close { position: absolute; top: 18px; right: 20px; display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid #d9e3ef; border-radius: 50%; background: #fff; color: #283c59; font-size: 28px; line-height: 1; cursor: pointer; }
+        .cf-ranking-momento-emblem { display: grid; place-items: center; width: 90px; height: 90px; margin: 24px 0 26px; border: 2px solid #b6d0f7; border-radius: 26px; background: #eaf3ff; color: #2860ba; font-size: 54px; font-weight: 800; animation: cf-momento-emblema .8s .12s cubic-bezier(.18,.89,.32,1.25) both; }
+        .cf-ranking-momento-kicker { color: #3265af; font-size: 11px; font-weight: 850; letter-spacing: .16em; }
+        .cf-ranking-momento-dialog h2 { max-width: 440px; margin: 9px 0 0; font-size: clamp(32px, 7vw, 52px); line-height: 1.04; letter-spacing: -.055em; font-weight: 850; }
+        .cf-ranking-momento-detail { margin: 24px 0 0; padding-top: 20px; border-top: 1px solid #d9e3ef; }
+        .cf-ranking-momento-detail p { margin: 0 0 12px; color: #4b5b70; font-size: 15px; line-height: 1.55; }
+        .cf-ranking-momento-detail .cf-ranking-momento-lead { color: #203854; font-size: 20px; line-height: 1.34; font-weight: 700; letter-spacing: -.02em; }
+        .cf-ranking-momento-detail .cf-ranking-momento-notice { padding: 12px 14px; border-radius: 12px; background: #eef4fd; color: #365276; font-size: 13px; }
+        .cf-ranking-momento-detail .cf-ranking-nivel-bar { height: 12px; margin: 13px 0 16px; }
+        .cf-ranking-momento-detail .cf-ranking-nivel-fill { transform-origin: left; animation: cf-momento-progresso 1s .25s ease-out both; }
+        .cf-ranking-momento-actions { display: grid; gap: 9px; margin-top: 20px; }
+        .cf-ranking-momento-actions button { min-height: 49px; padding: 10px 16px; border-radius: 13px; font: inherit; font-size: 14px; font-weight: 800; cursor: pointer; }
+        .cf-ranking-momento-actions .cf-ranking-momento-primary { border: 0; background: #ffca00; color: #202a38; }
+        .cf-ranking-momento-actions .cf-ranking-momento-secondary { border: 1px solid #d9e3ef; background: #fff; color: #315275; }
+        .cf-ranking-momento-actions button:disabled { opacity: .55; cursor: wait; }
+        .cf-ranking-momentos-outros { margin-top: 5px; }
+        .cf-ranking-momentos-outros summary { padding: 10px 2px; color: #536b89; font-size: 12px; font-weight: 700; cursor: pointer; }
+        .cf-ranking-momentos-outros .cf-ranking-momento-teaser { margin-top: 8px; }
+        .cf-ranking-momento-backdrop-semanal .cf-ranking-momento-emblem, .cf-ranking-momento-backdrop-coroa .cf-ranking-momento-emblem { border-color: #edcd66; background: #fff1b7; color: #9b6b00; }
+        .cf-ranking-momento-backdrop-conquista .cf-ranking-momento-emblem { animation-name: cf-momento-conquista; }
+        .cf-ranking-momento-backdrop-pedido .cf-ranking-momento-emblem { animation-name: cf-momento-pedido; }
+        .cf-ranking-momento-backdrop-coroa .cf-ranking-momento-emblem { animation-name: cf-momento-coroa; }
+        .cf-ranking-momento-backdrop-semanal .cf-ranking-momento-emblem, .cf-ranking-momento-backdrop-indicacao .cf-ranking-momento-emblem { animation-name: cf-momento-deslize; }
+        @keyframes cf-momento-fundo { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes cf-momento-entrada { from { opacity: 0; transform: translateY(30px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes cf-momento-emblema { from { opacity: 0; transform: scale(.65) rotate(-10deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
+        @keyframes cf-momento-conquista { from { opacity: 0; transform: scale(.5) rotate(-25deg); } 70% { transform: scale(1.12) rotate(4deg); } to { opacity: 1; transform: scale(1); } }
+        @keyframes cf-momento-pedido { from { opacity: 0; transform: scale(.65); } 60% { transform: scale(1.1); } to { opacity: 1; transform: scale(1); } }
+        @keyframes cf-momento-coroa { from { opacity: 0; transform: translateY(-25px) rotate(-12deg); } to { opacity: 1; transform: translateY(0) rotate(0); } }
+        @keyframes cf-momento-deslize { from { opacity: 0; transform: translateX(-35px) rotate(-8deg); } to { opacity: 1; transform: translateX(0) rotate(0); } }
+        @keyframes cf-momento-progresso { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+        @media (max-width: 600px) { .cf-ranking-momento-backdrop { padding: 0; }.cf-ranking-momento-dialog { width: 100%; max-height: 100dvh; min-height: 100dvh; border-radius: 0; padding: max(30px, env(safe-area-inset-top)) 25px max(28px, env(safe-area-inset-bottom)); }.cf-ranking-momento-emblem { margin-top: clamp(30px, 10dvh, 90px); }.cf-ranking-momento-actions { margin-top: auto; padding-top: 24px; } }
+        @media (prefers-reduced-motion: reduce) { .cf-ranking-momento-backdrop, .cf-ranking-momento-dialog, .cf-ranking-momento-emblem, .cf-ranking-momento-detail .cf-ranking-nivel-fill { animation: none !important; }.cf-ranking-momento-teaser { transition: none; } }
         @media (prefers-reduced-motion: reduce) { .cf-ranking-screen * { transition: none !important; } }
         @media (max-width: 420px) {
           .cf-ranking-current { grid-template-columns: minmax(100px, .75fr) 1fr; gap: 8px; padding: 14px 12px; border-radius: 17px; }

@@ -687,7 +687,7 @@ const CENARIOS_V3: Cenario[] = [
 CENARIOS.push(...CENARIOS_V3);
 
 export default function RankingRetencaoPreview() {
-  const [cenario, setCenario] = useState(CENARIOS[0]);
+  const [cenario, setCenario] = useState(CENARIOS[25]);
   const [aviso, setAviso] = useState("");
   const [indicando, setIndicando] = useState(false);
   const [compartilhando, setCompartilhando] = useState(false);
