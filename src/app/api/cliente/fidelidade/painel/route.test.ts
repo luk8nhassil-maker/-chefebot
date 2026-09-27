@@ -211,8 +211,9 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     expect(body.temporada?.nome).toBe("Temporada");
     expect(body.ranking).toBeNull();
     expect(JSON.stringify(body)).not.toContain('"score":999');
-    expect(reconciliarTransicaoMock).not.toHaveBeenCalled();
-    expect(aplicarCarryoverMock).not.toHaveBeenCalled();
+    // Fechar a visualização não pode parar a manutenção global da temporada.
+    expect(reconciliarTransicaoMock).toHaveBeenCalled();
+    expect(aplicarCarryoverMock).toHaveBeenCalled();
   });
 
   test("retorna dados de temporada quando há temporada ativa", async () => {
