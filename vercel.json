@@ -1,6 +1,7 @@
 {
   "crons": [
     {"path": "/api/cron", "schedule": "0 3 * * *"},
-    {"path": "/api/cron/pix-pendente", "schedule": "0 5 * * *"}
+    {"path": "/api/cron/pix-pendente", "schedule": "0 5 * * *"},
+    {"path": "/api/cron/ranking-podio", "schedule": "0 21 * * *"}
   ]
 }
