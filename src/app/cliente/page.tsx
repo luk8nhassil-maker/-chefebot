@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, ChevronRight, Clock3, Gift, Info, List, Phone, MessageCircle, Receipt, ShieldCheck, Sparkles, Pizza, Trophy, Users, Star } from 'lucide-react'
+import { ChevronRight, Clock3, Gift, Info, List, Phone, MessageCircle, Receipt, ShieldCheck, Sparkles, Pizza, Trophy, Users, Star } from 'lucide-react'
 import { calcularMissaoAtual } from '@/lib/missoes'
 import ClientBottomNav from '@/components/ClientBottomNav'
 import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
@@ -371,38 +371,19 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
         aria-label={rankingAtivadoPreview ? "Abrir Ranking do Chefe" : "Participar do Ranking do Chefe"}
       >
         <div className="cf-preview-ranking-top">
-          <span className="cf-preview-trophy"><Trophy size={22} /></span>
+          <span className="cf-preview-trophy"><Trophy size={24} /></span>
           <span className="cf-preview-ranking-title">
             <small>RANKING DO CHEFE</small>
             <strong>{rankingAtivadoPreview ? "Sua posição" : "Entre na disputa"}</strong>
             {rankingAtivadoPreview && <b>#{PAINEL_PREVIEW.ranking?.participantes.posicao ?? PAINEL_PREVIEW.ranking?.posicao}</b>}
           </span>
-          {rankingAtivadoPreview && PAINEL_PREVIEW.ranking ? (
-            <span className="cf-preview-ranking-tail">
-              <span
-                className="cf-preview-faces"
-                aria-label={`${PAINEL_PREVIEW.ranking.participantes.total} participantes no Ranking agora`}
-              >
-                {PAINEL_PREVIEW.ranking.participantes.lista.slice(0, 4).map((participante, index) => (
-                  <i key={participante.posicao} className={`cf-preview-face cf-preview-face-${index + 1}`} aria-hidden="true">
-                    <span>{participante.nomePublico?.slice(0, 1).toUpperCase() || "•"}</span>
-                  </i>
-                ))}
-                <i className="cf-preview-face cf-preview-face-total" aria-hidden="true">
-                  <strong>{PAINEL_PREVIEW.ranking.participantes.total}</strong>
-                </i>
-              </span>
-              <ChevronRight size={21} />
-            </span>
-          ) : (
-            <ChevronRight size={21} style={{ marginLeft: 'auto' }} />
-          )}
+          <ChevronRight size={21} className="cf-preview-ranking-chevron" />
         </div>
-        <div className="cf-preview-ranking-copy">
-          {rankingAtivadoPreview
-            ? <><ArrowUp size={22} /><span>{PAINEL_PREVIEW.ranking?.score ?? 0} <strong>pontos no Ranking</strong></span></>
-            : <><ShieldCheck size={20} /><span>Participe para ver sua posição, rivais e próximo passo.</span></>}
-        </div>
+        {!rankingAtivadoPreview && (
+          <div className="cf-preview-ranking-copy">
+            <ShieldCheck size={20} /><span>Participe para ver sua posição, rivais e próximo passo.</span>
+          </div>
+        )}
       </button>
 
       <section className="cf-preview-referral">
@@ -565,8 +546,6 @@ function FidelidadeMobileScreen({
 }: FidelidadeMobileScreenProps) {
   const primeiroNome = nome.split(' ')[0] || 'Cliente'
   const inicial = primeiroNome.slice(0, 1).toUpperCase()
-  const participantes = ranking?.participantes.lista.slice(0, 4) ?? []
-  const totalParticipantes = ranking?.participantes.total ?? 0
   const progressoSeguro = Math.max(0, Math.min(100, progresso))
 
   return (
@@ -605,38 +584,13 @@ function FidelidadeMobileScreen({
 
       <button type="button" className="cf-preview-ranking" onClick={onRanking} aria-label={ranking?.participaCampanha ? 'Abrir Ranking do Chefe' : 'Ativar Ranking do Chefe'}>
         <div className="cf-preview-ranking-top">
-          <span className="cf-preview-trophy"><Trophy size={22} /></span>
+          <span className="cf-preview-trophy"><Trophy size={24} /></span>
           <span className="cf-preview-ranking-title"><small>RANKING DO CHEFE</small><strong>{ranking?.participaCampanha ? 'Sua posição' : 'Entre na disputa'}</strong>{ranking?.participaCampanha && <b>#{ranking.participantes.posicao ?? ranking.posicao}</b>}</span>
-          {ranking?.participaCampanha && (
-            <span className="cf-preview-ranking-tail">
-              <span
-                className="cf-preview-faces"
-                aria-label={`${totalParticipantes} participantes no Ranking agora`}
-                title={`${totalParticipantes} participantes no Ranking agora`}
-              >
-                {participantes.map((participante, index) => {
-                  const inicialParticipante = participante.nomePublico?.trim().slice(0, 1).toUpperCase() || ''
-                  const mostrarFotoDoProprioCliente = participante.eVoce && !!fotoPerfilUrl
-                  return (
-                    <i key={participante.posicao} className={`cf-preview-face cf-preview-face-${index + 1}`} aria-hidden="true">
-                      {mostrarFotoDoProprioCliente
-                        ? <img src={fotoPerfilUrl!} alt="" />
-                        : inicialParticipante
-                          ? <span>{inicialParticipante}</span>
-                          : <span className="cf-preview-face-silhouette"><b /></span>}
-                    </i>
-                  )
-                })}
-                <i className="cf-preview-face cf-preview-face-total" aria-hidden="true">
-                  <strong>{totalParticipantes}</strong>
-                </i>
-              </span>
-              <ChevronRight size={21} />
-            </span>
-          )}
-          {!ranking?.participaCampanha && <ChevronRight size={21} style={{ marginLeft: 'auto' }} />}
+          <ChevronRight size={21} className="cf-preview-ranking-chevron" />
         </div>
-        <div className="cf-preview-ranking-copy"><ArrowUp size={22} /><span>{ranking?.participaCampanha ? <>{ranking.score} <strong>pontos no Ranking</strong></> : 'Ative para ver sua disputa e o próximo passo.'}</span></div>
+        {!ranking?.participaCampanha && (
+          <div className="cf-preview-ranking-copy"><ShieldCheck size={20} /><span>Ative para ver sua disputa e o próximo passo.</span></div>
+        )}
       </button>
 
       <section className="cf-preview-referral">
@@ -2358,10 +2312,9 @@ export default function ClientePage() {
         .cf-preview-progress-copy{font-size:12px;margin-top:7px;color:#6f7987}.cf-preview-progress-copy strong{color:#47505c}.cf-preview-season{display:flex;align-items:center;gap:5px;font-size:11px;color:#7a8493;margin-top:16px;padding-bottom:15px;border-bottom:1px solid rgba(126,157,192,.23)}
         .cf-preview-rule{display:flex;gap:9px;align-items:center;color:#697588;font-size:12.5px;padding:15px 0}.cf-preview-rule svg{color:#3d4f67;flex:none}
         .cf-preview-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.cf-preview-actions button{min-height:40px;border:1px solid rgba(144,178,218,.45);border-radius:12px;background:rgba(255,255,255,.38);color:#4e5968;font:700 12px inherit;display:flex;align-items:center;justify-content:center;gap:7px;cursor:pointer}
-        .cf-preview-ranking{width:100%;padding:16px 17px;background:linear-gradient(135deg,rgba(255,255,255,.79),rgba(255,245,211,.82));box-shadow:0 9px 28px rgba(159,125,24,.08);color:#59616a;text-align:left;cursor:pointer;font-family:inherit}
-        .cf-preview-ranking-top{display:flex;align-items:center}.cf-preview-trophy{width:40px;height:40px;border-radius:13px;display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,rgba(255,244,184,.99),rgba(241,209,92,.96));color:#896818;flex:none}.cf-preview-ranking-title{display:flex;flex-direction:column;margin-left:10px;min-width:80px}.cf-preview-ranking-title small{font-size:10px;color:#7f8996;font-weight:700}.cf-preview-ranking-title strong{font-size:16px;font-weight:700;margin-top:3px}.cf-preview-ranking-title b{font-size:20px;color:#252a30;margin-top:4px}
-        .cf-preview-ranking-tail{margin-left:auto;display:flex;align-items:center;gap:8px;min-width:0}.cf-preview-faces{display:flex;align-items:center;padding:3px 7px 3px 8px;border:1px solid rgba(226,230,236,.9);border-radius:999px;background:rgba(255,255,255,.92);box-shadow:0 5px 14px rgba(54,64,78,.10)}.cf-preview-face{position:relative;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-left:-8px;border:2px solid #fff;box-shadow:0 1px 5px rgba(38,49,66,.13);overflow:hidden;font-style:normal;font-size:10px;font-weight:800;color:#fff;flex:none}.cf-preview-face:first-child{margin-left:0}.cf-preview-face img{width:100%;height:100%;object-fit:cover;display:block}.cf-preview-face>span:not(.cf-preview-face-silhouette){display:flex;width:100%;height:100%;align-items:center;justify-content:center}.cf-preview-face-1{z-index:5;background:linear-gradient(145deg,#29384e,#7188a5)}.cf-preview-face-2{z-index:4;background:linear-gradient(145deg,#276c83,#79b8cb)}.cf-preview-face-3{z-index:3;background:linear-gradient(145deg,#6b4c85,#b499ca)}.cf-preview-face-4{z-index:2;background:linear-gradient(145deg,#5c646f,#171a1f)}.cf-preview-face-total{z-index:1;background:#f7f8fa;color:#707987;border-color:#fff}.cf-preview-face-total strong{font-size:10px;line-height:1;font-weight:800}.cf-preview-face-silhouette{position:relative;width:100%;height:100%;display:block;background:linear-gradient(145deg,#dfe5ec,#aeb9c7)}.cf-preview-face-silhouette:before{content:"";position:absolute;left:50%;top:6px;width:8px;height:8px;border-radius:50%;background:rgba(83,96,112,.68);transform:translateX(-50%)}.cf-preview-face-silhouette b{position:absolute;left:50%;bottom:4px;width:15px;height:9px;border-radius:9px 9px 6px 6px;background:rgba(83,96,112,.68);transform:translateX(-50%)}
-        .cf-preview-ranking-copy{border-top:1px solid rgba(189,166,82,.25);margin-top:12px;padding-top:12px;display:flex;align-items:center;gap:8px;font-size:12.5px;color:#7a828e}.cf-preview-ranking-copy svg,.cf-preview-ranking-copy strong{color:#2f9a65}
+        .cf-preview-ranking{width:100%;padding:15px 17px;background:linear-gradient(135deg,rgba(255,255,255,.79),rgba(255,245,211,.82));box-shadow:0 9px 28px rgba(159,125,24,.08);color:#59616a;text-align:left;cursor:pointer;font-family:inherit}
+        .cf-preview-ranking-top{display:grid;grid-template-columns:52px minmax(0,1fr) 22px;align-items:center;column-gap:12px}.cf-preview-trophy{width:52px;height:52px;border-radius:15px;display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,rgba(255,244,184,.99),rgba(241,209,92,.96));color:#896818}.cf-preview-ranking-title{display:flex;flex-direction:column;min-width:0;line-height:1.05}.cf-preview-ranking-title small{font-size:9.5px;line-height:1.1;color:#7f8996;font-weight:700;letter-spacing:.15px}.cf-preview-ranking-title strong{font-size:16px;line-height:1.05;font-weight:700;margin-top:4px}.cf-preview-ranking-title b{font-size:20px;line-height:1;font-weight:800;color:#252a30;margin-top:4px}.cf-preview-ranking-chevron{justify-self:end;color:#59616a}
+        .cf-preview-ranking-copy{border-top:1px solid rgba(189,166,82,.25);margin-top:12px;padding-top:12px;display:flex;align-items:center;gap:8px;font-size:12.5px;color:#7a828e}.cf-preview-ranking-copy svg{color:#5f7390;flex:none}
         .cf-preview-referral{position:relative;overflow:hidden;padding:19px 17px 17px;background:rgba(255,255,255,.56);min-height:188px}.cf-preview-referral h2{position:relative;z-index:2;font-size:18px;font-weight:800;line-height:1.2;margin:0 0 7px;max-width:88%}.cf-preview-referral>p:not(.cf-preview-kicker){position:relative;z-index:2;font-size:12.5px;line-height:1.45;color:#737d8b;max-width:86%;margin:0 0 17px}.cf-preview-referral>button{position:relative;z-index:3;width:100%;min-height:46px;border:1px solid rgba(255,255,255,.38);border-radius:13px;background:linear-gradient(135deg,rgba(67,134,247,.82),rgba(31,91,204,.8));color:#fff;font:700 15px inherit;backdrop-filter:blur(18px) saturate(1.45);box-shadow:0 8px 22px rgba(31,91,204,.18),inset 0 1px 0 rgba(255,255,255,.4);cursor:pointer}
         .cf-preview-gift{position:absolute;right:-36px;top:48%;transform:translateY(-50%) rotate(-7deg) scale(2.2);font-size:54px;opacity:.9;z-index:1;filter:drop-shadow(0 15px 22px rgba(233,80,126,.22))}
         .cf-preview-modal-backdrop{position:fixed;inset:0;z-index:80;background:rgba(20,27,37,.38);display:flex;align-items:flex-end;justify-content:center;padding:18px}.cf-preview-modal{width:100%;max-width:390px;background:#fff;border-radius:22px;padding:20px;box-shadow:0 24px 60px rgba(0,0,0,.22)}.cf-preview-modal h2{margin:0 0 5px;font-size:20px}.cf-preview-modal p{margin:0 0 14px;font-size:12.5px;line-height:1.4;color:#6d7684}.cf-preview-modal button{width:100%;min-height:42px;border:0;border-top:1px solid #edf0f4;background:#fff;color:#285fb9;font:700 14px inherit;cursor:pointer}.cf-preview-modal .cf-preview-modal-cancel{margin-top:7px;border-radius:11px;border:0;background:#f2f4f7;color:#59616a}
