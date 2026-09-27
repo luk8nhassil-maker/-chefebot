@@ -17,6 +17,7 @@ import "server-only";
 import { chaveExpedienteOperacional } from "./expedienteOperacional";
 import {
   consultarEventosPorPeriodo,
+  existeHistoricoAnaliticoAntesDe,
   type EventoAnalitico,
 } from "./historicoAnalitico";
 import { calcularEstrelasPorValorElegivel } from "./estrelas";
@@ -116,6 +117,17 @@ export async function obterReferenciaCoroaDinamica(
   agoraMs: number = Date.now(),
 ): Promise<ReferenciaCoroaDinamica | null> {
   const janela = calcularJanelaSemanaAnteriorOperacional(agoraMs);
+
+  // Não usar uma semana que começou antes de a camada analítica existir.
+  // Precisamos de pelo menos um evento já conhecido ANTES do início da
+  // semana-base; caso contrário, a cobertura pode ser parcial e a Coroa fica
+  // neutra até a próxima semana completa.
+  const coletaJaExistia = await existeHistoricoAnaliticoAntesDe(
+    tenantId,
+    janela.consultaInicioMs,
+  );
+  if (!coletaJaExistia) return null;
+
   const eventos = await consultarEventosPorPeriodo(
     tenantId,
     janela.consultaInicioMs,
