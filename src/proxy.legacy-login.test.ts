@@ -9,7 +9,10 @@ afterEach(() => {
 });
 
 function req(url: string, init?: ConstructorParameters<typeof NextRequest>[1]) {
-  return new NextRequest(url, init);
+  const parsed = new URL(url);
+  const headers = new Headers(init?.headers);
+  if (!headers.has("host")) headers.set("host", parsed.host);
+  return new NextRequest(url, { ...init, headers });
 }
 
 describe("proxy — login canônico do ChefeBot", () => {
