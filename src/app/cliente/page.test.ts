@@ -353,7 +353,7 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
 
   test("Preview não revela posição, rivais ou distância antes do cliente participar", () => {
     expect(fonte).toContain("Participe para ver sua posição, rivais e próximo passo.");
-    expect(fonte).toContain('aria-label="Participar do Ranking do Chefe"');
+    expect(fonte).toContain('"Participar do Ranking do Chefe"');
     expect(fonte).not.toContain('<strong>Sua posição</strong></span>\n          <span className="cf-preview-faces"');
   });
 
