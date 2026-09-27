@@ -235,3 +235,18 @@ export function textoConquistaRanking(conquista: ConquistaRanking, posicao: numb
       return `Subi ${conquista.casas} ${conquista.casas === 1 ? "posição" : "posições"} no Ranking do Chefe. Agora estou em #${posicao} ⭐`;
   }
 }
+
+/** Mensagem para quem recebe o convite, sem prometer pontos ou prêmio antes
+ * de uma ação comercial válida. */
+export function textoConviteRanking(conquista: ConquistaRanking | null, posicao: number): string {
+  const marco = conquista?.tipo === "top1"
+    ? "Cheguei ao #1 no Ranking do Chefe 🏆"
+    : conquista?.tipo === "top3"
+      ? `Estou no Top 3 do Ranking do Chefe: #${posicao} ⭐`
+      : conquista?.tipo === "top10"
+        ? `Entrei no Top 10 do Ranking do Chefe: #${posicao} 🔥`
+        : conquista?.tipo === "subiu"
+          ? `Subi ${conquista.casas} ${conquista.casas === 1 ? "posição" : "posições"} e agora estou em #${posicao} 🔥`
+          : `Estou em #${posicao} no Ranking do Chefe ⭐`;
+  return `${marco}\nVocê consegue me passar? Aceite meu desafio e dispute comigo.`;
+}

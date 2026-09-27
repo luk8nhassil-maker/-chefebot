@@ -257,7 +257,7 @@ const CENARIOS: Cenario[] = [
   {
     id: "top3",
     titulo: "10. Top 3",
-    detalhe: "Conquista real reconhecida — banner + botão de compartilhar aparecem.",
+    detalhe: "Conquista real reconhecida — convite de desafio aparece.",
     props: {
       ranking: montarRanking({ participantes: PARTICIPANTES_PADRAO, voceIndex: 1, variacaoPosicao: { direcao: "subiu", casas: 1 } }),
       temporada: TEMPORADA_PADRAO,

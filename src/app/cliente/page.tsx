@@ -11,7 +11,7 @@ import { fetchCliente, guardarSessaoFallback, limparSessaoFallback, telemetria }
 import {
   detectarCreditoDoPedido,
   detectarConquistaRanking,
-  textoConquistaRanking,
+  textoConviteRanking,
 } from '@/lib/rankingRetencao'
 import { NOME_STATUS_TEMPORADA, textoStatusSocialCompartilhavel } from '@/lib/rankingGamificacao'
 import type {
@@ -1003,7 +1003,7 @@ export default function ClientePage() {
           if (token) { setIndicacaoToken(token); telemetriaRanking('link_indicacao_gerado') }
         }
       }
-      const texto = textoConquistaRanking(conquista, posicao)
+      const texto = textoConviteRanking(conquista, posicao)
       const url = token ? `${window.location.origin}/pedido?ref=${token}` : undefined
       if (navigator.share) {
         await navigator.share({ title: 'Ranking do Chefe', text: texto, ...(url ? { url } : {}) })

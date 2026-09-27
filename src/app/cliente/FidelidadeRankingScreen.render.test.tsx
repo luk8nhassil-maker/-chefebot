@@ -77,6 +77,23 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     expect(screen.getByText("Elite Top 10")).toBeTruthy();
   });
 
+  test("conquista usa convite com desafio, não botão genérico de compartilhar", () => {
+    montar({
+      ranking: {
+        ...RANKING_BASE,
+        participantes: {
+          ...RANKING_BASE.participantes,
+          variacaoPosicao: { direcao: "subiu", casas: 1 },
+        },
+      },
+      onCompartilharConquista: () => undefined,
+    });
+    expect(screen.getByText("CONQUISTA RECENTE")).toBeTruthy();
+    expect(screen.getByText("Quem você desafia? Mostre sua posição e convide alguém para tentar passar você.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Desafiar alguém" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Compartilhar" })).toBeNull();
+  });
+
   test("missão semanal desbloqueada mostra o card Caçada ao Pódio", () => {
     montar({ gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "desbloqueada" }, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false } });
     expect(screen.getByText("Caçada ao Pódio liberada!")).toBeTruthy();

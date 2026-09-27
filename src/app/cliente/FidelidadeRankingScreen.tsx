@@ -259,10 +259,12 @@ export function FidelidadeRankingScreen({
           )}
 
           {conquista && (
-            <section className="cf-ranking-note" aria-label="Conquista recente">
-              <span aria-hidden="true">🎉</span>
-              <div>
+            <section className="cf-ranking-share-card" aria-label="Desafiar alguém no Ranking do Chefe">
+              <span className="cf-ranking-share-mark" aria-hidden="true">🔥</span>
+              <div className="cf-ranking-share-copy">
+                <small>CONQUISTA RECENTE</small>
                 <strong>{textoConquistaRanking(conquista, ranking.participantes.posicao ?? ranking.posicao)}</strong>
+                <p>Quem você desafia? Mostre sua posição e convide alguém para tentar passar você.</p>
                 {podeCompartilharConquista && (
                   <button
                     type="button"
@@ -270,7 +272,7 @@ export function FidelidadeRankingScreen({
                     disabled={compartilhando}
                     onClick={() => { emit('compartilhamento_clicado'); onCompartilharConquista?.() }}
                   >
-                    {compartilhando ? 'Preparando…' : 'Compartilhar'}
+                    {compartilhando ? 'Preparando…' : 'Desafiar alguém'}
                   </button>
                 )}
               </div>
@@ -486,7 +488,13 @@ export function FidelidadeRankingScreen({
         .cf-ranking-nivel-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #ffcd00, #ffe08a); }
         .cf-ranking-nivel small { display: block; margin-top: 6px; color: #8a95a6; font-size: 10.5px; }
         .cf-ranking-movimento-recente { margin: -8px 0 12px; color: #697588; font-size: 11.5px; text-align: center; }
-        .cf-ranking-share-btn { margin-top: 8px; padding: 8px 14px; border: 0; border-radius: 12px; background: #4f86ed; color: #fff; font-weight: 700; font-size: 12px; cursor: pointer; }.cf-ranking-share-btn:disabled { opacity: .6; cursor: wait; }
+        .cf-ranking-share-card { display: flex; gap: 12px; align-items: flex-start; margin-top: 17px; padding: 15px; border: 1px solid rgba(79,134,237,.34); border-radius: 19px; background: linear-gradient(115deg, rgba(239,247,255,.98), rgba(255,252,239,.96)); }
+        .cf-ranking-share-mark { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 12px; background: #fff; font-size: 19px; box-shadow: 0 4px 10px rgba(58,91,132,.1); }
+        .cf-ranking-share-copy { min-width: 0; }
+        .cf-ranking-share-copy>small { display: block; color: #3972d7; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+        .cf-ranking-share-copy>strong { display: block; margin-top: 3px; font-size: 13px; line-height: 1.35; }
+        .cf-ranking-share-copy>p { margin: 5px 0 0; color: #5f6f84; font-size: 11.5px; line-height: 1.4; }
+        .cf-ranking-share-btn { margin-top: 10px; padding: 9px 14px; border: 0; border-radius: 12px; background: #4f86ed; color: #fff; font-weight: 700; font-size: 12px; cursor: pointer; }.cf-ranking-share-btn:disabled { opacity: .6; cursor: wait; }
         .cf-ranking-cta-primary { display: block; width: 100%; min-height: 46px; margin: 0 0 14px; border: 0; border-radius: 13px; background: #ffc900; color: #252a30; font-weight: 700; font-size: 14.5px; cursor: pointer; }
         .cf-ranking-sheet-backdrop { position: fixed; inset: 0; z-index: 80; display: flex; align-items: flex-end; justify-content: center; padding: 18px; background: rgba(20,27,37,.38); }
         .cf-ranking-sheet { position: relative; width: 100%; max-width: 390px; max-height: min(560px, 80dvh); overflow: auto; box-sizing: border-box; padding: 24px 20px 20px; border-radius: 22px; background: #fff; color: #414851; box-shadow: 0 24px 60px rgba(0,0,0,.22); }
