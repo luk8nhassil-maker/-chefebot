@@ -377,6 +377,21 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
             <strong>{rankingAtivadoPreview ? "Sua posição" : "Entre na disputa"}</strong>
             {rankingAtivadoPreview && <b>#{PAINEL_PREVIEW.ranking?.participantes.posicao ?? PAINEL_PREVIEW.ranking?.posicao}</b>}
           </span>
+          {rankingAtivadoPreview && PAINEL_PREVIEW.ranking && (
+            <span
+              className="cf-preview-ranking-faces"
+              aria-label={`3 perfis em destaque e +${Math.max(PAINEL_PREVIEW.ranking.participantes.total - Math.min(3, PAINEL_PREVIEW.ranking.participantes.lista.length), 0)} participantes restantes`}
+            >
+              {PAINEL_PREVIEW.ranking.participantes.lista.slice(0, 3).map((participante, index) => (
+                <i key={participante.posicao} className={`cf-preview-ranking-face cf-preview-ranking-face-${index + 1}`} aria-hidden="true">
+                  <span>{participante.nomePublico?.trim().slice(0, 1).toUpperCase() || "•"}</span>
+                </i>
+              ))}
+              <i className="cf-preview-ranking-face cf-preview-ranking-face-more" aria-hidden="true">
+                +{Math.max(PAINEL_PREVIEW.ranking.participantes.total - Math.min(3, PAINEL_PREVIEW.ranking.participantes.lista.length), 0)}
+              </i>
+            </span>
+          )}
           <ChevronRight size={21} className="cf-preview-ranking-chevron" />
         </div>
         {!rankingAtivadoPreview && (
@@ -546,6 +561,8 @@ function FidelidadeMobileScreen({
 }: FidelidadeMobileScreenProps) {
   const primeiroNome = nome.split(' ')[0] || 'Cliente'
   const inicial = primeiroNome.slice(0, 1).toUpperCase()
+  const participantesDestaque = ranking?.participantes.lista.slice(0, 3) ?? []
+  const participantesRestantes = Math.max((ranking?.participantes.total ?? 0) - participantesDestaque.length, 0)
   const progressoSeguro = Math.max(0, Math.min(100, progresso))
 
   return (
@@ -586,6 +603,29 @@ function FidelidadeMobileScreen({
         <div className="cf-preview-ranking-top">
           <span className="cf-preview-trophy"><Trophy size={24} /></span>
           <span className="cf-preview-ranking-title"><small>RANKING DO CHEFE</small><strong>{ranking?.participaCampanha ? 'Sua posição' : 'Entre na disputa'}</strong>{ranking?.participaCampanha && <b>#{ranking.participantes.posicao ?? ranking.posicao}</b>}</span>
+          {ranking?.participaCampanha && (
+            <span
+              className="cf-preview-ranking-faces"
+              aria-label={`${participantesDestaque.length} perfis em destaque e +${participantesRestantes} participantes restantes`}
+            >
+              {participantesDestaque.map((participante, index) => {
+                const inicialParticipante = participante.nomePublico?.trim().slice(0, 1).toUpperCase() || ''
+                const mostrarFotoDoProprioCliente = participante.eVoce && !!fotoPerfilUrl
+                return (
+                  <i key={participante.posicao} className={`cf-preview-ranking-face cf-preview-ranking-face-${index + 1}`} aria-hidden="true">
+                    {mostrarFotoDoProprioCliente
+                      ? <img src={fotoPerfilUrl!} alt="" />
+                      : inicialParticipante
+                        ? <span>{inicialParticipante}</span>
+                        : <span className="cf-preview-ranking-face-silhouette"><b /></span>}
+                  </i>
+                )
+              })}
+              <i className="cf-preview-ranking-face cf-preview-ranking-face-more" aria-hidden="true">
+                +{participantesRestantes}
+              </i>
+            </span>
+          )}
           <ChevronRight size={21} className="cf-preview-ranking-chevron" />
         </div>
         {!ranking?.participaCampanha && (
@@ -2312,8 +2352,9 @@ export default function ClientePage() {
         .cf-preview-progress-copy{font-size:12px;margin-top:7px;color:#6f7987}.cf-preview-progress-copy strong{color:#47505c}.cf-preview-season{display:flex;align-items:center;gap:5px;font-size:11px;color:#7a8493;margin-top:16px;padding-bottom:15px;border-bottom:1px solid rgba(126,157,192,.23)}
         .cf-preview-rule{display:flex;gap:9px;align-items:center;color:#697588;font-size:12.5px;padding:15px 0}.cf-preview-rule svg{color:#3d4f67;flex:none}
         .cf-preview-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.cf-preview-actions button{min-height:40px;border:1px solid rgba(144,178,218,.45);border-radius:12px;background:rgba(255,255,255,.38);color:#4e5968;font:700 12px inherit;display:flex;align-items:center;justify-content:center;gap:7px;cursor:pointer}
-        .cf-preview-ranking{width:100%;padding:15px 17px;background:linear-gradient(135deg,rgba(255,255,255,.79),rgba(255,245,211,.82));box-shadow:0 9px 28px rgba(159,125,24,.08);color:#59616a;text-align:left;cursor:pointer;font-family:inherit}
-        .cf-preview-ranking-top{display:grid;grid-template-columns:52px minmax(0,1fr) 22px;align-items:center;column-gap:12px}.cf-preview-trophy{width:52px;height:52px;border-radius:15px;display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,rgba(255,244,184,.99),rgba(241,209,92,.96));color:#896818}.cf-preview-ranking-title{display:flex;flex-direction:column;min-width:0;line-height:1.05}.cf-preview-ranking-title small{font-size:9.5px;line-height:1.1;color:#7f8996;font-weight:700;letter-spacing:.15px}.cf-preview-ranking-title strong{font-size:16px;line-height:1.05;font-weight:700;margin-top:4px}.cf-preview-ranking-title b{font-size:20px;line-height:1;font-weight:800;color:#252a30;margin-top:4px}.cf-preview-ranking-chevron{justify-self:end;color:#59616a}
+        .cf-preview-ranking{width:100%;padding:15px clamp(12px,4.2vw,17px);background:linear-gradient(135deg,rgba(255,255,255,.82),rgba(255,246,214,.88));box-shadow:0 10px 30px rgba(159,125,24,.10),inset 0 1px 0 rgba(255,255,255,.72);color:#59616a;text-align:left;cursor:pointer;font-family:inherit}
+        .cf-preview-ranking-top{display:grid;grid-template-columns:clamp(44px,13vw,52px) minmax(72px,1fr) auto 18px;align-items:center;column-gap:clamp(6px,2.4vw,11px)}.cf-preview-trophy{width:clamp(44px,13vw,52px);height:clamp(44px,13vw,52px);border-radius:clamp(13px,3.8vw,15px);display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,rgba(255,244,184,.99),rgba(241,209,92,.96));box-shadow:0 5px 14px rgba(169,126,14,.12),inset 0 1px 0 rgba(255,255,255,.78);color:#896818}.cf-preview-ranking-title{display:flex;flex-direction:column;min-width:0;line-height:1.05}.cf-preview-ranking-title small{font-size:clamp(8px,2.35vw,9.5px);line-height:1.1;color:#7f8996;font-weight:750;letter-spacing:.15px}.cf-preview-ranking-title strong{font-size:clamp(14px,4vw,16px);line-height:1.05;font-weight:750;margin-top:4px;white-space:nowrap}.cf-preview-ranking-title b{font-size:clamp(18px,5vw,20px);line-height:1;font-weight:850;color:#252a30;margin-top:4px}.cf-preview-ranking-chevron{justify-self:end;color:#59616a}
+        .cf-preview-ranking-faces{display:flex;align-items:center;justify-content:flex-end;min-width:0;padding:0;background:transparent;border:0;box-shadow:none}.cf-preview-ranking-face{--cf-ranking-face-size:clamp(35px,9.7vw,44px);width:var(--cf-ranking-face-size);height:var(--cf-ranking-face-size);border-radius:50%;display:flex;align-items:center;justify-content:center;margin-left:clamp(-12px,-2.8vw,-9px);border:2.5px solid rgba(255,255,255,.98);box-shadow:0 4px 12px rgba(41,53,72,.19),0 0 0 1px rgba(151,118,34,.08);overflow:hidden;font-style:normal;font-size:clamp(10px,3vw,13px);font-weight:850;letter-spacing:-.1px;color:#fff;flex:none}.cf-preview-ranking-face:first-child{margin-left:0}.cf-preview-ranking-face img{width:100%;height:100%;object-fit:cover;display:block}.cf-preview-ranking-face>span:not(.cf-preview-ranking-face-silhouette){display:flex;width:100%;height:100%;align-items:center;justify-content:center}.cf-preview-ranking-face-1{z-index:4;background:linear-gradient(145deg,#23344d,#7189a8)}.cf-preview-ranking-face-2{z-index:3;background:linear-gradient(145deg,#21697e,#72b5c7)}.cf-preview-ranking-face-3{z-index:2;background:linear-gradient(145deg,#66487f,#b59cca)}.cf-preview-ranking-face-more{z-index:1;background:linear-gradient(145deg,#fff8dc,#efd06b);color:#73570c;text-shadow:0 1px 0 rgba(255,255,255,.45);font-size:clamp(9px,2.7vw,12px)}.cf-preview-ranking-face-silhouette{position:relative;width:100%;height:100%;display:block;background:linear-gradient(145deg,#dfe5ec,#aeb9c7)}.cf-preview-ranking-face-silhouette:before{content:"";position:absolute;left:50%;top:24%;width:28%;height:28%;border-radius:50%;background:rgba(83,96,112,.68);transform:translateX(-50%)}.cf-preview-ranking-face-silhouette b{position:absolute;left:50%;bottom:13%;width:52%;height:32%;border-radius:999px 999px 60% 60%;background:rgba(83,96,112,.68);transform:translateX(-50%)}
         .cf-preview-ranking-copy{border-top:1px solid rgba(189,166,82,.25);margin-top:12px;padding-top:12px;display:flex;align-items:center;gap:8px;font-size:12.5px;color:#7a828e}.cf-preview-ranking-copy svg{color:#5f7390;flex:none}
         .cf-preview-referral{position:relative;overflow:hidden;padding:19px 17px 17px;background:rgba(255,255,255,.56);min-height:188px}.cf-preview-referral h2{position:relative;z-index:2;font-size:18px;font-weight:800;line-height:1.2;margin:0 0 7px;max-width:88%}.cf-preview-referral>p:not(.cf-preview-kicker){position:relative;z-index:2;font-size:12.5px;line-height:1.45;color:#737d8b;max-width:86%;margin:0 0 17px}.cf-preview-referral>button{position:relative;z-index:3;width:100%;min-height:46px;border:1px solid rgba(255,255,255,.38);border-radius:13px;background:linear-gradient(135deg,rgba(67,134,247,.82),rgba(31,91,204,.8));color:#fff;font:700 15px inherit;backdrop-filter:blur(18px) saturate(1.45);box-shadow:0 8px 22px rgba(31,91,204,.18),inset 0 1px 0 rgba(255,255,255,.4);cursor:pointer}
         .cf-preview-gift{position:absolute;right:-36px;top:48%;transform:translateY(-50%) rotate(-7deg) scale(2.2);font-size:54px;opacity:.9;z-index:1;filter:drop-shadow(0 15px 22px rgba(233,80,126,.22))}
