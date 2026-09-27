@@ -45,8 +45,16 @@ nas regras da promoção.
    do benefício somente com um cliente que esteja autorizado e elegível para a
    campanha. Esse contato é uma finalidade separada da exibição pública e deve
    respeitar as regras de comunicação do programa.
-8. Foto de perfil permanece desativada até existir uma fonte oficial autorizada
-   e uma aprovação específica.
+8. A foto de perfil do próprio cliente passa a usar armazenamento oficial privado.
+   O upload não autoriza exibição pública no ranking: a finalidade
+   `ranking_foto_perfil` continua separada e bloqueada até aprovação específica.
+9. Na experiência de Estrelas/Gamificação, o primeiro presente já conquistado
+   fica garantido, mas seu resgate exige concluir uma única missão de foto.
+   A foto não gera Estrelas, desconto nem presente extra; apenas libera o
+   presente que já existia.
+10. A missão da foto é permanente por cliente: após o primeiro upload válido,
+    trocar ou remover a imagem não recria a missão e nenhum presente futuro
+    volta a ser bloqueado por essa regra.
 
 ## Filtros do ranking
 
@@ -138,3 +146,28 @@ decidir nenhuma regra comercial nova:
   vencedores) é recalculada a partir do consentimento **atual** a cada
   leitura, nunca do momento do encerramento — quem revoga depois passa a
   aparecer anonimizado também no histórico.
+
+
+## Adendo (2026-09-27) — participação fechada e missão única de foto
+
+Decisão aprovada pelo responsável do produto:
+
+- **Ranking fechado por padrão**: antes de clicar em **Participar**, a API do
+  painel não entrega posição, pódio, lista, rival, movimento, status social ou
+  missões da disputa. A temporada pode continuar aparecendo como contexto
+  neutro, sem revelar o Ranking.
+- **Foto privada do perfil**: a imagem pertence ao cliente autenticado e é
+  servida por rota autenticada. Metadados mínimos ficam no perfil; o binário
+  fica fora do Redis.
+- **Missão econômica única**: o primeiro presente de Estrelas que já tiver
+  cobertura econômica aprovada fica "garantido" enquanto a foto não foi
+  concluída. O upload apenas libera o resgate — não cria custo adicional em
+  produto.
+- **Não repetição**: o sistema guarda um marco permanente
+  (`fotoPerfilMissaoConcluidaEm`). Depois dele, presentes seguintes nunca
+  exigem a missão novamente.
+- **Fail-closed**: storage indisponível ou não configurado nunca marca a missão
+  como concluída e nunca libera o presente.
+- **Privacidade separada**: possuir uma foto no perfil não significa autorizar
+  sua publicação no Ranking. A exposição pública da foto continua sujeita a
+  decisão e consentimento próprios.
