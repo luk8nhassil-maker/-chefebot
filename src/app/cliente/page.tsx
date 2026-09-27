@@ -304,7 +304,7 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
       </div>
 
       <header className="cf-preview-header">
-        <div className="cf-preview-avatar" aria-hidden="true">{fotoPerfilUrl ? <img src={fotoPerfilUrl} alt="" /> : inicial}</div>
+        <div className="cf-preview-avatar" aria-hidden="true">{inicial}</div>
         <div className="cf-preview-greeting"><span>Olá,</span><strong>{primeiroNome}</strong></div>
         <button type="button" onClick={onClose}>Sair</button>
       </header>
@@ -514,7 +514,7 @@ function FidelidadeMobileScreen({
   return (
     <main className="cf-preview-phone" aria-label="Minha fidelidade">
       <header className="cf-preview-header">
-        <div className="cf-preview-avatar" aria-hidden="true">{inicial}</div>
+        <div className="cf-preview-avatar" aria-hidden="true">{fotoPerfilUrl ? <img src={fotoPerfilUrl} alt="" /> : inicial}</div>
         <div className="cf-preview-greeting"><span>Olá,</span><strong>{primeiroNome}</strong></div>
         <button type="button" onClick={onSair} aria-label="Sair da conta">Sair</button>
       </header>
