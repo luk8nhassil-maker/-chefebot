@@ -954,10 +954,14 @@ export default function ClientePage() {
       }
       if (!token) { setCompartilhandoIndicacao(false); return }
       const url = `${window.location.origin}/pedido?ref=${token}`
+      const posicaoRanking = painel?.ranking?.participantes.posicao ?? painel?.ranking?.posicao ?? null
+      const textoConvite = posicaoRanking
+        ? `Você topa entrar no Ranking do Chefe e tentar passar minha posição (#${posicaoRanking})? Faça seu primeiro pedido pelo meu convite.`
+        : 'Você topa conhecer o Chefe da Pizza? Faça seu primeiro pedido pelo meu convite.'
       if (navigator.share) {
-        await navigator.share({ title: 'Indique um amigo', text: 'Peça pelo meu link do Chefe da Pizza.', url })
+        await navigator.share({ title: 'Convite do Ranking do Chefe', text: textoConvite, url })
       } else {
-        await navigator.clipboard.writeText(url)
+        await navigator.clipboard.writeText(`${textoConvite} ${url}`)
       }
       if (!indicacaoToken) telemetriaRanking('link_indicacao_gerado')
     } catch {}
@@ -1947,15 +1951,15 @@ export default function ClientePage() {
                 </div>
               )}
 
-              {/* Indicação: compartilhar link — sem prometer benefício ao indicado */}
+              {/* Indicação: convite claro para a disputa — sem prometer benefício ao indicado */}
               {fidelidade && fidelidade.ativo && (
                 <div className="cf-glass" style={{ borderRadius: 16, padding: 20 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                     <Users size={16} color={cores.textoTerciario} />
-                    <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5 }}>Indique um amigo</span>
+                    <span style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5 }}>Convide alguém para a disputa</span>
                   </div>
                   <p style={{ fontSize: 14, color: cores.textoSecundario, margin: '0 0 12px' }}>
-                    Ganhe +6 Estrelas quando um novo amigo fizer o primeiro pedido válido.
+                    Mostre sua posição e chame alguém para tentar passar você. No primeiro pedido válido do convidado, você recebe +6 Estrelas.
                     {estrelasDeIndicacao > 0 && ` Você já ganhou ${estrelasDeIndicacao} ${fidelidade.unidade === 'estrelas' ? 'Estrelas' : 'pontos'} por indicações.`}
                   </p>
                   <button
@@ -1963,7 +1967,7 @@ export default function ClientePage() {
                     disabled={compartilhandoIndicacao}
                     style={{ ...botaoPrimario, opacity: compartilhandoIndicacao ? 0.6 : 1 }}
                   >
-                    {compartilhandoIndicacao ? 'Aguarde...' : 'Compartilhar meu link'}
+                    {compartilhandoIndicacao ? 'Preparando...' : 'Convidar para disputar'}
                   </button>
                 </div>
               )}

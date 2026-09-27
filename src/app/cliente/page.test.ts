@@ -286,7 +286,7 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
   test("compartilharIndicacao usa obterOuCriarTokenIndicacao via GET /api/cliente/indicacao", () => {
     expect(fonte).toContain("async function compartilharIndicacao");
     expect(fonte).toContain("/api/cliente/indicacao");
-    expect(fonte).toContain("Compartilhar meu link");
+    expect(fonte).toContain("Convidar para disputar");
   });
 
   test("captura ?ref= da URL antes do login e armazena como cf_ref", () => {
@@ -369,8 +369,8 @@ describe("/cliente — Correções PR #427: textos comerciais, estados vazios, P
   });
 
   test("texto de indicação menciona Estrelas e primeiro pedido válido (não benefício ao indicado)", () => {
-    expect(fonte).toContain("Ganhe +6 Estrelas quando um novo amigo fizer o primeiro pedido válido.");
-    expect(fonte).toContain("Indique um amigo");
+    expect(fonte).toContain("No primeiro pedido válido do convidado, você recebe +6 Estrelas.");
+    expect(fonte).toContain("Convide alguém para a disputa");
   });
 
   test("ranking seção sempre visível quando há temporada — estado vazio exibe mensagem de espera", () => {
@@ -386,7 +386,7 @@ describe("/cliente — Correções PR #427: textos comerciais, estados vazios, P
   });
 
   test("texto compartilhado via share API não promete benefícios", () => {
-    expect(fonte).toContain("Peça pelo meu link do Chefe da Pizza.");
+    expect(fonte).toContain("Você topa entrar no Ranking do Chefe e tentar passar minha posição");
     expect(fonte).not.toContain("ganhe desconto");
   });
 
