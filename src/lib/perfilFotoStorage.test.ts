@@ -17,7 +17,7 @@ describe("perfilFotoStorage", () => {
       VERCEL_OIDC_TOKEN: "oidc-token",
       BLOB_STORE_ID: "store_abc123",
       BLOB_READ_WRITE_TOKEN: undefined,
-      AUTH_SECRET: "x".repeat(32),
+      PRIVACY_CONSENT_HMAC_SECRET: "x".repeat(32),
       VERCEL_BLOB_API_URL: undefined,
     })).toMatchObject({ token: "oidc-token", storeId: "abc123" });
   });
@@ -27,7 +27,7 @@ describe("perfilFotoStorage", () => {
       VERCEL_OIDC_TOKEN: undefined,
       BLOB_STORE_ID: undefined,
       BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_store123_segredo",
-      AUTH_SECRET: "x".repeat(32),
+      PRIVACY_CONSENT_HMAC_SECRET: "x".repeat(32),
       VERCEL_BLOB_API_URL: undefined,
     }).storeId).toBe("store123");
   });
@@ -37,7 +37,7 @@ describe("perfilFotoStorage", () => {
       VERCEL_OIDC_TOKEN: undefined,
       BLOB_STORE_ID: undefined,
       BLOB_READ_WRITE_TOKEN: undefined,
-      AUTH_SECRET: "x".repeat(32),
+      PRIVACY_CONSENT_HMAC_SECRET: "x".repeat(32),
       VERCEL_BLOB_API_URL: undefined,
     })).toThrowError(ErroFotoPerfilStorage);
   });
@@ -49,17 +49,17 @@ describe("perfilFotoStorage", () => {
   });
 
   test("pathname usa HMAC e nunca inclui clienteId bruto", () => {
-    const anterior = process.env.AUTH_SECRET;
-    process.env.AUTH_SECRET = "segredo-de-teste-com-mais-de-32-caracteres";
+    const anterior = process.env.PRIVACY_CONSENT_HMAC_SECRET;
+    process.env.PRIVACY_CONSENT_HMAC_SECRET = "segredo-de-teste-com-mais-de-32-caracteres";
     const path = pathnameFotoPerfil("cli_5599999999999");
     expect(path).toMatch(/^perfil\/[a-f0-9]{64}\/avatar$/);
     expect(path).not.toContain("5599999999999");
-    process.env.AUTH_SECRET = anterior;
+    process.env.PRIVACY_CONSENT_HMAC_SECRET = anterior;
   });
 
   test("upload usa um único pathname privado e overwrite para evitar arquivos órfãos", async () => {
     const anterior = { ...process.env };
-    process.env.AUTH_SECRET = "segredo-de-teste-com-mais-de-32-caracteres";
+    process.env.PRIVACY_CONSENT_HMAC_SECRET = "segredo-de-teste-com-mais-de-32-caracteres";
     process.env.BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_store123_segredo";
     delete process.env.VERCEL_OIDC_TOKEN;
     delete process.env.BLOB_STORE_ID;
