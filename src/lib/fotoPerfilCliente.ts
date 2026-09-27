@@ -1,16 +1,24 @@
 import "server-only";
 
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { redis } from "./redis";
+import {
+  apagarFotoBlob,
+  ErroFotoPerfilStorage,
+  lerFotoBlob,
+  salvarFotoBlob,
+} from "./fotoPerfilStorage";
 
 export const FOTO_PERFIL_MAX_BYTES = 48 * 1024;
 const VERSAO_MISSAO = "foto-perfil-primeiro-presente-v1" as const;
 
-type RegistroFotoPerfil = {
-  dataUrl: string;
+export type RegistroFotoPerfil = {
+  url: string;
+  pathname: string;
+  etag: string | null;
   mimeType: "image/jpeg";
   updatedAt: string;
-  versao: "foto-perfil-v1";
+  versao: "foto-perfil-v2";
 };
 
 type RegistroMissaoFotoPerfil = {
@@ -32,7 +40,7 @@ function referenciaCliente(clienteId: string): string {
 }
 
 function chaveFoto(clienteId: string): string {
-  return `perfil:foto:v1:${referenciaCliente(clienteId)}`;
+  return `perfil:foto:v2:${referenciaCliente(clienteId)}`;
 }
 
 function chaveMissao(clienteId: string): string {
@@ -42,9 +50,11 @@ function chaveMissao(clienteId: string): string {
 function registroFotoValido(valor: unknown): valor is RegistroFotoPerfil {
   if (!valor || typeof valor !== "object") return false;
   const item = valor as Partial<RegistroFotoPerfil>;
-  return item.versao === "foto-perfil-v1"
+  return item.versao === "foto-perfil-v2"
     && item.mimeType === "image/jpeg"
-    && typeof item.dataUrl === "string"
+    && typeof item.url === "string"
+    && typeof item.pathname === "string"
+    && (item.etag === null || typeof item.etag === "string")
     && typeof item.updatedAt === "string";
 }
 
@@ -70,9 +80,29 @@ export function validarFotoPerfilDataUrl(dataUrl: unknown): string {
   return dataUrl;
 }
 
+function bytesDaFoto(dataUrl: string): Buffer {
+  const payload = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  return Buffer.from(payload, "base64");
+}
+
+export function possuiHistoricoPresenteResgatado(recompensas: Array<{ status: string }>): boolean {
+  return recompensas.some((recompensa) => recompensa.status === "resgatada");
+}
+
 export async function obterFotoPerfilCliente(clienteId: string): Promise<RegistroFotoPerfil | null> {
   const valor = await redis.get<RegistroFotoPerfil>(chaveFoto(clienteId));
   return registroFotoValido(valor) ? valor : null;
+}
+
+export async function obterFotoPerfilDataUrl(clienteId: string): Promise<{ dataUrl: string; updatedAt: string } | null> {
+  const foto = await obterFotoPerfilCliente(clienteId);
+  if (!foto) return null;
+  const bytes = await lerFotoBlob(foto.url);
+  if (!bytes) return null;
+  return {
+    dataUrl: `data:image/jpeg;base64,${bytes.toString("base64")}`,
+    updatedAt: foto.updatedAt,
+  };
 }
 
 export async function missaoFotoPerfilConcluida(clienteId: string): Promise<boolean> {
@@ -81,31 +111,66 @@ export async function missaoFotoPerfilConcluida(clienteId: string): Promise<bool
 }
 
 /**
- * Salva somente uma miniatura JPEG já normalizada pelo cliente autenticado.
- * A conclusão da missão é permanente e vive em chave separada: trocar a foto
- * depois nunca reabre a trava do primeiro presente.
+ * Clientes que já tinham um presente efetivamente resgatado antes desta
+ * missão não são travados retroativamente. Isso preserva a promessa anterior
+ * sem criar nenhum novo benefício ou custo para a pizzaria.
+ */
+export async function requisitoFotoPerfilSatisfeito(
+  clienteId: string,
+  recompensas: Array<{ status: string }>,
+): Promise<{ satisfeito: boolean; concluida: boolean; dispensadaPorHistorico: boolean }> {
+  const concluida = await missaoFotoPerfilConcluida(clienteId);
+  const dispensadaPorHistorico = !concluida && possuiHistoricoPresenteResgatado(recompensas);
+  return { satisfeito: concluida || dispensadaPorHistorico, concluida, dispensadaPorHistorico };
+}
+
+/**
+ * A imagem vai para Vercel Blob privado. O Redis guarda só metadados mínimos
+ * e o marco permanente da missão. O marco só nasce depois de upload +
+ * persistência concluírem com sucesso.
  */
 export async function salvarFotoPerfilCliente(clienteId: string, dataUrl: unknown): Promise<{
   foto: RegistroFotoPerfil;
   missao: RegistroMissaoFotoPerfil;
 }> {
   const fotoNormalizada = validarFotoPerfilDataUrl(dataUrl);
+  const bytes = bytesDaFoto(fotoNormalizada);
   const agora = new Date().toISOString();
+  const referencia = referenciaCliente(clienteId);
+  const pathname = `perfil-fotos/v1/${referencia}/${randomUUID()}.jpg`;
+
+  const [fotoAnterior, missaoExistente] = await Promise.all([
+    obterFotoPerfilCliente(clienteId),
+    redis.get<RegistroMissaoFotoPerfil>(chaveMissao(clienteId)),
+  ]);
+
+  const blob = await salvarFotoBlob(pathname, bytes);
   const foto: RegistroFotoPerfil = {
-    dataUrl: fotoNormalizada,
+    url: blob.url,
+    pathname: blob.pathname,
+    etag: blob.etag,
     mimeType: "image/jpeg",
     updatedAt: agora,
-    versao: "foto-perfil-v1",
+    versao: "foto-perfil-v2",
   };
-
-  const missaoExistente = await redis.get<RegistroMissaoFotoPerfil>(chaveMissao(clienteId));
   const missao: RegistroMissaoFotoPerfil = registroMissaoValido(missaoExistente)
     ? missaoExistente
     : { concluida: true, concluidaEm: agora, versao: VERSAO_MISSAO };
 
-  const transacao = redis.multi().set(chaveFoto(clienteId), foto);
-  if (!registroMissaoValido(missaoExistente)) transacao.set(chaveMissao(clienteId), missao);
-  await transacao.exec();
+  try {
+    const transacao = redis.multi().set(chaveFoto(clienteId), foto);
+    if (!registroMissaoValido(missaoExistente)) transacao.set(chaveMissao(clienteId), missao);
+    await transacao.exec();
+  } catch (erro) {
+    await apagarFotoBlob(blob.url).catch(() => undefined);
+    throw erro;
+  }
+
+  if (fotoAnterior?.url && fotoAnterior.url !== foto.url) {
+    await apagarFotoBlob(fotoAnterior.url).catch(() => undefined);
+  }
 
   return { foto, missao };
 }
+
+export { ErroFotoPerfilStorage };
