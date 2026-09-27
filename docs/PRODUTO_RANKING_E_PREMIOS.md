@@ -171,3 +171,13 @@ Decisão aprovada pelo responsável do produto:
 - **Privacidade separada**: possuir uma foto no perfil não significa autorizar
   sua publicação no Ranking. A exposição pública da foto continua sujeita a
   decisão e consentimento próprios.
+
+
+## Infraestrutura confirmada (2026-09-27)
+
+- Vercel Blob Store oficial criado no projeto `chefebot-contingencia`.
+- Nome: `chefebot-contingencia-blob`.
+- Região: `gru1` (São Paulo).
+- Acesso: `Private`.
+- O store foi criado pela interface do próprio projeto, com conexão aos ambientes Production e Preview.
+- Nenhum token read-write manual foi criado para o app; o código continua preparado para OIDC/store ID e falha fechado se a autenticação do storage não estiver disponível.
