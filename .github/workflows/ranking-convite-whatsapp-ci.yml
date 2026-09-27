@@ -1,0 +1,67 @@
+name: ranking-convite-whatsapp-ci
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/rankingConviteWhatsapp.ts"
+      - "src/lib/rankingConviteWhatsapp.test.ts"
+      - "src/app/api/whatsapp/route.ts"
+      - "src/app/api/whatsapp/rankingConviteInterception.test.ts"
+      - "docs/PRODUTO_RANKING_E_PREMIOS.md"
+      - ".github/workflows/ranking-convite-whatsapp-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ranking-convite-whatsapp-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout do HEAD exato
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados do motor e webhook
+        run: >-
+          npm test --
+          src/lib/rankingConviteWhatsapp.test.ts
+          src/app/api/whatsapp/rankingConviteInterception.test.ts
+          src/app/api/whatsapp/pesquisaPreferenciaInterception.test.ts
+          src/app/api/whatsapp/idempotenciaFalhaAposClaim.test.ts
+          src/app/api/whatsapp/duplicidadeSaudacaoConcorrente.test.ts
+          src/app/api/whatsapp/enviarMensagem.test.ts
+
+      - name: Lint dos arquivos novos
+        run: >-
+          npm run lint --
+          src/lib/rankingConviteWhatsapp.ts
+          src/lib/rankingConviteWhatsapp.test.ts
+          src/app/api/whatsapp/rankingConviteInterception.test.ts
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Suite completa
+        run: npm test
+
+      - name: Build de produção
+        env:
+          VERCEL_ENV: "preview"
+        run: npm run build

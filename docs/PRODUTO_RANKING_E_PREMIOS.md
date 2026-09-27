@@ -181,3 +181,30 @@ Decisão aprovada pelo responsável do produto:
 - Acesso: `Private`.
 - O store foi criado pela interface do próprio projeto, com conexão aos ambientes Production e Preview.
 - Nenhum token read-write manual foi criado para o app; o código continua preparado para OIDC/store ID e falha fechado se a autenticação do storage não estiver disponível.
+
+
+## Adendo (2026-09-27) — motor de convite persuasivo por WhatsApp
+
+Decisão de produto e proteção operacional para a primeira versão:
+
+- O convite automático do Ranking usa apenas fatos confirmados: participação atual,
+  saldo confirmado de Estrelas, meta vigente e recompensa realmente disponível.
+- O primeiro gatilho automático é a **resposta positiva da avaliação pós-entrega**
+  (nota 4 ou 5). Notas 1, 2 ou 3 nunca recebem convite.
+- O convite entra na **mesma mensagem de agradecimento** da avaliação; não cria
+  um disparo extra logo após a entrega.
+- Quem já participa do Ranking nunca recebe convite.
+- Sem Estrelas V1 ativas, sem saldo confirmado ou com leitura incerta de
+  participação, o motor falha fechado e não envia.
+- Frequência máxima: **1 tentativa a cada 14 dias** e **3 tentativas em 90 dias**,
+  alinhada ao teto conservador já usado pelo ChefeBot para contatos proativos.
+- A reserva da exposição acontece antes do provider de WhatsApp; resultado de
+  envio ambíguo não gera retry automático e não arrisca mensagem duplicada.
+- Opt-out próprio e permanente: **SAIR RANKING**. Isso bloqueia novos convites
+  pelo WhatsApp sem retirar o cliente do Ranking no app.
+- O texto muda conforme a situação real:
+  - presente já disponível com cobertura econômica aprovada;
+  - meta de Estrelas já alcançada;
+  - progresso confirmado com saldo e distância real até a meta.
+- A mensagem não inventa posição, adversário, urgência, prêmio ou benefício.
+- CTA oficial: `https://chefedapizza.com.br/cliente`.
