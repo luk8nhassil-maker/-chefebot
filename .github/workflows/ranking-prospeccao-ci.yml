@@ -11,6 +11,17 @@ on:
       - "src/app/cardapio/page.test.ts"
       - "src/app/cliente/page.tsx"
       - "src/app/cliente/page.test.ts"
+      - "src/lib/consentimentoRanking.ts"
+      - "src/lib/consentimentoRanking.test.ts"
+      - "src/lib/fotoPerfilCliente.ts"
+      - "src/lib/fotoPerfilCliente.test.ts"
+      - "src/lib/fidelidade.ts"
+      - "src/lib/fidelidade.resgate.test.ts"
+      - "src/app/api/cliente/fidelidade/route.ts"
+      - "src/app/api/cliente/fidelidade/route.test.ts"
+      - "src/app/api/cliente/fidelidade/resgate/route.ts"
+      - "src/app/api/cliente/fidelidade/resgate/route.test.ts"
+      - "src/app/api/cliente/perfil/foto/**"
       - "src/app/api/cliente/privacidade/ranking/**"
       - "src/app/dev/ranking-prospeccao/**"
       - "src/lib/rankingClientes.ts"
@@ -68,6 +79,12 @@ jobs:
           src/components/RankingInviteModal.test.ts
           src/app/api/cliente/privacidade/ranking/route.test.ts
           src/app/cliente/page.test.ts
+          src/lib/consentimentoRanking.test.ts
+          src/lib/fotoPerfilCliente.test.ts
+          src/lib/fidelidade.resgate.test.ts
+          src/app/api/cliente/fidelidade/route.test.ts
+          src/app/api/cliente/fidelidade/resgate/route.test.ts
+          src/app/api/cliente/perfil/foto/route.test.ts
           src/app/cardapio/page.test.ts
           src/app/dev/ranking-prospeccao/page.test.ts
           src/lib/rankingClientes.test.ts
@@ -91,6 +108,18 @@ jobs:
           src/app/api/cliente/privacidade/ranking/route.test.ts
           src/app/cliente/page.tsx
           src/app/cliente/page.test.ts
+          src/lib/consentimentoRanking.ts
+          src/lib/consentimentoRanking.test.ts
+          src/lib/fotoPerfilCliente.ts
+          src/lib/fotoPerfilCliente.test.ts
+          src/lib/fidelidade.ts
+          src/lib/fidelidade.resgate.test.ts
+          src/app/api/cliente/fidelidade/route.ts
+          src/app/api/cliente/fidelidade/route.test.ts
+          src/app/api/cliente/fidelidade/resgate/route.ts
+          src/app/api/cliente/fidelidade/resgate/route.test.ts
+          src/app/api/cliente/perfil/foto/route.ts
+          src/app/api/cliente/perfil/foto/route.test.ts
           src/app/cardapio/page.tsx
           src/app/cardapio/page.test.ts
           src/app/dev/ranking-prospeccao/page.tsx
