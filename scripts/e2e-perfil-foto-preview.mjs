@@ -66,18 +66,33 @@ try {
   await page.locator(".cf-ranking-screen").waitFor({ state: "visible" });
   await page.screenshot({ path: path.join(outDir, "05-ranking-liberado-apos-participar.png"), fullPage: true });
 
-  // 4) Ao voltar para a Fidelidade, o card usa quatro perfis sobrepostos e
-  // o quinto círculo mostra o total real vindo do fixture do servidor (6).
+  // 4) Ao voltar para a Fidelidade, o card ativo fica simples: sem avatares
+  // e sem a linha ambígua de pontos. Troféu e bloco de posição ficam alinhados.
   await page.getByRole("button", { name: "Voltar para Fidelidade" }).click();
   const cardRankingAtivo = page.getByRole("button", { name: "Abrir Ranking do Chefe" });
   await cardRankingAtivo.waitFor({ state: "visible" });
-  const pilha = cardRankingAtivo.locator(".cf-preview-faces");
-  await pilha.waitFor({ state: "visible" });
-  const perfis = pilha.locator(".cf-preview-face:not(.cf-preview-face-total)");
-  if (await perfis.count() !== 4) falhar("Card do Ranking não exibiu exatamente 4 perfis na fixture com 6 participantes");
-  const total = (await pilha.locator(".cf-preview-face-total").innerText()).trim();
-  if (total !== "6") falhar(`Total do Ranking incorreto no card: esperado 6, recebido ${total}`);
-  await page.screenshot({ path: path.join(outDir, "06-card-ranking-pilha-perfis-total-real.png"), fullPage: true });
+
+  if (await cardRankingAtivo.locator(".cf-preview-faces").count() !== 0) {
+    falhar("Card do Ranking ainda exibiu círculos de participantes");
+  }
+  if (await cardRankingAtivo.locator(".cf-preview-ranking-copy").count() !== 0) {
+    falhar("Card ativo do Ranking ainda exibiu a linha inferior de pontos");
+  }
+  const textoCard = await cardRankingAtivo.innerText();
+  if (textoCard.includes("pontos no Ranking")) {
+    falhar("Card ativo do Ranking ainda exibiu o texto ambíguo de pontos");
+  }
+
+  const trophyBox = await cardRankingAtivo.locator(".cf-preview-trophy").boundingBox();
+  const titleBox = await cardRankingAtivo.locator(".cf-preview-ranking-title").boundingBox();
+  if (!trophyBox || !titleBox) falhar("Não foi possível medir o alinhamento do card do Ranking");
+  const trophyCenter = trophyBox.y + trophyBox.height / 2;
+  const titleCenter = titleBox.y + titleBox.height / 2;
+  if (Math.abs(trophyCenter - titleCenter) > 4) {
+    falhar(`Troféu e bloco de posição ficaram desalinhados: diferença de ${Math.abs(trophyCenter - titleCenter)}px`);
+  }
+
+  await page.screenshot({ path: path.join(outDir, "06-card-ranking-hierarquia-simplificada.png"), fullPage: true });
 
   await fs.writeFile(path.join(outDir, "resultado.json"), JSON.stringify({
     ok: true,
@@ -88,8 +103,9 @@ try {
       "ranking_sem_dados_antes_de_participar",
       "ranking_liberado_apos_participacao_explicita",
       "modal_contextual_com_fundo_apos_animacao",
-      "card_ranking_quatro_perfis_sobrepostos",
-      "card_ranking_total_participantes_vindo_do_servidor"
+      "card_ranking_sem_circulos",
+      "card_ranking_sem_linha_ambigua_de_pontos",
+      "card_ranking_trofeu_alinhado_ao_bloco_de_posicao"
     ]
   }, null, 2));
 } finally {
