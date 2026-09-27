@@ -174,7 +174,7 @@ export function FidelidadeRankingScreen({
     resumo: posPedido.estado === 'creditado' ? 'Veja o que mudou na sua posição.' : 'Acompanhe a confirmação das estrelas.',
     simbolo: posPedido.estado === 'creditado' ? '✦' : '◷',
   })
-  if (conquista) momentos.push({ id: 'conquista', eyebrow: 'CONQUISTA RECENTE', titulo: 'Sua posição merece destaque', resumo: 'Veja sua conquista e convide alguém conhecido.', simbolo: '✦' })
+  if (conquista) momentos.push({ id: 'conquista', eyebrow: 'CONQUISTA RECENTE', titulo: 'Sua posição merece destaque', resumo: podeCompartilharConquista ? 'Veja sua conquista e convide alguém conhecido.' : 'Veja sua conquista no Ranking.', simbolo: '✦' })
   if (gamificacao?.missaoSemanal?.status === 'desbloqueada') momentos.push({ id: 'semanal', eyebrow: 'MISSÃO SEMANAL', titulo: 'Caçada ao Pódio liberada!', resumo: 'Seu próximo pedido vale 2x no Ranking.', simbolo: '↗' })
   if (alvo?.estado === 'liderando') momentos.push({ id: 'coroa', eyebrow: 'NA LIDERANÇA', titulo: gamificacao?.coroaAmeacada ? 'Coroa ameaçada!' : 'Defenda sua coroa', resumo: mensagemMissao ?? 'Acompanhe sua vantagem.', simbolo: '♛' })
   if (gamificacao?.missaoIndicacao) momentos.push({ id: 'indicacao', eyebrow: 'MISSÃO DA TEMPORADA', titulo: 'Indique 1 amigo', resumo: gamificacao.missaoIndicacao.concluida ? '1/1 ✓ Concluída' : '0/1 · Veja como participar', simbolo: '↗' })
@@ -448,7 +448,7 @@ export function FidelidadeRankingScreen({
               {momentoAberto === 'conquista' && conquista && (
                 <>
                   <p className="cf-ranking-momento-lead">{textoConquistaRanking(conquista, ranking.participantes.posicao ?? ranking.posicao)}</p>
-                  <p>Você pode convidar alguém conhecido para conhecer o ChefeBot e fortalecer sua posição.</p>
+                  {podeCompartilharConquista && <p>Você pode convidar alguém conhecido para conhecer o ChefeBot e fortalecer sua posição.</p>}
                   {!compartilhamentoLiberado && <p className="cf-ranking-momento-notice">Convites bloqueados. Faça seu primeiro pedido confirmado para liberar o compartilhamento.</p>}
                 </>
               )}
