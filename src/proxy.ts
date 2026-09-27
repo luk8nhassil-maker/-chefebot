@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ROUTE_ROLES, verifyToken, type Role } from "@/lib/auth";
 import { ehRotaOperacionalAssinatura } from "@/lib/assinaturaChefeBotUi";
+import { ehProjetoVercelLegado } from "@/lib/vercelProjeto";
 
 const CARDAPIO_DOMAIN = "chefedapizza.com.br";
 const LEGACY_PRODUCTION_ALIAS = "chefebot-pjif.vercel.app";
@@ -8,6 +9,18 @@ const LEGACY_PRODUCTION_ALIAS = "chefebot-pjif.vercel.app";
 function getHostname(req: NextRequest): string {
   const raw = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
   return raw.split(",")[0]!.trim().split(":")[0]!.toLowerCase();
+}
+
+function ehRotaAutenticacaoEquipe(pathname: string): boolean {
+  return pathname === "/login" || pathname.startsWith("/api/auth/");
+}
+
+function redirecionarParaDominioOficial(req: NextRequest) {
+  const url = req.nextUrl.clone();
+  url.protocol = "https:";
+  url.hostname = CARDAPIO_DOMAIN;
+  url.port = "";
+  return NextResponse.redirect(url, 308);
 }
 
 function veioDaTelaPedidos(req: NextRequest): boolean {
@@ -52,12 +65,19 @@ export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const hostname = getHostname(req);
 
+  const projetoOuAliasLegado = hostname === LEGACY_PRODUCTION_ALIAS || ehProjetoVercelLegado();
+
+  // Login nunca deve acontecer num deployment legado: cada projeto Vercel
+  // possui seu próprio conjunto de variáveis e uma credencial correta na
+  // produção oficial pode parecer "incorreta" no projeto antigo. Redirecionar
+  // ANTES da autenticação mantém uma única fonte operacional para credenciais,
+  // cookie e sessão.
+  if (projetoOuAliasLegado && ehRotaAutenticacaoEquipe(pathname)) {
+    return redirecionarParaDominioOficial(req);
+  }
+
   if (hostname === LEGACY_PRODUCTION_ALIAS && ehRotaOperacionalAssinatura(pathname)) {
-    const url = req.nextUrl.clone();
-    url.protocol = "https:";
-    url.hostname = CARDAPIO_DOMAIN;
-    url.port = "";
-    return NextResponse.redirect(url, 308);
+    return redirecionarParaDominioOficial(req);
   }
 
   if (hostname === LEGACY_PRODUCTION_ALIAS && pathname === "/api/pedido-app" && req.method === "POST") {
@@ -117,6 +137,8 @@ export async function proxy(req: NextRequest) {
 export const config = {
   matcher: [
     "/",
+    "/login",
+    "/api/auth/:path*",
     "/pedidos/:path*",
     "/conversas/:path*",
     "/cardapio/:path*",
