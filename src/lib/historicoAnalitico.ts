@@ -286,6 +286,27 @@ export async function consultarEventosAntesDe(
 }
 
 /**
+ * Confirma, com custo O(1), se o coletor analítico já possuía histórico antes
+ * de um instante. Usado por regras semanais que não podem tratar uma semana
+ * parcialmente instrumentada como se fosse uma semana completa.
+ *
+ * Não lê todos os eventos antigos: consulta no máximo 1 membro do Sorted Set.
+ */
+export async function existeHistoricoAnaliticoAntesDe(
+  tenantId: string,
+  antesDeMs: number
+): Promise<boolean> {
+  if (!Number.isFinite(antesDeMs) || antesDeMs <= 0) return false;
+  const primeiro = await aredis.zrange(
+    chaveIndiceGlobal(tenantId),
+    0,
+    antesDeMs - 1,
+    { byScore: true, limit: { offset: 0, count: 1 } },
+  );
+  return primeiro.length > 0;
+}
+
+/**
  * Returns analytics events for a single client in [inicioMs, fimMs].
  * Paginates per-client sorted set — no SCAN, no cross-client data.
  */
