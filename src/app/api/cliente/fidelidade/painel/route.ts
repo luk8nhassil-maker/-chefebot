@@ -12,6 +12,7 @@ import { ESTRELAS_INDICACAO_PRIMEIRA_COMPRA } from "@/lib/estrelasIndicacao";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
 import { posicaoClienteRanking, obterTopRanking, obterRankingCompleto, reindexarPorFiltro } from "@/lib/rankingClientes";
 import { projetarIdentidadesPublicasRanking } from "@/lib/rankingPrivacidade";
+import { obterParticipacaoRanking } from "@/lib/consentimentoRanking";
 import {
   calcularVariacaoPosicao,
   garantirSnapshotDiario,
@@ -71,8 +72,11 @@ export async function GET(req: NextRequest) {
   const clienteId = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
   const tenantId = TENANT_PADRAO;
 
-  const temporada = await obterTemporadaAtiva(tenantId);
-  const configGamificacao = await obterConfigGamificacao();
+  const [temporada, configGamificacao, participaRanking] = await Promise.all([
+    obterTemporadaAtiva(tenantId),
+    obterConfigGamificacao(),
+    obterParticipacaoRanking(clienteId).catch(() => false),
+  ]);
 
   // Vantagem de largada (carryover) e status social — aplicados ANTES de ler
   // a posição, para que o Top 10 herdado da temporada anterior já apareça
@@ -84,7 +88,7 @@ export async function GET(req: NextRequest) {
   // auditoria do #446); a chamada por-cliente logo depois garante que o
   // PRÓPRIO cliente autenticado nesta requisição também fica em dia mesmo
   // que a reconciliação em lote já tenha rodado por outra pessoa.
-  if (temporada) {
+  if (temporada && participaRanking) {
     await reconciliarTransicaoTemporada(tenantId, temporada);
     await aplicarCarryoverClienteSeNecessario(tenantId, temporada, clienteId);
   }
@@ -134,7 +138,7 @@ export async function GET(req: NextRequest) {
     };
   } | null = null;
 
-  if (temporada) {
+  if (temporada && participaRanking) {
     const [pos, top, completo] = await Promise.all([
       posicaoClienteRanking(tenantId, temporada.temporadaId, clienteId),
       obterTopRanking(tenantId, temporada.temporadaId, 50),
