@@ -7,6 +7,8 @@ on:
       - "src/lib/rankingConviteWhatsapp.test.ts"
       - "src/app/api/whatsapp/route.ts"
       - "src/app/api/whatsapp/rankingConviteInterception.test.ts"
+      - "src/app/api/orders/route.ts"
+      - "src/app/api/orders/route.notificacaoStatus.test.ts"
       - "docs/PRODUTO_RANKING_E_PREMIOS.md"
       - ".github/workflows/ranking-convite-whatsapp-ci.yml"
   workflow_dispatch:
@@ -43,10 +45,12 @@ jobs:
           npm test --
           src/lib/rankingConviteWhatsapp.test.ts
           src/app/api/whatsapp/rankingConviteInterception.test.ts
+          src/app/api/orders/route.notificacaoStatus.test.ts
           src/app/api/whatsapp/pesquisaPreferenciaInterception.test.ts
           src/app/api/whatsapp/idempotenciaFalhaAposClaim.test.ts
           src/app/api/whatsapp/duplicidadeSaudacaoConcorrente.test.ts
           src/app/api/whatsapp/enviarMensagem.test.ts
+          src/app/api/orders/route.notificacaoStatus.test.ts
 
       - name: Lint dos arquivos novos
         run: >-
