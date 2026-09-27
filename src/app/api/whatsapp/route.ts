@@ -1393,18 +1393,6 @@ export async function POST(req: NextRequest) {
     // Garante que o painel Tempo Real veja a mensagem independentemente do estado do bot.
     await registrarMensagem(phone, "cliente", messageText);
 
-    const optOutRanking = await consumirOptOutConviteRankingWhatsapp({
-      telefone: phone,
-      resposta: messageText,
-    });
-    if (optOutRanking) {
-      await enviarMensagem(
-        phone,
-        "Pronto. Você não receberá mais convites do Ranking pelo WhatsApp. Isso não altera sua participação no app."
-      );
-      return NextResponse.json({ ok: true });
-    }
-
     const botAtivo = await redis.get<boolean>("bot_ativo");
     if (botAtivo === false) {
       // Bot global pausado ("Você no comando"): NÃO processa fluxo, NÃO responde
@@ -1448,6 +1436,18 @@ export async function POST(req: NextRequest) {
       );
       await redis.set(`manual:${phone}`, true, { ex: 7200 });
 
+      return NextResponse.json({ ok: true });
+    }
+
+    const optOutRanking = await consumirOptOutConviteRankingWhatsapp({
+      telefone: phone,
+      resposta: messageText,
+    });
+    if (optOutRanking) {
+      await enviarMensagem(
+        phone,
+        "Pronto. Você não receberá mais convites do Ranking pelo WhatsApp. Isso não altera sua participação no app."
+      );
       return NextResponse.json({ ok: true });
     }
 
