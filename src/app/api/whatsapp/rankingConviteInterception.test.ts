@@ -60,7 +60,7 @@ vi.mock("@/lib/pesquisaPreferenciaRespostaRedis", () => ({
 }));
 
 const { enviarTextoWhatsAppMock } = vi.hoisted(() => ({
-  enviarTextoWhatsAppMock: vi.fn(async () => ({
+  enviarTextoWhatsAppMock: vi.fn(async (_phone: string, _text: string, _opts?: unknown) => ({
     ok: true,
     latenciaMs: 1,
     tentativas: 1,
