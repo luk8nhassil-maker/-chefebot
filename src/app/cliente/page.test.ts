@@ -312,6 +312,22 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
     expect(fonte).toContain("painel?.temporada");
     expect(fonte).toContain("Ranking da temporada");
   });
+  test("card do Ranking usa no máximo 4 avatares sobrepostos e um quinto círculo com o total exato do servidor", () => {
+    expect(fonte).toContain("ranking.participantes.lista.slice(0, 4)");
+    expect(fonte).toContain("ranking.participantes.total");
+    expect(fonte).toContain('className="cf-preview-face cf-preview-face-total"');
+    expect(fonte).toContain('className="cf-preview-ranking-nav"');
+    expect(fonte).toContain("margin-left:-9px");
+    expect(fonte).not.toContain("totalParticipantesRanking - 4");
+  });
+
+  test("avatares do card respeitam privacidade e não inventam foto pública de terceiros", () => {
+    expect(fonte).toContain("participante.nomePublico?.trim().slice(0, 1).toUpperCase()");
+    expect(fonte).toContain("participante.eVoce && !!fotoPerfilUrl");
+    expect(fonte).toContain("<UserRound");
+    expect(fonte).not.toContain("participante.fotoPerfilUrl");
+  });
+
 
   test("preferencias do ranking usam texto vindo do servidor e permitem revogacao total", () => {
     expect(fonte).toContain("/api/cliente/privacidade/ranking");
