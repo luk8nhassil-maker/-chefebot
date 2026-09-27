@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, ChevronRight, Clock3, Gift, Info, List, Phone, MessageCircle, Receipt, ShieldCheck, Sparkles, Pizza, Trophy, Users, Star } from 'lucide-react'
+import { ArrowUp, ChevronRight, Clock3, Gift, Info, List, Phone, MessageCircle, Receipt, ShieldCheck, Sparkles, Pizza, Trophy, Users, Star, UserRound } from 'lucide-react'
 import { calcularMissaoAtual } from '@/lib/missoes'
 import ClientBottomNav from '@/components/ClientBottomNav'
 import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
@@ -531,7 +531,14 @@ function FidelidadeMobileScreen({
 }: FidelidadeMobileScreenProps) {
   const primeiroNome = nome.split(' ')[0] || 'Cliente'
   const inicial = primeiroNome.slice(0, 1).toUpperCase()
-  const participantes = ranking?.entorno ?? []
+  // O card usa no máximo 4 participantes reais. O quinto círculo é sempre
+  // a contagem EXATA recebida do servidor nesta leitura do painel.
+  const participantesDestaque = ranking?.participaCampanha
+    ? ranking.participantes.lista.slice(0, 4)
+    : []
+  const totalParticipantesRanking = ranking?.participaCampanha
+    ? ranking.participantes.total
+    : 0
   const progressoSeguro = Math.max(0, Math.min(100, progresso))
 
   return (
@@ -572,10 +579,42 @@ function FidelidadeMobileScreen({
         <div className="cf-preview-ranking-top">
           <span className="cf-preview-trophy"><Trophy size={22} /></span>
           <span className="cf-preview-ranking-title"><small>RANKING DO CHEFE</small><strong>{ranking?.participaCampanha ? 'Sua posição' : 'Entre na disputa'}</strong>{ranking?.participaCampanha && <b>#{ranking.participantes.posicao ?? ranking.posicao}</b>}</span>
-          <span className="cf-preview-faces" aria-label="Participantes anonimizados">
-            {participantes.map((participante, index) => <i key={participante.posicao}>{participante.eVoce ? 'L' : String.fromCharCode(65 + index)}</i>)}
+          <span className="cf-preview-ranking-nav" aria-hidden={ranking?.participaCampanha ? undefined : true}>
+            {ranking?.participaCampanha && (
+              <span
+                className="cf-preview-faces"
+                aria-label={`${totalParticipantesRanking} participantes no Ranking agora`}
+                title={`${totalParticipantesRanking} participantes no Ranking agora`}
+              >
+                {participantesDestaque.map((participante, index) => {
+                  const inicialParticipante = participante.nomePublico?.trim().slice(0, 1).toUpperCase() || null
+                  const mostrarMinhaFoto = participante.eVoce && !!fotoPerfilUrl
+                  return (
+                    <i
+                      key={participante.posicao}
+                      className="cf-preview-face"
+                      data-index={index}
+                      aria-label={participante.eVoce ? 'Seu perfil' : participante.nomePublico ? `Perfil de ${participante.nomePublico}` : 'Participante anônimo'}
+                    >
+                      {mostrarMinhaFoto
+                        ? <img src={fotoPerfilUrl ?? ''} alt="" />
+                        : inicialParticipante
+                          ? <span>{inicialParticipante}</span>
+                          : <UserRound size={17} strokeWidth={1.8} aria-hidden="true" />}
+                    </i>
+                  )
+                })}
+                <i
+                  className="cf-preview-face cf-preview-face-total"
+                  aria-label={`${totalParticipantesRanking} participantes no Ranking`}
+                  title={`${totalParticipantesRanking} participantes no Ranking`}
+                >
+                  {totalParticipantesRanking}
+                </i>
+              </span>
+            )}
+            <ChevronRight className="cf-preview-ranking-chevron" size={21} />
           </span>
-          <ChevronRight size={21} />
         </div>
         <div className="cf-preview-ranking-copy"><ArrowUp size={22} /><span>{ranking?.participaCampanha ? <>{ranking.score} <strong>pontos no Ranking</strong></> : 'Ative para ver sua disputa e o próximo passo.'}</span></div>
       </button>
@@ -2301,7 +2340,7 @@ export default function ClientePage() {
         .cf-preview-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.cf-preview-actions button{min-height:40px;border:1px solid rgba(144,178,218,.45);border-radius:12px;background:rgba(255,255,255,.38);color:#4e5968;font:700 12px inherit;display:flex;align-items:center;justify-content:center;gap:7px;cursor:pointer}
         .cf-preview-ranking{width:100%;padding:16px 17px;background:linear-gradient(135deg,rgba(255,255,255,.79),rgba(255,245,211,.82));box-shadow:0 9px 28px rgba(159,125,24,.08);color:#59616a;text-align:left;cursor:pointer;font-family:inherit}
         .cf-preview-ranking-top{display:flex;align-items:center}.cf-preview-trophy{width:40px;height:40px;border-radius:13px;display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,rgba(255,244,184,.99),rgba(241,209,92,.96));color:#896818;flex:none}.cf-preview-ranking-title{display:flex;flex-direction:column;margin-left:10px;min-width:80px}.cf-preview-ranking-title small{font-size:10px;color:#7f8996;font-weight:700}.cf-preview-ranking-title strong{font-size:16px;font-weight:700;margin-top:3px}.cf-preview-ranking-title b{font-size:20px;color:#252a30;margin-top:4px}
-        .cf-preview-faces{margin-left:auto;display:flex;align-items:center}.cf-preview-faces i{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-left:-8px;border:1px solid rgba(255,255,255,.85);font-style:normal;font-size:11px;color:#fff}.cf-preview-faces i:nth-child(1){background:#ecc7bf}.cf-preview-faces i:nth-child(2){background:#b8d4e8}.cf-preview-faces i:nth-child(3){background:#c9afea}.cf-preview-faces i:nth-child(4){background:#fff;color:#9aa2ad}
+        .cf-preview-ranking-nav{margin-left:auto;display:flex;align-items:center;gap:8px;min-width:0}.cf-preview-faces{display:flex;align-items:center;padding-left:8px}.cf-preview-face{position:relative;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-left:-9px;border:2px solid rgba(255,255,255,.96);font-style:normal;font-size:11px;font-weight:800;color:#fff;overflow:hidden;box-shadow:0 3px 9px rgba(45,55,68,.12);background:linear-gradient(145deg,#91b7d8,#6385ac)}.cf-preview-face:nth-child(2){background:linear-gradient(145deg,#c8a7e9,#8e72bb)}.cf-preview-face:nth-child(3){background:linear-gradient(145deg,#e6b6a7,#bd7d6d)}.cf-preview-face:nth-child(4){background:linear-gradient(145deg,#adc9b7,#719a80)}.cf-preview-face img{width:100%;height:100%;display:block;object-fit:cover}.cf-preview-face svg{width:17px;height:17px;opacity:.92}.cf-preview-face-total{z-index:8;background:#fff;color:#737d8b;border-color:rgba(255,255,255,.98);box-shadow:0 3px 11px rgba(45,55,68,.13);font-size:10px;font-variant-numeric:tabular-nums;letter-spacing:-.2px}.cf-preview-ranking-chevron{flex:none;color:#5f6873}
         .cf-preview-ranking-copy{border-top:1px solid rgba(189,166,82,.25);margin-top:12px;padding-top:12px;display:flex;align-items:center;gap:8px;font-size:12.5px;color:#7a828e}.cf-preview-ranking-copy svg,.cf-preview-ranking-copy strong{color:#2f9a65}
         .cf-preview-referral{position:relative;overflow:hidden;padding:19px 17px 17px;background:rgba(255,255,255,.56);min-height:188px}.cf-preview-referral h2{position:relative;z-index:2;font-size:18px;font-weight:800;line-height:1.2;margin:0 0 7px;max-width:88%}.cf-preview-referral>p:not(.cf-preview-kicker){position:relative;z-index:2;font-size:12.5px;line-height:1.45;color:#737d8b;max-width:86%;margin:0 0 17px}.cf-preview-referral>button{position:relative;z-index:3;width:100%;min-height:46px;border:1px solid rgba(255,255,255,.38);border-radius:13px;background:linear-gradient(135deg,rgba(67,134,247,.82),rgba(31,91,204,.8));color:#fff;font:700 15px inherit;backdrop-filter:blur(18px) saturate(1.45);box-shadow:0 8px 22px rgba(31,91,204,.18),inset 0 1px 0 rgba(255,255,255,.4);cursor:pointer}
         .cf-preview-gift{position:absolute;right:-36px;top:48%;transform:translateY(-50%) rotate(-7deg) scale(2.2);font-size:54px;opacity:.9;z-index:1;filter:drop-shadow(0 15px 22px rgba(233,80,126,.22))}
