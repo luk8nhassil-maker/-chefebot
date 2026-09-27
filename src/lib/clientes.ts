@@ -14,6 +14,12 @@ export type Cliente = {
    * NUNCA pula a primeira ativação (campo ausente = ainda não ativou).
    */
   fidelidadeAtivadaEm?: string;
+  /** Metadados da foto ficam no perfil; o binário vive no Vercel Blob privado. */
+  fotoPerfilPathname?: string;
+  fotoPerfilContentType?: "image/jpeg" | "image/png" | "image/webp";
+  fotoPerfilAtualizadaEm?: string;
+  /** Marco permanente: depois de concluída uma vez, a missão da foto nunca volta a bloquear presentes. */
+  fotoPerfilMissaoConcluidaEm?: string;
 };
 
 export type ProximaEtapaCliente = "name" | "points";
@@ -139,6 +145,28 @@ export async function ativarFidelidadeCliente(telefone: string, nome: string): P
     updatedAt: agora,
     lastLoginAt: agora,
     fidelidadeAtivadaEm: existente?.fidelidadeAtivadaEm ?? agora,
+  };
+  await redis.set(chaveCliente(tel), atualizado);
+  return atualizado;
+}
+
+
+export async function registrarFotoPerfilCliente(
+  telefone: string,
+  foto: { pathname: string; contentType: "image/jpeg" | "image/png" | "image/webp" },
+): Promise<Cliente> {
+  const tel = sanitizeTelefoneCliente(telefone);
+  const existente = await buscarClientePorTelefone(tel);
+  if (!existente) throw new Error("cliente_nao_encontrado");
+  const agora = new Date().toISOString();
+  const atualizado: Cliente = {
+    ...existente,
+    fotoPerfilPathname: foto.pathname,
+    fotoPerfilContentType: foto.contentType,
+    fotoPerfilAtualizadaEm: agora,
+    // Idempotente e permanente: trocar a foto depois não recria a missão.
+    fotoPerfilMissaoConcluidaEm: existente.fotoPerfilMissaoConcluidaEm ?? agora,
+    updatedAt: agora,
   };
   await redis.set(chaveCliente(tel), atualizado);
   return atualizado;
