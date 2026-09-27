@@ -37,7 +37,11 @@ function realEval(_script: string, keys: string[], args: string[]) {
 }
 
 vi.mock("./fotoPerfilCliente", () => ({
-  missaoFotoPerfilConcluida: missaoFotoMock,
+  requisitoFotoPerfilSatisfeito: vi.fn(async (_clienteId: string, recompensas: Array<{ status: string }>) => {
+    const concluida = await missaoFotoMock();
+    const dispensadaPorHistorico = !concluida && recompensas.some((r) => r.status === "resgatada");
+    return { satisfeito: concluida || dispensadaPorHistorico, concluida, dispensadaPorHistorico };
+  }),
 }));
 
 vi.mock("@/lib/redis", () => ({
@@ -108,6 +112,26 @@ describe("reservarResgatePontos", () => {
     missaoFotoMock.mockResolvedValue(false);
     await expect(reservarResgatePontos(clienteId, recompensaId)).rejects.toThrow(/foto de perfil/i);
     expect((await obterSaldoPontos(clienteId)).disponivel).toBe(100);
+  });
+
+  test("cliente legado que já resgatou presente não é travado retroativamente pela foto", async () => {
+    const { clienteId, recompensaId } = await clienteComRecompensaDisponivel("86999991021", 200);
+    const primeiraReserva = await reservarResgatePontos(clienteId, recompensaId);
+    await confirmarResgatePontos(clienteId, primeiraReserva.resgateId, "ped_legado_1");
+
+    // Gera uma segunda recompensa e simula a nova regra chegando depois do
+    // primeiro resgate. O histórico resgatado preserva o direito existente.
+    const { registrarMovimentoPontosIdempotente } = await import("./fidelidade");
+    await registrarMovimentoPontosIdempotente(clienteId, {
+      eventoId: "confirmado:legado:2",
+      pedidoId: "ped_legado_2",
+      tipo: "confirmado",
+      pontos: 100,
+      motivo: "novo pedido",
+    });
+    const abertas = (await obterRecompensasPontos(clienteId)).filter((r) => r.status === "disponivel");
+    missaoFotoMock.mockResolvedValue(false);
+    await expect(reservarResgatePontos(clienteId, abertas[0].recompensaId)).resolves.toBeTruthy();
   });
 
   test("recompensa inexistente lança erro", async () => {
