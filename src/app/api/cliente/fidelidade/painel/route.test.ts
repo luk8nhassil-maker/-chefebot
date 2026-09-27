@@ -6,6 +6,7 @@ let posicaoPorCliente = new Map<string, { posicao: number; score: number } | nul
 let topRanking: Array<{ clienteId: string; score: number; posicao: number }> = [];
 let rankingCompleto: Array<{ clienteId: string; score: number; posicao: number }> = [];
 let identidadesPublicas = new Map<string, { participaCampanha: boolean; nomePublico: string | null; telefoneMascarado: string | null; fotoPerfilUrl: null }>();
+let participaRanking = true;
 
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
@@ -58,6 +59,10 @@ vi.mock("@/lib/rankingClientes", async () => {
 
 vi.mock("@/lib/rankingPrivacidade", () => ({
   projetarIdentidadesPublicasRanking: vi.fn(async () => identidadesPublicas),
+}));
+
+vi.mock("@/lib/consentimentoRanking", () => ({
+  obterParticipacaoRanking: vi.fn(async () => participaRanking),
 }));
 
 let posicaoAnteriorMock: { geral: number; participantes: number | null } | null = null;
@@ -154,6 +159,7 @@ beforeEach(() => {
   topRanking = [];
   rankingCompleto = [];
   identidadesPublicas = new Map();
+  participaRanking = true;
   posicaoAnteriorMock = null;
   configFidelidadeMock = { ativo: true, regraVersao: "estrelas-faixas-v1" };
   registrarFatoMock.mockClear();
@@ -191,6 +197,26 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     const body = await res.json();
     expect(body.temporada).toBeNull();
     expect(body.ranking).toBeNull();
+  });
+
+  test("sem clique em Participar não devolve nem calcula o Ranking", async () => {
+    participaRanking = false;
+    temporadaAtiva = { temporadaId: "temp_1", nome: "Temporada", fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 1, score: 999 });
+    topRanking = [{ clienteId, score: 999, posicao: 1 }];
+    rankingCompleto = [...topRanking];
+
+    const res = await GET(req("token-cli-a"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ranking).toBeNull();
+    expect(reconciliarTransicaoMock).not.toHaveBeenCalled();
+    expect(aplicarCarryoverMock).not.toHaveBeenCalled();
+    expect(sincronizarStatusSocialMock).not.toHaveBeenCalled();
+    expect(sincronizarMissaoSemanalMock).not.toHaveBeenCalled();
+    expect(registrarFatoMock).not.toHaveBeenCalled();
   });
 
   test("retorna dados de temporada quando há temporada ativa", async () => {
