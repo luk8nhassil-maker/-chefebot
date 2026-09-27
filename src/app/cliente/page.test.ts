@@ -320,6 +320,30 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
     expect(fonte).toContain("Revogar todas as autorizações do ranking");
   });
 
+  test("card do Ranking mostra no máximo 4 perfis sobrepostos e um quinto círculo com o total real de participantes", () => {
+    expect(fonte).toContain("ranking?.participantes.lista.slice(0, 4)");
+    expect(fonte).toContain("ranking?.participantes.total ?? 0");
+    expect(fonte).toContain("cf-preview-ranking-tail");
+    expect(fonte).toContain("cf-preview-face-total");
+    expect(fonte).toContain("{totalParticipantes}");
+    expect(fonte).toContain("participantes no Ranking agora");
+    // O total vem do servidor; nunca existe número fixo no componente real.
+    const bloco = fonte.slice(
+      fonte.indexOf("function FidelidadeMobileScreen"),
+      fonte.indexOf("type PrivacidadeRankingControlsProps"),
+    );
+    expect(bloco).not.toMatch(/totalParticipantes\s*=\s*\d+/);
+  });
+
+  test("pilha de perfis só aparece para quem já participa do Ranking", () => {
+    const bloco = fonte.slice(
+      fonte.indexOf("function FidelidadeMobileScreen"),
+      fonte.indexOf("type PrivacidadeRankingControlsProps"),
+    );
+    expect(bloco).toContain("{ranking?.participaCampanha && (");
+    expect(bloco).toContain('className="cf-preview-faces"');
+  });
+
   test("foto do perfil usa rota autenticada e não vira exposição pública implícita no ranking", () => {
     expect(fonte).toContain("/api/cliente/perfil/foto");
     expect(fonte).toContain("fotoPerfilDisponivel");
