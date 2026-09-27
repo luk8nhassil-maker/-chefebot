@@ -47,6 +47,16 @@ vi.mock("@/lib/pesquisaPreferenciaContatosRedis", () => ({
   registrarContatoPesquisaConfirmado: registrarContatoPesquisaConfirmadoMock,
 }));
 
+const { prepararConviteRankingMock, confirmarConviteRankingMock } = vi.hoisted(() => ({
+  prepararConviteRankingMock: vi.fn(),
+  confirmarConviteRankingMock: vi.fn(async () => true),
+}));
+
+vi.mock("@/lib/rankingConviteWhatsapp", () => ({
+  prepararConviteRankingWhatsapp: prepararConviteRankingMock,
+  confirmarConviteRankingWhatsapp: confirmarConviteRankingMock,
+}));
+
 vi.mock("@/lib/evolutionApi", () => ({
   obterConfigEvolution: vi.fn(() => ({
     baseUrl: "https://evolution.test",
@@ -106,6 +116,10 @@ beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({ ok: true, json: async () => ({}) });
   registrarContatoPesquisaConfirmadoMock.mockClear();
+  prepararConviteRankingMock.mockReset();
+  prepararConviteRankingMock.mockResolvedValue({ status: "suprimido", motivo: "cooldown_14_dias" });
+  confirmarConviteRankingMock.mockClear();
+  confirmarConviteRankingMock.mockResolvedValue(true);
 });
 
 function nenhumaMensagemEnviada(): boolean {
@@ -131,15 +145,39 @@ describe("PATCH /api/orders — cliente recebe a sequência completa de status",
     expect(textoEnviado()).toBe("*Wesley*, seu pedido foi enviado para a cozinha! 👨‍🍳🍕\n\nJá começamos o preparo e avisaremos você a cada etapa.");
   });
 
-  test("pedido do site com WhatsApp vinculado recebe convite do Rank ao entrar na cozinha", async () => {
+  test("ao entrar na cozinha envia primeiro o status e depois o convite curto do motor", async () => {
+    prepararConviteRankingMock.mockResolvedValue({
+      status: "pronto",
+      exposureId: "exp-cozinha-1",
+      situacao: "progresso_estrelas",
+      mensagem: "🎁 Quer ganhar presentes da pizzaria?\nÉ só clicar: https://chefedapizza.com.br/cliente",
+    });
     seedPedido({ origem: "site", whatsappVinculado: true, status: "novo" });
+
     const res = await PATCH(patchRequest({ id: "ped_notif_1", status: "em_preparo" }));
+
     expect(res.status).toBe(200);
+    expect(prepararConviteRankingMock).toHaveBeenCalledWith({
+      telefone: "5586999998888",
+      triggerEventId: "cozinha:ped_notif_1",
+    });
     const textos = textosEnviados();
-    expect(textos).toHaveLength(1);
-    expect(textos[0]).toContain("seu pedido foi enviado para a cozinha");
-    expect(textos[0]).toContain("E se ele também te aproximasse de uma pizza grátis?");
-    expect(textos[0]).toContain("/cliente?fromOrder=1");
+    expect(textos).toHaveLength(2);
+    expect(textos[0]).toBe("*Wesley*, seu pedido foi enviado para a cozinha! 👨‍🍳🍕\n\nJá começamos o preparo e avisaremos você a cada etapa.");
+    expect(textos[1]).toBe("🎁 Quer ganhar presentes da pizzaria?\nÉ só clicar: https://chefedapizza.com.br/cliente");
+    expect(confirmarConviteRankingMock).toHaveBeenCalledWith({ exposureId: "exp-cozinha-1" });
+  });
+
+  test("motor suprimido mantém somente a mensagem normal da cozinha", async () => {
+    seedPedido({ status: "novo" });
+
+    const res = await PATCH(patchRequest({ id: "ped_notif_1", status: "em_preparo" }));
+
+    expect(res.status).toBe(200);
+    expect(textosEnviados()).toEqual([
+      "*Wesley*, seu pedido foi enviado para a cozinha! 👨‍🍳🍕\n\nJá começamos o preparo e avisaremos você a cada etapa.",
+    ]);
+    expect(confirmarConviteRankingMock).not.toHaveBeenCalled();
   });
 
   // Delivery envia somente no saiu_entrega — 1. copy exata.
@@ -262,13 +300,23 @@ describe("PATCH /api/orders — cliente recebe a sequência completa de status",
     expect(nenhumaMensagemEnviada()).toBe(true);
   });
 
-  test("falha da Evolution preserva o status e retorna aviso operacional", async () => {
+  test("falha da mensagem da cozinha preserva status e nunca envia convite isolado", async () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({}) });
+    prepararConviteRankingMock.mockResolvedValue({
+      status: "pronto",
+      exposureId: "exp-nao-pode-sair",
+      situacao: "progresso_estrelas",
+      mensagem: "CONVITE NÃO PODE SAIR",
+    });
     seedPedido({ tipoEntrega: "delivery", status: "novo" });
+
     const res = await PATCH(patchRequest({ id: "ped_notif_1", status: "em_preparo" }));
     const data = await res.json();
+
     expect(res.status).toBe(200);
     expect(data.status).toBe("em_preparo");
     expect(data.avisoOperacional).toMatch(/mensagem ao cliente não foi enviada/i);
+    expect(prepararConviteRankingMock).not.toHaveBeenCalled();
+    expect(textosEnviados()).not.toContain("CONVITE NÃO PODE SAIR");
   });
 });
