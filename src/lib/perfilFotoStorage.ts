@@ -2,6 +2,11 @@ import "server-only";
 
 import { createHmac } from "crypto";
 
+/**
+ * Storage oficial: Vercel Blob privado conectado ao projeto chefebot-contingencia.
+ * O runtime continua fail-closed se BLOB_STORE_ID/OIDC não estiverem disponíveis.
+ */
+
 export const FOTO_PERFIL_MAX_BYTES = 700 * 1024;
 export const FOTO_PERFIL_TIPOS = ["image/jpeg", "image/png", "image/webp"] as const;
 export type FotoPerfilContentType = (typeof FOTO_PERFIL_TIPOS)[number];
