@@ -1442,7 +1442,7 @@ export async function POST(req: NextRequest) {
     if (optOutRanking) {
       await enviarMensagem(
         phone,
-        "Pronto. Você não receberá mais convites do Ranking pelo WhatsApp. Isso não altera sua participação no app."
+        "Pronto. Você não receberá mais mensagens do Ranking pelo WhatsApp. Isso não altera sua participação no app."
       );
       return NextResponse.json({ ok: true });
     }

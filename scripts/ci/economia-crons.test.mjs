@@ -23,7 +23,16 @@ describe("Vercel crons — modo economia seguro", () => {
     expect(paths).not.toContain("/api/cron/mcp-observer");
   });
 
-  it("não introduz outros despertares automáticos", () => {
-    expect(paths.sort()).toEqual(["/api/cron", "/api/cron/pix-pendente"].sort());
+  it("mantém somente os três crons explicitamente aprovados", () => {
+    expect(paths.sort()).toEqual([
+      "/api/cron",
+      "/api/cron/pix-pendente",
+      "/api/cron/ranking-podio",
+    ].sort());
+  });
+
+  it("agenda o Pódio somente uma vez por dia às 21:00 UTC", () => {
+    const cron = (config.crons ?? []).find((item) => item.path === "/api/cron/ranking-podio");
+    expect(cron).toEqual({ path: "/api/cron/ranking-podio", schedule: "0 21 * * *" });
   });
 });

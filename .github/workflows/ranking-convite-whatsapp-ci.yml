@@ -5,11 +5,16 @@ on:
     paths:
       - "src/lib/rankingConviteWhatsapp.ts"
       - "src/lib/rankingConviteWhatsapp.test.ts"
+      - "src/lib/rankingPodioWhatsapp.ts"
+      - "src/lib/rankingPodioWhatsapp.test.ts"
+      - "src/app/api/cron/ranking-podio/**"
       - "src/app/api/whatsapp/route.ts"
       - "src/app/api/whatsapp/rankingConviteInterception.test.ts"
       - "src/app/api/orders/route.ts"
       - "src/app/api/orders/route.notificacaoStatus.test.ts"
       - "docs/PRODUTO_RANKING_E_PREMIOS.md"
+      - "vercel.json"
+      - "scripts/ci/economia-crons.test.mjs"
       - ".github/workflows/ranking-convite-whatsapp-ci.yml"
   workflow_dispatch:
 
@@ -44,6 +49,9 @@ jobs:
         run: >-
           npm test --
           src/lib/rankingConviteWhatsapp.test.ts
+          src/lib/rankingPodioWhatsapp.test.ts
+          src/app/api/cron/ranking-podio/route.test.ts
+          scripts/ci/economia-crons.test.mjs
           src/app/api/whatsapp/rankingConviteInterception.test.ts
           src/app/api/orders/route.notificacaoStatus.test.ts
           src/app/api/whatsapp/pesquisaPreferenciaInterception.test.ts
@@ -57,6 +65,10 @@ jobs:
           npm run lint --
           src/lib/rankingConviteWhatsapp.ts
           src/lib/rankingConviteWhatsapp.test.ts
+          src/lib/rankingPodioWhatsapp.ts
+          src/lib/rankingPodioWhatsapp.test.ts
+          src/app/api/cron/ranking-podio/route.ts
+          src/app/api/cron/ranking-podio/route.test.ts
           src/app/api/whatsapp/rankingConviteInterception.test.ts
 
       - name: Typecheck
