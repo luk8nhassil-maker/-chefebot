@@ -126,7 +126,7 @@ describe("Ranking no webhook WhatsApp após mover o gatilho para a cozinha", () 
     expect(processMessageMock).not.toHaveBeenCalled();
     expect(consumirRespostaPesquisaMock).not.toHaveBeenCalled();
     expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(1);
-    expect((enviarTextoWhatsAppMock.mock.calls[0]?.[1] as string)).toContain("não receberá mais convites do Ranking");
+    expect((enviarTextoWhatsAppMock.mock.calls[0]?.[1] as string)).toContain("não receberá mais mensagens do Ranking");
   });
 
   test("nota inválida mantém a avaliação pendente para a próxima tentativa", async () => {
