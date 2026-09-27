@@ -32,14 +32,6 @@ export async function POST(req: NextRequest) {
 
   const clienteIdPontos = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
 
-  // Regra server-side: na experiência de Estrelas, a missão da foto é
-  // obrigatória uma única vez antes do primeiro presente. O marcador é
-  // permanente; trocar/remover a imagem depois não recria a missão.
-  const config = await obterConfigFidelidadePontos();
-  if (estrelasV1Ativa(config) && !cliente.fotoPerfilMissaoConcluidaEm) {
-    return NextResponse.json({ error: "Adicione uma foto ao perfil para desbloquear seu primeiro presente", code: "foto_perfil_obrigatoria_primeiro_presente" }, { status: 409 });
-  }
-
   let body: { recompensaId?: string };
   try {
     body = await req.json();
@@ -58,6 +50,14 @@ export async function POST(req: NextRequest) {
   const pertenceAoCliente = recompensas.some((r) => r.recompensaId === recompensaId);
   if (!pertenceAoCliente) {
     return NextResponse.json({ error: "Recompensa nao encontrada" }, { status: 404 });
+  }
+
+  // Regra server-side aplicada somente a um presente real deste cliente:
+  // na experiência de Estrelas, a missão da foto é obrigatória uma única vez
+  // antes do primeiro resgate. O marcador permanente impede repetição futura.
+  const config = await obterConfigFidelidadePontos();
+  if (estrelasV1Ativa(config) && !cliente.fotoPerfilMissaoConcluidaEm) {
+    return NextResponse.json({ error: "Adicione uma foto ao perfil para desbloquear seu primeiro presente", code: "foto_perfil_obrigatoria_primeiro_presente" }, { status: 409 });
   }
 
   try {
