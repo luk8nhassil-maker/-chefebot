@@ -6,6 +6,7 @@ let posicaoPorCliente = new Map<string, { posicao: number; score: number } | nul
 let topRanking: Array<{ clienteId: string; score: number; posicao: number }> = [];
 let rankingCompleto: Array<{ clienteId: string; score: number; posicao: number }> = [];
 let identidadesPublicas = new Map<string, { participaCampanha: boolean; nomePublico: string | null; telefoneMascarado: string | null; fotoPerfilUrl: null }>();
+let participaRanking = true;
 
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
@@ -58,6 +59,10 @@ vi.mock("@/lib/rankingClientes", async () => {
 
 vi.mock("@/lib/rankingPrivacidade", () => ({
   projetarIdentidadesPublicasRanking: vi.fn(async () => identidadesPublicas),
+}));
+
+vi.mock("@/lib/consentimentoRanking", () => ({
+  obterParticipacaoRanking: vi.fn(async () => participaRanking),
 }));
 
 let posicaoAnteriorMock: { geral: number; participantes: number | null } | null = null;
@@ -154,6 +159,7 @@ beforeEach(() => {
   topRanking = [];
   rankingCompleto = [];
   identidadesPublicas = new Map();
+  participaRanking = true;
   posicaoAnteriorMock = null;
   configFidelidadeMock = { ativo: true, regraVersao: "estrelas-faixas-v1" };
   registrarFatoMock.mockClear();
@@ -191,6 +197,23 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     const body = await res.json();
     expect(body.temporada).toBeNull();
     expect(body.ranking).toBeNull();
+  });
+
+  test("não participante recebe temporada, mas nenhum dado do ranking antes de clicar Participar", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: "Temporada", fimEm: new Date(Date.now() + 5 * 86400000).toISOString(), estado: "ativa" };
+    participaRanking = false;
+    posicaoPorCliente.set("hashed_11900000001", { posicao: 2, score: 999 });
+    topRanking = [{ clienteId: "hashed_11900000001", posicao: 2, score: 999 }];
+
+    const res = await GET(req("token-cli-a"));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.temporada?.nome).toBe("Temporada");
+    expect(body.ranking).toBeNull();
+    expect(JSON.stringify(body)).not.toContain('"score":999');
+    // Fechar a visualização não pode parar a manutenção global da temporada.
+    expect(reconciliarTransicaoMock).toHaveBeenCalled();
+    expect(aplicarCarryoverMock).toHaveBeenCalled();
   });
 
   test("retorna dados de temporada quando há temporada ativa", async () => {

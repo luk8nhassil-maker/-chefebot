@@ -12,6 +12,7 @@ import { ESTRELAS_INDICACAO_PRIMEIRA_COMPRA } from "@/lib/estrelasIndicacao";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
 import { posicaoClienteRanking, obterTopRanking, obterRankingCompleto, reindexarPorFiltro } from "@/lib/rankingClientes";
 import { projetarIdentidadesPublicasRanking } from "@/lib/rankingPrivacidade";
+import { obterParticipacaoRanking } from "@/lib/consentimentoRanking";
 import {
   calcularVariacaoPosicao,
   garantirSnapshotDiario,
@@ -71,8 +72,11 @@ export async function GET(req: NextRequest) {
   const clienteId = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
   const tenantId = TENANT_PADRAO;
 
-  const temporada = await obterTemporadaAtiva(tenantId);
-  const configGamificacao = await obterConfigGamificacao();
+  const [temporada, configGamificacao, participaRanking] = await Promise.all([
+    obterTemporadaAtiva(tenantId),
+    obterConfigGamificacao(),
+    obterParticipacaoRanking(clienteId).catch(() => false),
+  ]);
 
   // Vantagem de largada (carryover) e status social — aplicados ANTES de ler
   // a posição, para que o Top 10 herdado da temporada anterior já apareça
@@ -85,6 +89,9 @@ export async function GET(req: NextRequest) {
   // PRÓPRIO cliente autenticado nesta requisição também fica em dia mesmo
   // que a reconciliação em lote já tenha rodado por outra pessoa.
   if (temporada) {
+    // Invariante global: a transição da temporada precisa continuar sendo
+    // reconciliada mesmo quando quem abriu o app ainda não participa. Isso
+    // mantém status/carryover corretos para todos sem expor o Ranking.
     await reconciliarTransicaoTemporada(tenantId, temporada);
     await aplicarCarryoverClienteSeNecessario(tenantId, temporada, clienteId);
   }
@@ -134,7 +141,7 @@ export async function GET(req: NextRequest) {
     };
   } | null = null;
 
-  if (temporada) {
+  if (temporada && participaRanking) {
     const [pos, top, completo] = await Promise.all([
       posicaoClienteRanking(tenantId, temporada.temporadaId, clienteId),
       obterTopRanking(tenantId, temporada.temporadaId, 50),
@@ -372,7 +379,7 @@ export async function GET(req: NextRequest) {
   let missaoIndicacao: { concluida: boolean } | null = null;
   let movimentoRecente: MovimentoRecente | null = null;
   let coroaAmeacada = false;
-  if (temporada) {
+  if (temporada && participaRanking) {
     const statusVigente = await sincronizarStatusSocialCliente(tenantId, temporada, clienteId);
     statusSocial = statusVigente?.status ?? null;
     bonusCompeticao = await obterBonusCompeticaoDaTemporada(tenantId, temporada.temporadaId, clienteId);

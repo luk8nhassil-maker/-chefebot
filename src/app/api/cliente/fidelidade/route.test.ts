@@ -5,6 +5,7 @@ const extratosPorCliente = new Map<string, unknown[]>();
 let configPontos: Record<string, unknown> | null = null;
 let pizzasAntigasPorCliente = new Map<string, number>();
 let recompensasPorCliente = new Map<string, unknown[]>();
+let clienteAFotoConcluida = false;
 
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
@@ -23,7 +24,7 @@ vi.mock("@/lib/clientes", async () => {
   return {
     ...actual,
     buscarClientePorId: vi.fn(async (clienteId: string) => {
-      if (clienteId === "cli_a") return { clienteId: "cli_a", telefone: "cli_a", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" };
+      if (clienteId === "cli_a") return { clienteId: "cli_a", telefone: "cli_a", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "", ...(clienteAFotoConcluida ? { fotoPerfilMissaoConcluidaEm: "2026-09-27T12:00:00.000Z" } : {}) };
       if (clienteId === "cli_b") return { clienteId: "cli_b", telefone: "cli_b", nome: "Cliente B", createdAt: "", updatedAt: "", lastLoginAt: "" };
       return null;
     }),
@@ -64,6 +65,7 @@ beforeEach(() => {
   pizzasAntigasPorCliente = new Map();
   recompensasPorCliente = new Map();
   configPontos = null;
+  clienteAFotoConcluida = false;
 });
 
 describe("GET /api/cliente/fidelidade — autenticacao", () => {
@@ -318,6 +320,51 @@ describe("GET /api/cliente/fidelidade — recompensas abertas e historico (CTA n
     expect(body.recompensasHistorico.map((r: { recompensaId: string }) => r.recompensaId).sort()).toEqual(
       ["rcp_usada", "rcp_vencida"].sort()
     );
+  });
+
+  test("primeiro presente de Estrelas fica garantido mas bloqueado pela foto, sem criar prêmio extra", async () => {
+    configPontos = {
+      ativo: true,
+      regraVersao: "estrelas-faixas-v1",
+      metaEstrelas: 50,
+      coberturaEconomicaAprovada: true,
+      descricaoRecompensa: "Presente aprovado",
+    };
+    recompensasPorCliente.set("cli_a", [
+      { recompensaId: "rcp_primeiro", status: "disponivel", createdAt: "2026-09-27T00:00:00.000Z" },
+    ]);
+
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+
+    expect(body.recompensas).toHaveLength(1);
+    expect(body.recompensas[0].bloqueadaPorFoto).toBe(true);
+    expect(body.missaoFotoPerfil).toEqual({
+      aplicavel: true,
+      concluida: false,
+      bloqueiaPrimeiroPresente: true,
+    });
+  });
+
+  test("marco permanente da foto libera os presentes seguintes sem repetir missão", async () => {
+    clienteAFotoConcluida = true;
+    configPontos = {
+      ativo: true,
+      regraVersao: "estrelas-faixas-v1",
+      metaEstrelas: 50,
+      coberturaEconomicaAprovada: true,
+      descricaoRecompensa: "Presente aprovado",
+    };
+    recompensasPorCliente.set("cli_a", [
+      { recompensaId: "rcp_futuro", status: "disponivel", createdAt: "2026-09-28T00:00:00.000Z" },
+    ]);
+
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+
+    expect(body.recompensas[0].bloqueadaPorFoto).toBe(false);
+    expect(body.missaoFotoPerfil.concluida).toBe(true);
+    expect(body.missaoFotoPerfil.bloqueiaPrimeiroPresente).toBe(false);
   });
 
   test("recompensa expirada nunca aparece na lista de recompensas abertas, mesmo com saldo alto", async () => {

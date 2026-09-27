@@ -133,6 +133,13 @@ vi.mock("./rankingPrivacidade", () => ({
   projetarIdentidadePublicaRanking: vi.fn(async () => ({ participaCampanha: true, nomePublico: null, telefoneMascarado: null, fotoPerfilUrl: null })),
 }));
 
+// Esta E2E prova a mecânica da gamificação, não o fluxo de opt-in.
+// A participação explícita é coberta pela rota do painel. Mantemos aqui a
+// premissa já documentada acima: os clientes desta jornada aceitaram Participar.
+vi.mock("@/lib/consentimentoRanking", () => ({
+  obterParticipacaoRanking: vi.fn(async () => true),
+}));
+
 import {
   derivarClienteIdPorTelefone,
   registrarMovimentoPontosIdempotente,

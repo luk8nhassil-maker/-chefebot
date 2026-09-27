@@ -13,7 +13,7 @@ vi.mock("./redis", () => ({
   },
 }));
 
-import { clienteProximaEtapa, ativarFidelidadeCliente, obterOuCriarCliente, listarClientesCadastrados, type Cliente } from "./clientes";
+import { clienteProximaEtapa, ativarFidelidadeCliente, obterOuCriarCliente, listarClientesCadastrados, registrarFotoPerfilCliente, type Cliente } from "./clientes";
 
 const TEL = "5599974000691";
 
@@ -59,6 +59,27 @@ describe("ativarFidelidadeCliente", () => {
   test("obterOuCriarCliente NUNCA marca ativacao sozinho", async () => {
     const c = await obterOuCriarCliente(TEL, "Qualquer Nome");
     expect(c.fidelidadeAtivadaEm).toBeUndefined();
+  });
+});
+
+describe("registrarFotoPerfilCliente — missão única", () => {
+  test("primeira foto grava metadados e conclui a missão permanentemente", async () => {
+    await obterOuCriarCliente(TEL, "Maria");
+    const primeira = await registrarFotoPerfilCliente(TEL, { pathname: "perfil/a/avatar", contentType: "image/webp" });
+    expect(primeira.fotoPerfilPathname).toBe("perfil/a/avatar");
+    expect(primeira.fotoPerfilMissaoConcluidaEm).toBeTruthy();
+
+    const marco = primeira.fotoPerfilMissaoConcluidaEm;
+    await new Promise((r) => setTimeout(r, 5));
+    const segunda = await registrarFotoPerfilCliente(TEL, { pathname: "perfil/a/avatar", contentType: "image/jpeg" });
+    expect(segunda.fotoPerfilContentType).toBe("image/jpeg");
+    expect(segunda.fotoPerfilMissaoConcluidaEm).toBe(marco);
+  });
+
+  test("não cria perfil fantasma só para marcar missão", async () => {
+    await expect(registrarFotoPerfilCliente(TEL, { pathname: "perfil/a/avatar", contentType: "image/webp" }))
+      .rejects.toThrow("cliente_nao_encontrado");
+    expect(store.has(`perfil-cliente:${TEL}`)).toBe(false);
   });
 });
 

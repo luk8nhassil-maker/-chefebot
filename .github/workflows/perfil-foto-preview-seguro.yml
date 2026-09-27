@@ -1,0 +1,93 @@
+name: perfil-foto-preview-seguro
+
+on:
+  pull_request:
+    paths:
+      - "src/app/cliente/page.tsx"
+      - "src/app/cliente/FidelidadeRankingScreen.tsx"
+      - "src/app/api/cliente/perfil/**"
+      - "src/app/api/cliente/fidelidade/**"
+      - "src/lib/clientes.ts"
+      - "src/lib/perfilFotoStorage.ts"
+      - "scripts/e2e-perfil-foto-preview.mjs"
+      - ".github/workflows/perfil-foto-preview-seguro.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perfil-foto-preview-seguro-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  VERCEL_ENV: "preview"
+  CHEFEBOT_E2E: "1"
+  UPSTASH_DISABLE_TELEMETRY: "1"
+  KV_REST_API_URL: "http://127.0.0.1:9"
+  KV_REST_API_TOKEN: "preview-local-nao-real"
+  E2E_BASE_URL: "http://127.0.0.1:3000"
+  PREVIEW_OUTPUT_DIR: "/tmp/perfil-foto-preview"
+
+jobs:
+  preview-hermetico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout do HEAD exato
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências do projeto
+        run: npm ci
+
+      - name: Instalar Playwright isolado
+        run: |
+          mkdir -p /tmp/playwright-node
+          cd /tmp/playwright-node
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0
+          npx playwright install --with-deps chromium
+          echo "PLAYWRIGHT_MODULE_PATH=/tmp/playwright-node/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
+
+      - name: Iniciar aplicação em desenvolvimento isolado
+        run: |
+          npm run dev -- -H 127.0.0.1 -p 3000 > /tmp/cliente-preview-next.log 2>&1 &
+          echo $! > /tmp/cliente-preview.pid
+
+      - name: Aguardar aplicação
+        run: |
+          for i in $(seq 1 90); do
+            if node -e "fetch('http://127.0.0.1:3000/cliente').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"; then
+              echo "Preview local pronto."
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/cliente-preview-next.log || true
+          exit 1
+
+      - name: Validar Ranking fechado e missão única da foto
+        run: node scripts/e2e-perfil-foto-preview.mjs
+
+      - name: Publicar evidências visuais
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perfil-foto-preview-${{ github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/perfil-foto-preview
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Log da aplicação em caso de falha
+        if: failure()
+        run: cat /tmp/cliente-preview-next.log || true
+
+      - name: Encerrar aplicação
+        if: always()
+        run: |
+          if [ -f /tmp/cliente-preview.pid ]; then
+            kill "$(cat /tmp/cliente-preview.pid)" 2>/dev/null || true
+          fi

@@ -320,9 +320,31 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
     expect(fonte).toContain("Revogar todas as autorizações do ranking");
   });
 
-  test("foto permanece indisponivel sem fonte oficial autorizada", () => {
-    expect(fonte).toContain("A foto de perfil não é utilizada enquanto não existir uma fonte oficial autorizada e integrada.");
+  test("foto do perfil usa rota autenticada e não vira exposição pública implícita no ranking", () => {
+    expect(fonte).toContain("/api/cliente/perfil/foto");
+    expect(fonte).toContain("fotoPerfilDisponivel");
     expect(fonte).not.toContain("profilePictureUrl");
+    expect(fonte).not.toContain("ranking_foto_perfil', estado: 'concedido'");
+  });
+
+  test("Preview não revela posição, rivais ou distância antes do cliente participar", () => {
+    expect(fonte).toContain("Participe para ver sua posição, rivais e próximo passo.");
+    expect(fonte).toContain('aria-label="Participar do Ranking do Chefe"');
+    expect(fonte).not.toContain('<strong>Sua posição</strong></span>\n          <span className="cf-preview-faces"');
+  });
+
+  test("primeiro presente pode ficar garantido e bloqueado por uma missão única de foto", () => {
+    expect(fonte).toContain("presenteBloqueadoPorFoto");
+    expect(fonte).toContain("Seu presente está garantido");
+    expect(fonte).toContain("Você faz esta missão só uma vez.");
+    expect(fonte).toContain("Adicionar foto e desbloquear");
+  });
+
+  test("foto é reduzida para 512x512 antes do upload e Preview nunca envia arquivo real", () => {
+    expect(fonte).toContain("canvas.width = 512");
+    expect(fonte).toContain("canvas.height = 512");
+    expect(fonte).toContain("700 * 1024");
+    expect(fonte).toContain("Foto simulada no Preview. Nenhum arquivo foi enviado e nenhum presente real foi liberado.");
   });
 
   test("indicação nunca expõe telefone no link compartilhado", () => {

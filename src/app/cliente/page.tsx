@@ -37,7 +37,7 @@ type Movimento = {
   origem?: 'indicacao' | 'apoio' | 'pedido' | 'outro'
 }
 
-type Recompensa = { recompensaId: string; status: string; criadoEm: string; descricao: string }
+type Recompensa = { recompensaId: string; status: string; criadoEm: string; descricao: string; bloqueadaPorFoto?: boolean }
 
 type Jornada = {
   ativo: boolean
@@ -63,6 +63,7 @@ type Fidelidade = {
   metaAtingida: boolean
   extrato: Movimento[]
   recompensas: Recompensa[]
+  missaoFotoPerfil?: { aplicavel: boolean; concluida: boolean; bloqueiaPrimeiroPresente: boolean }
 }
 
 type PedidoResumo = {
@@ -74,7 +75,13 @@ type PedidoResumo = {
 }
 
 type Perfil = {
-  cliente: { nome: string | null; telefone: string }
+  cliente: {
+    nome: string | null
+    telefone: string
+    fotoPerfilDisponivel?: boolean
+    fotoPerfilAtualizadaEm?: string | null
+    missaoFotoPerfilConcluida?: boolean
+  }
   ultimosPedidos: PedidoResumo[]
 }
 
@@ -88,6 +95,40 @@ function dataCurta(iso: string) {
   } catch {
     return ''
   }
+}
+
+
+async function prepararFotoPerfil(file: File): Promise<File> {
+  const TIPOS = new Set(['image/jpeg', 'image/png', 'image/webp'])
+  if (!TIPOS.has(file.type)) throw new Error('Escolha uma foto JPG, PNG ou WebP.')
+  if (file.size > 8 * 1024 * 1024) throw new Error('A foto original deve ter no máximo 8 MB.')
+
+  const bitmap = await createImageBitmap(file)
+  const lado = Math.min(bitmap.width, bitmap.height)
+  if (!lado) { bitmap.close(); throw new Error('Não conseguimos ler essa foto.') }
+
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 512
+  const ctx = canvas.getContext('2d')
+  if (!ctx) { bitmap.close(); throw new Error('Não conseguimos preparar essa foto.') }
+
+  const sx = Math.floor((bitmap.width - lado) / 2)
+  const sy = Math.floor((bitmap.height - lado) / 2)
+  ctx.drawImage(bitmap, sx, sy, lado, lado, 0, 0, 512, 512)
+  bitmap.close()
+
+  const gerar = (tipo: 'image/webp' | 'image/jpeg', qualidade: number) =>
+    new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, tipo, qualidade))
+
+  let blob = await gerar('image/webp', 0.82)
+  let tipo = 'image/webp'
+  if (!blob || blob.size > 700 * 1024) {
+    blob = await gerar('image/jpeg', 0.78)
+    tipo = 'image/jpeg'
+  }
+  if (!blob || blob.size > 700 * 1024) throw new Error('Não conseguimos reduzir essa foto. Escolha outra imagem.')
+  return new File([blob], tipo === 'image/webp' ? 'perfil.webp' : 'perfil.jpg', { type: tipo })
 }
 
 const cores = {
@@ -215,6 +256,7 @@ type PreviewFidelidadeMobileProps = {
 
 function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeMobileProps) {
   const [modalCompartilhar, setModalCompartilhar] = useState(false)
+  const [modalPresenteFoto, setModalPresenteFoto] = useState(false)
   const [modalRankingConsentimento, setModalRankingConsentimento] = useState(false)
   const [mostrarRanking, setMostrarRanking] = useState(false)
   const [statusSocialPreview, setStatusSocialPreview] = useState<StatusTemporadaSocial>(null)
@@ -316,19 +358,18 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
         <div className="cf-preview-season"><Clock3 size={14} /> Temporada atual · {PAINEL_PREVIEW.temporada?.diasRestantes} dias restantes</div>
         <div className="cf-preview-rule"><Info size={18} /><span>Juntou {FIDELIDADE_PREVIEW.metaPontos} Estrelas = ganha 1 presente.</span></div>
         <div className="cf-preview-actions">
-          <button type="button" onClick={() => onAviso('Meus presentes aberto em modo demonstrativo. Nenhuma recompensa real foi reservada.')}><Gift size={18} /> Meus presentes</button>
+          <button type="button" onClick={() => setModalPresenteFoto(true)}><Gift size={18} /> Meus presentes</button>
           <button type="button" onClick={() => onAviso('Extrato demonstrativo aberto. Nenhuma movimentação real foi consultada ou alterada.')}><List size={18} /> Extrato</button>
         </div>
       </section>
 
-      <button type="button" className="cf-preview-ranking" onClick={() => setModalRankingConsentimento(true)}>
+      <button type="button" className="cf-preview-ranking" onClick={() => setModalRankingConsentimento(true)} aria-label="Participar do Ranking do Chefe">
         <div className="cf-preview-ranking-top">
           <span className="cf-preview-trophy"><Trophy size={22} /></span>
-          <span className="cf-preview-ranking-title"><small>RANKING</small><strong>Sua posição</strong></span>
-          <span className="cf-preview-faces" aria-label="Participantes anônimos"><i>A</i><i>B</i><i>C</i><i>+27</i></span>
-          <ChevronRight size={21} />
+          <span className="cf-preview-ranking-title"><small>RANKING DO CHEFE</small><strong>Entre na disputa</strong></span>
+          <ChevronRight size={21} style={{ marginLeft: 'auto' }} />
         </div>
-        <div className="cf-preview-ranking-copy"><ArrowUp size={22} /><span>Faltam <strong>4 Estrelas</strong> para subir de posição</span></div>
+        <div className="cf-preview-ranking-copy"><ShieldCheck size={20} /><span>Participe para ver sua posição, rivais e próximo passo.</span></div>
       </button>
 
       <section className="cf-preview-referral">
@@ -338,6 +379,29 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
         <p>Convide alguém conhecido para conhecer o ChefeBot e fortalecer sua jornada.</p>
         <button type="button" onClick={() => setModalCompartilhar(true)}>Fortalecer minha posição</button>
       </section>
+
+      {modalPresenteFoto && (
+        <div className="cf-preview-modal-backdrop" role="presentation" onClick={() => setModalPresenteFoto(false)}>
+          <div className="cf-preview-modal" role="dialog" aria-modal="true" aria-label="Presente bloqueado pela missão de foto" onClick={(event) => event.stopPropagation()}>
+            <p className="cf-preview-kicker">MEUS PRESENTES</p>
+            <div className="cf-photo-mission" style={{ marginTop: 0 }}>
+              <strong>🎁 Seu presente está garantido</strong>
+              <p>Adicione uma foto ao seu perfil para desbloquear. Você faz esta missão só uma vez.</p>
+              <button
+                type="button"
+                className="cf-mobile-sheet-primary"
+                onClick={() => {
+                  setModalPresenteFoto(false)
+                  onAviso('Foto simulada no Preview. Nenhum arquivo foi enviado e nenhum presente real foi liberado.')
+                }}
+              >
+                Adicionar foto e desbloquear
+              </button>
+            </div>
+            <button type="button" className="cf-preview-modal-cancel" onClick={() => setModalPresenteFoto(false)}>Voltar</button>
+          </div>
+        </div>
+      )}
 
       {modalCompartilhar && (
         <div className="cf-preview-modal-backdrop" role="presentation" onClick={() => setModalCompartilhar(false)}>
@@ -455,6 +519,7 @@ type FidelidadeMobileScreenProps = {
   compartilhandoStatus: boolean
   indicando: boolean
   compartilhamentoLiberado: boolean
+  fotoPerfilUrl?: string | null
 }
 
 /** Tela oficial de Fidelidade usada pelo cliente autenticado e pelo Preview.
@@ -462,7 +527,7 @@ type FidelidadeMobileScreenProps = {
  * pontuação, recompensa ou posição localmente. */
 function FidelidadeMobileScreen({
   nome, saldo, meta, faltam, progresso, diasRestantes, ranking, statusSocial, aviso,
-  onSair, onPresentes, onExtrato, onRanking, onIndicacao, onCompartilharStatus, compartilhandoStatus, indicando, compartilhamentoLiberado,
+  onSair, onPresentes, onExtrato, onRanking, onIndicacao, onCompartilharStatus, compartilhandoStatus, indicando, compartilhamentoLiberado, fotoPerfilUrl = null,
 }: FidelidadeMobileScreenProps) {
   const primeiroNome = nome.split(' ')[0] || 'Cliente'
   const inicial = primeiroNome.slice(0, 1).toUpperCase()
@@ -472,7 +537,7 @@ function FidelidadeMobileScreen({
   return (
     <main className="cf-preview-phone" aria-label="Minha fidelidade">
       <header className="cf-preview-header">
-        <div className="cf-preview-avatar" aria-hidden="true">{inicial}</div>
+        <div className="cf-preview-avatar" aria-hidden="true">{fotoPerfilUrl ? <img src={fotoPerfilUrl} alt="" /> : inicial}</div>
         <div className="cf-preview-greeting"><span>Olá,</span><strong>{primeiroNome}</strong></div>
         <button type="button" onClick={onSair} aria-label="Sair da conta">Sair</button>
       </header>
@@ -659,6 +724,7 @@ function RankingConsentModal({ privacidade, carregando, salvando, erro, onAceita
         <style>{`.cf-ranking-consent-visual{padding-top:12px;padding-bottom:14px;margin-bottom:26px}.cf-ranking-consent-people{margin-top:4px}.cf-ranking-consent-tour{margin-top:18px}.cf-ranking-consent-modal h2{margin-bottom:18px}.cf-ranking-consent-info-card{margin-top:0;padding:16px 16px 14px}.cf-ranking-consent-info-card .cf-ranking-consent-lead{margin-top:0!important;margin-bottom:0!important}.cf-ranking-consent-info-card .cf-ranking-consent-privacy{margin-top:14px!important;margin-bottom:0}.cf-ranking-consent-primary{margin-top:4px}.cf-ranking-consent-secondary{margin-top:10px}`}</style>
         <style>{`.cf-ranking-consent-modal{--consent-space-1:8px;--consent-space-2:12px;--consent-space-3:16px;--consent-space-4:24px}.cf-ranking-consent-icon-row{margin-bottom:var(--consent-space-1)}.cf-ranking-consent-people{margin-top:var(--consent-space-1)}.cf-ranking-consent-tour{margin-top:var(--consent-space-3)}.cf-ranking-consent-visual{margin-bottom:var(--consent-space-4)!important}.cf-ranking-consent-modal h2{margin:0 0 var(--consent-space-3)!important}.cf-ranking-consent-info-card{margin:0 0 var(--consent-space-3)!important;padding:var(--consent-space-3) var(--consent-space-3) var(--consent-space-2)!important}.cf-ranking-consent-info-card .cf-ranking-consent-lead{margin:0!important}.cf-ranking-consent-info-card .cf-ranking-consent-privacy{margin:var(--consent-space-2) 0 0!important}.cf-ranking-consent-primary{margin-top:0!important}.cf-ranking-consent-secondary{margin-top:var(--consent-space-2)!important}.cf-ranking-consent-modal>small{margin-top:var(--consent-space-2)!important}`}</style>
         <style>{`.cf-ranking-consent-backdrop{padding:10px!important}.cf-ranking-consent-modal{width:min(calc(100vw - 20px),420px)!important}`}</style>
+        <style>{`@media(max-width:420px){.cf-ranking-consent-privacy{white-space:normal!important;align-items:flex-start!important;text-align:left!important}.cf-ranking-consent-privacy-copy{white-space:normal!important;flex-direction:column;align-items:flex-start;line-height:1.25!important}.cf-ranking-consent-privacy-copy>span{margin-top:2px}}`}</style>
         <style>{`.cf-ranking-consent-icon-row .cf-ranking-consent-emoji{filter:drop-shadow(0 17px 12px rgba(92,55,20,.3))}.cf-ranking-consent-icon-row .cf-ranking-consent-gift{filter:drop-shadow(0 19px 14px rgba(173,112,19,.34))}.cf-ranking-consent-icon-row .cf-ranking-consent-burger{filter:drop-shadow(0 18px 13px rgba(72,39,18,.31))}.cf-ranking-consent-icon-row .cf-ranking-consent-soda{filter:drop-shadow(0 18px 14px rgba(74,28,20,.33))}`}</style>
         <style>{`.cf-ranking-consent-modal{background:linear-gradient(145deg,rgba(255,253,248,.98) 0%,rgba(249,251,255,.98) 54%,rgba(238,246,255,.98) 100%)!important;border:1px solid rgba(255,255,255,.92)!important;box-shadow:0 28px 80px rgba(24,43,76,.32),0 8px 24px rgba(79,134,237,.1),inset 0 1px 0 rgba(255,255,255,.95)!important;backdrop-filter:blur(14px)}.cf-ranking-consent-visual{background:radial-gradient(circle at 50% 44%,rgba(255,226,126,.2),rgba(255,255,255,0) 58%),linear-gradient(145deg,rgba(255,250,244,.78),rgba(242,248,255,.72))!important;border:1px solid rgba(255,255,255,.86);box-shadow:inset 0 1px 0 rgba(255,255,255,.98),0 12px 28px rgba(62,84,119,.11)!important}.cf-ranking-consent-info-card{background:rgba(246,250,255,.78)!important;border:1px solid rgba(199,216,244,.7)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.85)}`}</style>
         <style>{`.cf-ranking-consent-info-card{background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important}.cf-ranking-consent-modal h2{font-size:27px!important;font-weight:800!important;letter-spacing:-.035em;color:#172945;line-height:1.08!important}.cf-ranking-consent-lead{max-width:310px;margin-left:auto!important;margin-right:auto!important;color:#536781!important;font-size:14px!important;line-height:1.55!important}.cf-ranking-consent-lead strong{color:#20395e;font-weight:800}.cf-ranking-consent-privacy{background:rgba(255,255,255,.55)!important;border-color:rgba(191,208,235,.7)!important;color:#61738b!important}`}</style>
@@ -702,6 +768,8 @@ export default function ClientePage() {
   const [posPedido, setPosPedido] = useState<{ estado: 'pendente' | 'creditado'; estrelasGanhas?: number; pedidoId: string | null } | null>(null)
   const [resgatando, setResgatando] = useState(false)
   const [resgateErro, setResgateErro] = useState('')
+  const [fotoEnviando, setFotoEnviando] = useState(false)
+  const [fotoErro, setFotoErro] = useState('')
   const [mobilePanel, setMobilePanel] = useState<'presentes' | 'extrato' | 'ranking' | null>(null)
   const [rankingConsentModal, setRankingConsentModal] = useState(false)
   const convitePosPedidoRef = useRef(false)
@@ -726,6 +794,7 @@ export default function ClientePage() {
   const [modoPreview, setModoPreview] = useState(false)
   const [previewAviso, setPreviewAviso] = useState('')
   const codigoRef = useRef<HTMLInputElement>(null)
+  const fotoInputRef = useRef<HTMLInputElement>(null)
 
   function entrarPreview() {
     if (!PREVIEW_LOCAL_DISPONIVEL) return
@@ -1402,7 +1471,42 @@ export default function ClientePage() {
   // não um snapshot antigo) bate, a fidelidade está ativa e existe pelo menos
   // uma recompensa aberta de verdade — nunca confia só na existência de um
   // texto de "próxima recompensa".
-  const podeResgatar = !!fidelidade && fidelidade.ativo && fidelidade.metaAtingida && fidelidade.recompensas.length > 0
+  const presenteBloqueadoPorFoto = !!fidelidade?.missaoFotoPerfil?.bloqueiaPrimeiroPresente
+  const podeResgatar = !!fidelidade && fidelidade.ativo && fidelidade.metaAtingida && fidelidade.recompensas.length > 0 && !presenteBloqueadoPorFoto
+
+  async function enviarFotoPerfil(file: File) {
+    if (modoPreview) {
+      setPreviewAviso('Foto simulada no Preview. Nenhum arquivo foi enviado e nenhum presente real foi liberado.')
+      return
+    }
+    setFotoErro('')
+    setFotoEnviando(true)
+    try {
+      const preparada = await prepararFotoPerfil(file)
+      const form = new FormData()
+      form.set('foto', preparada)
+      const res = await fetchCliente('/api/cliente/perfil/foto', { method: 'POST', body: form }, sessaoMemRef.current)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.ok !== true) {
+        const mensagens: Record<string, string> = {
+          arquivo_muito_grande: 'A foto ficou grande demais. Escolha outra imagem.',
+          tipo_nao_permitido: 'Use uma foto JPG, PNG ou WebP.',
+          conteudo_invalido: 'Esse arquivo não parece ser uma foto válida.',
+          storage_nao_configurado: 'A foto de perfil ainda não está disponível. Tente novamente mais tarde.',
+          storage_indisponivel: 'Não conseguimos salvar sua foto agora. Tente novamente.',
+        }
+        throw new Error(mensagens[data.error] || 'Não conseguimos salvar sua foto agora.')
+      }
+      await Promise.all([carregarIdentidade(), carregarFidelidade()])
+      setPreviewAviso('Missão concluída: seu presente foi desbloqueado.')
+      setMobilePanel('presentes')
+    } catch (erroFoto) {
+      setFotoErro(erroFoto instanceof Error ? erroFoto.message : 'Não conseguimos salvar sua foto agora.')
+    } finally {
+      setFotoEnviando(false)
+      if (fotoInputRef.current) fotoInputRef.current.value = ''
+    }
+  }
 
   const missaoAtual = (!podeResgatar && fidelidade)
     ? calcularMissaoAtual({
@@ -1708,6 +1812,7 @@ export default function ClientePage() {
                   compartilhandoStatus={compartilhandoStatus}
                   indicando={compartilhandoIndicacao}
                   compartilhamentoLiberado={painel?.indicacao?.compartilhamentoLiberado === true}
+                  fotoPerfilUrl={perfil?.cliente.fotoPerfilDisponivel ? `/api/cliente/perfil/foto?v=${encodeURIComponent(perfil.cliente.fotoPerfilAtualizadaEm ?? '')}` : null}
                 />
               </>
             )}
@@ -1731,8 +1836,20 @@ export default function ClientePage() {
                     <>
                       <p className="cf-preview-kicker">MEUS PRESENTES</p>
                       {fidelidade?.recompensas.length ? fidelidade.recompensas.map((recompensa) => (
-                        <div key={recompensa.recompensaId} className="cf-mobile-sheet-row"><span>{recompensa.descricao}</span><small>{recompensa.status}</small></div>
+                        <div key={recompensa.recompensaId} className="cf-mobile-sheet-row">
+                          <span>{recompensa.descricao}<small>{recompensa.bloqueadaPorFoto ? 'Presente garantido · falta uma missão' : recompensa.status}</small></span>
+                        </div>
                       )) : <p>Seu próximo presente vai aparecer aqui.</p>}
+                      {presenteBloqueadoPorFoto && (
+                        <div className="cf-photo-mission">
+                          <strong>🎁 Seu presente está garantido</strong>
+                          <p>Adicione uma foto ao seu perfil para desbloquear. Você faz esta missão só uma vez.</p>
+                          {fotoErro && <small role="alert">{fotoErro}</small>}
+                          <button type="button" className="cf-mobile-sheet-primary" disabled={fotoEnviando} onClick={() => fotoInputRef.current?.click()}>
+                            {fotoEnviando ? 'Preparando foto…' : 'Adicionar foto e desbloquear'}
+                          </button>
+                        </div>
+                      )}
                       {podeResgatar && <button type="button" className="cf-mobile-sheet-primary" onClick={() => void resgatar()}>Resgatar meu presente</button>}
                     </>
                   )}
@@ -1796,7 +1913,20 @@ export default function ClientePage() {
                     </div>
                   </div>
 
-                  {podeResgatar ? (
+                  {presenteBloqueadoPorFoto ? (
+                    <div style={{ background: cores.navyCard, borderRadius: 16, padding: 22, color: cores.navyCardTexto }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                        <Gift size={20} color={cores.amarelo} />
+                        <span style={{ fontSize: 13, fontWeight: 700, color: cores.amarelo, textTransform: 'uppercase', letterSpacing: 0.5 }}>Presente garantido</span>
+                      </div>
+                      <p style={{ fontSize: 15, margin: '0 0 6px' }}>Adicione uma foto ao perfil para desbloquear este presente.</p>
+                      <p style={{ fontSize: 12, opacity: .78, margin: '0 0 14px' }}>Esta missão é feita apenas uma vez.</p>
+                      {fotoErro && <p style={{ color: 'var(--danger-border)', fontSize: 13 }}>{fotoErro}</p>}
+                      <button type="button" onClick={() => fotoInputRef.current?.click()} disabled={fotoEnviando} style={{ ...botaoPrimario, opacity: fotoEnviando ? .6 : 1 }}>
+                        {fotoEnviando ? 'Preparando foto…' : 'Adicionar foto e desbloquear'}
+                      </button>
+                    </div>
+                  ) : podeResgatar ? (
                     // Meta atingida: card de resgate com fundo sólido — máximo peso visual para CTA.
                     <div style={{ background: cores.navyCard, borderRadius: 16, padding: 22, color: cores.navyCardTexto }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
@@ -2057,6 +2187,16 @@ export default function ClientePage() {
         )}
       </div>
 
+      <input
+        ref={fotoInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        hidden
+        onChange={(event) => {
+          const arquivo = event.currentTarget.files?.[0]
+          if (arquivo) void enviarFotoPerfil(arquivo)
+        }}
+      />
       {!modoPreview && <PixPendenteBar pendente={pixPendente} />}
         {/* Compatibilidade estrutural: onClick={sair}; loyaltyLabel={modoPreview ? 'Fidelidade' : 'Pontos'}.
             A UI aprovada usa Fidelidade e o logout oficial permanece em onSair. */}
@@ -2101,7 +2241,7 @@ export default function ClientePage() {
         .cf-mobile-sheet-row span { display: flex; flex-direction: column; gap: 4px; }
         .cf-mobile-sheet-row small { color: #7b8490; font-size: 11px; }
         .cf-mobile-sheet-row strong { color: #2f9a65; }
-        .cf-mobile-sheet-primary { width: 100%; min-height: 44px; margin-top: 14px; border: 0; border-radius: 13px; background: #ffc900; color: #252a30; font-weight: 700; cursor: pointer; }
+        .cf-mobile-sheet-primary { width: 100%; min-height: 44px; margin-top: 14px; border: 0; border-radius: 13px; background: #ffc900; color: #252a30; font-weight: 700; cursor: pointer; }.cf-mobile-sheet-primary:disabled{opacity:.58;cursor:wait}.cf-photo-mission{margin-top:14px;padding:14px;border:1px solid rgba(245,189,32,.38);border-radius:15px;background:#fff9e8}.cf-photo-mission strong{display:block;color:#3d4653;font-size:14px}.cf-photo-mission p{margin:6px 0 0;color:#687487;font-size:12px;line-height:1.45}.cf-photo-mission small{display:block;margin-top:8px;color:var(--danger-text);font-size:11px}
         .cf-ranking-consent-backdrop{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(24,35,55,.52);backdrop-filter:blur(4px);animation:cf-ranking-consent-fade .22s ease-out both}.cf-ranking-consent-modal{width:min(100%,370px);padding:22px 20px 18px;border:1px solid rgba(255,255,255,.8);border-radius:24px;background:#fff;box-shadow:0 24px 70px rgba(25,39,65,.28);color:#1e2a3b;animation:cf-ranking-consent-pop .32s cubic-bezier(.2,.8,.2,1) both}.cf-ranking-consent-visual{position:relative;width:112px;height:58px;margin:0 auto 2px}.cf-ranking-consent-emoji{position:absolute;left:39px;top:8px;font-size:31px;line-height:1;transform-origin:center;animation:cf-ranking-consent-bob 1.8s ease-in-out infinite}.cf-ranking-consent-gift{position:absolute;right:2px;bottom:2px;font-size:20px;filter:drop-shadow(0 3px 4px rgba(211,151,35,.25));animation:cf-ranking-consent-gift 2.1s ease-in-out .2s infinite}.cf-ranking-consent-spark{position:absolute;color:#f5b719;font-size:16px;line-height:1;animation:cf-ranking-consent-twinkle 1.4s ease-in-out infinite}.cf-ranking-consent-spark-one{left:7px;top:8px}.cf-ranking-consent-spark-two{right:23px;top:2px;font-size:11px;animation-delay:.55s}.cf-ranking-consent-eyebrow{margin:0 0 7px!important;color:#4f86ed!important;font-size:10px!important;font-weight:800;letter-spacing:.13em;line-height:1.2!important;text-align:center}.cf-ranking-consent-modal h2{margin:0;text-align:center;font-size:23px;line-height:1.12}.cf-ranking-consent-lead{margin:12px 0 14px!important;color:#607086;font-size:13px;line-height:1.5}.cf-ranking-consent-privacy{display:flex;align-items:center;gap:7px;margin:0 0 13px;padding:9px 11px;border:1px solid #e7eefb;border-radius:12px;background:#f7faff;color:#63738a;font-size:11px;line-height:1.25}.cf-ranking-consent-privacy span:first-child{font-size:14px}.cf-ranking-consent-option{display:flex;align-items:flex-start;gap:9px;margin:11px 0;color:#33445b;font-size:13px;line-height:1.4}.cf-ranking-consent-option input{margin-top:3px;accent-color:#4f86ed}.cf-ranking-consent-primary,.cf-ranking-consent-secondary{width:100%;padding:12px;border-radius:14px;font:700 13px inherit;cursor:pointer}.cf-ranking-consent-primary{margin-top:2px;border:0;background:#4f86ed;color:#fff;transition:transform .16s ease,box-shadow .16s ease}.cf-ranking-consent-primary:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 8px 18px rgba(79,134,237,.28)}.cf-ranking-consent-primary:disabled{opacity:.5;cursor:not-allowed}.cf-ranking-consent-secondary{margin-top:8px;border:1px solid rgba(94,112,138,.25);background:#fff;color:#53647a}.cf-ranking-consent-modal>small{display:block;margin-top:12px;color:#8792a1;font-size:10px;text-align:center}.cf-ranking-consent-error{color:#b33e3e!important;font-size:12px!important}@keyframes cf-ranking-consent-fade{from{opacity:0}to{opacity:1}}@keyframes cf-ranking-consent-pop{from{opacity:0;transform:translateY(12px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}@keyframes cf-ranking-consent-bob{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-5px) rotate(2deg)}}@keyframes cf-ranking-consent-gift{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-4px) rotate(-4deg)}}@keyframes cf-ranking-consent-twinkle{0%,100%{opacity:.35;transform:scale(.8) rotate(0)}50%{opacity:1;transform:scale(1.2) rotate(18deg)}}@media (prefers-reduced-motion:reduce){.cf-ranking-consent-backdrop,.cf-ranking-consent-modal,.cf-ranking-consent-emoji,.cf-ranking-consent-gift,.cf-ranking-consent-spark{animation:none}.cf-ranking-consent-primary{transition:none}}
         .cf-mobile-sheet-position { display: block; margin: 8px 0; font-size: 44px; line-height: 1; color: #252a30; }
         .cliente-grid { display: flex; flex-direction: column; }
@@ -2144,7 +2284,7 @@ export default function ClientePage() {
         .cf-preview-phone{display:flex;flex-direction:column;gap:11px;width:100%;max-width:390px;margin:0 auto;color:#414851;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif}
         .cf-preview-safety{padding:9px 12px;border:1px solid rgba(57,124,246,.28);border-radius:12px;background:rgba(235,244,255,.88);color:#315d9d;font-size:11px;line-height:1.35;text-align:center}
         .cf-preview-header{display:flex;align-items:center;padding:4px 5px 7px;min-height:52px}
-        .cf-preview-avatar{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,#e1efff,#bfd9f7);color:#5b6c83;font-size:20px;font-weight:700;flex:none}
+        .cf-preview-avatar{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,#e1efff,#bfd9f7);color:#5b6c83;font-size:20px;font-weight:700;flex:none;overflow:hidden}.cf-preview-avatar img{width:100%;height:100%;object-fit:cover;display:block}
         .cf-preview-greeting{display:flex;flex-direction:column;justify-content:center;margin-left:12px;line-height:1.08}.cf-preview-greeting span{font-size:13px;color:#7b8490}.cf-preview-greeting strong{font-size:22px;font-weight:760;color:#343a43;margin-top:4px}
         .cf-preview-header button{margin-left:auto;border:0;background:none;color:#6d7684;font:600 13px inherit;cursor:pointer;padding:10px}
         .cf-preview-notice{border-radius:12px;padding:9px 12px;background:#fff8db;border:1px solid rgba(230,187,53,.3);font-size:11.5px;line-height:1.35;color:#6e5a1d}
