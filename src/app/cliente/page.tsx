@@ -65,6 +65,7 @@ type Fidelidade = {
   recompensas: Recompensa[]
   missaoFotoPerfil: {
     concluida: boolean
+    dispensadaPorHistorico?: boolean
     necessariaParaLiberarPresente: boolean
   }
 }
@@ -1477,7 +1478,7 @@ export default function ClientePage() {
     && fidelidade.ativo
     && fidelidade.metaAtingida
     && fidelidade.recompensas.length > 0
-    && fidelidade.missaoFotoPerfil?.concluida === true
+    && fidelidade.missaoFotoPerfil?.necessariaParaLiberarPresente !== true
 
   const missaoAtual = (!podeResgatar && !presenteBloqueadoPorFoto && fidelidade)
     ? calcularMissaoAtual({
