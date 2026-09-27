@@ -118,6 +118,7 @@ import {
   consultarEventosAntesDe,
   consultarEventosPorPeriodo,
   estornarEventoAnalitico,
+  existeHistoricoAnaliticoAntesDe,
   periodo30Dias,
   periodo60Dias,
   periodo7Dias,
@@ -153,6 +154,35 @@ beforeEach(() => {
   store.clear();
   sortedSets.clear();
   vi.clearAllMocks();
+});
+
+// ── cobertura temporal do coletor ─────────────────────────────────────────────
+
+describe("existeHistoricoAnaliticoAntesDe", () => {
+  test("false quando não existe evento anterior ao início da semana", async () => {
+    await registrarEventoEntregue({ ...pedidoBase, id: "semana_atual" }, AGORA);
+    expect(await existeHistoricoAnaliticoAntesDe(TENANT, AGORA)).toBe(false);
+  });
+
+  test("true quando o índice já possuía evento antes do início da semana", async () => {
+    await registrarEventoEntregue({ ...pedidoBase, id: "historico_anterior" }, AGORA - 1000);
+    expect(await existeHistoricoAnaliticoAntesDe(TENANT, AGORA)).toBe(true);
+  });
+
+  test("faz consulta limitada e não varre o histórico inteiro", async () => {
+    for (let i = 1; i <= 5; i++) {
+      await registrarEventoEntregue({ ...pedidoBase, id: `p_${i}` }, AGORA - i * 1000);
+    }
+    redisMock.zrange.mockClear();
+
+    expect(await existeHistoricoAnaliticoAntesDe(TENANT, AGORA)).toBe(true);
+    expect(redisMock.zrange).toHaveBeenCalledWith(
+      chaveIndiceGlobal(TENANT),
+      0,
+      AGORA - 1,
+      { byScore: true, limit: { offset: 0, count: 1 } },
+    );
+  });
 });
 
 // ── calcularValorElegivelCentsParaHistorico ───────────────────────────────────
