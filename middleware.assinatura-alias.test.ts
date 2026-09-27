@@ -40,12 +40,19 @@ describe("middleware — alias operacional do ChefeBot", () => {
     expect(response.status).toBe(200);
   });
 
-  it("não redireciona rotas públicas que não pertencem ao gate operacional", async () => {
-    for (const pathname of ["/pedido", "/entregador", "/login"]) {
+  it("mantém públicas as rotas que realmente não pertencem ao gate operacional", async () => {
+    for (const pathname of ["/pedido", "/entregador"]) {
       const response = await middleware(request(`https://chefebot-pjif.vercel.app${pathname}`));
       expect(response.status, pathname).toBe(200);
       expect(response.headers.get("location"), pathname).toBeNull();
     }
+  });
+
+  it("login do alias legado é exceção de segurança e vai para o domínio oficial", async () => {
+    const response = await middleware(request("https://chefebot-pjif.vercel.app/login?callbackUrl=%2Fadmin"));
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe("https://chefedapizza.com.br/login?callbackUrl=%2Fadmin");
   });
 
   it("não trata Preview Vercel como alias de produção", async () => {
