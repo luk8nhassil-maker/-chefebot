@@ -87,6 +87,7 @@ export async function GET(req: NextRequest) {
   // a fonte da verdade de "pode resgatar agora" é sempre `metaAtingida`
   // (saldo atual) combinado com `ativo` e a existência de uma recompensa
   // aberta abaixo, revalidados de novo no próprio endpoint de reserva.
+  const missaoFotoPerfilConcluida = !!cliente.fotoPerfilMissaoConcluidaEm;
   const recompensasAbertas = recompensasCompletas
     .filter(() => !estrelasAtivas || config.coberturaEconomicaAprovada === true)
     .filter((r) => r.status === "disponivel" || r.status === "notificada")
@@ -95,6 +96,9 @@ export async function GET(req: NextRequest) {
       status: r.status,
       criadoEm: r.createdAt,
       descricao: r.descricaoRecompensa ?? config.descricaoRecompensa,
+      // Missão econômica: não cria outro brinde. Só segura o primeiro
+      // presente da experiência de Estrelas até a foto ser concluída uma vez.
+      bloqueadaPorFoto: estrelasAtivas && !missaoFotoPerfilConcluida,
     }));
 
   const recompensasHistorico = recompensasCompletas
@@ -123,6 +127,11 @@ export async function GET(req: NextRequest) {
     marcoEstrelasAtingido: estrelasAtivas ? metaAtingida : false,
     extrato,
     recompensas: recompensasAbertas,
+    missaoFotoPerfil: {
+      aplicavel: estrelasAtivas,
+      concluida: missaoFotoPerfilConcluida,
+      bloqueiaPrimeiroPresente: estrelasAtivas && recompensasAbertas.length > 0 && !missaoFotoPerfilConcluida,
+    },
     recompensasHistorico,
     legado: {
       pizzasAcumuladas,
