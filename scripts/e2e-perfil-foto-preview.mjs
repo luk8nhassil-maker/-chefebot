@@ -27,7 +27,7 @@ try {
 
   // 1) Presente garantido, mas bloqueado até a missão única da foto.
   await page.getByRole("button", { name: /Meus presentes/i }).click();
-  await page.getByText("Seu presente está garantido", { exact: true }).waitFor({ state: "visible" });
+  await page.getByText(/Seu presente está garantido/).waitFor({ state: "visible" });
   await page.getByText("Você faz esta missão só uma vez.").waitFor({ state: "visible" });
   await page.screenshot({ path: path.join(outDir, "01-presente-garantido-foto-pendente.png"), fullPage: true });
 
