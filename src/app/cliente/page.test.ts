@@ -327,6 +327,12 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
     expect(fonte).not.toContain("ranking_foto_perfil', estado: 'concedido'");
   });
 
+  test("Preview não revela posição, rivais ou distância antes do cliente participar", () => {
+    expect(fonte).toContain("Participe para ver sua posição, rivais e próximo passo.");
+    expect(fonte).toContain('aria-label="Participar do Ranking do Chefe"');
+    expect(fonte).not.toContain('<strong>Sua posição</strong></span>\n          <span className="cf-preview-faces"');
+  });
+
   test("primeiro presente pode ficar garantido e bloqueado por uma missão única de foto", () => {
     expect(fonte).toContain("presenteBloqueadoPorFoto");
     expect(fonte).toContain("Seu presente está garantido");
