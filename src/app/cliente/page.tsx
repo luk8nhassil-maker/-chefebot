@@ -256,6 +256,7 @@ type PreviewFidelidadeMobileProps = {
 
 function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeMobileProps) {
   const [modalCompartilhar, setModalCompartilhar] = useState(false)
+  const [modalPresenteFoto, setModalPresenteFoto] = useState(false)
   const [modalRankingConsentimento, setModalRankingConsentimento] = useState(false)
   const [mostrarRanking, setMostrarRanking] = useState(false)
   const [statusSocialPreview, setStatusSocialPreview] = useState<StatusTemporadaSocial>(null)
@@ -357,19 +358,18 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
         <div className="cf-preview-season"><Clock3 size={14} /> Temporada atual · {PAINEL_PREVIEW.temporada?.diasRestantes} dias restantes</div>
         <div className="cf-preview-rule"><Info size={18} /><span>Juntou {FIDELIDADE_PREVIEW.metaPontos} Estrelas = ganha 1 presente.</span></div>
         <div className="cf-preview-actions">
-          <button type="button" onClick={() => onAviso('Meus presentes aberto em modo demonstrativo. Nenhuma recompensa real foi reservada.')}><Gift size={18} /> Meus presentes</button>
+          <button type="button" onClick={() => setModalPresenteFoto(true)}><Gift size={18} /> Meus presentes</button>
           <button type="button" onClick={() => onAviso('Extrato demonstrativo aberto. Nenhuma movimentação real foi consultada ou alterada.')}><List size={18} /> Extrato</button>
         </div>
       </section>
 
-      <button type="button" className="cf-preview-ranking" onClick={() => setModalRankingConsentimento(true)}>
+      <button type="button" className="cf-preview-ranking" onClick={() => setModalRankingConsentimento(true)} aria-label="Participar do Ranking do Chefe">
         <div className="cf-preview-ranking-top">
           <span className="cf-preview-trophy"><Trophy size={22} /></span>
-          <span className="cf-preview-ranking-title"><small>RANKING</small><strong>Sua posição</strong></span>
-          <span className="cf-preview-faces" aria-label="Participantes anônimos"><i>A</i><i>B</i><i>C</i><i>+27</i></span>
-          <ChevronRight size={21} />
+          <span className="cf-preview-ranking-title"><small>RANKING DO CHEFE</small><strong>Entre na disputa</strong></span>
+          <ChevronRight size={21} style={{ marginLeft: 'auto' }} />
         </div>
-        <div className="cf-preview-ranking-copy"><ArrowUp size={22} /><span>Faltam <strong>4 Estrelas</strong> para subir de posição</span></div>
+        <div className="cf-preview-ranking-copy"><ShieldCheck size={20} /><span>Participe para ver sua posição, rivais e próximo passo.</span></div>
       </button>
 
       <section className="cf-preview-referral">
@@ -379,6 +379,29 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
         <p>Convide alguém conhecido para conhecer o ChefeBot e fortalecer sua jornada.</p>
         <button type="button" onClick={() => setModalCompartilhar(true)}>Fortalecer minha posição</button>
       </section>
+
+      {modalPresenteFoto && (
+        <div className="cf-preview-modal-backdrop" role="presentation" onClick={() => setModalPresenteFoto(false)}>
+          <div className="cf-preview-modal" role="dialog" aria-modal="true" aria-label="Presente bloqueado pela missão de foto" onClick={(event) => event.stopPropagation()}>
+            <p className="cf-preview-kicker">MEUS PRESENTES</p>
+            <div className="cf-photo-mission" style={{ marginTop: 0 }}>
+              <strong>🎁 Seu presente está garantido</strong>
+              <p>Adicione uma foto ao seu perfil para desbloquear. Você faz esta missão só uma vez.</p>
+              <button
+                type="button"
+                className="cf-mobile-sheet-primary"
+                onClick={() => {
+                  setModalPresenteFoto(false)
+                  onAviso('Foto simulada no Preview. Nenhum arquivo foi enviado e nenhum presente real foi liberado.')
+                }}
+              >
+                Adicionar foto e desbloquear
+              </button>
+            </div>
+            <button type="button" className="cf-preview-modal-cancel" onClick={() => setModalPresenteFoto(false)}>Voltar</button>
+          </div>
+        </div>
+      )}
 
       {modalCompartilhar && (
         <div className="cf-preview-modal-backdrop" role="presentation" onClick={() => setModalCompartilhar(false)}>
