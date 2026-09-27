@@ -85,12 +85,25 @@ describe("consentimento do ranking", () => {
     expect((await obterFinalidadesAtivasRanking(CLIENTE_ID)).has("ranking_primeiro_nome")).toBe(true);
   });
 
-  test("preserva participantes antigos e saída explícita prevalece sobre o consentimento legado", async () => {
+  test("consentimento legado nunca substitui o clique explícito em Participar", async () => {
     configurarNome();
+    await registrarParticipacaoRanking(CLIENTE_ID, true);
     await registrarConsentimentoRanking({ clienteId: CLIENTE_ID, finalidade: "ranking_primeiro_nome", estado: "concedido", textoVersaoInformada: "dpo-2026-09-v1" });
-    expect(await obterParticipacaoRanking(CLIENTE_ID)).toBe(true);
-    await registrarParticipacaoRanking(CLIENTE_ID, false);
+    const chaveParticipacao = [...store.keys()].find((item) => item.startsWith("privacidade:ranking:participacao:") && !item.includes(":historico:"));
+    expect(chaveParticipacao).toBeTruthy();
+    store.delete(chaveParticipacao!); // simula dado legado sem registro de Participar
     expect(await obterParticipacaoRanking(CLIENTE_ID)).toBe(false);
+    expect((await obterFinalidadesAtivasRanking(CLIENTE_ID)).size).toBe(0);
+  });
+
+  test("não permite conceder exposição de ranking antes de Participar", async () => {
+    configurarNome();
+    await expect(registrarConsentimentoRanking({
+      clienteId: CLIENTE_ID,
+      finalidade: "ranking_primeiro_nome",
+      estado: "concedido",
+      textoVersaoInformada: "dpo-2026-09-v1",
+    })).rejects.toMatchObject({ codigo: "participacao_inativa" } satisfies Partial<ErroConsentimentoRanking>);
   });
 
   test("registro de participação corrompido falha fechado, mesmo com consentimento antigo", async () => {
