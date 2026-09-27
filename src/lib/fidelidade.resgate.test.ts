@@ -1,6 +1,9 @@
 import { vi, describe, test, expect, beforeEach } from "vitest";
 
 const store = new Map<string, unknown>();
+const { missaoFotoMock } = vi.hoisted(() => ({
+  missaoFotoMock: vi.fn(async () => true),
+}));
 
 function realGet(key: string) {
   return store.has(key) ? store.get(key) : null;
@@ -33,6 +36,10 @@ function realEval(_script: string, keys: string[], args: string[]) {
   return 0;
 }
 
+vi.mock("./fotoPerfilCliente", () => ({
+  missaoFotoPerfilConcluida: missaoFotoMock,
+}));
+
 vi.mock("@/lib/redis", () => ({
   redis: {
     get: vi.fn(async (key: string) => realGet(key)),
@@ -56,6 +63,7 @@ import {
 
 beforeEach(async () => {
   store.clear();
+  missaoFotoMock.mockReset().mockResolvedValue(true);
   await salvarConfigFidelidadePontos({
     ativo: true,
     metaPontos: 100,
@@ -93,6 +101,13 @@ describe("reservarResgatePontos", () => {
 
     const reservas = await obterReservasResgatePontos(clienteId);
     expect(reservas).toHaveLength(1);
+  });
+
+  test("primeiro presente não pode ser reservado antes da missão da foto", async () => {
+    const { clienteId, recompensaId } = await clienteComRecompensaDisponivel("86999991020");
+    missaoFotoMock.mockResolvedValue(false);
+    await expect(reservarResgatePontos(clienteId, recompensaId)).rejects.toThrow(/foto de perfil/i);
+    expect((await obterSaldoPontos(clienteId)).disponivel).toBe(100);
   });
 
   test("recompensa inexistente lança erro", async () => {
@@ -186,6 +201,15 @@ describe("confirmarResgatePontos", () => {
     await confirmarResgatePontos(clienteId, reserva.resgateId, "ped_confirma_2");
 
     expect((await obterSaldoPontos(clienteId)).disponivel).toBe(50);
+  });
+
+  test("confirmação também bloqueia uma reserva antiga se a missão da foto ainda não foi concluída", async () => {
+    const { clienteId, recompensaId } = await clienteComRecompensaDisponivel("86999992020", 150);
+    const reserva = await reservarResgatePontos(clienteId, recompensaId);
+    missaoFotoMock.mockResolvedValue(false);
+
+    await expect(confirmarResgatePontos(clienteId, reserva.resgateId, "ped_sem_foto")).rejects.toThrow(/foto de perfil/i);
+    expect((await obterSaldoPontos(clienteId)).disponivel).toBe(150);
   });
 
   test("reserva expirada não pode ser confirmada", async () => {
