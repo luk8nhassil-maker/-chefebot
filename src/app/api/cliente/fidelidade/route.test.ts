@@ -32,7 +32,14 @@ vi.mock("@/lib/clientes", async () => {
 });
 
 vi.mock("@/lib/fotoPerfilCliente", () => ({
-  missaoFotoPerfilConcluida: vi.fn(async () => missaoFotoConcluida),
+  requisitoFotoPerfilSatisfeito: vi.fn(async (_clienteId: string, recompensas: Array<{ status: string }>) => {
+    const dispensadaPorHistorico = !missaoFotoConcluida && recompensas.some((r) => r.status === "resgatada");
+    return {
+      satisfeito: missaoFotoConcluida || dispensadaPorHistorico,
+      concluida: missaoFotoConcluida,
+      dispensadaPorHistorico,
+    };
+  }),
 }));
 
 vi.mock("@/lib/fidelidade", async () => {
@@ -339,6 +346,7 @@ describe("GET /api/cliente/fidelidade — recompensas abertas e historico (CTA n
     expect(body.recompensas[0].bloqueadaPorFoto).toBe(true);
     expect(body.missaoFotoPerfil).toEqual({
       concluida: false,
+      dispensadaPorHistorico: false,
       necessariaParaLiberarPresente: true,
     });
   });
@@ -355,9 +363,28 @@ describe("GET /api/cliente/fidelidade — recompensas abertas e historico (CTA n
 
     expect(body.missaoFotoPerfil).toEqual({
       concluida: true,
+      dispensadaPorHistorico: false,
       necessariaParaLiberarPresente: false,
     });
     expect(body.recompensas.every((r: { bloqueadaPorFoto: boolean }) => r.bloqueadaPorFoto === false)).toBe(true);
+  });
+
+  test("cliente com presente antigo já resgatado não é travado retroativamente pela missão", async () => {
+    missaoFotoConcluida = false;
+    configPontos = { ativo: true, metaPontos: 60, descricaoRecompensa: "Presente configurado" };
+    recompensasPorCliente.set("cli_a", [
+      { recompensaId: "rcp_legado", status: "resgatada", createdAt: "2026-09-01T12:00:00.000Z" },
+      { recompensaId: "rcp_novo", status: "disponivel", createdAt: "2026-09-27T12:00:00.000Z" },
+    ]);
+
+    const body = await (await GET(requestComCookie("token-cliente-a"))).json();
+
+    expect(body.missaoFotoPerfil).toEqual({
+      concluida: false,
+      dispensadaPorHistorico: true,
+      necessariaParaLiberarPresente: false,
+    });
+    expect(body.recompensas[0].bloqueadaPorFoto).toBe(false);
   });
 
   test("recompensa expirada nunca aparece na lista de recompensas abertas, mesmo com saldo alto", async () => {
