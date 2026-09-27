@@ -189,10 +189,11 @@ Decisão de produto e proteção operacional para a primeira versão:
 
 - O convite automático do Ranking usa apenas fatos confirmados: participação atual,
   saldo confirmado de Estrelas, meta vigente e recompensa realmente disponível.
-- O primeiro gatilho automático é a **resposta positiva da avaliação pós-entrega**
-  (nota 4 ou 5). Notas 1, 2 ou 3 nunca recebem convite.
-- O convite entra na **mesma mensagem de agradecimento** da avaliação; não cria
-  um disparo extra logo após a entrega.
+- Por decisão posterior do produto, o gatilho oficial passou a ser a transição
+  **novo → em_preparo**: o pedido foi confirmado e enviado para a cozinha.
+- O cliente recebe primeiro a mensagem operacional de cozinha e, somente se ela
+  for confirmada pelo provider, recebe em seguida um **convite curto separado**.
+- Responder à avaliação pós-entrega não dispara mais convite do Ranking.
 - Quem já participa do Ranking nunca recebe convite.
 - Sem Estrelas V1 ativas, sem saldo confirmado ou com leitura incerta de
   participação, o motor falha fechado e não envia.
@@ -202,9 +203,9 @@ Decisão de produto e proteção operacional para a primeira versão:
   envio ambíguo não gera retry automático e não arrisca mensagem duplicada.
 - Opt-out próprio e permanente: **SAIR RANKING**. Isso bloqueia novos convites
   pelo WhatsApp sem retirar o cliente do Ranking no app.
-- O texto muda conforme a situação real:
-  - presente já disponível com cobertura econômica aprovada;
-  - meta de Estrelas já alcançada;
-  - progresso confirmado com saldo e distância real até a meta.
+- O texto é curto e simples. Quando existe cobertura econômica aprovada, usa a
+  chamada “Quer ganhar presentes da pizzaria?” e mostra somente o saldo real de
+  Estrelas + o link. Se a cobertura não estiver aprovada, não promete presente.
+- Quando já existe presente realmente disponível, informa esse fato diretamente.
 - A mensagem não inventa posição, adversário, urgência, prêmio ou benefício.
 - CTA oficial: `https://chefedapizza.com.br/cliente`.
