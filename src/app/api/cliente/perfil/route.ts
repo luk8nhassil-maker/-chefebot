@@ -39,7 +39,13 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({
-    cliente: { nome: cliente.nome ?? null, telefone: cliente.telefone },
+    cliente: {
+      nome: cliente.nome ?? null,
+      telefone: cliente.telefone,
+      fotoPerfilDisponivel: !!cliente.fotoPerfilPathname,
+      fotoPerfilAtualizadaEm: cliente.fotoPerfilAtualizadaEm ?? null,
+      missaoFotoPerfilConcluida: !!cliente.fotoPerfilMissaoConcluidaEm,
+    },
     ultimosPedidos,
   });
 }
