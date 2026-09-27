@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
@@ -34,6 +35,18 @@ beforeEach(() => {
   vi.stubEnv("VERCEL_PROJECT_ID", VERCEL_PROJECT_CHEFEBOT_OFICIAL);
   h.horario = true;
   h.processar.mockClear();
+});
+
+describe("agendamento do Pódio", () => {
+  test("Vercel chama a rota diariamente às 21:00 UTC, equivalente a 18h no fuso operacional atual", () => {
+    const config = JSON.parse(readFileSync("vercel.json", "utf8")) as {
+      crons?: Array<{ path: string; schedule: string }>;
+    };
+    expect(config.crons).toContainEqual({
+      path: "/api/cron/ranking-podio",
+      schedule: "0 21 * * *",
+    });
+  });
 });
 
 describe("GET /api/cron/ranking-podio", () => {
