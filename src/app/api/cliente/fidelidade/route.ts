@@ -17,7 +17,7 @@ import {
   metaEstrelasDaConfig,
   classificarOrigemMovimentoPontos,
 } from "@/lib/fidelidade";
-import { missaoFotoPerfilConcluida } from "@/lib/fotoPerfilCliente";
+import { requisitoFotoPerfilSatisfeito } from "@/lib/fotoPerfilCliente";
 
 // GET /api/cliente/fidelidade — saldo, progresso e extrato da fidelidade por
 // pontos do cliente autenticado (Etapa 3). Só lê os dados do dono da sessão
@@ -49,13 +49,14 @@ export async function GET(req: NextRequest) {
   const limite = resolverLimite(searchParams);
   const clienteIdPontos = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
 
-  const [extratoCompleto, config, pizzasAcumuladas, recompensasCompletas, fotoPerfilConcluida] = await Promise.all([
+  const [extratoCompleto, config, pizzasAcumuladas, recompensasCompletas] = await Promise.all([
     obterExtratoPontos(clienteIdPontos),
     obterConfigFidelidadePontos(),
     obterSaldoAntigoPizzas(cliente.clienteId).catch(() => 0),
     obterRecompensasPontos(clienteIdPontos),
-    missaoFotoPerfilConcluida(clienteIdPontos).catch(() => false),
   ]);
+  const requisitoFoto = await requisitoFotoPerfilSatisfeito(clienteIdPontos, recompensasCompletas)
+    .catch(() => ({ satisfeito: false, concluida: false, dispensadaPorHistorico: false }));
 
   const estrelasAtivas = estrelasV1Ativa(config);
   const saldoPontos = estrelasAtivas ? calcularSaldoEstrelas(extratoCompleto) : calcularSaldoDoExtrato(extratoCompleto);
@@ -97,7 +98,7 @@ export async function GET(req: NextRequest) {
       status: r.status,
       criadoEm: r.createdAt,
       descricao: r.descricaoRecompensa ?? config.descricaoRecompensa,
-      bloqueadaPorFoto: !fotoPerfilConcluida,
+      bloqueadaPorFoto: !requisitoFoto.satisfeito,
     }));
 
   const recompensasHistorico = recompensasCompletas
@@ -128,8 +129,9 @@ export async function GET(req: NextRequest) {
     recompensas: recompensasAbertas,
     recompensasHistorico,
     missaoFotoPerfil: {
-      concluida: fotoPerfilConcluida,
-      necessariaParaLiberarPresente: !fotoPerfilConcluida && recompensasAbertas.length > 0,
+      concluida: requisitoFoto.concluida,
+      dispensadaPorHistorico: requisitoFoto.dispensadaPorHistorico,
+      necessariaParaLiberarPresente: !requisitoFoto.satisfeito && recompensasAbertas.length > 0,
     },
     legado: {
       pizzasAcumuladas,
