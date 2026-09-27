@@ -18,7 +18,7 @@ type Config = {
   ameacaPodioMaxGap: number
 }
 
-type Grupo = 'semanal' | 'indicacao' | 'impulso' | 'carryover' | 'nivel' | 'coroa'
+type Grupo = 'semanal' | 'indicacao' | 'impulso' | 'carryover' | 'nivel'
 
 function camposDoGrupo(config: Config, grupo: Grupo): Partial<Config> {
   switch (grupo) {
@@ -27,7 +27,6 @@ function camposDoGrupo(config: Config, grupo: Grupo): Partial<Config> {
     case 'impulso': return { impulsoPodioAtivo: config.impulsoPodioAtivo, impulsoPodioBonus: config.impulsoPodioBonus, impulsoPodioCapTemporada: config.impulsoPodioCapTemporada }
     case 'carryover': return { carryoverAtivo: config.carryoverAtivo, carryoverTabela: config.carryoverTabela }
     case 'nivel': return { nivelChefAtivo: config.nivelChefAtivo, nivelChefLimiares: config.nivelChefLimiares }
-    case 'coroa': return { ameacaPodioMaxGap: config.ameacaPodioMaxGap }
   }
 }
 
@@ -147,8 +146,11 @@ export default function GamificacaoConfigPanel() {
       </div>
       <div style={caixa}>
         <strong>Coroa ameaçada</strong>
-        {numero('ameacaPodioMaxGap', 'Distância máxima aprovada até o #2 (0 desliga)', config.ameacaPodioMaxGap)}
-        {botao('coroa')}
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--foreground-secondary)', lineHeight: 1.45 }}>
+          Automática. Toda semana o sistema usa o ticket médio elegível da semana anterior completa,
+          converte esse valor pela regra oficial de Estrelas e usa o resultado como distância de ameaça
+          entre o líder e o #2. Sem dados válidos, a ameaça fica desligada.
+        </p>
       </div>
     </fieldset>}
   </section>
