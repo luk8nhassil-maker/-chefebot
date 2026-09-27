@@ -209,3 +209,31 @@ Decisão de produto e proteção operacional para a primeira versão:
 - Quando já existe presente realmente disponível, informa esse fato diretamente.
 - A mensagem não inventa posição, adversário, urgência, prêmio ou benefício.
 - CTA oficial: `https://chefedapizza.com.br/cliente`.
+
+
+## Adendo (2026-09-27) — WhatsApp exclusivo da disputa do Pódio às 18h
+
+Decisão aprovada pelo responsável do produto:
+
+- O motor é exclusivo para quem está no **Top 3 atual entre participantes autorizados**.
+- A avaliação ocorre **diariamente às 18h no fuso operacional da pizzaria**. O Vercel Cron chama a rota às 21:00 UTC e a própria rota confirma novamente que a hora local é 18h antes de qualquer envio.
+- Produção real é permitida somente no projeto oficial `chefebot-contingencia`; Preview, projetos legados e qualquer projeto diferente falham fechados sem disparar WhatsApp.
+- Cada cliente recebe no máximo **uma mensagem do Pódio por dia**.
+- O mesmo cenário não é repetido em dias seguintes. O cron continua avaliando às 18h, mas fica em silêncio quando posição/distância/ameaça não mudaram.
+- Retry do cron no mesmo dia não duplica mensagem: a exposição diária é reservada antes de chamar a Evolution API.
+- Quem não está mais no Top 3 **não recebe** mensagem competitiva. O motor não tenta puxar #4, #5 etc. por pressão.
+- O #1 recebe informação de defesa: vantagem real sobre o #2 e, quando a regra dinâmica da Coroa confirmar, aviso de **Coroa ameaçada**.
+- #2 e #3 recebem a distância exata, em Estrelas, necessária para ultrapassar a posição imediatamente acima.
+- O sistema só afirma que "um pedido pode mudar a posição" quando a tabela oficial de Estrelas prova isso:
+  - até 3 Estrelas necessárias: qualquer pedido que gere Estrelas pode bastar;
+  - 4–5: pelo menos R$ 40,00 em valor elegível;
+  - 6–7: pelo menos R$ 70,00;
+  - 8–9: pelo menos R$ 100,00;
+  - 10–12: pelo menos R$ 150,00;
+  - acima de 12: a mensagem **não promete** ultrapassagem com um único pedido.
+- Esses valores são apenas a tradução da regra oficial `estrelas-faixas-v1` para uma ação compreensível; taxa de entrega e valores não elegíveis não entram no cálculo.
+- A mensagem nunca cita nome, telefone ou outra informação pessoal do adversário.
+- A mensagem usa o WhatsApp oficial já configurado na Evolution API e aponta para `https://chefedapizza.com.br/cliente`.
+- O comando **SAIR RANKING** passa a silenciar toda comunicação automática do Ranking no WhatsApp (convites e Pódio), sem remover a participação no app nem apagar Estrelas.
+- Se o provider falhar, o sistema prefere perder o envio daquele dia a arriscar duplicidade.
+- O motor não altera score, saldo de Estrelas, prêmio, pedido, Pix, estoque ou impressão; ele somente lê a disputa real e comunica o estado.
