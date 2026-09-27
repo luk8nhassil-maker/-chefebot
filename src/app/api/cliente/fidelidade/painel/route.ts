@@ -52,6 +52,7 @@ import { obterEstadoMissaoIndicacao } from "@/lib/rankingMissaoIndicacaoEstado";
 import { aplicarImpulsoPodioSeElegivel } from "@/lib/rankingImpulsoPodioEstado";
 import { sincronizarNivelChefCliente } from "@/lib/rankingNivelChefEstado";
 import { sincronizarMovimentoRecente, type MovimentoRecente } from "@/lib/rankingMovimentoRecenteEstado";
+import { obterReferenciaCoroaDinamica } from "@/lib/rankingCoroaDinamica";
 
 const TENANT_PADRAO = "default";
 
@@ -411,12 +412,26 @@ export async function GET(req: NextRequest) {
       movimentoRecente = await sincronizarMovimentoRecente(tenantId, temporada.temporadaId, clienteId, posicaoParaMovimento);
     }
 
-    // "Defenda sua Coroa" — só afirma ameaça com uma condição matemática
-    // configurada pelo admin (ameacaPodioMaxGap); sem config, fica sempre
-    // false e a UI mostra apenas a distância neutra já presente em `alvo`.
+    // "Defenda sua Coroa" — referência DINÂMICA, baseada no ticket médio
+    // elegível da semana operacional anterior completa. O ticket é convertido
+    // pela mesma regra oficial de Estrelas e serve apenas como distância de
+    // competição: não credita saldo, não altera fidelidade e não muda prêmio.
+    //
+    // Fail-closed: se o histórico semanal ainda não existir/estiver
+    // indisponível, a UI mostra somente a distância neutra e nunca inventa
+    // uma ameaça.
     const alvoDoCliente = ranking?.participantes.alvo ?? null;
     if (alvoDoCliente && alvoDoCliente.estado === "liderando") {
-      coroaAmeacada = calcularCoroaAmeacada(alvoDoCliente.vantagem, configGamificacao.ameacaPodioMaxGap);
+      try {
+        const referenciaCoroa = await obterReferenciaCoroaDinamica(tenantId);
+        coroaAmeacada = calcularCoroaAmeacada(
+          alvoDoCliente.vantagem,
+          referenciaCoroa?.maxGapEstrelas ?? 0,
+        );
+      } catch {
+        console.error("[ranking-coroa-dinamica] falha ao ler histórico semanal");
+        coroaAmeacada = false;
+      }
     }
   }
 
