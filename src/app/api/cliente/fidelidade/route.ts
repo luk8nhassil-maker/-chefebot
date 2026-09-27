@@ -17,6 +17,7 @@ import {
   metaEstrelasDaConfig,
   classificarOrigemMovimentoPontos,
 } from "@/lib/fidelidade";
+import { missaoFotoPerfilConcluida } from "@/lib/fotoPerfilCliente";
 
 // GET /api/cliente/fidelidade — saldo, progresso e extrato da fidelidade por
 // pontos do cliente autenticado (Etapa 3). Só lê os dados do dono da sessão
@@ -48,11 +49,12 @@ export async function GET(req: NextRequest) {
   const limite = resolverLimite(searchParams);
   const clienteIdPontos = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
 
-  const [extratoCompleto, config, pizzasAcumuladas, recompensasCompletas] = await Promise.all([
+  const [extratoCompleto, config, pizzasAcumuladas, recompensasCompletas, fotoPerfilConcluida] = await Promise.all([
     obterExtratoPontos(clienteIdPontos),
     obterConfigFidelidadePontos(),
     obterSaldoAntigoPizzas(cliente.clienteId).catch(() => 0),
     obterRecompensasPontos(clienteIdPontos),
+    missaoFotoPerfilConcluida(clienteIdPontos).catch(() => false),
   ]);
 
   const estrelasAtivas = estrelasV1Ativa(config);
@@ -95,6 +97,7 @@ export async function GET(req: NextRequest) {
       status: r.status,
       criadoEm: r.createdAt,
       descricao: r.descricaoRecompensa ?? config.descricaoRecompensa,
+      bloqueadaPorFoto: !fotoPerfilConcluida,
     }));
 
   const recompensasHistorico = recompensasCompletas
@@ -124,6 +127,10 @@ export async function GET(req: NextRequest) {
     extrato,
     recompensas: recompensasAbertas,
     recompensasHistorico,
+    missaoFotoPerfil: {
+      concluida: fotoPerfilConcluida,
+      necessariaParaLiberarPresente: !fotoPerfilConcluida && recompensasAbertas.length > 0,
+    },
     legado: {
       pizzasAcumuladas,
     },
