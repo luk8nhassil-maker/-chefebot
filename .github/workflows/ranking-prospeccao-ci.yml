@@ -15,6 +15,10 @@ on:
       - "src/lib/consentimentoRanking.test.ts"
       - "src/lib/fotoPerfilCliente.ts"
       - "src/lib/fotoPerfilCliente.test.ts"
+      - "src/lib/fotoPerfilStorage.ts"
+      - "src/lib/fotoPerfilStorage.test.ts"
+      - "src/lib/rankingGamificacaoE2E.test.ts"
+      - "src/app/api/pedido-app/route.resgate.test.ts"
       - "src/lib/fidelidade.ts"
       - "src/lib/fidelidade.resgate.test.ts"
       - "src/app/api/cliente/fidelidade/route.ts"
@@ -81,7 +85,10 @@ jobs:
           src/app/cliente/page.test.ts
           src/lib/consentimentoRanking.test.ts
           src/lib/fotoPerfilCliente.test.ts
+          src/lib/fotoPerfilStorage.test.ts
           src/lib/fidelidade.resgate.test.ts
+          src/lib/rankingGamificacaoE2E.test.ts
+          src/app/api/pedido-app/route.resgate.test.ts
           src/app/api/cliente/fidelidade/route.test.ts
           src/app/api/cliente/fidelidade/resgate/route.test.ts
           src/app/api/cliente/perfil/foto/route.test.ts
@@ -112,6 +119,10 @@ jobs:
           src/lib/consentimentoRanking.test.ts
           src/lib/fotoPerfilCliente.ts
           src/lib/fotoPerfilCliente.test.ts
+          src/lib/fotoPerfilStorage.ts
+          src/lib/fotoPerfilStorage.test.ts
+          src/lib/rankingGamificacaoE2E.test.ts
+          src/app/api/pedido-app/route.resgate.test.ts
           src/lib/fidelidade.ts
           src/lib/fidelidade.resgate.test.ts
           src/app/api/cliente/fidelidade/route.ts
