@@ -20,7 +20,7 @@ export class ErroFotoPerfilStorage extends Error {
   }
 }
 
-type EnvBlob = Pick<NodeJS.ProcessEnv, "BLOB_READ_WRITE_TOKEN" | "BLOB_STORE_ID" | "VERCEL_OIDC_TOKEN" | "AUTH_SECRET" | "VERCEL_BLOB_API_URL">;
+type EnvBlob = Partial<Pick<NodeJS.ProcessEnv, "BLOB_READ_WRITE_TOKEN" | "BLOB_STORE_ID" | "VERCEL_OIDC_TOKEN" | "AUTH_SECRET" | "VERCEL_BLOB_API_URL">>;
 
 function envTexto(valor: string | undefined): string | null {
   const limpo = valor?.trim();
@@ -47,7 +47,7 @@ export function resolverCredenciaisBlob(env: EnvBlob = process.env): { token: st
   throw new ErroFotoPerfilStorage("storage_nao_configurado");
 }
 
-export function referenciaFotoPerfil(clienteId: string, env: Pick<NodeJS.ProcessEnv, "AUTH_SECRET"> = process.env): string {
+export function referenciaFotoPerfil(clienteId: string, env: Partial<Pick<NodeJS.ProcessEnv, "AUTH_SECRET">> = process.env): string {
   const segredo = envTexto(env.AUTH_SECRET);
   if (!segredo || segredo.length < 16 || !clienteId) {
     throw new ErroFotoPerfilStorage("storage_nao_configurado");
@@ -111,7 +111,7 @@ export async function salvarFotoPerfilBlob(params: {
         "x-content-type": params.contentType,
         "x-cache-control-max-age": "3600",
       },
-      body: params.bytes,
+      body: Buffer.from(params.bytes),
     });
   } catch {
     throw new ErroFotoPerfilStorage("storage_indisponivel");
