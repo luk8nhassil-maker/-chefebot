@@ -10,6 +10,8 @@ import {
 
 export const dynamic = "force-dynamic";
 
+const FOTO_REQUEST_MAX_BYTES = 900 * 1024;
+
 function statusErro(erro: ErroFotoPerfilStorage): number {
   if (erro.codigo === "arquivo_invalido" || erro.codigo === "tipo_nao_permitido" || erro.codigo === "conteudo_invalido") return 400;
   if (erro.codigo === "arquivo_muito_grande") return 413;
@@ -41,6 +43,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const tamanhoDeclarado = Number(req.headers.get("content-length") ?? 0);
+  if (Number.isFinite(tamanhoDeclarado) && tamanhoDeclarado > FOTO_REQUEST_MAX_BYTES) {
+    return NextResponse.json({ error: "arquivo_muito_grande" }, { status: 413 });
+  }
+
   const sessao = await lerSessaoCliente(req);
   if (!sessao) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
   const cliente = await buscarClientePorId(sessao.clienteId);
