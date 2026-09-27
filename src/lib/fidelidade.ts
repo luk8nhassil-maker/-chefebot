@@ -7,6 +7,7 @@ import { obterTemporadaAtiva } from "./temporadas";
 import { calcularScoreDaTemporada } from "./rankingClientes";
 import { projetarScoreRankingComBonus } from "./rankingScoreTemporada";
 import { comBloqueioGamificacao, chaveLockScoreRanking } from "./rankingGamificacaoLock";
+import { missaoFotoPerfilConcluida } from "./fotoPerfilCliente";
 
 export type TipoRecompensa = "pizza_gratis" | "desconto_fixo" | "desconto_percentual";
 
@@ -867,6 +868,9 @@ export async function reservarResgatePontos(clienteId: string, recompensaId: str
     if (recompensa.status !== "disponivel" && recompensa.status !== "notificada") {
       throw new Error("Recompensa nao esta mais disponivel para resgate");
     }
+    if (!await missaoFotoPerfilConcluida(clienteId)) {
+      throw new Error("Adicione uma foto de perfil para liberar seu primeiro presente");
+    }
 
     const config = await obterConfigFidelidadePontos();
     if (!config.ativo) throw new Error("Fidelidade nao esta ativa");
@@ -945,6 +949,9 @@ export async function confirmarResgatePontos(
     if (!reserva) throw new Error("Reserva de resgate nao encontrada");
     if (reserva.status !== "reservado") throw new Error(`Reserva nao esta mais disponivel para confirmar (status atual: ${reserva.status})`);
     if (reservaResgateExpirada(reserva)) throw new Error("Reserva de resgate expirada");
+    if (!await missaoFotoPerfilConcluida(clienteId)) {
+      throw new Error("Adicione uma foto de perfil para liberar seu primeiro presente");
+    }
 
     const registroSemSaldo: MovimentoPontos = {
       movimentoId: novoId("pt"),
