@@ -222,10 +222,10 @@ describe("detectarConquistaRanking / textoConquistaRanking", () => {
     expect(textoConquistaRanking(null, 12)).toBe("Estou em #12 no Ranking do Chefe ⭐");
   });
 
-  test("convite cria desafio pessoal sem prometer pontos ou prêmio", () => {
+  test("convite é amigável e não promete pontos ou prêmio", () => {
     const texto = textoConviteRanking({ tipo: "top10" }, 5);
     expect(texto).toContain("Entrei no Top 10");
-    expect(texto).toContain("Você consegue me passar?");
+    expect(texto).toContain("queria te convidar para conhecer também.");
     expect(texto).not.toMatch(/\+?\d+ Estrelas|desconto|prêmio/i);
   });
 });
