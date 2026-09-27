@@ -51,7 +51,20 @@ try {
   await page.getByRole("button", { name: "Ativar meu Ranking" }).click();
   await page.locator(".cf-ranking-screen").waitFor({ state: "visible", timeout: 15000 });
   await page.getByText("Ranking do Chefe", { exact: true }).first().waitFor({ state: "visible" });
-  await page.screenshot({ path: path.join(outDir, "04-ranking-liberado-apos-participar.png"), fullPage: true });
+
+  const modalMomento = page.locator(".cf-ranking-momento-dialog");
+  if (await modalMomento.isVisible().catch(() => false)) {
+    await page.waitForTimeout(900);
+    const fundo = await modalMomento.evaluate((el) => getComputedStyle(el).backgroundColor);
+    if (!fundo || fundo === "rgba(0, 0, 0, 0)" || fundo === "transparent") {
+      falhar("Modal contextual do Ranking ficou sem fundo após a animação");
+    }
+    await page.screenshot({ path: path.join(outDir, "04-modal-contextual-estavel.png"), fullPage: false });
+    await page.getByRole("button", { name: "Fechar e voltar ao ranking" }).click();
+  }
+
+  await page.locator(".cf-ranking-screen").waitFor({ state: "visible" });
+  await page.screenshot({ path: path.join(outDir, "05-ranking-liberado-apos-participar.png"), fullPage: true });
 
   await fs.writeFile(path.join(outDir, "resultado.json"), JSON.stringify({
     ok: true,
@@ -60,7 +73,8 @@ try {
       "presente_garantido_bloqueado_por_foto",
       "missao_foto_unica",
       "ranking_sem_dados_antes_de_participar",
-      "ranking_liberado_apos_participacao_explicita"
+      "ranking_liberado_apos_participacao_explicita",
+      "modal_contextual_com_fundo_apos_animacao"
     ]
   }, null, 2));
 } finally {
