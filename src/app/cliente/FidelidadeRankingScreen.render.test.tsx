@@ -5,7 +5,7 @@
 // código-fonte. Complementa FidelidadeRankingScreen.test.ts (regressões
 // estruturais herdadas do #445).
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, within, waitFor } from "@testing-library/react";
 import { FidelidadeRankingScreen, type FidelidadeRankingScreenProps } from "./FidelidadeRankingScreen";
 
 afterEach(cleanup);
@@ -27,7 +27,7 @@ const RANKING_BASE: FidelidadeRankingScreenProps["ranking"] = {
   },
 };
 
-function montar(props: Partial<FidelidadeRankingScreenProps> = {}, manterEntrada = false) {
+function montar(props: Partial<FidelidadeRankingScreenProps> = {}, manterModal = false) {
   render(
     <FidelidadeRankingScreen
       ranking={RANKING_BASE}
@@ -43,36 +43,81 @@ function montar(props: Partial<FidelidadeRankingScreenProps> = {}, manterEntrada
       {...props}
     />
   );
-  if (!manterEntrada) fireEvent.click(screen.getByRole("button", { name: "Ver meu ranking" }));
+  if (!manterModal) {
+    const dialog = screen.queryByRole("dialog");
+    if (dialog) fireEvent.click(within(dialog).getByRole("button", { name: /^Voltar ao ranking$/ }));
+    const outros = screen.queryByText("Outras informações do Ranking");
+    if (outros) fireEvent.click(outros);
+  }
 }
 
 describe("FidelidadeRankingScreen — Gamificação V2", () => {
-  test("ao abrir o Ranking apresenta as missões e permite escolher sem disparar ação", () => {
+  test("ao abrir o Ranking escolhe uma missão real, sem lista nem ação automática", () => {
     const onNovoPedido = vi.fn();
     montar({
       gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "desbloqueada" }, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
       onNovoPedido,
     }, true);
-    const entrada = screen.getByRole("dialog", { name: "Sua próxima jogada" });
-    expect(entrada.getAttribute("aria-modal")).toBe("true");
-    expect(within(entrada).getByRole("button", { name: /Caçada ao Pódio liberada/ })).toBeTruthy();
-    expect(onNovoPedido).not.toHaveBeenCalled();
-    fireEvent.click(within(entrada).getByRole("button", { name: /Caçada ao Pódio liberada/ }));
-    expect(screen.getByRole("dialog", { name: "Caçada ao Pódio liberada!" })).toBeTruthy();
+    const dialog = screen.getByRole("dialog", { name: "Caçada ao Pódio liberada!" });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(within(dialog).getByText(/2x no Ranking desta temporada/)).toBeTruthy();
+    expect(screen.queryByText("Sua próxima jogada")).toBeNull();
     expect(onNovoPedido).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /^Voltar ao ranking$/ }));
     expect(screen.queryByRole("dialog")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Ver tudo" }));
-    expect(screen.getByRole("dialog", { name: "Sua próxima jogada" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Caçada ao Pódio liberada/ }));
+    expect(screen.getByRole("dialog", { name: "Caçada ao Pódio liberada!" })).toBeTruthy();
   });
 
-  test("sem missão configurada o painel inicial não inventa benefício", () => {
+  test("sem situação acionável abre o Ranking direto, sem modal inventado", () => {
     montar({ gamificacao: null }, true);
-    expect(screen.getByRole("dialog", { name: "Sua próxima jogada" })).toBeTruthy();
-    expect(screen.queryByText("MISSÕES DA TEMPORADA")).toBeNull();
-    fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.body.style.overflow).toBe("");
+  });
+
+  test("pedido pendente vem antes da missão e nunca promete crédito", () => {
+    montar({
+      posPedido: { estado: "pendente" },
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "desbloqueada" }, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
+    }, true);
+    const dialog = screen.getByRole("dialog", { name: "Pedido recebido" });
+    expect(within(dialog).getByText(/Quando as estrelas forem confirmadas/)).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Caçada ao Pódio liberada!" })).toBeNull();
+  });
+
+  test("alerta de coroa só vence a missão quando há ameaça confirmada", () => {
+    montar({
+      ranking: { ...RANKING_BASE, participantes: { ...RANKING_BASE.participantes, alvo: { estado: "liderando", vantagem: 2 } } },
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "desbloqueada" }, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: true },
+    }, true);
+    const dialog = screen.getByRole("dialog", { name: "Coroa ameaçada!" });
+    expect(within(dialog).getByRole("button", { name: "Ver como subir" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Caçada ao Pódio liberada!" })).toBeNull();
+  });
+
+  test("indicação bloqueada não ganha destaque automático", () => {
+    montar({
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6, compartilhamentoLiberado: false },
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: null, missaoIndicacao: { concluida: false }, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
+    }, true);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  test("modal removido por atualização do painel não reaparece sozinho", async () => {
+    const base = {
+      ranking: RANKING_BASE, temporada: null, indicacao: null, privacidade: null,
+      privacidadeCarregando: false, privacidadeSalvando: null, privacidadeErro: "",
+      onAlterarPrivacidade: () => undefined, onRevogarTodas: () => undefined,
+      onNovoPedido: () => undefined, onClose: () => undefined,
+    } satisfies FidelidadeRankingScreenProps;
+    const ativa = { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "desbloqueada" as const }, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false };
+    const consumida = { ...ativa, missaoSemanal: { status: "consumida" as const } };
+    const { rerender } = render(<FidelidadeRankingScreen {...base} gamificacao={ativa} />);
+    expect(screen.getByRole("dialog", { name: "Caçada ao Pódio liberada!" })).toBeTruthy();
+    rerender(<FidelidadeRankingScreen {...base} gamificacao={consumida} />);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    rerender(<FidelidadeRankingScreen {...base} gamificacao={ativa} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
   test("participante anônimo vê controle de saída sem consentimento de identidade", () => {
     const onRevogarTodas = vi.fn();
