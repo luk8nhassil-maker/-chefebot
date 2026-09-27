@@ -27,7 +27,7 @@ const RANKING_BASE: FidelidadeRankingScreenProps["ranking"] = {
   },
 };
 
-function montar(props: Partial<FidelidadeRankingScreenProps> = {}) {
+function montar(props: Partial<FidelidadeRankingScreenProps> = {}, manterEntrada = false) {
   render(
     <FidelidadeRankingScreen
       ranking={RANKING_BASE}
@@ -43,9 +43,37 @@ function montar(props: Partial<FidelidadeRankingScreenProps> = {}) {
       {...props}
     />
   );
+  if (!manterEntrada) fireEvent.click(screen.getByRole("button", { name: "Ver meu ranking" }));
 }
 
 describe("FidelidadeRankingScreen — Gamificação V2", () => {
+  test("ao abrir o Ranking apresenta as missões e permite escolher sem disparar ação", () => {
+    const onNovoPedido = vi.fn();
+    montar({
+      gamificacao: { statusSocial: null, bonusCompeticao: 0, missaoSemanal: { status: "desbloqueada" }, missaoIndicacao: null, nivelChef: null, movimentoRecente: null, coroaAmeacada: false },
+      onNovoPedido,
+    }, true);
+    const entrada = screen.getByRole("dialog", { name: "Sua próxima jogada" });
+    expect(entrada.getAttribute("aria-modal")).toBe("true");
+    expect(within(entrada).getByRole("button", { name: /Caçada ao Pódio liberada/ })).toBeTruthy();
+    expect(onNovoPedido).not.toHaveBeenCalled();
+    fireEvent.click(within(entrada).getByRole("button", { name: /Caçada ao Pódio liberada/ }));
+    expect(screen.getByRole("dialog", { name: "Caçada ao Pódio liberada!" })).toBeTruthy();
+    expect(onNovoPedido).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /^Voltar ao ranking$/ }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ver tudo" }));
+    expect(screen.getByRole("dialog", { name: "Sua próxima jogada" })).toBeTruthy();
+  });
+
+  test("sem missão configurada o painel inicial não inventa benefício", () => {
+    montar({ gamificacao: null }, true);
+    expect(screen.getByRole("dialog", { name: "Sua próxima jogada" })).toBeTruthy();
+    expect(screen.queryByText("MISSÕES DA TEMPORADA")).toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.body.style.overflow).toBe("");
+  });
   test("participante anônimo vê controle de saída sem consentimento de identidade", () => {
     const onRevogarTodas = vi.fn();
     montar({ privacidade: { participaCampanha: true, finalidades: [] }, onRevogarTodas });
