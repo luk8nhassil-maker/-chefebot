@@ -4,7 +4,7 @@
 // cliente/page.tsx (que crescia demais) para um módulo dedicado — mesmo
 // comportamento e tipos, reaproveitado tanto pela página real quanto pelo
 // Preview isolado (/dev/ranking-retencao), que importa este mesmo arquivo.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { Star } from 'lucide-react'
 import {
@@ -38,6 +38,9 @@ const ICONE_STATUS_SOCIAL: Record<NonNullable<PainelGamificacao['statusSocial']>
 }
 
 type MomentoRanking = 'conquista' | 'nivel' | 'coroa' | 'indicacao' | 'semanal' | 'pedido'
+const subscribeToDocument = () => () => {}
+const documentDisponivel = () => true
+const documentIndisponivel = () => false
 
 // Selo compacto (só ícone) para OUTROS membros do Top 10 dentro das listas —
 // distinto do selo "cf-ranking-selo" (ícone+nome) usado no card do próprio
@@ -103,11 +106,13 @@ export function FidelidadeRankingScreen({
 }: FidelidadeRankingScreenProps) {
   const [aba, setAba] = useState<'participantes' | 'minha' | 'geral'>('minha')
   const [sheetSubirAberto, setSheetSubirAberto] = useState(false)
-  const [momentoAberto, setMomentoAberto] = useState<MomentoRanking | null>(null)
+  const [momentoAberto, setMomentoAberto] = useState<MomentoRanking | 'entrada' | null>('entrada')
+  const podeCriarPortal = useSyncExternalStore(subscribeToDocument, documentDisponivel, documentIndisponivel)
   const momentoDialogRef = useRef<HTMLDivElement>(null)
   const momentoGatilhoRef = useRef<HTMLElement | null>(null)
+  const rankingRef = useRef<HTMLElement>(null)
   const abrirMomento = (momento: MomentoRanking) => {
-    momentoGatilhoRef.current = document.activeElement as HTMLElement | null
+    if (!momentoAberto) momentoGatilhoRef.current = document.activeElement as HTMLElement | null
     setMomentoAberto(momento)
   }
   const emit = (tipo: EventoRankingRetencao) => onTelemetria?.(tipo)
@@ -180,6 +185,9 @@ export function FidelidadeRankingScreen({
   if (gamificacao?.missaoIndicacao) momentos.push({ id: 'indicacao', eyebrow: 'MISSÃO DA TEMPORADA', titulo: 'Indique 1 amigo', resumo: gamificacao.missaoIndicacao.concluida ? '1/1 ✓ Concluída' : '0/1 · Veja como participar', simbolo: '↗' })
   if (gamificacao?.nivelChef) momentos.push({ id: 'nivel', eyebrow: 'SEU NÍVEL', titulo: `Nível ${gamificacao.nivelChef.nivel}${gamificacao.nivelChef.nome ? ` — ${gamificacao.nivelChef.nome}` : ''}`, resumo: gamificacao.nivelChef.xpProximoNivel === null ? 'Nível máximo atingido.' : `${gamificacao.nivelChef.xpAtual} XP / ${gamificacao.nivelChef.xpProximoNivel} XP`, simbolo: '✶' })
   const momentoAtual = momentos.find((item) => item.id === momentoAberto)
+  const painelEntrada = momentoAberto === 'entrada' || (momentoAberto !== null && !momentoAtual)
+  const missoes = momentos.filter((item) => item.id === 'semanal' || item.id === 'indicacao')
+  const novidades = momentos.filter((item) => item.id !== 'semanal' && item.id !== 'indicacao')
 
   // Telemetria da abertura — dispara uma vez por montagem (o usuário abriu a
   // tela agora). "Retorno" é reconhecido por um marcador local no aparelho,
@@ -199,7 +207,8 @@ export function FidelidadeRankingScreen({
   }, [])
 
   useEffect(() => {
-    if (!momentoAberto) return
+    if (!momentoAberto || !podeCriarPortal) return
+    const rankingAtual = rankingRef.current
     const overflowAnterior = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     momentoDialogRef.current?.focus()
@@ -219,10 +228,10 @@ export function FidelidadeRankingScreen({
     document.addEventListener('keydown', onKeyDown)
     return () => {
       document.body.style.overflow = overflowAnterior
-      document.removeEventListener('keydown', onKeyDown)
-      momentoGatilhoRef.current?.focus()
+      document.removeEventListener('keydown', onKeyDown);
+      (momentoGatilhoRef.current ?? rankingAtual)?.focus()
     }
-  }, [momentoAberto])
+  }, [momentoAberto, podeCriarPortal])
 
   const linhaDisputa = (participante: ParticipanteDisputa) => (
     <div key={`disputa-${participante.posicao}`} className={`cf-ranking-row ${participante.eVoce ? 'voce' : ''}`}>
@@ -239,7 +248,7 @@ export function FidelidadeRankingScreen({
   )
 
   return (
-    <main className="cf-ranking-screen" aria-label="Pódio Chefe" inert={momentoAtual ? true : undefined}>
+    <main ref={rankingRef} tabIndex={-1} className="cf-ranking-screen" aria-label="Pódio Chefe" inert={momentoAberto ? true : undefined}>
       <header className="cf-ranking-header">
         <button type="button" onClick={onClose} aria-label="Voltar para Fidelidade">‹</button>
         <div>
@@ -332,7 +341,7 @@ export function FidelidadeRankingScreen({
 
           {momentos.length > 0 && (
             <section className="cf-ranking-momentos" aria-label="Suas novidades no Ranking">
-              <div className="cf-ranking-momentos-head"><span>ACONTECENDO COM VOCÊ</span><small>Toque para ver</small></div>
+              <div className="cf-ranking-momentos-head"><span>ACONTECENDO COM VOCÊ</span><button type="button" onClick={() => { momentoGatilhoRef.current = document.activeElement as HTMLElement; setMomentoAberto('entrada') }}>Ver tudo</button></div>
               {momentos.map((momento) => (
                 <button key={momento.id} type="button" className={`cf-ranking-momento-teaser cf-ranking-momento-${momento.id}`} onClick={() => abrirMomento(momento.id)}>
                   <span className="cf-ranking-momento-icon" aria-hidden="true">{momento.simbolo}</span>
@@ -437,10 +446,19 @@ export function FidelidadeRankingScreen({
         </div>
       )}
 
-      {momentoAtual && createPortal(
-        <div className={`cf-ranking-momento-backdrop cf-ranking-momento-backdrop-${momentoAtual.id}`} onMouseDown={(event) => { if (event.target === event.currentTarget) setMomentoAberto(null) }}>
-          <div ref={momentoDialogRef} className="cf-ranking-momento-dialog" role="dialog" aria-modal="true" aria-labelledby="cf-ranking-momento-title" tabIndex={-1}>
+      {momentoAberto && podeCriarPortal && createPortal(
+        <div className={`cf-ranking-momento-backdrop cf-ranking-momento-backdrop-${momentoAberto}`} onMouseDown={(event) => { if (event.target === event.currentTarget) setMomentoAberto(null) }}>
+          <div ref={momentoDialogRef} className={`cf-ranking-momento-dialog ${painelEntrada ? 'cf-ranking-momento-dialog-entrada' : ''}`} role="dialog" aria-modal="true" aria-labelledby="cf-ranking-momento-title" tabIndex={-1}>
             <button type="button" className="cf-ranking-momento-close" aria-label="Fechar e voltar ao ranking" onClick={() => setMomentoAberto(null)}>×</button>
+            {painelEntrada ? (
+              <>
+                <span className="cf-ranking-momento-kicker">RANKING DO CHEFE</span>
+                <h2 id="cf-ranking-momento-title">Sua próxima jogada</h2>
+                <p className="cf-ranking-entrada-intro">{momentos.length > 0 ? 'Escolha o que quer fazer agora ou acompanhe sua posição no Ranking.' : 'Acompanhe sua posição e volte sempre para ver suas próximas missões.'}</p>
+                {missoes.length > 0 && <div className="cf-ranking-entrada-grupo"><span>MISSÕES DA TEMPORADA</span>{missoes.map((item) => <button type="button" key={item.id} className="cf-ranking-entrada-opcao" onClick={() => abrirMomento(item.id)}><span aria-hidden="true">{item.simbolo}</span><span><small>{item.eyebrow}</small><strong>{item.titulo}</strong><em>{item.resumo}</em></span><b aria-hidden="true">›</b></button>)}</div>}
+                {novidades.length > 0 && <div className="cf-ranking-entrada-grupo"><span>SUAS NOVIDADES</span>{novidades.map((item) => <button type="button" key={item.id} className="cf-ranking-entrada-opcao" onClick={() => abrirMomento(item.id)}><span aria-hidden="true">{item.simbolo}</span><span><small>{item.eyebrow}</small><strong>{item.titulo}</strong><em>{item.resumo}</em></span><b aria-hidden="true">›</b></button>)}</div>}
+              </>
+            ) : momentoAtual && <>
             <div className="cf-ranking-momento-emblem" aria-hidden="true">{momentoAtual.simbolo}</div>
             <span className="cf-ranking-momento-kicker">{momentoAtual.eyebrow}</span>
             <h2 id="cf-ranking-momento-title">{momentoAtual.titulo}</h2>
@@ -479,6 +497,7 @@ export function FidelidadeRankingScreen({
                   : mensagemMov ?? (mensagemMissao ? `Agora você está em #${ranking.participantes.posicao ?? ranking.posicao}. ${mensagemMissao}` : `Agora você está em #${ranking.participantes.posicao ?? ranking.posicao}.`)}</p>
               )}
             </div>
+            </>}
             <div className="cf-ranking-momento-actions">
               {momentoAberto === 'conquista' && podeCompartilharConquista && (
                 <button type="button" className="cf-ranking-momento-primary" disabled={compartilhando} onClick={() => { setMomentoAberto(null); emit('compartilhamento_clicado'); onCompartilharConquista?.() }}>{compartilhando ? 'Preparando…' : 'Fortalecer minha posição'}</button>
@@ -491,7 +510,7 @@ export function FidelidadeRankingScreen({
                 }}>{compartilhamentoLiberado ? 'Convidar um amigo' : 'Fazer primeiro pedido'}</button>
               )}
               {momentoAberto === 'semanal' && onNovoPedido && <button type="button" className="cf-ranking-momento-primary" onClick={() => { setMomentoAberto(null); onNovoPedido() }}>Fazer pedido</button>}
-              <button type="button" className="cf-ranking-momento-secondary" onClick={() => setMomentoAberto(null)}>Voltar ao ranking</button>
+              <button type="button" className="cf-ranking-momento-secondary" onClick={() => setMomentoAberto(null)}>{painelEntrada ? 'Ver meu ranking' : 'Voltar ao ranking'}</button>
             </div>
           </div>
         </div>, document.body,
@@ -591,6 +610,20 @@ export function FidelidadeRankingScreen({
         .cf-ranking-momento-actions .cf-ranking-momento-primary { border: 0; background: #ffca00; color: #202a38; }
         .cf-ranking-momento-actions .cf-ranking-momento-secondary { border: 1px solid #d9e3ef; background: #fff; color: #315275; }
         .cf-ranking-momento-actions button:disabled { opacity: .55; cursor: wait; }
+        .cf-ranking-momentos-head button { border: 0; background: transparent; color: #2860ba; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
+        .cf-ranking-momento-dialog-entrada { width: min(100%, 600px); padding-top: 48px; }
+        .cf-ranking-entrada-intro { margin: 15px 0 22px; color: #52627a; font-size: 16px; line-height: 1.5; }
+        .cf-ranking-entrada-grupo { display: grid; gap: 9px; margin: 0 0 20px; }
+        .cf-ranking-entrada-grupo>span { color: #3265af; font-size: 11px; font-weight: 850; letter-spacing: .13em; }
+        .cf-ranking-entrada-opcao { display: grid; grid-template-columns: 44px minmax(0,1fr) 16px; align-items: center; gap: 13px; width: 100%; padding: 13px; border: 1px solid #dce5f0; border-radius: 17px; background: #fff; color: #172b47; text-align: left; font: inherit; cursor: pointer; transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease; }
+        .cf-ranking-entrada-opcao:hover { transform: translateY(-2px); border-color: #8eb4f3; box-shadow: 0 10px 22px rgba(31,66,112,.1); }
+        .cf-ranking-entrada-opcao:focus-visible, .cf-ranking-momentos-head button:focus-visible { outline: 3px solid #306cce; outline-offset: 3px; }
+        .cf-ranking-entrada-opcao>span:first-child { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 13px; background: #fff1bc; color: #8b5e00; font-size: 26px; font-weight: 800; }
+        .cf-ranking-entrada-opcao>span:nth-child(2) { display: grid; gap: 2px; min-width: 0; }
+        .cf-ranking-entrada-opcao small { color: #5173a5; font-size: 10px; font-weight: 850; letter-spacing: .09em; }
+        .cf-ranking-entrada-opcao strong { font-size: 16px; line-height: 1.2; }
+        .cf-ranking-entrada-opcao em { color: #617087; font-size: 12px; font-style: normal; line-height: 1.35; }
+        .cf-ranking-entrada-opcao b { color: #55749c; font-size: 24px; }
         .cf-ranking-momento-backdrop-semanal .cf-ranking-momento-emblem, .cf-ranking-momento-backdrop-coroa .cf-ranking-momento-emblem { border-color: #edcd66; background: #fff1b7; color: #9b6b00; }
         .cf-ranking-momento-backdrop-conquista .cf-ranking-momento-emblem { animation-name: cf-momento-conquista; }
         .cf-ranking-momento-backdrop-pedido .cf-ranking-momento-emblem { animation-name: cf-momento-pedido; }
@@ -605,7 +638,7 @@ export function FidelidadeRankingScreen({
         @keyframes cf-momento-deslize { from { opacity: 0; transform: translateX(-35px) rotate(-8deg); } to { opacity: 1; transform: translateX(0) rotate(0); } }
         @keyframes cf-momento-progresso { from { transform: scaleX(0); } to { transform: scaleX(1); } }
         @media (max-width: 600px) { .cf-ranking-momento-backdrop { padding: 0; }.cf-ranking-momento-dialog { width: 100%; max-height: 100dvh; min-height: 100dvh; border-radius: 0; padding: max(30px, env(safe-area-inset-top)) 25px max(28px, env(safe-area-inset-bottom)); }.cf-ranking-momento-emblem { margin-top: clamp(30px, 10dvh, 90px); }.cf-ranking-momento-actions { margin-top: auto; padding-top: 24px; } }
-        @media (prefers-reduced-motion: reduce) { .cf-ranking-momento-backdrop, .cf-ranking-momento-dialog, .cf-ranking-momento-emblem, .cf-ranking-momento-detail .cf-ranking-nivel-fill { animation: none !important; }.cf-ranking-momento-teaser { transition: none; } }
+        @media (prefers-reduced-motion: reduce) { .cf-ranking-momento-backdrop, .cf-ranking-momento-dialog, .cf-ranking-momento-emblem, .cf-ranking-momento-detail .cf-ranking-nivel-fill { animation: none !important; }.cf-ranking-momento-teaser, .cf-ranking-entrada-opcao { transition: none; } }
         @media (prefers-reduced-motion: reduce) { .cf-ranking-screen * { transition: none !important; } }
         @media (max-width: 420px) {
           .cf-ranking-current { grid-template-columns: minmax(100px, .75fr) 1fr; gap: 8px; padding: 14px 12px; border-radius: 17px; }
