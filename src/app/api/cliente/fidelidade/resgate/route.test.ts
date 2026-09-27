@@ -18,7 +18,7 @@ vi.mock("@/lib/clientes", async () => {
   return {
     ...actual,
     buscarClientePorId: vi.fn(async (clienteId: string) => {
-      if (clienteId === "cli_a") return { clienteId: "cli_a", telefone: "cli_a", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" };
+      if (clienteId === "cli_a") return { clienteId: "cli_a", telefone: "cli_a", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "", ...(clienteAFotoConcluida ? { fotoPerfilMissaoConcluidaEm: "2026-09-27T12:00:00.000Z" } : {}) };
       if (clienteId === "cli_b") return { clienteId: "cli_b", telefone: "cli_b", nome: "Cliente B", createdAt: "", updatedAt: "", lastLoginAt: "" };
       return null;
     }),
@@ -27,12 +27,16 @@ vi.mock("@/lib/clientes", async () => {
 
 const recompensasPorCliente = new Map<string, Array<{ recompensaId: string; status: string }>>();
 const reservarMock = vi.fn();
+let configPontosMock: Record<string, unknown> = { ativo: false, descricaoRecompensa: "x" };
+let clienteAFotoConcluida = false;
 
 vi.mock("@/lib/fidelidade", async () => {
   const actual = await vi.importActual<typeof import("@/lib/fidelidade")>("@/lib/fidelidade");
   return {
     ...actual,
     obterRecompensasPontos: vi.fn(async (clienteId: string) => recompensasPorCliente.get(clienteId) ?? []),
+    obterConfigFidelidadePontos: vi.fn(async () => configPontosMock),
+    estrelasV1Ativa: actual.estrelasV1Ativa,
     reservarResgatePontos: (...args: unknown[]) => reservarMock(...args),
   };
 });
@@ -52,6 +56,8 @@ function requestComCorpo(token: string | undefined, body: unknown) {
 beforeEach(() => {
   recompensasPorCliente.clear();
   reservarMock.mockReset();
+  configPontosMock = { ativo: false, descricaoRecompensa: "x" };
+  clienteAFotoConcluida = false;
 });
 
 describe("POST /api/cliente/fidelidade/resgate", () => {
@@ -77,6 +83,33 @@ describe("POST /api/cliente/fidelidade/resgate", () => {
     const res = await POST(requestComCorpo("token-cliente-a", { recompensaId: "rcp_pertence_a_b" }));
     expect(res.status).toBe(404);
     expect(reservarMock).not.toHaveBeenCalled();
+  });
+
+  test("Estrelas V1 bloqueia o primeiro presente até a missão única da foto ser concluída", async () => {
+    configPontosMock = { ativo: true, regraVersao: "estrelas-faixas-v1", descricaoRecompensa: "Presente" };
+    recompensasPorCliente.set("cli_a", [{ recompensaId: "rcp_1", status: "disponivel" }]);
+
+    const res = await POST(requestComCorpo("token-cliente-a", { recompensaId: "rcp_1" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.code).toBe("foto_perfil_obrigatoria_primeiro_presente");
+    expect(reservarMock).not.toHaveBeenCalled();
+  });
+
+  test("depois da missão da foto, o gate não volta para presentes futuros", async () => {
+    configPontosMock = { ativo: true, regraVersao: "estrelas-faixas-v1", descricaoRecompensa: "Presente" };
+    clienteAFotoConcluida = true;
+    recompensasPorCliente.set("cli_a", [{ recompensaId: "rcp_2", status: "disponivel" }]);
+    reservarMock.mockResolvedValue({
+      resgateId: "rsg_2", valorDescontoMaximo: 0, pontosReservados: 50,
+      expiraEm: "2026-10-01T00:00:00.000Z", clienteId: "cli_a",
+      recompensaId: "rcp_2", status: "reservado", createdAt: "2026-09-27T00:00:00.000Z",
+    });
+
+    const res = await POST(requestComCorpo("token-cliente-a", { recompensaId: "rcp_2" }));
+    expect(res.status).toBe(200);
+    expect(reservarMock).toHaveBeenCalledWith("cli_a", "rcp_2");
   });
 
   test("recompensaId valido do proprio cliente reserva com sucesso", async () => {
