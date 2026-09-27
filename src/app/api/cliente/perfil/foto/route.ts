@@ -4,8 +4,9 @@ import { buscarClientePorId } from "@/lib/clientes";
 import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
 import {
   ErroFotoPerfil,
+  ErroFotoPerfilStorage,
   missaoFotoPerfilConcluida,
-  obterFotoPerfilCliente,
+  obterFotoPerfilDataUrl,
   salvarFotoPerfilCliente,
 } from "@/lib/fotoPerfilCliente";
 
@@ -30,14 +31,17 @@ export async function GET(req: NextRequest) {
   const cliente = await resolverCliente(req);
   if (!cliente) return resposta({ error: "Nao autorizado" }, { status: 401 });
 
-  const [foto, missaoConcluida] = await Promise.all([
-    obterFotoPerfilCliente(cliente.clienteId),
-    missaoFotoPerfilConcluida(cliente.clienteId),
-  ]);
-  return resposta({
-    foto: foto ? { dataUrl: foto.dataUrl, updatedAt: foto.updatedAt } : null,
-    missaoConcluida,
-  });
+  const missaoConcluida = await missaoFotoPerfilConcluida(cliente.clienteId).catch(() => false);
+  try {
+    const foto = await obterFotoPerfilDataUrl(cliente.clienteId);
+    return resposta({ foto, missaoConcluida });
+  } catch (erro) {
+    if (erro instanceof ErroFotoPerfilStorage) {
+      // Falha de mídia nunca desfaz a missão já concluída nem simula logout.
+      return resposta({ foto: null, fotoIndisponivel: true, missaoConcluida });
+    }
+    return resposta({ foto: null, missaoConcluida });
+  }
 }
 
 export async function PUT(req: NextRequest) {
@@ -60,7 +64,10 @@ export async function PUT(req: NextRequest) {
     const salvo = await salvarFotoPerfilCliente(cliente.clienteId, body.dataUrl);
     return resposta({
       ok: true,
-      foto: { dataUrl: salvo.foto.dataUrl, updatedAt: salvo.foto.updatedAt },
+      foto: {
+        dataUrl: typeof body.dataUrl === "string" ? body.dataUrl : null,
+        updatedAt: salvo.foto.updatedAt,
+      },
       missaoConcluida: true,
     });
   } catch (erro) {
@@ -69,6 +76,11 @@ export async function PUT(req: NextRequest) {
         ? "A foto ficou grande demais. Escolha outra imagem."
         : "Não conseguimos usar essa imagem. Escolha uma foto JPG, PNG ou WebP.";
       return resposta({ error: mensagem }, { status: 400 });
+    }
+    if (erro instanceof ErroFotoPerfilStorage) {
+      return resposta({
+        error: "O armazenamento de fotos está indisponível agora. Seu presente continua garantido; tente novamente mais tarde.",
+      }, { status: 503 });
     }
     return resposta({ error: "Erro interno" }, { status: 500 });
   }
