@@ -262,7 +262,7 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
     expect(fonte).toContain('max-width:390px');
     expect(fonte).toContain('SUAS ESTRELAS');
     expect(fonte).toContain('Próximo presente');
-    expect(fonte).toContain('Sua posição');
+    expect(fonte).toContain('Entre na disputa');
     expect(fonte).toContain('Fortaleça sua posição');
     expect(fonte).toContain("loyaltyLabel={modoPreview ? 'Fidelidade' : 'Pontos'}");
   });
@@ -320,9 +320,19 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
     expect(fonte).toContain("Revogar todas as autorizações do ranking");
   });
 
-  test("foto permanece indisponivel sem fonte oficial autorizada", () => {
-    expect(fonte).toContain("A foto de perfil não é utilizada enquanto não existir uma fonte oficial autorizada e integrada.");
+  test("foto da missão é privada e não vira exposição pública automática no Ranking", () => {
+    expect(fonte).toContain("Sua foto de perfil é privada por padrão e não aparece no Ranking sem uma autorização pública separada.");
+    expect(fonte).toContain("/api/cliente/perfil/foto");
+    expect(fonte).toContain("Sua foto fica privada e não é publicada no Ranking automaticamente.");
     expect(fonte).not.toContain("profilePictureUrl");
+  });
+
+  test("primeiro presente exige foto uma única vez e o CTA de resgate respeita a trava", () => {
+    expect(fonte).toContain("necessariaParaLiberarPresente");
+    expect(fonte).toContain("Uma missão para liberar seu primeiro presente");
+    expect(fonte).toContain("os próximos presentes não pedem essa missão novamente");
+    expect(fonte).toMatch(/podeResgatar[\s\S]{0,350}missaoFotoPerfil\?\.concluida === true/);
+    expect(fonte).toContain("Adicionar foto e liberar");
   });
 
   test("indicação nunca expõe telefone no link compartilhado", () => {
@@ -419,6 +429,21 @@ describe("/cliente — Correções PR #427: textos comerciais, estados vazios, P
   });
 });
 
+
+describe("/cliente — Ranking só depois de Participar", () => {
+  test("estado bloqueado não mostra posição nem rivais antes do opt-in", () => {
+    expect(fonte).toContain("ranking?.participaCampanha ? 'Sua posição' : 'Entre na disputa'");
+    expect(fonte).toContain("ranking?.participaCampanha && <b>");
+    expect(fonte).toContain("'Ative para ver sua disputa e o próximo passo.'");
+  });
+
+  test("Preview também esconde a posição até clicar em Participar", () => {
+    const bloco = fonte.slice(fonte.indexOf("function PreviewFidelidadeMobile"), fonte.indexOf("// Selo do status social"));
+    expect(bloco).toContain("Entre na disputa");
+    expect(bloco).toContain("Participe para ver sua posição, rivais e próximo passo.");
+    expect(bloco).not.toContain("Faltam <strong>4 Estrelas</strong> para subir de posição");
+  });
+});
 
 describe("/cliente — prospeccao segura do Ranking no pos-pedido", () => {
   test("participacao efetiva vem do servidor, nao do estado bruto de uma finalidade", () => {
