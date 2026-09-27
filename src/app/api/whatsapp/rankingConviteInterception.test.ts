@@ -37,18 +37,10 @@ vi.mock("@/lib/bot", async (importOriginal) => {
   return { ...actual, processMessage: processMessageMock };
 });
 
-const {
-  prepararConviteMock,
-  confirmarConviteMock,
-  consumirOptOutMock,
-} = vi.hoisted(() => ({
-  prepararConviteMock: vi.fn(),
-  confirmarConviteMock: vi.fn(async () => true),
+const { consumirOptOutMock } = vi.hoisted(() => ({
   consumirOptOutMock: vi.fn(async () => false),
 }));
 vi.mock("@/lib/rankingConviteWhatsapp", () => ({
-  prepararConviteRankingWhatsapp: prepararConviteMock,
-  confirmarConviteRankingWhatsapp: confirmarConviteMock,
   consumirOptOutConviteRankingWhatsapp: consumirOptOutMock,
 }));
 
@@ -102,65 +94,27 @@ beforeEach(() => {
     nomeTitularPix: "",
     limitePico: 0,
   });
-  prepararConviteMock.mockResolvedValue({ status: "suprimido", motivo: "cooldown_14_dias" });
-  confirmarConviteMock.mockResolvedValue(true);
   consumirOptOutMock.mockResolvedValue(false);
   consumirRespostaPesquisaMock.mockResolvedValue({ consumida: false });
   enviarTextoWhatsAppMock.mockResolvedValue({ ok: true, latenciaMs: 1, tentativas: 1 });
 });
 
-describe("convite persuasivo do Ranking no webhook WhatsApp", () => {
-  test("nota 4/5 usa o pedido real como evento e anexa o convite à mesma mensagem", async () => {
-    store.set(`avaliacao:${PHONE}`, "pedido-real-123");
-    prepararConviteMock.mockResolvedValue({
-      status: "pronto",
-      exposureId: "exp-ranking-1",
-      situacao: "progresso_estrelas",
-      mensagem: "CONVITE CONTEXTUAL DO RANKING",
-    });
+describe("Ranking no webhook WhatsApp após mover o gatilho para a cozinha", () => {
+  test("responder avaliação não anexa mais convite do Ranking", async () => {
+    store.set(`avaliacao:${PHONE}`, true);
 
-    const res = await POST(req("5", "rating-ranking-1"));
+    const res = await POST(req("5", "rating-sem-ranking-1"));
 
     expect(res.status ?? 200).toBe(200);
-    expect(prepararConviteMock).toHaveBeenCalledWith({
-      telefone: PHONE,
-      triggerEventId: "avaliacao:pedido-real-123",
-      notaAvaliacao: 5,
-    });
     expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(1);
     const textoEnviado = enviarTextoWhatsAppMock.mock.calls[0]?.[1] as string;
     expect(textoEnviado).toContain("5/5");
-    expect(textoEnviado).toContain("CONVITE CONTEXTUAL DO RANKING");
-    expect(confirmarConviteMock).toHaveBeenCalledWith({ exposureId: "exp-ranking-1" });
+    expect(textoEnviado).not.toContain("Ranking");
+    expect(textoEnviado).not.toContain("presente");
     expect(processMessageMock).not.toHaveBeenCalled();
   });
 
-  test("convite suprimido mantém exatamente o agradecimento normal", async () => {
-    store.set(`avaliacao:${PHONE}`, "pedido-real-124");
-    prepararConviteMock.mockResolvedValue({ status: "suprimido", motivo: "ja_participa" });
-
-    await POST(req("4", "rating-ranking-2"));
-
-    expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(1);
-    const textoEnviado = enviarTextoWhatsAppMock.mock.calls[0]?.[1] as string;
-    expect(textoEnviado).toContain("4/5");
-    expect(textoEnviado).not.toContain("Ranking do Chefe");
-    expect(confirmarConviteMock).not.toHaveBeenCalled();
-  });
-
-  test("falha interna do motor nunca impede o agradecimento da avaliação", async () => {
-    store.set(`avaliacao:${PHONE}`, "pedido-real-125");
-    prepararConviteMock.mockRejectedValue(new Error("redis_indisponivel"));
-
-    const res = await POST(req("5", "rating-ranking-3"));
-
-    expect(res.status ?? 200).toBe(200);
-    expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(1);
-    expect((enviarTextoWhatsAppMock.mock.calls[0]?.[1] as string)).toContain("5/5");
-    expect(confirmarConviteMock).not.toHaveBeenCalled();
-  });
-
-  test("SAIR RANKING é consumido antes do fluxo normal e recebe confirmação", async () => {
+  test("SAIR RANKING continua sendo consumido antes do fluxo normal e recebe confirmação", async () => {
     consumirOptOutMock.mockResolvedValue(true);
 
     await POST(req("SAIR RANKING", "ranking-optout-1"));
@@ -175,12 +129,13 @@ describe("convite persuasivo do Ranking no webhook WhatsApp", () => {
     expect((enviarTextoWhatsAppMock.mock.calls[0]?.[1] as string)).toContain("não receberá mais convites do Ranking");
   });
 
-  test("nota inválida preserva o pedidoId da avaliação para a próxima tentativa", async () => {
-    store.set(`avaliacao:${PHONE}`, "pedido-real-126");
+  test("nota inválida mantém a avaliação pendente para a próxima tentativa", async () => {
+    store.set(`avaliacao:${PHONE}`, true);
 
-    await POST(req("8", "rating-ranking-4"));
+    await POST(req("8", "rating-sem-ranking-2"));
 
-    expect(store.get(`avaliacao:${PHONE}`)).toBe("pedido-real-126");
-    expect(prepararConviteMock).not.toHaveBeenCalled();
+    expect(store.get(`avaliacao:${PHONE}`)).toBe(true);
+    expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(1);
+    expect((enviarTextoWhatsAppMock.mock.calls[0]?.[1] as string)).toContain("número de 1 a 5");
   });
 });
