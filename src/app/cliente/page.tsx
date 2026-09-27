@@ -259,6 +259,7 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
   const [modalPresenteFoto, setModalPresenteFoto] = useState(false)
   const [modalRankingConsentimento, setModalRankingConsentimento] = useState(false)
   const [mostrarRanking, setMostrarRanking] = useState(false)
+  const [rankingAtivadoPreview, setRankingAtivadoPreview] = useState(false)
   const [statusSocialPreview, setStatusSocialPreview] = useState<StatusTemporadaSocial>(null)
   const progresso = Math.max(0, Math.min(100, FIDELIDADE_PREVIEW.progressoPercentual))
   const nome = PERFIL_PREVIEW.cliente.nome ?? 'Cliente'
@@ -363,13 +364,45 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
         </div>
       </section>
 
-      <button type="button" className="cf-preview-ranking" onClick={() => setModalRankingConsentimento(true)} aria-label="Participar do Ranking do Chefe">
+      <button
+        type="button"
+        className="cf-preview-ranking"
+        onClick={() => rankingAtivadoPreview ? setMostrarRanking(true) : setModalRankingConsentimento(true)}
+        aria-label={rankingAtivadoPreview ? "Abrir Ranking do Chefe" : "Participar do Ranking do Chefe"}
+      >
         <div className="cf-preview-ranking-top">
           <span className="cf-preview-trophy"><Trophy size={22} /></span>
-          <span className="cf-preview-ranking-title"><small>RANKING DO CHEFE</small><strong>Entre na disputa</strong></span>
-          <ChevronRight size={21} style={{ marginLeft: 'auto' }} />
+          <span className="cf-preview-ranking-title">
+            <small>RANKING DO CHEFE</small>
+            <strong>{rankingAtivadoPreview ? "Sua posição" : "Entre na disputa"}</strong>
+            {rankingAtivadoPreview && <b>#{PAINEL_PREVIEW.ranking?.participantes.posicao ?? PAINEL_PREVIEW.ranking?.posicao}</b>}
+          </span>
+          {rankingAtivadoPreview && PAINEL_PREVIEW.ranking ? (
+            <span className="cf-preview-ranking-tail">
+              <span
+                className="cf-preview-faces"
+                aria-label={`${PAINEL_PREVIEW.ranking.participantes.total} participantes no Ranking agora`}
+              >
+                {PAINEL_PREVIEW.ranking.participantes.lista.slice(0, 4).map((participante, index) => (
+                  <i key={participante.posicao} className={`cf-preview-face cf-preview-face-${index + 1}`} aria-hidden="true">
+                    <span>{participante.nomePublico?.slice(0, 1).toUpperCase() || "•"}</span>
+                  </i>
+                ))}
+                <i className="cf-preview-face cf-preview-face-total" aria-hidden="true">
+                  <strong>{PAINEL_PREVIEW.ranking.participantes.total}</strong>
+                </i>
+              </span>
+              <ChevronRight size={21} />
+            </span>
+          ) : (
+            <ChevronRight size={21} style={{ marginLeft: 'auto' }} />
+          )}
         </div>
-        <div className="cf-preview-ranking-copy"><ShieldCheck size={20} /><span>Participe para ver sua posição, rivais e próximo passo.</span></div>
+        <div className="cf-preview-ranking-copy">
+          {rankingAtivadoPreview
+            ? <><ArrowUp size={22} /><span>{PAINEL_PREVIEW.ranking?.score ?? 0} <strong>pontos no Ranking</strong></span></>
+            : <><ShieldCheck size={20} /><span>Participe para ver sua posição, rivais e próximo passo.</span></>}
+        </div>
       </button>
 
       <section className="cf-preview-referral">
@@ -430,6 +463,7 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
           erro=""
           onAceitar={() => {
             setModalRankingConsentimento(false)
+            setRankingAtivadoPreview(true)
             setMostrarRanking(true)
             onAviso('Participação simulada no Preview. Nenhuma autorização real foi salva.')
           }}
