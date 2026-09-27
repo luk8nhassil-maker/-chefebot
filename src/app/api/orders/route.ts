@@ -39,6 +39,7 @@ import { classificarFalhaDatastore } from '@/lib/datastoreDiagnostico'
 import { lerComRetry } from '@/lib/datastoreRetry'
 import { chaveExpedienteOperacional, chaveExpedienteDoPedido } from '@/lib/expedienteOperacional'
 import { registrarContatoPesquisaConfirmado } from '@/lib/pesquisaPreferenciaContatosRedis'
+import { confirmarConviteRankingWhatsapp, prepararConviteRankingWhatsapp } from '@/lib/rankingConviteWhatsapp'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 
@@ -260,28 +261,43 @@ async function notificarCliente(telefone: string, status: Status, nomeCliente: s
   }
 }
 
-/** Convite de ranking disparado uma única vez quando o pedido autoatendido
- * entra oficialmente na cozinha. O link leva ao login do cliente e, depois
- * da confirmação do WhatsApp, abre o mesmo consentimento do Rank. */
-async function notificarConviteRanking(pedido: Pedido, statusAnterior?: Status): Promise<{ ok: boolean; motivo?: string } | null> {
-  if (statusAnterior !== 'novo' || pedido.status !== 'em_preparo') return null
-  if (pedido.origem !== 'site' || pedido.whatsappVinculado !== true) return null
+/** Convite contextual do Ranking enviado SOMENTE depois que a mensagem
+ * operacional "pedido foi para a cozinha" foi confirmada pelo provider.
+ * O motor central decide elegibilidade, frequência, opt-out e copy factual. */
+async function notificarConviteRankingComMotor(pedido: Pedido): Promise<{ ok: boolean; motivo?: string } | null> {
   const digitos = String(pedido.telefone || '').replace(/\D/g, '')
   if (digitos.length < 10) return null
-  const phone = sanitizePhone(pedido.telefone)
-  const firstName = String(pedido.cliente || 'Cliente').trim().split(/\s+/)[0] || 'Cliente'
-  const linkRank = `${APP_BASE_URL}/cliente?fromOrder=1&pedido=${encodeURIComponent(pedido.id)}`
-  const mensagem = `*${firstName}*, seu pedido foi enviado para a cozinha! 👨‍🍳🍕\n\nJá começamos o preparo e avisaremos você a cada etapa.\n\nE se ele também te aproximasse de uma pizza grátis? 🎁\n\nConfira sua posição no Rank e veja como participar:\n${linkRank}`
+
   try {
-    const resultado = await enviarTextoWhatsApp(phone, mensagem)
+    const preparado = await prepararConviteRankingWhatsapp({
+      telefone: sanitizePhone(pedido.telefone),
+      triggerEventId: `cozinha:${pedido.id}`,
+    })
+    if (preparado.status !== 'pronto') return null
+
+    const resultado = await enviarTextoWhatsApp(sanitizePhone(pedido.telefone), preparado.mensagem)
     if (!resultado.ok) {
-      console.error('[ChefeBot] Convite do Rank não enviado.', { pedidoId: pedido.id, motivo: resultado.motivo })
+      console.error('[ChefeBot] Convite do Ranking não enviado.', { pedidoId: pedido.id, motivo: resultado.motivo })
       return { ok: false, motivo: resultado.motivo }
+    }
+
+    try {
+      await confirmarConviteRankingWhatsapp({ exposureId: preparado.exposureId })
+    } catch (err) {
+      // A exposição já foi reservada antes do provider; falha aqui não permite
+      // duplicar o convite no mesmo evento, então só registramos para auditoria.
+      console.error('[ChefeBot] Convite do Ranking enviado, mas confirmação local falhou.', {
+        pedidoId: pedido.id,
+        erro: err instanceof Error ? err.message : 'erro_inesperado',
+      })
     }
     return { ok: true }
   } catch (err) {
-    console.error('[ChefeBot] Erro ao enviar convite do Rank:', err)
-    return { ok: false, motivo: 'erro_inesperado' }
+    console.error('[ChefeBot] Motor de convite do Ranking falhou fechado.', {
+      pedidoId: pedido.id,
+      erro: err instanceof Error ? err.message : 'erro_inesperado',
+    })
+    return null
   }
 }
 
@@ -675,15 +691,28 @@ export async function PATCH(req: NextRequest) {
   // mensagem mais completa (nome + rastreamento). Não mande também a copy
   // genérica de saída, evitando duas mensagens para o mesmo evento.
   const pedidoAtual = pedidos[index]
-  const deveConvidarParaRank = !silent && status === 'em_preparo' && statusAnterior === 'novo' && pedidoAtual.origem === 'site' && pedidoAtual.whatsappVinculado === true
   if (!silent && !(status === 'saiu_entrega' && entregadorCanonico)) {
-    const notificacao = deveConvidarParaRank
-      ? await notificarConviteRanking(pedidoAtual, statusAnterior)
-      : await notificarCliente(pedidoAtual.telefone, status, pedidoAtual.cliente, pedidoAtual.tipoEntrega, pedidoAtual.endereco, statusAnterior)
+    const notificacao = await notificarCliente(
+      pedidoAtual.telefone,
+      status,
+      pedidoAtual.cliente,
+      pedidoAtual.tipoEntrega,
+      pedidoAtual.endereco,
+      statusAnterior,
+    )
     if (notificacao && !notificacao.ok) {
-      avisosOperacionais.push(deveConvidarParaRank
-        ? 'Pedido enviado à cozinha, mas o convite do Rank não foi enviado ao cliente.'
-        : 'Status atualizado, mas a mensagem ao cliente não foi enviada. Tente novamente pelo WhatsApp.')
+      avisosOperacionais.push('Status atualizado, mas a mensagem ao cliente não foi enviada. Tente novamente pelo WhatsApp.')
+    }
+
+    // O convite só vem DEPOIS da confirmação da mensagem de cozinha. Assim o
+    // cliente recebe primeiro a informação operacional e, em seguida, uma
+    // chamada curta do Ranking. Se a mensagem de status falhar, não enviamos
+    // marketing isolado.
+    if (status === 'em_preparo' && statusAnterior === 'novo' && notificacao?.ok) {
+      const convite = await notificarConviteRankingComMotor(pedidoAtual)
+      if (convite && !convite.ok) {
+        avisosOperacionais.push('Pedido enviado à cozinha, mas o convite do Ranking não foi enviado ao cliente.')
+      }
     }
   }
 
