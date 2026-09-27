@@ -624,6 +624,7 @@ export function FidelidadeRankingScreen({
         .cf-ranking-entrada-opcao strong { font-size: 16px; line-height: 1.2; }
         .cf-ranking-entrada-opcao em { color: #617087; font-size: 12px; font-style: normal; line-height: 1.35; }
         .cf-ranking-entrada-opcao b { color: #55749c; font-size: 24px; }
+        .cf-ranking-momento-dialog-entrada .cf-ranking-momento-actions { position: sticky; bottom: -1px; z-index: 1; flex: none; margin-top: auto; padding: 14px 0 0; background: #fffdf7; box-shadow: 0 -12px 20px #fffdf7; }
         .cf-ranking-momento-backdrop-semanal .cf-ranking-momento-emblem, .cf-ranking-momento-backdrop-coroa .cf-ranking-momento-emblem { border-color: #edcd66; background: #fff1b7; color: #9b6b00; }
         .cf-ranking-momento-backdrop-conquista .cf-ranking-momento-emblem { animation-name: cf-momento-conquista; }
         .cf-ranking-momento-backdrop-pedido .cf-ranking-momento-emblem { animation-name: cf-momento-pedido; }
