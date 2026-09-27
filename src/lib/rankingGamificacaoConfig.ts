@@ -31,10 +31,10 @@ export type ConfigGamificacao = {
   nivelChefAtivo: boolean;
   nivelChefLimiares: LimiarNivelChef[];
 
-  // "Coroa ameaçada" — vantagem máxima (em Estrelas) do líder sobre o #2
-  // para a UI poder afirmar isso. Fail-closed: `0` (padrão) desliga a
-  // mecânica — a UI mostra só a distância neutra, nunca inventa uma
-  // ameaça sem essa condição matemática configurada pelo admin.
+  // Campo legado preservado para compatibilidade com configs/admin antigos.
+  // A regra atual da "Coroa ameaçada" é dinâmica e NÃO usa este número:
+  // deriva a distância do ticket médio elegível da semana anterior completa.
+  // Manter o campo evita quebrar payloads/configs já persistidos.
   ameacaPodioMaxGap: number;
 };
 
