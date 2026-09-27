@@ -320,7 +320,7 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
     expect(fonte).toContain("Revogar todas as autorizações do ranking");
   });
 
-  test("card do Ranking usa hierarquia simples sem avatares nem linha ambígua de pontos", () => {
+  test("card do Ranking mostra 3 perfis premium e quarto círculo +N sem cápsula externa", () => {
     const bloco = fonte.slice(
       fonte.indexOf("function FidelidadeMobileScreen"),
       fonte.indexOf("type PrivacidadeRankingControlsProps"),
@@ -330,10 +330,16 @@ describe("/cliente — Fidelidade: painel, missões, ranking, indicação, carte
     expect(bloco).toContain("<small>RANKING DO CHEFE</small>");
     expect(bloco).toContain("'Sua posição'");
     expect(bloco).toContain("ranking.participantes.posicao ?? ranking.posicao");
-    expect(bloco).not.toContain("cf-preview-faces");
-    expect(bloco).not.toContain("cf-preview-ranking-tail");
+    expect(bloco).toContain("ranking?.participantes.lista.slice(0, 3) ?? []");
+    expect(bloco).toContain("participantesRestantes");
+    expect(bloco).toContain('className="cf-preview-ranking-faces"');
+    expect(bloco).toContain("cf-preview-ranking-face-more");
+    expect(bloco).toContain("+{participantesRestantes}");
     expect(bloco).not.toContain("pontos no Ranking");
     expect(bloco).toContain("{!ranking?.participaCampanha && (");
+    expect(fonte).toContain("--cf-ranking-face-size:clamp(35px,9.7vw,44px)");
+    expect(fonte).toContain(".cf-preview-ranking-faces{display:flex");
+    expect(fonte).toContain("background:transparent;border:0;box-shadow:none");
   });
 
   test("foto do perfil usa rota autenticada e não vira exposição pública implícita no ranking", () => {
