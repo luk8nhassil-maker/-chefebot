@@ -20,8 +20,8 @@ const { store, zsets, hashes, redisMock } = vi.hoisted(() => {
       return entries.length;
     }),
     zrange: vi.fn(async (key: string, min: number | string, max: number | string) => {
-      const lo = Number(min);
-      const hi = Number(max);
+      const lo = min === "-inf" ? Number.NEGATIVE_INFINITY : Number(min);
+      const hi = max === "+inf" ? Number.POSITIVE_INFINITY : Number(max);
       return [...(zsets.get(key)?.entries() ?? [])]
         .filter(([, score]) => score >= lo && score <= hi)
         .sort((a, b) => a[1] - b[1])
@@ -53,6 +53,7 @@ import {
   behaviorAnalyticsEnabled,
   deriveBehaviorCustomerRef,
   publicBehaviorEventValid,
+  readBehaviorFunnelOverview,
   readBehaviorSessionEvents,
   recordOrderCreatedBehaviorFact,
   recordPublicBehaviorEvent,
@@ -243,6 +244,102 @@ describe("evento público comportamental", () => {
     expect(events).toHaveLength(2);
     expect(events[0].actor).toBe("anonymous");
     expect(events[1].actor).toBe("authenticated");
+  });
+});
+
+describe("overview do funil por sessão", () => {
+  test("separa visitas, carrinho, checkout e conversão sem contar eventos duplicados", async () => {
+    const sessionA = SESSION;
+    const sessionB = "44444444-4444-4444-8444-444444444444";
+    const sessionC = "55555555-5555-4555-8555-555555555555";
+
+    await recordPublicBehaviorEvent({
+      eventId: EVENT,
+      sessionId: sessionA,
+      type: "app_open",
+      data: { page: "cardapio" },
+      nowMs: 1_780_000_000_000,
+    });
+    await recordPublicBehaviorEvent({
+      eventId: EVENT2,
+      sessionId: sessionA,
+      type: "cart_add",
+      data: { page: "cardapio", cartItems: 1, cartDistinctItems: 1 },
+      nowMs: 1_780_000_000_100,
+    });
+    await recordPublicBehaviorEvent({
+      eventId: "66666666-6666-4666-8666-666666666666",
+      sessionId: sessionA,
+      type: "funnel_step",
+      data: { page: "cardapio", step: "pagamento" },
+      nowMs: 1_780_000_000_200,
+    });
+    await recordOrderCreatedBehaviorFact({
+      pedidoId: "pedido-a",
+      sessionId: sessionA,
+      clienteId: "cli_a",
+      totalCents: 5000,
+      itemCount: 1,
+      deliveryType: "retirada",
+      payment: "Pix",
+      nowMs: 1_780_000_000_300,
+    });
+
+    await recordPublicBehaviorEvent({
+      eventId: "77777777-7777-4777-8777-777777777777",
+      sessionId: sessionB,
+      type: "app_open",
+      data: { page: "cardapio" },
+      nowMs: 1_780_000_001_000,
+    });
+    await recordPublicBehaviorEvent({
+      eventId: "88888888-8888-4888-8888-888888888888",
+      sessionId: sessionB,
+      type: "cart_add",
+      data: { page: "cardapio", cartItems: 2, cartDistinctItems: 1 },
+      nowMs: 1_780_000_001_100,
+    });
+
+    await recordPublicBehaviorEvent({
+      eventId: "99999999-9999-4999-8999-999999999999",
+      sessionId: sessionC,
+      type: "app_open",
+      data: { page: "cardapio" },
+      nowMs: 1_780_000_002_000,
+    });
+    await recordPublicBehaviorEvent({
+      eventId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      sessionId: sessionC,
+      type: "funnel_step",
+      data: { page: "cardapio", step: "entrega" },
+      nowMs: 1_780_000_002_100,
+    });
+    await recordPublicBehaviorEvent({
+      eventId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      sessionId: sessionC,
+      type: "checkout_exit_observed",
+      data: { page: "cardapio", step: "entrega" },
+      nowMs: 1_780_000_002_200,
+    });
+
+    const overview = await readBehaviorFunnelOverview({
+      startMs: 1_779_999_999_000,
+      endMs: 1_780_000_003_000,
+    });
+
+    expect(overview).toMatchObject({
+      sessions: 3,
+      sessionsWithCart: 2,
+      sessionsReachedCheckout: 2,
+      sessionsWithCheckoutExitObserved: 1,
+      convertedSessions: 1,
+      sessionsWithoutOrder: 2,
+      cartSessionsWithoutOrder: 1,
+      checkoutSessionsWithoutOrder: 1,
+      conversionRatePct: 33.33,
+    });
+    expect(overview?.identifiedCustomers).toBe(1);
+    expect(overview?.identifiedCustomerSessions).toBe(1);
   });
 });
 
