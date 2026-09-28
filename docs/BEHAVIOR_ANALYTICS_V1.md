@@ -145,6 +145,23 @@ Namespace:
 
 Eventos são idempotentes por eventId. Se a gravação do evento tiver sucesso e a criação de algum índice falhar, o retry relê o evento canônico e completa os índices com operações idempotentes, sem substituir o evento. Todos os eventos e índices recebem TTL de retenção.
 
+### Custo Redis por sessão
+
+Para cada evento novo e único, o coletor executa:
+- 1 `SET NX EX` para o evento;
+- 2 comandos por índice (`ZADD` + `EXPIRE`) para os índices global e de sessão;
+- mais 2 comandos (`ZADD` + `EXPIRE`) quando o evento está associado a um cliente autenticado.
+
+Assim, o custo normal é **5 comandos Redis por evento anônimo** ou **7 por evento associado**. Cada lote HTTP acrescenta um `INCR` ao rate limit e o primeiro lote de uma chave/janela acrescenta um `EXPIRE`. Com lotes cheios de até 20 eventos, a estimativa é:
+
+| Eventos únicos na sessão | Anônimo | Associado |
+| ---: | ---: | ---: |
+| 10 | ~52 comandos | ~72 comandos |
+| 20 | ~102 comandos | ~142 comandos |
+| 40 | ~204 comandos | ~284 comandos |
+
+A tabela supõe lotes cheios, uma janela de rate limit e eventos gravados sem retry; pedidos oficiais acrescentam **7 comandos** cada. O cliente também envia lotes após uma espera curta, então sessões com pausas podem usar mais requisições HTTP e comandos de rate limit. Reenvios idempotentes não criam eventos duplicados, mas consultam o evento existente e repetem os comandos dos índices para repará-los. São estimativas de operações Redis, não preços: o custo monetário depende do plano e da região. O Redis é usado também por outros recursos do ChefeBot; para atribuir custo real ao módulo, medir volume/comandos por namespace e comparar com a linha de base.
+
 ## Release gates
 
 Servidor:
@@ -195,9 +212,9 @@ Entrada administrativa:
 
 O telefone é usado apenas no servidor para localizar o cliente e derivar o ID canônico. A resposta não devolve telefone nem actorHash.
 
-Retorna:
-- nome/apelido do perfil, quando existente;
+Retorna somente:
 - linha do tempo;
+- resumo comportamental individual (sem nome, apelido, telefone, endereço ou actorHash);
 - resumo comportamental individual:
   - sessões;
   - sessões com e sem pedido;
@@ -211,6 +228,14 @@ Retorna:
   - tempo ativo;
   - intervalo mediano entre sessões;
   - primeira e última observação.
+
+Não retorna nome, apelido, telefone ou endereço. O telefone de entrada é usado somente no servidor para resolver o ID canônico e não é ecoado. A leitura limita-se a 1.000 eventos por cliente/período; quando `timeline.truncated` for verdadeiro, contagens e medianas podem estar incompletas.
+
+### Métricas disponíveis e derivação futura
+
+O resumo atual calcula sessões com/sem pedido, aberturas, buscas, produtos vistos, interações de carrinho, entradas no checkout, aberturas de Ranking/Fidelidade, engajamento somado/mediano, mediana de dias entre sessões e primeira/última observação. A timeline permite derivar dias ativos por data UTC distinta e comportamento recente versus histórico comparando períodos iguais dentro da janela de 90 dias. Também permite contar sessões com carrinho, checkout sem pedido e tempo entre primeira abertura e pedido, agrupando por `sessionId`; essas três métricas ainda não fazem parte do resumo individual.
+
+O intervalo entre pedidos exige eventos `order_created` completos e deduplicados para o mesmo ator, ou deve ser calculado a partir do histórico oficial de pedidos. Para decisões econômicas, o histórico oficial é a fonte de verdade. Até implementar essas métricas no resumo com paginação/limites explícitos, qualquer timeline truncada deve ser tratada como amostra e não como histórico completo.
 
 ## Cobertura inicial
 

@@ -6,7 +6,7 @@ import {
   resumirTimelineComportamentalCliente,
 } from "@/lib/behaviorAnalyticsRead";
 import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
-import { buscarClientePorTelefone, sanitizeTelefoneCliente } from "@/lib/clientes";
+import { sanitizeTelefoneCliente } from "@/lib/clientes";
 
 const PERIODOS = new Set([7, 30, 60, 90]);
 
@@ -60,22 +60,12 @@ export async function POST(req: NextRequest) {
 
   const endMs = Date.now();
   const startMs = endMs - dias * 24 * 60 * 60 * 1000;
-  const [timeline, perfil] = await Promise.all([
-    consultarTimelineComportamentalCliente({ clienteId, startMs, endMs }),
-    buscarClientePorTelefone(telefone).catch(() => null),
-  ]);
+  const timeline = await consultarTimelineComportamentalCliente({ clienteId, startMs, endMs });
 
   return NextResponse.json(
     {
       ok: true,
       periodoDias: dias,
-      cliente: perfil
-        ? {
-            nome: perfil.nome ?? null,
-            apelido: perfil.apelido ?? null,
-            cadastradoEm: perfil.createdAt,
-          }
-        : null,
       timeline,
       summary: resumirTimelineComportamentalCliente(timeline.events),
     },

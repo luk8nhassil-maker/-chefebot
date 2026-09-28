@@ -2390,17 +2390,17 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     }
   }, [screen, hydrated]);
 
-  const cartBehaviorSignature = cart.map((item) => String(item.kind) + ":" + String(item.qty)).join("|");
+  const cartBehaviorSignature = `${cartCount}:${cart.length}:${cart.map((item) => String(item.kind) + ":" + String(item.qty)).join("|")}`;
   useEffect(() => {
     if (!hydrated) return;
+    const [cartItemsRaw, cartDistinctItemsRaw] = cartBehaviorSignature.split(":", 3);
     trackBehavior("cart_state", {
       source: "cardapio",
-      screen,
       target: "cart",
-      cartItems: cartCount,
-      cartDistinctItems: cart.length,
+      cartItems: Number(cartItemsRaw) || 0,
+      cartDistinctItems: Number(cartDistinctItemsRaw) || 0,
     });
-  }, [cartBehaviorSignature, hydrated, screen, cartCount, cart.length]);
+  }, [cartBehaviorSignature, hydrated]);
   const cartTemBebidaOuSuco = cart.some((c) => [...bebidasEfetivas, ...sucosEfetivos].some((m) => m.name === c.name));
   const showUpsellBebida = !upsellBebidaIgnorado && !cartTemBebidaOuSuco && ["pizza", "lanche", "macarronada"].includes(lastAddedKind || "");
   function sairDoPosItemSemBebida(destino: "sc-start" | "sc-cart") { if (showUpsellBebida) setUpsellBebidaIgnorado(true); go(destino); }

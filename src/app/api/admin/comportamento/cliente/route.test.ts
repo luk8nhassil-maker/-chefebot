@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   consultarTimelineComportamentalCliente: vi.fn(),
   resumirTimelineComportamentalCliente: vi.fn(),
   derivarClienteIdPorTelefone: vi.fn(),
-  buscarClientePorTelefone: vi.fn(),
   sanitizeTelefoneCliente: vi.fn(),
 }));
 
@@ -23,7 +22,6 @@ vi.mock("@/lib/fidelidade", () => ({
   derivarClienteIdPorTelefone: mocks.derivarClienteIdPorTelefone,
 }));
 vi.mock("@/lib/clientes", () => ({
-  buscarClientePorTelefone: mocks.buscarClientePorTelefone,
   sanitizeTelefoneCliente: mocks.sanitizeTelefoneCliente,
 }));
 
@@ -45,13 +43,6 @@ beforeEach(() => {
   mocks.verifyToken.mockResolvedValue({ username: "admin", role: "admin" });
   mocks.sanitizeTelefoneCliente.mockImplementation((v) => typeof v === "string" ? v.replace(/\D/g, "") : "");
   mocks.derivarClienteIdPorTelefone.mockImplementation((v) => v.length >= 10 ? "cli_canonico" : undefined);
-  mocks.buscarClientePorTelefone.mockResolvedValue({
-    clienteId: "cli_canonico",
-    telefone: "5599999999999",
-    nome: "Maria",
-    apelido: "Mah",
-    createdAt: "2026-09-01T00:00:00.000Z",
-  });
   mocks.consultarTimelineComportamentalCliente.mockResolvedValue({
     truncated: false,
     events: [{
@@ -105,7 +96,7 @@ describe("POST /api/admin/comportamento/cliente", () => {
     expect(mocks.consultarTimelineComportamentalCliente).not.toHaveBeenCalled();
   });
 
-  test("resolve cliente no servidor e não devolve telefone nem actor hash", async () => {
+  test("resolve o cliente no servidor e mantém o read model sem dados pessoais", async () => {
     const dateSpy = vi.spyOn(Date, "now").mockReturnValue(1_000_000_000);
     const res = await POST(req({ telefone: "(55) 99999-9999", periodo: 30, clienteId: "forjado" }));
     const body = await res.json();
@@ -115,11 +106,7 @@ describe("POST /api/admin/comportamento/cliente", () => {
     expect(mocks.consultarTimelineComportamentalCliente).toHaveBeenCalledWith(expect.objectContaining({
       clienteId: "cli_canonico",
     }));
-    expect(body.cliente).toEqual({
-      nome: "Maria",
-      apelido: "Mah",
-      cadastradoEm: "2026-09-01T00:00:00.000Z",
-    });
+    expect(body).not.toHaveProperty("cliente");
     expect(body.summary).toEqual(expect.objectContaining({
       sessions: 1,
       sessionsWithoutOrder: 1,
@@ -129,7 +116,11 @@ describe("POST /api/admin/comportamento/cliente", () => {
     const serializado = JSON.stringify(body);
     expect(serializado).not.toContain("5599999999999");
     expect(serializado).not.toContain("actorHash");
+    expect(serializado).not.toContain("Maria");
+    expect(serializado).not.toContain("Mah");
     expect(serializado).not.toContain("forjado");
+    expect(serializado).not.toContain("endereco");
+    expect(serializado).not.toContain("logradouro");
     dateSpy.mockRestore();
   });
 });
