@@ -85,6 +85,27 @@ export async function obterTemporada(tenantId: string, temporadaId: string): Pro
   return redis.get<ConfigTemporada>(chaveTemporada(tenantId, temporadaId));
 }
 
+/**
+ * Leitura estritamente read-only da temporada apontada como ativa.
+ *
+ * Diferente de obterTemporadaAtiva(), esta função NUNCA corrige estado,
+ * encerra temporada expirada nem remove a chave ativa. Foi criada para
+ * consumidores observacionais (ex.: Cofre do Chefe em fase de leitura)
+ * que não podem transformar uma consulta em efeito colateral.
+ */
+export async function obterTemporadaAtivaSomenteLeitura(
+  tenantId: string,
+  agora: Date = new Date(),
+): Promise<ConfigTemporada | null> {
+  if (!tenantId) return null;
+  const temporadaId = await redis.get<string>(chaveTemporadaAtiva(tenantId));
+  if (!temporadaId) return null;
+  const config = await obterTemporada(tenantId, temporadaId);
+  if (!config || config.estado !== "ativa") return null;
+  if (temporadaExpirada(config, agora)) return null;
+  return config;
+}
+
 export async function obterTemporadaAtiva(tenantId: string): Promise<ConfigTemporada | null> {
   if (!tenantId) return null;
   const temporadaId = await redis.get<string>(chaveTemporadaAtiva(tenantId));
