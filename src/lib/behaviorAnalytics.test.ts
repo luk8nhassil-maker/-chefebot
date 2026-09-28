@@ -21,12 +21,18 @@ vi.mock("./redis", () => ({
       expirations.set(key, seconds);
       return 1;
     }),
+    incr: vi.fn(async (key: string) => {
+      const atual = Number(store.get(key) ?? 0) + 1;
+      store.set(key, atual);
+      return atual;
+    }),
   },
 }));
 
 import {
   behaviorAnalyticsEnabled,
   pseudonimizarClienteId,
+  consumirLimiteIngestaoComportamental,
   registrarEventosClienteComportamento,
   validarEventoClienteComportamento,
 } from "./behaviorAnalytics";
@@ -58,6 +64,16 @@ describe("behaviorAnalyticsEnabled", () => {
   test("Preview nunca escreve mesmo com flag ativa", () => {
     vi.stubEnv("VERCEL_ENV", "preview");
     expect(behaviorAnalyticsEnabled()).toBe(false);
+  });
+});
+
+describe("limite técnico de ingestão", () => {
+  test("chave de rate limit também é pseudonimizada e recebe TTL curto", async () => {
+    expect(await consumirLimiteIngestaoComportamental("203.0.113.10")).toBe(true);
+    const chaves = [...store.keys()].filter((k) => k.startsWith("behavior:v1:rate:"));
+    expect(chaves).toHaveLength(1);
+    expect(chaves[0]).not.toContain("203.0.113.10");
+    expect(expirations.get(chaves[0]!)).toBe(90);
   });
 });
 
