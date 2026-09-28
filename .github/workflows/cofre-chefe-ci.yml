@@ -13,6 +13,11 @@ on:
       - "src/lib/temporadas.test.ts"
       - "src/app/api/cliente/cofre/**"
       - "src/app/api/admin/cofre/**"
+      - "src/lib/behaviorAnalyticsTypes.ts"
+      - "src/lib/behaviorAnalytics.ts"
+      - "src/lib/behaviorAnalytics.test.ts"
+      - "src/lib/behaviorClient.ts"
+      - "src/app/api/comportamento/**"
       - "src/lib/checkoutIdentidade.ts"
       - "src/lib/checkoutIdentidade.test.ts"
       - "src/lib/clientes.ts"
@@ -68,6 +73,8 @@ jobs:
           src/lib/temporadas.test.ts
           src/app/api/cliente/cofre/route.test.ts
           src/app/api/admin/cofre/calibracao/route.test.ts
+          src/lib/behaviorAnalytics.test.ts
+          src/app/api/comportamento/route.test.ts
           src/lib/checkoutIdentidade.test.ts
           src/lib/clientes.test.ts
           src/app/api/cliente/perfil/route.test.ts
@@ -86,6 +93,12 @@ jobs:
           src/lib/cofreChefReadModel.test.ts
           src/lib/cofreChefCalibracao.ts
           src/lib/cofreChefCalibracao.test.ts
+          src/lib/behaviorAnalyticsTypes.ts
+          src/lib/behaviorAnalytics.ts
+          src/lib/behaviorAnalytics.test.ts
+          src/lib/behaviorClient.ts
+          src/app/api/comportamento/route.ts
+          src/app/api/comportamento/route.test.ts
           src/lib/checkoutIdentidade.ts
           src/lib/checkoutIdentidade.test.ts
           src/lib/clientes.ts
