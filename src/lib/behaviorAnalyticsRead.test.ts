@@ -22,6 +22,7 @@ import {
 import {
   consultarTimelineComportamentalCliente,
   resumirFunilComportamental,
+  resumirTimelineComportamentalCliente,
 } from "./behaviorAnalyticsRead";
 
 const DAY = Date.parse("2026-09-28T00:00:00.000Z");
@@ -113,6 +114,94 @@ describe("consultarTimelineComportamentalCliente", () => {
     });
 
     expect(result.events.map((event) => event.type)).toEqual(["order_created"]);
+  });
+});
+
+describe("resumirTimelineComportamentalCliente", () => {
+  test("resume frequência, intenção e sessões sem expor identidade", () => {
+    const events = [
+      {
+        eventId: "a1",
+        sessionId: SESSION,
+        type: "app_open" as const,
+        occurredAtMs: DAY,
+        receivedAtMs: DAY,
+        context: { source: "cardapio" as const },
+        identificado: false,
+      },
+      {
+        eventId: "a2",
+        sessionId: SESSION,
+        type: "search_used" as const,
+        occurredAtMs: DAY + 60_000,
+        receivedAtMs: DAY + 60_000,
+        context: { source: "cardapio" as const, queryLength: 5 },
+        identificado: false,
+      },
+      {
+        eventId: "a3",
+        sessionId: SESSION,
+        type: "checkout_start" as const,
+        occurredAtMs: DAY + 2 * 60_000,
+        receivedAtMs: DAY + 2 * 60_000,
+        context: { source: "checkout" as const },
+        identificado: false,
+      },
+      {
+        eventId: "a4",
+        sessionId: SESSION,
+        type: "page_exit" as const,
+        occurredAtMs: DAY + 3 * 60_000,
+        receivedAtMs: DAY + 3 * 60_000,
+        context: { source: "cardapio" as const, engagementMs: 90_000 },
+        identificado: false,
+      },
+      {
+        eventId: "b1",
+        sessionId: "66666666-6666-4666-8666-666666666666",
+        type: "app_open" as const,
+        occurredAtMs: DAY + 2 * 24 * 60 * 60 * 1000,
+        receivedAtMs: DAY + 2 * 24 * 60 * 60 * 1000,
+        context: { source: "cardapio" as const },
+        identificado: true,
+      },
+      {
+        eventId: "b2",
+        sessionId: "66666666-6666-4666-8666-666666666666",
+        type: "order_created" as const,
+        occurredAtMs: DAY + 2 * 24 * 60 * 60 * 1000 + 5 * 60_000,
+        receivedAtMs: DAY + 2 * 24 * 60 * 60 * 1000 + 5 * 60_000,
+        context: { source: "checkout" as const },
+        identificado: true,
+      },
+      {
+        eventId: "b3",
+        sessionId: "66666666-6666-4666-8666-666666666666",
+        type: "page_exit" as const,
+        occurredAtMs: DAY + 2 * 24 * 60 * 60 * 1000 + 6 * 60_000,
+        receivedAtMs: DAY + 2 * 24 * 60 * 60 * 1000 + 6 * 60_000,
+        context: { source: "cardapio" as const, engagementMs: 150_000 },
+        identificado: true,
+      },
+    ];
+
+    const summary = resumirTimelineComportamentalCliente(events);
+
+    expect(summary).toEqual(expect.objectContaining({
+      sessions: 2,
+      sessionsWithOrder: 1,
+      sessionsWithoutOrder: 1,
+      appOpens: 2,
+      searches: 1,
+      checkoutStarts: 1,
+      totalEngagementSeconds: 240,
+      medianEngagementSeconds: 120,
+      medianDaysBetweenSessions: 2,
+      firstSeenAtMs: DAY,
+    }));
+    expect(summary.lastSeenAtMs).toBeGreaterThan(DAY);
+    expect(JSON.stringify(summary)).not.toContain("actor");
+    expect(JSON.stringify(summary)).not.toContain("cliente");
   });
 });
 
