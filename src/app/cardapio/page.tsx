@@ -3276,7 +3276,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                       <button
                         type="button"
                         className="pay-action-link muted"
-                        onClick={() => { setUsarOutroWhatsapp(true); setEditandoIdentidade(true); }}
+                        onClick={() => { setUsarOutroWhatsapp(true); void fetch("/api/comportamento", { method: "DELETE" }).catch(() => {}); setEditandoIdentidade(true); }}
                       >Usar outro WhatsApp</button>
                     )}
                   </div>
@@ -3297,7 +3297,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                         <button
                           type="button"
                           className="pay-action-link"
-                          onClick={() => setUsarOutroWhatsapp(true)}
+                          onClick={() => { setUsarOutroWhatsapp(true); void fetch("/api/comportamento", { method: "DELETE" }).catch(() => {}); }}
                         >Usar outro WhatsApp</button>
                       </div>
                     </div>
@@ -3310,7 +3310,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                           type="button"
                           className="pay-action-link"
                           style={{ fontSize: 12, marginTop: 6 }}
-                          onClick={() => { setUsarOutroWhatsapp(false); setTelefone(""); setErroTelefone(""); }}
+                          onClick={async () => { if (waToken) await fetch(`/api/cardapio-whatsapp-session?t=${encodeURIComponent(waToken)}`, { cache: "no-store" }).catch(() => null); setUsarOutroWhatsapp(false); setTelefone(""); setErroTelefone(""); }}
                         >Voltar a usar o WhatsApp vinculado (final {waFinal})</button>
                       )}
                       {erroTelefone && <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 4 }}>{erroTelefone}</div>}

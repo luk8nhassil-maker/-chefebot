@@ -1543,5 +1543,7 @@ describe("/cardapio — aviso discreto de privacidade", () => {
     expect(fonte).not.toContain("Se precisar de ajuda, a equipe pode conferir");
     expect(fonte).toContain('href="/privacidade"');
     expect(fonte).toContain(">Privacidade</a>");
+    expect(fonte).toContain('fetch("/api/comportamento", { method: "DELETE" })');
+    expect(fonte).toContain("/api/cardapio-whatsapp-session?t=");
   });
 });
