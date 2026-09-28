@@ -72,6 +72,7 @@ jobs:
           src/lib/clientes.test.ts
           src/app/api/cliente/perfil/route.test.ts
           src/app/api/pedido-app/route.cliente.test.ts
+          src/app/cardapio/page.test.ts
           src/lib/rankingClientes.test.ts
           src/lib/rankingScoreAutoridadeUnica.integration.test.ts
           src/proxy.cofre-preview.test.ts
@@ -100,6 +101,7 @@ jobs:
           src/app/api/pedido-app/route.ts
           src/app/api/pedido-app/route.cliente.test.ts
           src/app/cardapio/page.tsx
+          src/app/cardapio/page.test.ts
           src/lib/rankingClientes.ts
           src/lib/rankingClientes.test.ts
           src/lib/rankingScoreAutoridadeUnica.integration.test.ts
