@@ -20,6 +20,7 @@ on:
       - "src/app/dev/page.tsx"
       - "src/app/privacidade/page.tsx"
       - "src/lib/auth.ts"
+      - "next.config.ts"
       - ".github/workflows/monitoramento-usuarios-ci.yml"
   workflow_dispatch:
 
