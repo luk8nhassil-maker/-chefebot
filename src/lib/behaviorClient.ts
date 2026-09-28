@@ -48,6 +48,36 @@ export function getBehaviorSessionId(): string | null {
   }
 }
 
+function ambienteDaSessao(): Partial<BehaviorContext> {
+  if (typeof window === "undefined") return {};
+
+  const largura = window.innerWidth || 0;
+  const deviceClass: NonNullable<BehaviorContext["deviceClass"]> =
+    largura <= 640 ? "mobile" : largura <= 1024 ? "tablet" : "desktop";
+  const viewportClass: NonNullable<BehaviorContext["viewportClass"]> =
+    largura <= 640 ? "compact" : largura <= 1180 ? "medium" : "wide";
+
+  let displayMode: NonNullable<BehaviorContext["displayMode"]> = "browser";
+  try {
+    if (window.matchMedia?.("(display-mode: standalone)")?.matches) displayMode = "standalone";
+  } catch {}
+
+  let referrerKind: NonNullable<BehaviorContext["referrerKind"]> = "direct";
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("t")) {
+      referrerKind = "whatsapp_link";
+    } else if (document.referrer) {
+      const ref = new URL(document.referrer);
+      referrerKind = ref.origin === window.location.origin ? "internal" : "external";
+    }
+  } catch {
+    referrerKind = "unknown";
+  }
+
+  return { deviceClass, viewportClass, displayMode, referrerKind };
+}
+
 function scheduleFlush() {
   if (flushTimer) return;
   flushTimer = setTimeout(() => {
@@ -61,12 +91,17 @@ export function trackBehavior(type: ClientBehaviorEventType, context?: BehaviorC
   const sessionId = getBehaviorSessionId();
   if (!sessionId) return;
 
+  const contextoFinal: BehaviorContext | undefined =
+    type === "app_open"
+      ? { ...ambienteDaSessao(), ...(context ?? {}) }
+      : context;
+
   queue.push({
     eventId: uuid(),
     sessionId,
     type,
     occurredAtMs: Date.now(),
-    ...(context ? { context } : {}),
+    ...(contextoFinal ? { context: contextoFinal } : {}),
   });
 
   if (queue.length >= QUEUE_MAX) {
@@ -101,10 +136,37 @@ export async function flushBehaviorEvents(): Promise<void> {
 
 export function installBehaviorPageExitTracking(source: BehaviorContext["source"]): () => void {
   if (!enabledOnClient() || typeof window === "undefined") return () => {};
+
+  let acumuladoAtivoMs = 0;
+  let iniciouAtivoEm = document.visibilityState === "visible" ? Date.now() : null;
+
+  const fecharTrechoAtivo = () => {
+    if (iniciouAtivoEm === null) return;
+    acumuladoAtivoMs += Math.max(0, Date.now() - iniciouAtivoEm);
+    iniciouAtivoEm = null;
+  };
+
+  const onVisibility = () => {
+    if (document.visibilityState === "visible") {
+      if (iniciouAtivoEm === null) iniciouAtivoEm = Date.now();
+    } else {
+      fecharTrechoAtivo();
+    }
+  };
+
   const onExit = () => {
-    trackBehavior("page_exit", { source });
+    fecharTrechoAtivo();
+    trackBehavior("page_exit", {
+      source,
+      engagementMs: Math.min(acumuladoAtivoMs, 24 * 60 * 60 * 1000),
+    });
     void flushBehaviorEvents();
   };
+
+  document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("pagehide", onExit);
-  return () => window.removeEventListener("pagehide", onExit);
+  return () => {
+    document.removeEventListener("visibilitychange", onVisibility);
+    window.removeEventListener("pagehide", onExit);
+  };
 }
