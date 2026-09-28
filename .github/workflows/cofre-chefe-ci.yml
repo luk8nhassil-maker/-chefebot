@@ -16,8 +16,15 @@ on:
       - "src/lib/behaviorAnalyticsTypes.ts"
       - "src/lib/behaviorAnalytics.ts"
       - "src/lib/behaviorAnalytics.test.ts"
+      - "src/lib/behaviorAnalyticsRead.ts"
+      - "src/lib/behaviorAnalyticsRead.test.ts"
+      - "src/lib/behaviorInstrumentation.test.ts"
       - "src/lib/behaviorClient.ts"
       - "src/app/api/comportamento/**"
+      - "src/app/api/admin/comportamento/**"
+      - "src/app/cliente/page.tsx"
+      - "src/app/cliente/pedidos/page.tsx"
+      - "src/app/rastrear/[pedidoId]/page.tsx"
       - "src/lib/checkoutIdentidade.ts"
       - "src/lib/checkoutIdentidade.test.ts"
       - "src/lib/clientes.ts"
@@ -33,6 +40,7 @@ on:
       - "src/proxy.ts"
       - "src/proxy.cofre-preview.test.ts"
       - "docs/COFRE_DO_CHEFE_V1.md"
+      - "docs/BEHAVIOR_ANALYTICS_V1.md"
       - "scripts/e2e-cofre-chefe-preview.mjs"
       - ".github/workflows/cofre-chefe-ci.yml"
   workflow_dispatch:
@@ -74,7 +82,21 @@ jobs:
           src/app/api/cliente/cofre/route.test.ts
           src/app/api/admin/cofre/calibracao/route.test.ts
           src/lib/behaviorAnalytics.test.ts
+          src/lib/behaviorAnalyticsRead.ts
+          src/lib/behaviorAnalyticsRead.test.ts
+          src/lib/behaviorInstrumentation.test.ts
+          src/lib/behaviorAnalyticsRead.test.ts
+          src/lib/behaviorInstrumentation.test.ts
+          src/app/api/admin/comportamento/resumo/route.test.ts
+          src/app/api/admin/comportamento/cliente/route.test.ts
           src/app/api/comportamento/route.test.ts
+          src/app/api/admin/comportamento/resumo/route.ts
+          src/app/api/admin/comportamento/resumo/route.test.ts
+          src/app/api/admin/comportamento/cliente/route.ts
+          src/app/api/admin/comportamento/cliente/route.test.ts
+          src/app/cliente/page.tsx
+          src/app/cliente/pedidos/page.tsx
+          src/app/rastrear/[pedidoId]/page.tsx
           src/lib/checkoutIdentidade.test.ts
           src/lib/clientes.test.ts
           src/app/api/cliente/perfil/route.test.ts
