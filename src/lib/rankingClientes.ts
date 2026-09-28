@@ -144,7 +144,11 @@ export function calcularScoreDaTemporada(
   let primeiroAtingidoEm: number | null = null;
   for (const { movimento, ms } of elegiveis) {
     if (movimento.tipo === "confirmado" || movimento.tipo === "ajuste") score += movimento.pontos;
-    if (movimento.tipo === "resgatado" || movimento.tipo === "estornado") score -= movimento.pontos;
+    // Ranking mede conquista competitiva, não saldo disponível para gastar.
+    // Resgatar Estrelas no Cofre reduz o saldo da fidelidade, mas NÃO apaga
+    // o que o cliente já conquistou na temporada. Estorno continua retirando
+    // score porque corrige uma conquista que deixou de ser válida.
+    if (movimento.tipo === "estornado") score -= movimento.pontos;
     score = Math.max(0, Math.round(score));
     if (score > 0 && primeiroAtingidoEm === null) primeiroAtingidoEm = ms;
   }
