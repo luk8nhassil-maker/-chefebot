@@ -276,6 +276,8 @@ export default function DevPage() {
           </div>
         </div>
 
+        <a href="/dev/monitoramento-usuarios" style={{ display: "block", margin: "0 0 18px", padding: "16px 18px", borderRadius: 12, background: "color-mix(in srgb, var(--info) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--info) 22%, transparent)", color: "var(--foreground)", textDecoration: "none" }}><strong style={{ display: "block", fontSize: 14 }}>Sala de monitoramento de usuários</strong><span style={{ display: "block", color: "var(--border-strong)", fontSize: 12, marginTop: 4 }}>Consultar jornada, falhas observadas e sinais para UX usando o telefone informado pelo cliente.</span></a>
+
         <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
           <button onClick={() => setAba('padroes')} style={{ flex: 1, padding: '10px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, background: aba === 'padroes' ? 'var(--attention)' : 'rgba(var(--overlay-rgb), 0.05)', color: 'var(--foreground)' }}>
             Padroes Aprendidos

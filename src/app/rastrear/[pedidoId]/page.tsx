@@ -6,6 +6,7 @@ import type { LocalizacaoEntregador } from '@/types/entregador'
 import ClientBottomNav from '@/components/ClientBottomNav'
 import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
 import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
+import { installBehaviorPageExitTracking, trackBehavior } from '@/lib/behaviorClient'
 
 const MapaEntregador = dynamic(() => import('@/components/MapaEntregador'), { ssr: false })
 
@@ -99,6 +100,12 @@ export default function RastrearPage({ params }: PageProps) {
   const [statusToken, setStatusToken] = useState<string | null>(null)
   const [edicao, setEdicao] = useState<EdicaoStatus | null>(null)
   const [whatsappPizzaria, setWhatsappPizzaria] = useState<string | undefined>(undefined)
+
+  useEffect(() => {
+    trackBehavior('app_open', { source: 'tracking', screen: 'rastrear' })
+    trackBehavior('screen_view', { source: 'tracking', screen: 'rastrear', target: 'tracking' })
+    return installBehaviorPageExitTracking('tracking')
+  }, [])
 
   useEffect(() => {
     params.then(p => setPedidoId(p.pedidoId))
