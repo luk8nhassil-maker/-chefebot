@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { behaviorAnalyticsEnabled } from "@/lib/behaviorAnalytics";
-import { consultarTimelineComportamentalCliente } from "@/lib/behaviorAnalyticsRead";
+import {
+  consultarTimelineComportamentalCliente,
+  resumirTimelineComportamentalCliente,
+} from "@/lib/behaviorAnalyticsRead";
 import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
 import { buscarClientePorTelefone, sanitizeTelefoneCliente } from "@/lib/clientes";
 
@@ -74,6 +77,7 @@ export async function POST(req: NextRequest) {
           }
         : null,
       timeline,
+      summary: resumirTimelineComportamentalCliente(timeline.events),
     },
     {
       headers: {
