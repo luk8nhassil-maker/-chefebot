@@ -248,10 +248,23 @@ Métricas principais:
 
 ### Fase 1 — leitura real, ainda sem resgate
 
-- montar read-model do Cofre com analytics + ledger + Ranking;
-- somente leitura;
-- medir distribuição de sinais;
-- calibrar thresholds com dados reais.
+**IMPLEMENTADA NESTA BRANCH, MAS DESLIGADA POR PADRÃO.**
+
+- read-model autenticado em `/api/cliente/cofre`;
+- usa somente o cliente derivado da sessão — não aceita clienteId arbitrário;
+- lê o ledger atual de Estrelas;
+- lê o histórico analítico somente desse cliente;
+- lê a temporada ativa por caminho estritamente read-only;
+- calcula a posição entre participantes do Ranking sem expor identidades;
+- expõe score conquistado da temporada separado do saldo disponível;
+- não cria/reserva/debita Estrelas;
+- não cria cupom;
+- não escreve analytics, Ranking, temporada ou fidelidade;
+- não ativa thresholds de retorno/ticket vindos das fixtures;
+- benefícios financeiros continuam bloqueados;
+- endpoint real exige `COFRE_CHEFE_READMODEL_ATIVO=true` no servidor; ausência/qualquer outro valor retorna 404.
+
+Próximo uso seguro desta fase: observar distribuição dos sinais reais e calibrar thresholds com dados suficientes antes de transformar qualquer classificação em regra comercial.
 
 ### Fase 2 — configuração econômica
 
@@ -272,6 +285,19 @@ Métricas principais:
 ### Fase 4 — expansão
 
 Só depois de provar que o benefício gera resultado incremental sustentável.
+
+## 15.1 Estado técnico desta branch
+
+- PR: #467 (DRAFT).
+- Main não recebe nenhuma alteração nesta etapa.
+- Preview continua baseado em fixture isolada.
+- O read-model real existe no código, mas o release gate server-side está fechado por padrão.
+- Nenhum dado real precisa ser escrito para validar a Fase 1.
+- A antiga Jornada do Chef continua fora da arquitetura nova.
+- Fonte de saldo: ledger atual de Estrelas.
+- Fonte de comportamento: analytics por cliente.
+- Fonte competitiva: Ranking/temporada existentes.
+- Fonte econômica: ainda não configurada; por isso o guard financeiro permanece bloqueado.
 
 ## 16. Informações ainda faltantes para ativação real
 
