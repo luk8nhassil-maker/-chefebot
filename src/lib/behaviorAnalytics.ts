@@ -48,7 +48,9 @@ const SAFE_ACTOR_HASH_RE = /^[a-f0-9]{32}$/;
 const BEHAVIOR_LINK_TTL_SECONDS = 2592000;
 
 function retentionDays(): number | null {
-  const raw = Number(process.env.BEHAVIOR_ANALYTICS_RETENTION_DAYS);
+  const configured = process.env.BEHAVIOR_ANALYTICS_RETENTION_DAYS;
+  if (configured === undefined || configured.trim() === "") return 30;
+  const raw = Number(configured);
   if (!Number.isInteger(raw) || raw < 7 || raw > 730) return null;
   return raw;
 }
@@ -60,10 +62,13 @@ function hashSecret(): string | null {
 }
 
 export function behaviorAnalyticsEnabled(): boolean {
-  if (process.env.BEHAVIOR_ANALYTICS_ENABLED !== "true") return false;
   // Preview nunca escreve telemetria comportamental real, mesmo que uma
   // variável seja herdada por engano do projeto.
   if (process.env.VERCEL_ENV === "preview") return false;
+  if (process.env.BEHAVIOR_ANALYTICS_ENABLED === "false") return false;
+  // A coleta liga por padrão somente em produção; em desenvolvimento, continua
+  // exigindo ativação explícita para não gerar dados acidentais.
+  if (process.env.BEHAVIOR_ANALYTICS_ENABLED !== "true" && process.env.VERCEL_ENV !== "production") return false;
   return retentionDays() !== null && hashSecret() !== null;
 }
 
