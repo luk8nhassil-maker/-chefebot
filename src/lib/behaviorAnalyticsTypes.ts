@@ -1,5 +1,6 @@
 export const CLIENT_BEHAVIOR_EVENTS = [
   "app_open",
+  "whatsapp_link_verified",
   "screen_view",
   "search_used",
   "category_view",
@@ -15,6 +16,7 @@ export const CLIENT_BEHAVIOR_EVENTS = [
   "cofre_open",
   "fidelity_open",
   "order_submit_attempt",
+  "action_result",
   "page_exit",
 ] as const;
 
@@ -40,4 +42,7 @@ export type BehaviorContext = {
   displayMode?: "standalone" | "browser" | "unknown";
   referrerKind?: "direct" | "internal" | "external" | "whatsapp_link" | "unknown";
   engagementMs?: number;
+  action?: "checkout_submit";
+  outcome?: "success" | "failure";
+  failureCode?: "request_rejected" | "service_unavailable" | "network_error" | "unknown";
 };

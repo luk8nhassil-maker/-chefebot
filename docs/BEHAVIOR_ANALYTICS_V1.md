@@ -24,11 +24,11 @@ Navegador
 → POST /api/comportamento
 → validação allowlist
 → rate limit
-→ associação opcional com sessão autenticada
+→ associação com sessão autenticada ou cookie assinado do link oficial do WhatsApp
 → pseudonimização server-side
 → Redis com TTL
 → índices globais / por sessão / por ator
-→ APIs admin somente leitura
+→ APIs dev somente leitura
 → agregação para funil e resumo individual.
 
 ## Identidade e sessões
@@ -39,12 +39,13 @@ Antes de o cliente ser identificado, eventos ficam vinculados somente à sessão
 
 Quando a mesma sessão produz um fato autenticado ou um pedido oficial, o servidor registra um evento associado ao cliente pseudonimizado. A leitura individual pode então recuperar também os eventos anônimos anteriores daquela mesma sessão.
 
-Uma sessão que nunca autentica e nunca gera um fato oficial permanece anônima. Ela participa apenas das métricas agregadas e não deve ser forçada artificialmente para um cliente.
+Quando o cliente abre um link oficial do WhatsApp, o servidor valida o token e define cookie HttpOnly de finalidade restrita com pseudônimo HMAC assinado e validade de 30 dias; escolher outro WhatsApp apaga o cookie do navegador. O cookie só é enviado ao endpoint de telemetria, não autentica compras e nunca contém telefone ou clienteId. Sessões sem login, sem link oficial e sem pedido permanecem anônimas.
 
 ## Eventos V1
 
 ### Acesso e navegação
 - app_open
+- whatsapp_link_verified
 - screen_view
 - page_exit
 
@@ -64,6 +65,7 @@ Uma sessão que nunca autentica e nunca gera um fato oficial permanece anônima.
 - delivery_step_view
 - payment_step_view
 - order_submit_attempt
+- action_result (sucesso/falha do envio; categorias técnicas controladas)
 
 ### Relacionamento
 - fidelity_open
@@ -184,7 +186,7 @@ Mesmo com as flags, VERCEL_ENV=preview bloqueia escrita no servidor.
 ## Leitura administrativa
 
 ### Funil agregado
-GET /api/admin/comportamento/resumo?periodo=7|30|60|90
+GET /api/dev/comportamento/resumo?periodo=7|30|60|90
 
 Retorna, entre outros:
 - eventos;
@@ -204,13 +206,13 @@ Retorna, entre outros:
 Não retorna identidade de cliente.
 
 ### Cliente individual
-POST /api/admin/comportamento/cliente
+POST /api/dev/comportamento/cliente
 
-Entrada administrativa:
+Entrada da sala Dev:
 - telefone;
 - período 7/30/60/90.
 
-O telefone é usado apenas no servidor para localizar o cliente e derivar o ID canônico. A resposta não devolve telefone nem actorHash.
+O telefone é usado apenas no servidor para localizar o cliente e derivar o ID canônico. A resposta não devolve telefone nem actorHash. Os endpoints antigos sob `/api/admin/comportamento/*` aceitam somente perfil `dev`; administradores da pizzaria recebem 401.
 
 Retorna somente:
 - linha do tempo;
@@ -246,7 +248,7 @@ Instrumentado:
 - /rastrear/[pedidoId];
 - criação oficial do pedido no servidor.
 
-O monitoramento não muda componentes visuais nem navegação.
+A Sala Dev permite localizar uma jornada pelo telefone informado pelo próprio cliente, revisar eventos em ordem temporal e ver padrões como falha de checkout, checkout sem pedido e produto revisitado. A interface explica quando o histórico é truncado ou não contém eventos. A timeline mostra somente campos allowlisted e não exibe identidade civil.
 
 ## Relação com o Cofre do Chefe
 
@@ -262,7 +264,7 @@ Exemplos de sinais possíveis no futuro:
 - intervalo entre acessos aumentando;
 - acesso ao Ranking antes de comprar.
 
-Nenhum desses sinais possui threshold comercial hardcoded nesta camada.
+Nenhum desses sinais possui threshold comercial hardcoded nesta camada. Os sinais exibidos na Sala Dev orientam investigação de UX; eles não disparam descontos nem ações invisíveis sobre o cliente.
 
 ## Ativação econômica
 
@@ -293,6 +295,6 @@ A V1 está tecnicamente pronta quando:
 - eventos anônimos não são forçados a uma identidade;
 - retenção existe;
 - Preview não escreve;
-- APIs admin não expõem actorHash/telefone;
+- admin do dono não acessa a consulta individual; resposta Dev não expõe telefone/actorHash;
 - cobertura dos fluxos públicos relevantes está testada;
 - suíte, lint, typecheck e build passam.

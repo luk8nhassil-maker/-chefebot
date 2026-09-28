@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 function ler(relativo: string): string {
-  return readFileSync(fileURLToPath(new URL(relativo, import.meta.url)), "utf-8").replace(/\r\n/g, "\n");
+  return readFileSync(fileURLToPath(new URL(relativo, import.meta.url)), "utf-8").replace(/\r
+/g, "
+");
 }
 
 const cardapio = ler("../app/cardapio/page.tsx");
@@ -17,6 +19,7 @@ describe("instrumentação comportamental — cobertura essencial", () => {
   test("cardápio cobre acesso, navegação, busca, produto, carrinho e checkout", () => {
     for (const evento of [
       "app_open",
+      "whatsapp_link_verified",
       "screen_view",
       "search_used",
       "category_view",
@@ -29,6 +32,7 @@ describe("instrumentação comportamental — cobertura essencial", () => {
       "delivery_step_view",
       "payment_step_view",
       "order_submit_attempt",
+      "action_result",
     ]) {
       expect(cardapio).toContain(`trackBehavior("${evento}"`);
     }

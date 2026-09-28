@@ -39,6 +39,8 @@ import {
   behaviorGlobalIndexKey,
   behaviorSessionIndexKey,
   pseudonimizarClienteId,
+  criarVinculoCookieComportamento,
+  validarVinculoCookieComportamento,
   consumirLimiteIngestaoComportamental,
   registrarEventosClienteComportamento,
   validarEventoClienteComportamento,
@@ -86,6 +88,17 @@ describe("limite técnico de ingestão", () => {
   });
 });
 
+describe("resultado de ação", () => {
+  test("exige categoria controlada e não persiste mensagem livre", () => {
+    const base = { eventId: EVENT_ID, sessionId: SESSION_ID, type: "action_result", occurredAtMs: AGORA };
+    expect(validarEventoClienteComportamento(base, AGORA)).toBeNull();
+    const evento = validarEventoClienteComportamento({
+      ...base,
+      context: { action: "checkout_submit", outcome: "failure", failureCode: "network_error", error: "telefone 5544999999999" },
+    }, AGORA);
+    expect(evento?.context).toEqual({ action: "checkout_submit", outcome: "failure", failureCode: "network_error" });
+  });
+});
 describe("validarEventoClienteComportamento", () => {
   test("aceita evento allowlist e descarta campos livres", () => {
     const evento = validarEventoClienteComportamento({
@@ -234,5 +247,15 @@ describe("persistência pseudonimizada", () => {
     });
     expect(resultado).toEqual({ accepted: 0, duplicated: 0 });
     expect(store.size).toBe(0);
+  });
+});
+
+describe("vínculo pseudonimizado do WhatsApp", () => {
+  test("cookie não contém clienteId e valida somente assinatura vigente", () => {
+    const token = criarVinculoCookieComportamento("cli_5544999999999", AGORA)!;
+    expect(token).not.toContain("5544999999999");
+    expect(validarVinculoCookieComportamento(token, AGORA)).toBe(pseudonimizarClienteId("cli_5544999999999"));
+    expect(validarVinculoCookieComportamento(token + "x", AGORA)).toBeNull();
+    expect(validarVinculoCookieComportamento(token, AGORA + 31 * 24 * 60 * 60 * 1000)).toBeNull();
   });
 });

@@ -1455,6 +1455,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         const r = await fetch(`/api/cardapio-whatsapp-session?t=${encodeURIComponent(token)}`, { cache: "no-store" });
         const data = await r.json();
         if (data?.ok && data.phoneFinal) {
+          trackBehavior("whatsapp_link_verified", { source: "cardapio", screen: "sc-start", referrerKind: "whatsapp_link" });
           setWaToken(token); setWaFinal(String(data.phoneFinal));
           try { sessionStorage.setItem("cf_wa_token", token); sessionStorage.setItem("cf_wa_final", String(data.phoneFinal)); } catch {}
         } else {
@@ -2707,8 +2708,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { try { if (identidadeCheckout.nome) localStorage.setItem("cf_nome", identidadeCheckout.nome); else localStorage.removeItem("cf_nome"); if (identidadeCheckout.apelido) localStorage.setItem("cf_apelido", identidadeCheckout.apelido); else localStorage.removeItem("cf_apelido"); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} if (itemRecompensaJornada) limparReferenciaRecompensa(localStorage); try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: agoraEmMs(), statusToken: typeof data.statusToken === "string" ? data.statusToken : undefined }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } const pagamentoRanking: RankingProspeccaoStatusPagamento = payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"; setConviteRankingPedido(false); go("sc-done"); if (pagamentoRanking === "nao_pix") void avaliarConviteRankingPosPedido(pagamentoRanking); } else { if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
-    } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
+      if (data.ok) { trackBehavior("action_result", { source: "checkout", screen: "sc-pay", target: "checkout", action: "checkout_submit", outcome: "success" }); try { if (identidadeCheckout.nome) localStorage.setItem("cf_nome", identidadeCheckout.nome); else localStorage.removeItem("cf_nome"); if (identidadeCheckout.apelido) localStorage.setItem("cf_apelido", identidadeCheckout.apelido); else localStorage.removeItem("cf_apelido"); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} if (itemRecompensaJornada) limparReferenciaRecompensa(localStorage); try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: agoraEmMs(), statusToken: typeof data.statusToken === "string" ? data.statusToken : undefined }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } const pagamentoRanking: RankingProspeccaoStatusPagamento = payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"; setConviteRankingPedido(false); go("sc-done"); if (pagamentoRanking === "nao_pix") void avaliarConviteRankingPosPedido(pagamentoRanking); } else { trackBehavior("action_result", { source: "checkout", screen: "sc-pay", target: "checkout", action: "checkout_submit", outcome: "failure", failureCode: r.status >= 500 ? "service_unavailable" : "request_rejected" }); if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
+    } catch { trackBehavior("action_result", { source: "checkout", screen: "sc-pay", target: "checkout", action: "checkout_submit", outcome: "failure", failureCode: "network_error" }); showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
   function resetAll() { conviteRankingPagamentoAvaliadoRef.current = null; setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setBairroQuery(""); setBairroDropdownOpen(false); setRua(""); setRuaSugestoes([]); setRuaDropdownOpen(false); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setMistoPixInput(""); setMistoDinheiroInput(""); setErroMisto(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setConviteRankingPedido(false); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
 
@@ -2749,6 +2750,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     <>
       <style>{CSS}</style>
       <LayoutDebugPanel />
+      {waFinal && !usarOutroWhatsapp && <aside role="status" style={{ maxWidth: 720, margin: "12px auto", padding: "10px 14px", border: "1px solid var(--surface-elevated)", borderRadius: 10, color: "var(--text-secondary)", fontSize: 12, lineHeight: 1.5 }}>Para ajudar a equipe a resolver problemas no cardápio, telas e etapas acessadas neste navegador podem ser associadas ao WhatsApp final {waFinal} por até 30 dias. Não registramos o texto digitado na busca nem endereço ou dados de pagamento nesta trilha. Ao escolher outro WhatsApp, esse vínculo é removido.</aside>}
       <div className={`wrap ${screen === "sc-start" ? "wrap-start" : ""}`} style={{ "--steps-h": `${stepsHeight}px` } as CSSProperties}>
         {screen !== "sc-start" && (
           <div className="steps" ref={stepsRef}>
@@ -3421,7 +3423,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                         <button
                           type="button"
                           className="pay-action-link"
-                          onClick={() => setUsarOutroWhatsapp(true)}
+                          onClick={() => { setUsarOutroWhatsapp(true); void fetch("/api/comportamento", { method: "DELETE" }).catch(() => {}); }}
                         >Usar outro WhatsApp</button>
                       </div>
                     </div>
@@ -3434,7 +3436,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                           type="button"
                           className="pay-action-link"
                           style={{ fontSize: 12, marginTop: 6 }}
-                          onClick={() => { setUsarOutroWhatsapp(false); setTelefone(""); setErroTelefone(""); }}
+                          onClick={async () => { if (waToken) await fetch(`/api/cardapio-whatsapp-session?t=${encodeURIComponent(waToken)}`, { cache: "no-store" }).catch(() => null); setUsarOutroWhatsapp(false); setTelefone(""); setErroTelefone(""); }}
                         >Voltar a usar o WhatsApp vinculado (final {waFinal})</button>
                       )}
                       {erroTelefone && <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 4 }}>{erroTelefone}</div>}

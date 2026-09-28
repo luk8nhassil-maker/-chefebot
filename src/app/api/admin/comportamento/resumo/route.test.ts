@@ -26,7 +26,7 @@ function req(periodo = "30") {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.behaviorAnalyticsEnabled.mockReturnValue(true);
-  mocks.verifyToken.mockResolvedValue({ username: "admin", role: "admin" });
+  mocks.verifyToken.mockResolvedValue({ username: "ominix", role: "dev" });
   mocks.resumirFunilComportamental.mockResolvedValue({
     schemaVersion: 1,
     mode: "behavior_summary_read_only",
@@ -52,8 +52,8 @@ describe("GET /api/admin/comportamento/resumo", () => {
     expect(mocks.verifyToken).not.toHaveBeenCalled();
   });
 
-  test("exige admin ou dev", async () => {
-    mocks.verifyToken.mockResolvedValue({ username: "x", role: "atendente" });
+  test("somente dev acessa o resumo", async () => {
+    mocks.verifyToken.mockResolvedValue({ username: "admin", role: "admin" });
     expect((await GET(req())).status).toBe(401);
     expect(mocks.resumirFunilComportamental).not.toHaveBeenCalled();
   });

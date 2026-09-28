@@ -5,6 +5,7 @@ import {
   consumirLimiteIngestaoComportamental,
   registrarEventosClienteComportamento,
   validarEventoClienteComportamento,
+  validarVinculoCookieComportamento,
 } from "@/lib/behaviorAnalytics";
 
 const MAX_BODY_BYTES = 32 * 1024;
@@ -45,6 +46,18 @@ async function lerJsonComLimite(req: NextRequest): Promise<
   } catch {
     return { ok: false, status: 400 };
   }
+}
+
+export async function DELETE() {
+  const response = NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+  response.cookies.set("behavior-link-v1", "", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/api/comportamento",
+    maxAge: 0,
+  });
+  return response;
 }
 
 export async function POST(req: NextRequest) {
@@ -109,9 +122,12 @@ export async function POST(req: NextRequest) {
   // cliente no servidor; caso contrário, a sessão comportamental permanece
   // anônima e ainda pode ser ligada futuramente por sessionId quando houver
   // um fato oficial (ex.: pedido criado).
+  // A identidade nunca vem do body. Sessão autenticada vence; sem ela, aceita-se somente o pseudônimo do cookie assinado criado após validar o link oficial do WhatsApp.
   const sessao = await lerSessaoCliente(req).catch(() => null);
+  const actorHashVerificado = sessao?.clienteId ? null : validarVinculoCookieComportamento(req.cookies.get("behavior-link-v1")?.value, agora);
   const resultado = await registrarEventosClienteComportamento({
     clienteId: sessao?.clienteId ?? null,
+    actorHashVerificado,
     events,
     agoraMs: agora,
   });

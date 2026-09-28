@@ -156,5 +156,6 @@ export const config = {
     "/contador/:path*",
     "/api/orders",
     "/api/pedido-app",
+    "/api/dev/:path*",
   ],
 };

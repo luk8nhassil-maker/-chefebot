@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   consumirLimiteIngestaoComportamental: vi.fn(),
   registrarEventosClienteComportamento: vi.fn(),
   validarEventoClienteComportamento: vi.fn(),
+  validarVinculoCookieComportamento: vi.fn(),
   lerSessaoCliente: vi.fn(),
 }));
 
@@ -14,6 +15,7 @@ vi.mock("@/lib/behaviorAnalytics", () => ({
   consumirLimiteIngestaoComportamental: mocks.consumirLimiteIngestaoComportamental,
   registrarEventosClienteComportamento: mocks.registrarEventosClienteComportamento,
   validarEventoClienteComportamento: mocks.validarEventoClienteComportamento,
+  validarVinculoCookieComportamento: mocks.validarVinculoCookieComportamento,
 }));
 
 vi.mock("@/lib/clienteAuth", () => ({
@@ -43,6 +45,7 @@ beforeEach(() => {
   mocks.behaviorAnalyticsEnabled.mockReturnValue(true);
   mocks.consumirLimiteIngestaoComportamental.mockResolvedValue(true);
   mocks.validarEventoClienteComportamento.mockImplementation((x) => x);
+  mocks.validarVinculoCookieComportamento.mockReturnValue(null);
   mocks.registrarEventosClienteComportamento.mockResolvedValue({ accepted: 1, duplicated: 0 });
   mocks.lerSessaoCliente.mockResolvedValue(null);
 });
@@ -55,6 +58,13 @@ describe("POST /api/comportamento", () => {
     expect(res.status).toBe(404);
     expect(mocks.lerSessaoCliente).not.toHaveBeenCalled();
     expect(mocks.registrarEventosClienteComportamento).not.toHaveBeenCalled();
+  });
+
+  test("usa apenas identidade de cookie validado, nunca identidade do body", async () => {
+    mocks.validarVinculoCookieComportamento.mockReturnValue("a".repeat(32));
+    const res = await POST(req({ events: [EVENTO_VALIDO], clienteId: "forjado" }, { cookie: "behavior-link-v1=token" }));
+    expect(res.status).toBe(202);
+    expect(mocks.registrarEventosClienteComportamento).toHaveBeenCalledWith(expect.objectContaining({ actorHashVerificado: "a".repeat(32) }));
   });
 
   test("rejeita corpo acima do limite mesmo com content-length falsamente pequeno", async () => {

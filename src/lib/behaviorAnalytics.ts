@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createHmac, randomUUID } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { redis } from "./redis";
 
 export const BEHAVIOR_SCHEMA_VERSION = 1 as const;
@@ -44,6 +44,8 @@ export type BehaviorEvent = {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_ID_RE = /^[a-zA-Z0-9:_-]{1,80}$/;
 const SAFE_SCREEN_RE = /^[a-z0-9_-]{1,40}$/;
+const SAFE_ACTOR_HASH_RE = /^[a-f0-9]{32}$/;
+const BEHAVIOR_LINK_TTL_SECONDS = 2592000;
 
 function retentionDays(): number | null {
   const raw = Number(process.env.BEHAVIOR_ANALYTICS_RETENTION_DAYS);
@@ -73,6 +75,34 @@ function pseudonimizarValor(valor: string): string | null {
 
 export function pseudonimizarClienteId(clienteId: string): string | null {
   return pseudonimizarValor(clienteId);
+}
+
+function assinarVinculoAtor(actorHash: string, expiresAt: number): string | null {
+  const secret = hashSecret();
+  if (!secret) return null;
+  return createHmac("sha256", secret).update("behavior-link:v1:" + actorHash + ":" + expiresAt).digest("hex");
+}
+
+export function criarVinculoCookieComportamento(clienteId: string, agoraMs = Date.now()): string | null {
+  const actorHash = pseudonimizarClienteId(clienteId);
+  if (!actorHash) return null;
+  const expiresAt = Math.floor(agoraMs / 1000) + BEHAVIOR_LINK_TTL_SECONDS;
+  const signature = assinarVinculoAtor(actorHash, expiresAt);
+  return signature ? actorHash + "." + expiresAt + "." + signature : null;
+}
+
+export function validarVinculoCookieComportamento(token: string | undefined, agoraMs = Date.now()): string | null {
+  if (!token) return null;
+  const [actorHash, expiresRaw, signature, ...extra] = token.split(".");
+  if (extra.length || !actorHash || !SAFE_ACTOR_HASH_RE.test(actorHash) || !expiresRaw || !signature || !/^[a-f0-9]{64}$/.test(signature)) return null;
+  const expiresAt = Number(expiresRaw);
+  const nowSeconds = Math.floor(agoraMs / 1000);
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= nowSeconds || expiresAt > nowSeconds + BEHAVIOR_LINK_TTL_SECONDS) return null;
+  const expected = assinarVinculoAtor(actorHash, expiresAt);
+  if (!expected) return null;
+  const receivedBytes = Buffer.from(signature, "hex");
+  const expectedBytes = Buffer.from(expected, "hex");
+  return receivedBytes.length === expectedBytes.length && timingSafeEqual(receivedBytes, expectedBytes) ? actorHash : null;
 }
 
 export async function consumirLimiteIngestaoComportamental(chaveBruta: string): Promise<boolean> {
@@ -161,6 +191,11 @@ function sanitizeContext(input: unknown, allowPedidoId = false): BehaviorContext
   if (Number.isInteger(engagementMs) && engagementMs >= 0 && engagementMs <= 24 * 60 * 60 * 1000) {
     out.engagementMs = engagementMs;
   }
+  if (raw.action === "checkout_submit") out.action = "checkout_submit";
+  if (["success", "failure"].includes(String(raw.outcome))) out.outcome = raw.outcome as BehaviorContext["outcome"];
+  if (["request_rejected", "service_unavailable", "network_error", "unknown"].includes(String(raw.failureCode))) {
+    out.failureCode = raw.failureCode as BehaviorContext["failureCode"];
+  }
   if (allowPedidoId) {
     const pedidoId = sanitizeSafeId(raw.pedidoId);
     if (pedidoId) out.pedidoId = pedidoId;
@@ -180,12 +215,14 @@ export function validarEventoClienteComportamento(raw: unknown, agoraMs = Date.n
     ? Math.trunc(occurred)
     : agoraMs;
 
+  const context = sanitizeContext(obj.context, false);
+  if (obj.type === "action_result" && (!context.action || !context.outcome || (context.outcome === "failure" && !context.failureCode))) return null;
   return {
     eventId: obj.eventId,
     sessionId: obj.sessionId,
     type: obj.type as ClientBehaviorEventType,
     occurredAtMs,
-    context: sanitizeContext(obj.context, false),
+    context,
   };
 }
 
@@ -241,13 +278,16 @@ async function persistEvent(event: BehaviorEvent): Promise<boolean> {
 export async function registrarEventosClienteComportamento(params: {
   tenantId?: string;
   clienteId?: string | null;
+  actorHashVerificado?: string | null;
   events: BehaviorClientInput[];
   agoraMs?: number;
 }): Promise<{ accepted: number; duplicated: number }> {
   if (!behaviorAnalyticsEnabled()) return { accepted: 0, duplicated: 0 };
   const tenantId = params.tenantId ?? BEHAVIOR_TENANT_DEFAULT;
   const agoraMs = params.agoraMs ?? Date.now();
-  const actorHash = params.clienteId ? pseudonimizarClienteId(params.clienteId) : null;
+  const actorHash = params.clienteId
+    ? pseudonimizarClienteId(params.clienteId)
+    : (params.actorHashVerificado && SAFE_ACTOR_HASH_RE.test(params.actorHashVerificado) ? params.actorHashVerificado : null);
   let accepted = 0;
   let duplicated = 0;
 

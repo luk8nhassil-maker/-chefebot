@@ -40,7 +40,7 @@ function req(body: unknown) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.behaviorAnalyticsEnabled.mockReturnValue(true);
-  mocks.verifyToken.mockResolvedValue({ username: "admin", role: "admin" });
+  mocks.verifyToken.mockResolvedValue({ username: "ominix", role: "dev" });
   mocks.sanitizeTelefoneCliente.mockImplementation((v) => typeof v === "string" ? v.replace(/\D/g, "") : "");
   mocks.derivarClienteIdPorTelefone.mockImplementation((v) => v.length >= 10 ? "cli_canonico" : undefined);
   mocks.consultarTimelineComportamentalCliente.mockResolvedValue({
@@ -84,8 +84,8 @@ describe("POST /api/admin/comportamento/cliente", () => {
     expect(mocks.sanitizeTelefoneCliente).not.toHaveBeenCalled();
   });
 
-  test("exige admin/dev", async () => {
-    mocks.verifyToken.mockResolvedValue({ username: "x", role: "atendente" });
+  test("somente dev pode consultar; admin do dono fica bloqueado", async () => {
+    mocks.verifyToken.mockResolvedValue({ username: "admin", role: "admin" });
     expect((await POST(req({ telefone: "5599999999999" }))).status).toBe(401);
   });
 

@@ -30,4 +30,12 @@ describe("proxy — Preview do Cofre do Chefe", () => {
     expect(location).toContain("/login");
     expect(location).toContain("callbackUrl=%2Fdev%2Fcofre-chefe");
   });
+  test("a sala de monitoramento continua restrita no Preview", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    const res = await proxy(req("https://branch-preview.vercel.app/dev/monitoramento-usuarios"));
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toContain("/login");
+  });
+
 });

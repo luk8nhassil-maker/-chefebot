@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validarTokenCardapio, mascararPhone, mascararTelefoneExibicao } from "@/lib/cardapioToken";
 import { sincronizarCronometroInatividade } from "@/lib/inatividadeConversa";
+import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
+import { criarVinculoCookieComportamento, behaviorAnalyticsEnabled } from "@/lib/behaviorAnalytics";
 
 // Resolve o token `?t=` do link do cardápio enviado pelo WhatsApp.
 // NUNCA devolve o phone completo ao navegador — apenas os 4 últimos dígitos
@@ -25,14 +27,28 @@ export async function GET(req: NextRequest) {
     } catch {
       // best-effort — nunca bloqueia a resolução do token
     }
-    // phoneMascarado: formato de exibição "(45) 9••••-0691" para a confirmação
-    // na aba Pontos — nunca o número completo (só DDD + 9 inicial + 4 finais).
-    return NextResponse.json({
+    // phoneMascarado: formato de exibição "(45) 9••••-0691" para confirmação. O telefone completo nunca volta ao navegador.
+    const response = NextResponse.json({
       ok: true,
       origem: "whatsapp",
       phoneFinal: mascararPhone(resolvido.phone),
       phoneMascarado: mascararTelefoneExibicao(resolvido.phone),
-    });
+    }, { headers: { "Cache-Control": "no-store" } });
+
+    // Associa a navegação após validar o link oficial. Cookie HttpOnly contém
+    // somente pseudônimo assinado, tem finalidade restrita à telemetria e não autentica pedidos.
+    if (behaviorAnalyticsEnabled()) {
+      const clienteId = derivarClienteIdPorTelefone(resolvido.phone);
+      const tokenComportamento = clienteId ? criarVinculoCookieComportamento(clienteId) : null;
+      if (tokenComportamento) response.cookies.set("behavior-link-v1", tokenComportamento, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/api/comportamento",
+        maxAge: 30 * 24 * 60 * 60,
+      });
+    }
+    return response;
   } catch {
     return NextResponse.json({ ok: false });
   }
