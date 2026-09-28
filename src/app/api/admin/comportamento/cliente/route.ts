@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const telefone = sanitizeTelefoneCliente(body.telefone);
+  const telefone = sanitizeTelefoneCliente(typeof body.telefone === "string" ? body.telefone : "");
   const clienteId = derivarClienteIdPorTelefone(telefone);
   if (!clienteId) {
     return NextResponse.json(
