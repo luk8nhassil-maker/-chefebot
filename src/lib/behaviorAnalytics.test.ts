@@ -214,7 +214,7 @@ describe("evento público comportamental", () => {
       duplicate: true,
       customerLinked: false,
     });
-    expect(hashes.get("behavior:counter:default:20260527")?.get("app_open")).toBe(1);
+    expect(hashes.get("behavior:counter:default:20260528")?.get("app_open")).toBe(1);
   });
 
   test("histórico da sessão devolve inclusive eventos anônimos anteriores ao login", async () => {
