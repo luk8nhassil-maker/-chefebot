@@ -1536,3 +1536,12 @@ describe("/cardapio — prospeccao de ranking sem competir com pedido/pagamento"
     expect(bloco).not.toContain("DELETE");
   });
 });
+
+
+describe("/cardapio — aviso discreto de privacidade", () => {
+  test("não mostra banner de monitoramento e oferece link discreto no rodapé", () => {
+    expect(fonte).not.toContain("Se precisar de ajuda, a equipe pode conferir");
+    expect(fonte).toContain('href="/privacidade"');
+    expect(fonte).toContain(">Privacidade</a>");
+  });
+});

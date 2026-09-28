@@ -1864,6 +1864,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // pickFlavor/continueBuild abaixo.
   const isMiniSize = size === "MINI" && !miniPizzaMode;
   function pickFlavor(f: string) {
+    const flavorId = menu.pizzaCatalog?.flavors.find((flavor) => flavor.name === f)?.id
+      ?? (menu.catalog ? todosOsProdutos(menu.catalog).flatMap((produto) => produto.flavors ?? []).find((flavor) => flavor.name === f)?.id : undefined);
+    trackBehavior("product_view", { source: "cardapio", screen: "flavor-modal", ...(flavorId ? { productId: flavorId } : {}) });
     const atual = { f1, f2 };
     const next = nextFlavorSelection(atual, f, miniPizzaMode || calzoneMode || pastelMode || isMiniSize);
     // Limite de 2 sabores atingido: nextFlavorSelection recusa o toque
@@ -2102,6 +2105,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     const newItem: CartItem = { emoji: "🍕", kind: "pizza", name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`, detail, price, qty: 1, keys, ...(pizzaSelection ? { pizzaSelection } : {}) };
     const newCart = [...cart, newItem];
     setCart(newCart);
+    const flavorId = menu.pizzaCatalog?.flavors.find((flavor) => flavor.name === f1)?.id;
+    trackBehavior("cart_add", { source: "cardapio", screen, target: "cart", ...(flavorId ? { productId: flavorId } : {}), cartItems: cartCount + 1, cartDistinctItems: cart.length + 1 });
     setLastAddedKind("pizza");
     if (!plan.openEnded && plan.current < plan.total) { setPlan({ ...plan, current: plan.current + 1 }); showToast(`Pizza pronta! 🍕`); resetBuild(); go("sc-build"); }
     else if (plan.openEnded) { showToast("Pizza adicionada! 🍕"); go("sc-another"); }
