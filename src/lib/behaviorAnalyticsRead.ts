@@ -42,9 +42,14 @@ export type BehaviorFunnelSummary = {
   sessionsWithCheckout: number;
   sessionsWithOrder: number;
   sessionsWithoutOrder: number;
+  sessionsWithSearch: number;
+  sessionsWithProductView: number;
+  sessionsWithCart: number;
+  abandonedCheckoutSessions: number;
   checkoutToOrderRate: number | null;
   sessionToOrderRate: number | null;
   medianMinutesFirstOpenToOrder: number | null;
+  medianEngagementSeconds: number | null;
   byType: Record<string, number>;
 };
 
@@ -200,7 +205,12 @@ export async function resumirFunilComportamental(params: {
 
   let sessionsWithCheckout = 0;
   let sessionsWithOrder = 0;
+  let sessionsWithSearch = 0;
+  let sessionsWithProductView = 0;
+  let sessionsWithCart = 0;
+  let abandonedCheckoutSessions = 0;
   const openToOrderMinutes: number[] = [];
+  const engagementSeconds: number[] = [];
 
   for (const list of bySession.values()) {
     const sorted = [...list].sort((a, b) => a.occurredAtMs - b.occurredAtMs);
@@ -211,8 +221,25 @@ export async function resumirFunilComportamental(params: {
       event.type === "order_submit_attempt",
     );
     const order = sorted.find((event) => event.type === "order_created");
+    const searched = sorted.some((event) => event.type === "search_used");
+    const productViewed = sorted.some((event) => event.type === "product_view");
+    const cartTouched = sorted.some((event) =>
+      event.type === "cart_state" ||
+      event.type === "cart_add" ||
+      event.type === "cart_remove" ||
+      event.type === "cart_quantity_change",
+    );
     if (checkout) sessionsWithCheckout += 1;
     if (order) sessionsWithOrder += 1;
+    if (searched) sessionsWithSearch += 1;
+    if (productViewed) sessionsWithProductView += 1;
+    if (cartTouched) sessionsWithCart += 1;
+    if (checkout && !order) abandonedCheckoutSessions += 1;
+
+    const engagement = sorted
+      .filter((event) => event.type === "page_exit")
+      .reduce((sum, event) => sum + (event.context.engagementMs ?? 0), 0);
+    if (engagement > 0) engagementSeconds.push(engagement / 1000);
 
     if (order) {
       const firstOpen = sorted.find((event) => event.type === "app_open");
@@ -224,6 +251,7 @@ export async function resumirFunilComportamental(params: {
 
   const sessions = bySession.size;
   const medianMinutes = median(openToOrderMinutes);
+  const medianEngagement = median(engagementSeconds);
 
   return {
     schemaVersion: 1,
@@ -235,9 +263,14 @@ export async function resumirFunilComportamental(params: {
     sessionsWithCheckout,
     sessionsWithOrder,
     sessionsWithoutOrder: Math.max(sessions - sessionsWithOrder, 0),
+    sessionsWithSearch,
+    sessionsWithProductView,
+    sessionsWithCart,
+    abandonedCheckoutSessions,
     checkoutToOrderRate: ratio(sessionsWithOrder, sessionsWithCheckout),
     sessionToOrderRate: ratio(sessionsWithOrder, sessions),
     medianMinutesFirstOpenToOrder: medianMinutes === null ? null : Math.round(medianMinutes * 10) / 10,
+    medianEngagementSeconds: medianEngagement === null ? null : Math.round(medianEngagement * 10) / 10,
     byType,
   };
 }
