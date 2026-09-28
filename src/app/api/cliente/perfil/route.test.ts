@@ -72,7 +72,7 @@ vi.mock("@/lib/clientes", async () => {
     ativarFidelidadeCliente: ativarFidelidadeClienteMock,
     buscarClientePorId: vi.fn(async (clienteId: string) => {
       if (clienteId === "cli_a") {
-        return { clienteId: "cli_a", telefone: "11900000001", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" };
+        return { clienteId: "cli_a", telefone: "11900000001", nome: "Cliente A", apelido: "Cacá", createdAt: "", updatedAt: "", lastLoginAt: "" };
       }
       return null;
     }),
@@ -139,6 +139,7 @@ describe("GET /api/cliente/perfil", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.cliente.telefone).toBe("11900000001");
+    expect(body.cliente.apelido).toBe("Cacá");
     // desacoplado: o perfil NUNCA embute fidelidade (falha de pontos nao pode
     // derrubar este endpoint nem parecer logout)
     expect(body.fidelidade).toBeUndefined();
