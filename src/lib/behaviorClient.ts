@@ -23,7 +23,9 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let flushing = false;
 
 function enabledOnClient(): boolean {
-  return process.env.NEXT_PUBLIC_BEHAVIOR_ANALYTICS_ENABLED === "true";
+  if (process.env.NEXT_PUBLIC_BEHAVIOR_ANALYTICS_ENABLED === "false") return false;
+  if (process.env.NEXT_PUBLIC_BEHAVIOR_ANALYTICS_ENABLED === "true") return true;
+  return process.env.VERCEL_ENV === "production";
 }
 
 function uuid(): string {
