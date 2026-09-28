@@ -13,7 +13,6 @@ import {
   classifyBehaviorPaymentMethod,
   type BehaviorEventData,
   type BehaviorEventType,
-  type BehaviorPaymentMethod,
   type PublicBehaviorEventType,
 } from "./behaviorEvents";
 
