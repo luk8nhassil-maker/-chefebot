@@ -1,5 +1,8 @@
-import { describe, expect, test } from "vitest";
-import { calibrarComportamentoCofre } from "./cofreChefCalibracao";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import {
+  calibrarComportamentoCofre,
+  cofreChefCalibracaoHabilitada,
+} from "./cofreChefCalibracao";
 import type { EventoAnalitico } from "./historicoAnalitico";
 
 const DIA = 24 * 60 * 60 * 1000;
@@ -21,6 +24,23 @@ function ev(clienteId: string, diasAtras: number, ticket: number, statusAnalitic
     regraVersao: "estrelas-faixas-v1",
   };
 }
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("cofreChefCalibracaoHabilitada", () => {
+  test("fica fechada por padrão e só abre com true explícito", () => {
+    vi.stubEnv("COFRE_CHEFE_CALIBRACAO_ATIVA", "");
+    expect(cofreChefCalibracaoHabilitada()).toBe(false);
+
+    vi.stubEnv("COFRE_CHEFE_CALIBRACAO_ATIVA", "false");
+    expect(cofreChefCalibracaoHabilitada()).toBe(false);
+
+    vi.stubEnv("COFRE_CHEFE_CALIBRACAO_ATIVA", "true");
+    expect(cofreChefCalibracaoHabilitada()).toBe(true);
+  });
+});
 
 describe("calibrarComportamentoCofre", () => {
   test("agrega somente participantes e nunca expõe clienteId no resultado", () => {
