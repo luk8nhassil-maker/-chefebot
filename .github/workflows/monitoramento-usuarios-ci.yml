@@ -108,6 +108,8 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Suíte completa
+        env:
+          VERCEL_ENV: production
         run: npm test
 
       - name: Build com telemetria bloqueada no Preview
