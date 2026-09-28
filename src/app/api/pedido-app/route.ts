@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { redis } from "@/lib/redis";
 import { obterEsgotadosEfetivos, obterEsgotadosLegado, obterEstoqueItens } from "@/lib/estoque";
@@ -13,6 +13,10 @@ import { temDinheiroNoPagamento, valorDinheiroEsperado, temPixNoPagamento, valor
 import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
 import { atualizarIdentidadeCliente, buscarClientePorId, sanitizeTelefoneCliente } from "@/lib/clientes";
 import { resolverIdentidadeCheckout } from "@/lib/checkoutIdentidade";
+import {
+  behaviorSessionIdValid,
+  recordOrderCreatedBehaviorFact,
+} from "@/lib/behaviorAnalytics";
 import { calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
 import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice, contarPizzasPagasParaFidelidade } from "@/lib/pedidoAppItens";
 import {
@@ -94,6 +98,8 @@ type PedidoApp = {
    * efeito quando SURVIVAL_MODE_ENABLED=true; ausente/ignorado do
    * contrário. Nunca contém PII (ver src/survival/clientRequestId.ts). */
   clientRequestId?: string;
+  /** Sessão comportamental opaca do site. Nunca contém clienteId/telefone. */
+  behaviorSessionId?: string;
 };
 
 type ConfigPizzariaPix = {
@@ -1949,6 +1955,29 @@ export async function POST(req: NextRequest) {
       ...(pixCliente ? { pix: pixCliente } : {}),
       ...(degradado ? { degradado: true } : {}),
     };
+
+    // Customer 360: "pedido criado" é fato server-side e só é associado a
+    // uma jornada web quando existe sessionId opaco válido. after() garante
+    // que a telemetria nunca entra na latência/consistência crítica do pedido.
+    if (behaviorSessionIdValid(body.behaviorSessionId)) {
+      const behaviorSessionId = body.behaviorSessionId;
+      const behaviorItemCount = itensDetalhadosFinais.reduce(
+        (sum, item) => sum + Math.max(0, Number(item.qty) || 0),
+        0,
+      );
+      after(async () => {
+        await recordOrderCreatedBehaviorFact({
+          pedidoId,
+          sessionId: behaviorSessionId,
+          clienteId: clienteId ?? null,
+          totalCents: Math.max(0, Math.round(total * 100)),
+          itemCount: behaviorItemCount,
+          deliveryType: body.tipoEntrega,
+          payment: body.pagamento,
+        });
+      });
+    }
+
     return NextResponse.json(resposta);
   } catch (error) {
     // Removida a regra genérica de que toda exceção depois da persistência
