@@ -13,6 +13,14 @@ on:
       - "src/lib/temporadas.test.ts"
       - "src/app/api/cliente/cofre/**"
       - "src/app/api/admin/cofre/**"
+      - "src/lib/checkoutIdentidade.ts"
+      - "src/lib/checkoutIdentidade.test.ts"
+      - "src/lib/clientes.ts"
+      - "src/lib/clientes.test.ts"
+      - "src/app/api/cliente/perfil/**"
+      - "src/app/cardapio/page.tsx"
+      - "src/app/api/pedido-app/route.ts"
+      - "src/app/api/pedido-app/route.cliente.test.ts"
       - "src/lib/rankingClientes.ts"
       - "src/lib/rankingClientes.test.ts"
       - "src/lib/rankingScoreAutoridadeUnica.integration.test.ts"
@@ -60,6 +68,19 @@ jobs:
           src/lib/temporadas.test.ts
           src/app/api/cliente/cofre/route.test.ts
           src/app/api/admin/cofre/calibracao/route.test.ts
+          src/lib/checkoutIdentidade.ts
+          src/lib/checkoutIdentidade.test.ts
+          src/lib/clientes.ts
+          src/lib/clientes.test.ts
+          src/app/api/cliente/perfil/route.ts
+          src/app/api/cliente/perfil/route.test.ts
+          src/app/cardapio/page.tsx
+          src/app/api/pedido-app/route.ts
+          src/app/api/pedido-app/route.cliente.test.ts
+          src/lib/checkoutIdentidade.test.ts
+          src/lib/clientes.test.ts
+          src/app/api/cliente/perfil/route.test.ts
+          src/app/api/pedido-app/route.cliente.test.ts
           src/lib/rankingClientes.test.ts
           src/lib/rankingScoreAutoridadeUnica.integration.test.ts
           src/proxy.cofre-preview.test.ts
