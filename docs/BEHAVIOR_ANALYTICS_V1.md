@@ -1,0 +1,275 @@
+# BEHAVIOR ANALYTICS V1 — Camada de monitoramento comportamental
+
+## Objetivo
+
+Registrar a jornada de uso do cliente antes, durante e depois da compra para permitir evolução do Cofre do Chefe, retenção, UX, funil e futura decisão econômica baseada em comportamento real.
+
+Esta camada é analítica. Ela não altera preço, pedido, Pix, fidelidade, Ranking, estoque, impressão ou WhatsApp.
+
+## Princípios
+
+1. Eventos comportamentais nunca são fonte de verdade financeira.
+2. Pedido criado, valor, pagamento e demais fatos comerciais continuam vindo do servidor oficial.
+3. Identidade nunca é aceita do body da telemetria.
+4. Eventos usam sessão aleatória e, quando possível, actor pseudonimizado.
+5. Nome, telefone, endereço, observação do pedido, token, OTP e texto livre não entram no evento comportamental.
+6. Preview nunca escreve telemetria comportamental real.
+7. Nenhum evento sozinho autoriza cupom ou benefício.
+8. Retenção é obrigatória e configurável; ausência de configuração mantém o coletor desligado.
+
+## Fluxo
+
+Navegador
+→ fila local em memória
+→ POST /api/comportamento
+→ validação allowlist
+→ rate limit
+→ associação opcional com sessão autenticada
+→ pseudonimização server-side
+→ Redis com TTL
+→ índices globais / por sessão / por ator
+→ APIs admin somente leitura
+→ agregação para funil e resumo individual.
+
+## Identidade e sessões
+
+Cada aba recebe um sessionId UUID salvo em sessionStorage.
+
+Antes de o cliente ser identificado, eventos ficam vinculados somente à sessão.
+
+Quando a mesma sessão produz um fato autenticado ou um pedido oficial, o servidor registra um evento associado ao cliente pseudonimizado. A leitura individual pode então recuperar também os eventos anônimos anteriores daquela mesma sessão.
+
+Uma sessão que nunca autentica e nunca gera um fato oficial permanece anônima. Ela participa apenas das métricas agregadas e não deve ser forçada artificialmente para um cliente.
+
+## Eventos V1
+
+### Acesso e navegação
+- app_open
+- screen_view
+- page_exit
+
+### Interesse
+- search_used
+- category_view
+- product_view
+
+### Carrinho
+- cart_state
+- cart_add
+- cart_remove
+- cart_quantity_change
+
+### Checkout
+- checkout_start
+- delivery_step_view
+- payment_step_view
+- order_submit_attempt
+
+### Relacionamento
+- fidelity_open
+- ranking_open
+- cofre_open
+
+### Fato oficial
+- order_created
+
+order_created é gerado no servidor somente depois de o pedido existir.
+
+## Contexto permitido
+
+Somente campos explicitamente permitidos podem ser persistidos:
+
+- screen;
+- source;
+- categoryId;
+- productId;
+- cartItems;
+- cartDistinctItems;
+- queryLength;
+- resultCount;
+- deliveryType;
+- paymentFamily;
+- target;
+- pedidoId apenas em evento server-side;
+- deviceClass: mobile/tablet/desktop;
+- viewportClass: compact/medium/wide;
+- displayMode: browser/standalone;
+- referrerKind: direct/internal/external/whatsapp_link;
+- engagementMs.
+
+Qualquer campo fora da allowlist é descartado.
+
+## Dados propositalmente não coletados nos eventos
+
+- nome;
+- apelido;
+- telefone;
+- endereço;
+- bairro em texto;
+- rua/número/referência;
+- observação do pedido;
+- texto digitado na busca;
+- mensagem de WhatsApp;
+- senha;
+- OTP;
+- token de sessão;
+- token de status do pedido;
+- QR/Payload Pix;
+- número de cartão;
+- geolocalização precisa;
+- user-agent cru;
+- IP persistido.
+
+O IP recebido pela infraestrutura pode ser usado apenas para rate limit técnico. A chave do rate limit é HMAC/pseudonimizada e expira rapidamente.
+
+## Contexto técnico coarse
+
+No app_open o navegador pode informar:
+- classe de dispositivo;
+- classe de viewport;
+- PWA/browser;
+- origem coarse do acesso.
+
+Não é armazenado user-agent cru.
+
+No page_exit é registrado tempo de engajamento ativo da página. Tempo com a aba oculta é descontado.
+
+## Redis
+
+Namespace:
+- behavior:v1:event:{tenant}:{eventId}
+- behavior:v1:idx:{tenant}:{YYYYMMDD}
+- behavior:v1:actor:{tenant}:{actorHash}:{YYYYMMDD}
+- behavior:v1:session:{tenant}:{sessionId}:{YYYYMMDD}
+- behavior:v1:rate:{hash}:{janela}
+
+Eventos são idempotentes por eventId.
+
+Todos os eventos e índices recebem TTL de retenção.
+
+## Release gates
+
+Servidor:
+BEHAVIOR_ANALYTICS_ENABLED=true
+
+Cliente:
+NEXT_PUBLIC_BEHAVIOR_ANALYTICS_ENABLED=true
+
+Retenção:
+BEHAVIOR_ANALYTICS_RETENTION_DAYS=<7..730>
+
+Segredo de pseudonimização:
+BEHAVIOR_ANALYTICS_HASH_SECRET=<segredo server-side com no mínimo 24 caracteres>
+
+Fallback permitido do segredo:
+AUTH_SECRET.
+
+Mesmo com as flags, VERCEL_ENV=preview bloqueia escrita no servidor.
+
+## Leitura administrativa
+
+### Funil agregado
+GET /api/admin/comportamento/resumo?periodo=7|30|60|90
+
+Retorna, entre outros:
+- eventos;
+- sessões;
+- sessões com busca;
+- sessões com produto;
+- sessões com carrinho;
+- sessões com checkout;
+- sessões com pedido;
+- abandono de checkout;
+- conversão checkout→pedido;
+- conversão sessão→pedido;
+- mediana abertura→pedido;
+- mediana de tempo ativo;
+- contagem por tipo de evento.
+
+Não retorna identidade de cliente.
+
+### Cliente individual
+POST /api/admin/comportamento/cliente
+
+Entrada administrativa:
+- telefone;
+- período 7/30/60/90.
+
+O telefone é usado apenas no servidor para localizar o cliente e derivar o ID canônico. A resposta não devolve telefone nem actorHash.
+
+Retorna:
+- nome/apelido do perfil, quando existente;
+- linha do tempo;
+- resumo comportamental individual:
+  - sessões;
+  - sessões com e sem pedido;
+  - acessos;
+  - pesquisas;
+  - produtos vistos;
+  - interações de carrinho;
+  - entradas no checkout;
+  - aberturas do Ranking;
+  - aberturas da fidelidade;
+  - tempo ativo;
+  - intervalo mediano entre sessões;
+  - primeira e última observação.
+
+## Cobertura inicial
+
+Instrumentado:
+- /cardapio e /pedido, pelo PublicCardapio compartilhado;
+- /cliente;
+- /cliente/pedidos;
+- /rastrear/[pedidoId];
+- criação oficial do pedido no servidor.
+
+O monitoramento não muda componentes visuais nem navegação.
+
+## Relação com o Cofre do Chefe
+
+Behavior Analytics V1 fornece sinais para o futuro Motor de Próxima Melhor Ação.
+
+Exemplos de sinais possíveis no futuro:
+- muitas sessões sem compra;
+- pesquisa recorrente;
+- repetição de visualização;
+- carrinho recorrente sem checkout;
+- checkout abandonado;
+- cliente que compra sem incentivo;
+- intervalo entre acessos aumentando;
+- acesso ao Ranking antes de comprar.
+
+Nenhum desses sinais possui threshold comercial hardcoded nesta camada.
+
+## Ativação econômica
+
+Esta camada não decide valor de cupom.
+
+O motor econômico deve cruzar comportamento com:
+- CMV oficial por item/variante;
+- custos variáveis aprovados;
+- margem mínima;
+- orçamento;
+- venda incremental estimada.
+
+Sem essas fontes, benefícios financeiros continuam fail-closed.
+
+## Preview
+
+Preview pode executar UI e testes com flags cliente ligadas, mas o servidor bloqueia escrita quando VERCEL_ENV=preview.
+
+É proibido validar esta camada escrevendo no Redis de produção durante Preview.
+
+## Critério de sucesso da V1
+
+A V1 está tecnicamente pronta quando:
+- taxonomia está allowlisted;
+- sessão é idempotente;
+- cliente não é confiado do navegador;
+- pedido oficial liga sessão à conversão;
+- eventos anônimos não são forçados a uma identidade;
+- retenção existe;
+- Preview não escreve;
+- APIs admin não expõem actorHash/telefone;
+- cobertura dos fluxos públicos relevantes está testada;
+- suíte, lint, typecheck e build passam.
