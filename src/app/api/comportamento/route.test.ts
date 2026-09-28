@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
   behaviorAnalyticsEnabled: vi.fn(),
+  consumirLimiteIngestaoComportamental: vi.fn(),
   registrarEventosClienteComportamento: vi.fn(),
   validarEventoClienteComportamento: vi.fn(),
   lerSessaoCliente: vi.fn(),
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/behaviorAnalytics", () => ({
   behaviorAnalyticsEnabled: mocks.behaviorAnalyticsEnabled,
+  consumirLimiteIngestaoComportamental: mocks.consumirLimiteIngestaoComportamental,
   registrarEventosClienteComportamento: mocks.registrarEventosClienteComportamento,
   validarEventoClienteComportamento: mocks.validarEventoClienteComportamento,
 }));
@@ -39,6 +41,7 @@ function req(body: unknown, extraHeaders: Record<string, string> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.behaviorAnalyticsEnabled.mockReturnValue(true);
+  mocks.consumirLimiteIngestaoComportamental.mockResolvedValue(true);
   mocks.validarEventoClienteComportamento.mockImplementation((x) => x);
   mocks.registrarEventosClienteComportamento.mockResolvedValue({ accepted: 1, duplicated: 0 });
   mocks.lerSessaoCliente.mockResolvedValue(null);
@@ -64,6 +67,15 @@ describe("POST /api/comportamento", () => {
     const res = await POST(req({ events: [EVENTO_VALIDO] }));
 
     expect(res.status).toBe(400);
+    expect(mocks.registrarEventosClienteComportamento).not.toHaveBeenCalled();
+  });
+
+  test("bloqueia abuso antes de persistir eventos", async () => {
+    mocks.consumirLimiteIngestaoComportamental.mockResolvedValue(false);
+    const res = await POST(req({ events: [EVENTO_VALIDO] }, { "x-forwarded-for": "203.0.113.10" }));
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("60");
     expect(mocks.registrarEventosClienteComportamento).not.toHaveBeenCalled();
   });
 
