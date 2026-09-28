@@ -44,6 +44,9 @@ function requestSessao(token?: string) {
 beforeEach(() => {
   redisStore.clear();
   sincronizarCronometroMock.mockClear();
+  behaviorMocks.derivarClienteIdPorTelefone.mockClear();
+  behaviorMocks.criarVinculoCookieComportamento.mockClear();
+  behaviorMocks.behaviorAnalyticsEnabled.mockClear();
   behaviorMocks.derivarClienteIdPorTelefone.mockReturnValue("cliente-pseudonimizado");
   behaviorMocks.criarVinculoCookieComportamento.mockReturnValue("hash.assinado");
   behaviorMocks.behaviorAnalyticsEnabled.mockReturnValue(true);
