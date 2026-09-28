@@ -76,6 +76,21 @@ export type BehaviorEventData = {
   orderItemCount?: number;
 };
 
+export function classifyBehaviorPaymentMethod(
+  value: string | null | undefined,
+): BehaviorPaymentMethod {
+  const lower = (value ?? "").toLowerCase();
+  const pix = lower.includes("pix");
+  const dinheiro = lower.includes("dinheiro");
+  const cartao = lower.includes("cart");
+  const total = Number(pix) + Number(dinheiro) + Number(cartao);
+  if (total > 1) return "misto";
+  if (pix) return "pix";
+  if (dinheiro) return "dinheiro";
+  if (cartao) return "cartao";
+  return "outro";
+}
+
 export function classifyPublicBehaviorPage(pathname: string): BehaviorPage | null {
   const path = pathname.split("?")[0]?.split("#")[0] ?? "/";
   if (
