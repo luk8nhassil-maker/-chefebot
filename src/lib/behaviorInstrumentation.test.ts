@@ -12,6 +12,7 @@ const pedidos = ler("../app/cliente/pedidos/page.tsx");
 const rastrear = ler("../app/rastrear/[pedidoId]/page.tsx");
 const behaviorClient = ler("./behaviorClient.ts");
 const pedidoApi = ler("../app/api/pedido-app/route.ts");
+const nextConfig = ler("../../next.config.ts");
 
 describe("instrumentação comportamental — cobertura essencial", () => {
   test("cardápio cobre acesso, navegação, busca, produto, carrinho e checkout", () => {
@@ -61,6 +62,12 @@ describe("instrumentação comportamental — cobertura essencial", () => {
     expect(behaviorClient).not.toContain("getBehaviorVisitorId");
     expect(behaviorClient).not.toContain("navigator.userAgent");
     expect(behaviorClient).not.toContain("geolocation");
+  });
+
+  test("cliente liga por padrão somente no build de produção e permite desligar", () => {
+    expect(nextConfig).toContain('process.env.VERCEL_ENV === "production" ? "true" : "false"');
+    expect(nextConfig).toContain("process.env.NEXT_PUBLIC_BEHAVIOR_ANALYTICS_ENABLED ??");
+    expect(behaviorClient).toContain('return process.env.VERCEL_ENV === "production"');
   });
 
   test("pedido oficial liga sessão anônima à conversão no servidor", () => {
