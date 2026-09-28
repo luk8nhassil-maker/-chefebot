@@ -2752,7 +2752,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     <>
       <style>{CSS}</style>
       <LayoutDebugPanel />
-      {waFinal && monitoramentoAtivo && !usarOutroWhatsapp && <aside role="status" style={{ maxWidth: 720, margin: "12px auto", padding: "10px 14px", border: "1px solid var(--surface-elevated)", borderRadius: 10, color: "var(--text-secondary)", fontSize: 12, lineHeight: 1.5 }}>Para ajudar a equipe a resolver problemas no cardápio, telas e etapas acessadas neste navegador podem ser associadas ao WhatsApp final {waFinal} por até 30 dias. Não registramos o texto digitado na busca nem endereço ou dados de pagamento nesta trilha. Ao escolher outro WhatsApp, esse vínculo é removido.</aside>}
+      {waFinal && monitoramentoAtivo && !usarOutroWhatsapp && <aside role="status" style={{ maxWidth: 720, margin: "12px auto", padding: "10px 14px", border: "1px solid var(--surface-elevated)", borderRadius: 10, color: "var(--text-secondary)", fontSize: 12, lineHeight: 1.5 }}>Para suporte, sua atividade no cardápio é associada ao WhatsApp final {waFinal} por até 30 dias. O texto da busca não é salvo.</aside>}
       <div className={`wrap ${screen === "sc-start" ? "wrap-start" : ""}`} style={{ "--steps-h": `${stepsHeight}px` } as CSSProperties}>
         {screen !== "sc-start" && (
           <div className="steps" ref={stepsRef}>
