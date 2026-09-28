@@ -105,7 +105,11 @@ export async function proxy(req: NextRequest) {
   // Demonstrações com fixtures locais, liberadas somente no Preview Vercel.
   // Todas as demais rotas /dev e APIs continuam sob a regra de autenticação.
   if (process.env.VERCEL_ENV === "preview" &&
-    (pathname === "/dev/ranking-retencao" || pathname === "/dev/ranking-prospeccao")) {
+    (
+      pathname === "/dev/ranking-retencao" ||
+      pathname === "/dev/ranking-prospeccao" ||
+      pathname === "/dev/cofre-chefe"
+    )) {
     return NextResponse.next();
   }
 
