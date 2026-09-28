@@ -5,6 +5,9 @@ export const CLIENT_BEHAVIOR_EVENTS = [
   "category_view",
   "product_view",
   "cart_state",
+  "cart_add",
+  "cart_remove",
+  "cart_quantity_change",
   "checkout_start",
   "delivery_step_view",
   "payment_step_view",
@@ -32,4 +35,9 @@ export type BehaviorContext = {
   paymentFamily?: "pix" | "dinheiro" | "cartao" | "misto" | "unknown";
   target?: "ranking" | "cofre" | "fidelity" | "cart" | "checkout" | "orders" | "tracking";
   pedidoId?: string;
+  deviceClass?: "mobile" | "tablet" | "desktop" | "unknown";
+  viewportClass?: "compact" | "medium" | "wide" | "unknown";
+  displayMode?: "standalone" | "browser" | "unknown";
+  referrerKind?: "direct" | "internal" | "external" | "whatsapp_link" | "unknown";
+  engagementMs?: number;
 };
