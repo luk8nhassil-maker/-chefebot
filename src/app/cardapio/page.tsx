@@ -27,6 +27,7 @@ import {
   deveMostrarConviteRankingPosPedido,
   type RankingProspeccaoStatusPagamento,
 } from "@/lib/rankingProspeccao";
+import { getBehaviorSessionId, installBehaviorPageExitTracking, trackBehavior } from "@/lib/behaviorClient";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -1262,6 +1263,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // ingredientesDoSabor). Some sozinha quando o modal fecha, pra não filtrar
   // silenciosamente a próxima abertura.
   const [flavorSearchQuery, setFlavorSearchQuery] = useState("");
+  useEffect(() => {
+    const query = flavorSearchQuery.trim();
+    if (!flavorModalOpen || query.length < 2) return;
+    const timer = setTimeout(() => trackBehavior("search_used", { source: "cardapio", screen: "flavor-modal", queryLength: query.length }), 600);
+    return () => clearTimeout(timer);
+  }, [flavorSearchQuery, flavorModalOpen]);
   // Reseta durante a renderização (não em efeito) ao detectar que o modal
   // fechou — padrão recomendado pelo React pra "resetar estado quando algo
   // muda", sem o round-trip extra de um useEffect.
@@ -1276,6 +1283,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // regra da busca de sabores: reseta ao trocar de categoria, nunca filtra
   // silenciosamente a lista seguinte.
   const [listSearchQuery, setListSearchQuery] = useState("");
+  useEffect(() => {
+    const query = listSearchQuery.trim();
+    if (query.length < 2) return;
+    const timer = setTimeout(() => trackBehavior("search_used", { source: "cardapio", screen: "sc-list", categoryId: listCat, queryLength: query.length }), 600);
+    return () => clearTimeout(timer);
+  }, [listSearchQuery, listCat]);
   const [prevListCat, setPrevListCat] = useState(listCat);
   if (listCat !== prevListCat) {
     setPrevListCat(listCat);
@@ -1415,6 +1428,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         const r = await fetch(`/api/cardapio-whatsapp-session?t=${encodeURIComponent(token)}`, { cache: "no-store" });
         const data = await r.json();
         if (data?.ok && data.phoneFinal) {
+          trackBehavior("whatsapp_link_verified", { source: "cardapio", screen: "sc-start", referrerKind: "whatsapp_link" });
           setWaToken(token); setWaFinal(String(data.phoneFinal));
           try { sessionStorage.setItem("cf_wa_token", token); sessionStorage.setItem("cf_wa_final", String(data.phoneFinal)); } catch {}
         } else {
@@ -1820,6 +1834,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     setF1(null);
     setF2(null);
     setFlavorModalOpen(true);
+    const productId = menu.catalog?.calzone.find((produto) => produto.name === calzoneItem.name)?.id;
+    trackBehavior("product_view", { source: "cardapio", screen: "sc-list", categoryId: "lanche", ...(productId ? { productId } : {}) });
   }
   // Pastel de Forno / Pastel de Feira — mesmo modal de sabores, trava em 1
   // sabor só (nunca meio a meio), mesma ideia de pickCalzone acima.
@@ -1848,6 +1864,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // pickFlavor/continueBuild abaixo.
   const isMiniSize = size === "MINI" && !miniPizzaMode;
   function pickFlavor(f: string) {
+    const flavorId = menu.pizzaCatalog?.flavors.find((flavor) => flavor.name === f)?.id
+      ?? (menu.catalog ? todosOsProdutos(menu.catalog).flatMap((produto) => produto.flavors ?? []).find((flavor) => flavor.name === f)?.id : undefined);
+    trackBehavior("product_view", { source: "cardapio", screen: "flavor-modal", ...(flavorId ? { productId: flavorId } : {}) });
     const atual = { f1, f2 };
     const next = nextFlavorSelection(atual, f, miniPizzaMode || calzoneMode || pastelMode || isMiniSize);
     // Limite de 2 sabores atingido: nextFlavorSelection recusa o toque
@@ -2086,6 +2105,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     const newItem: CartItem = { emoji: "🍕", kind: "pizza", name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`, detail, price, qty: 1, keys, ...(pizzaSelection ? { pizzaSelection } : {}) };
     const newCart = [...cart, newItem];
     setCart(newCart);
+    const flavorId = menu.pizzaCatalog?.flavors.find((flavor) => flavor.name === f1)?.id;
+    trackBehavior("cart_add", { source: "cardapio", screen, target: "cart", ...(flavorId ? { productId: flavorId } : {}), cartItems: cartCount + 1, cartDistinctItems: cart.length + 1 });
     setLastAddedKind("pizza");
     if (!plan.openEnded && plan.current < plan.total) { setPlan({ ...plan, current: plan.current + 1 }); showToast(`Pizza pronta! 🍕`); resetBuild(); go("sc-build"); }
     else if (plan.openEnded) { showToast("Pizza adicionada! 🍕"); go("sc-another"); }
@@ -2169,7 +2190,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   function continueBuild() { if (!buildOk) return; if (miniPizzaMode) addMiniPizza(); else if (calzoneMode) addCalzone(); else if (pastelMode) addPastel(); else if (isMiniSize) finalizarPizza(null, 0, []); else go("sc-border"); }
   function confirmFromModal() { if (!buildOk) return; setFlavorModalOpen(false); continueBuild(); }
   function addAnother() { setPlan({ total: 0, current: pizzasNoCarrinho() + 1, openEnded: true }); resetBuild(); go("sc-build"); }
-  function goCat(cat: "lanche" | "macarronada" | "bebida" | "suco" | "hamburguer" | "pastelForno" | "vitamina") { setListCat(cat); go("sc-list"); }
+  function goCat(cat: "lanche" | "macarronada" | "bebida" | "suco" | "hamburguer" | "pastelForno" | "vitamina") {
+    trackBehavior("category_view", { source: "cardapio", screen: "sc-list", categoryId: cat });
+    setListCat(cat);
+    go("sc-list");
+  }
   function isMacarronada(it: { name: string; sizes?: { code: string; price: number }[] }) {
     return it.name.toLowerCase().includes("macarronada") && Array.isArray(it.sizes) && it.sizes.length > 0;
   }
@@ -2179,6 +2204,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   function addSimple(it: { name: string; price: number; available?: boolean; sizes?: { code: string; price: number }[]; flavors?: string[] }, emoji: string) {
     if (it.available === false) return;
+    const behaviorProductId = menu.catalog ? todosOsProdutos(menu.catalog).find((produto) => produto.name === it.name)?.id : undefined;
+    trackBehavior("product_view", { source: "cardapio", screen: "sc-list", categoryId: listCat, ...(behaviorProductId ? { productId: behaviorProductId } : {}) });
     if (isCalzoneName(it.name)) { pickCalzone(); return; }
     // Produtos de sabor único do catálogo oficial fora do Calzone (Pastel de
     // Forno, Pastel de Feira) — exigem 1 sabor antes de ir pra sacola, mesmo
@@ -2194,6 +2221,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     const ex = cart.find((c) => c.kind === "simple" && c.name === it.name);
     if (ex) { setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c))); }
     else { setCart([...cart, { emoji, kind: "simple", name: it.name, detail: "", price: it.price, qty: 1, keys: [it.name], ...(simpleSelection ? { simpleSelection } : {}) }]); }
+    trackBehavior("cart_add", { source: "cardapio", screen: "sc-list", target: "cart", ...(behaviorProductId ? { productId: behaviorProductId } : {}), cartItems: cartCount + 1, cartDistinctItems: ex ? cart.length : cart.length + 1 });
     setLastAddedKind(listCat === "bebida" ? "bebida" : "lanche");
     showToast(`${it.name} adicionado!`);
   }
@@ -2265,12 +2293,37 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
+
+  useEffect(() => {
+    trackBehavior("app_open", { source: "cardapio", screen: "sc-start" });
+    return installBehaviorPageExitTracking("cardapio");
+  }, []);
+  useEffect(() => {
+    if (!hydrated) return;
+    trackBehavior("screen_view", { source: "cardapio", screen });
+    if (screen === "sc-delivery") {
+      trackBehavior("checkout_start", { source: "checkout", screen, target: "checkout" });
+      trackBehavior("delivery_step_view", { source: "checkout", screen, target: "checkout" });
+    } else if (screen === "sc-pay") {
+      trackBehavior("payment_step_view", { source: "checkout", screen, target: "checkout" });
+    }
+  }, [screen, hydrated]);
+  const cartBehaviorSignature = `${cartCount}:${cart.length}:${cart.map((item) => String(item.kind) + ":" + String(item.qty)).join("|")}`;
+  useEffect(() => {
+    if (!hydrated) return;
+    const [items, distinct] = cartBehaviorSignature.split(":", 3);
+    trackBehavior("cart_state", { source: "cardapio", target: "cart", cartItems: Number(items) || 0, cartDistinctItems: Number(distinct) || 0 });
+  }, [cartBehaviorSignature, hydrated]);
   const cartTemBebidaOuSuco = cart.some((c) => [...bebidasEfetivas, ...sucosEfetivos].some((m) => m.name === c.name));
   const showUpsellBebida = !upsellBebidaIgnorado && !cartTemBebidaOuSuco && ["pizza", "lanche", "macarronada"].includes(lastAddedKind || "");
   function sairDoPosItemSemBebida(destino: "sc-start" | "sc-cart") { if (showUpsellBebida) setUpsellBebidaIgnorado(true); go(destino); }
-  function chQty(idx: number, d: number) { setCart(cart.map((c, i) => (i === idx ? { ...c, qty: Math.max(1, c.qty + d) } : c))); }
+  function chQty(idx: number, d: number) {
+    trackBehavior("cart_quantity_change", { source: "cardapio", screen, target: "cart", cartItems: cartCount, cartDistinctItems: cart.length });
+    setCart(cart.map((c, i) => (i === idx ? { ...c, qty: Math.max(1, c.qty + d) } : c)));
+  }
   function rmItem(idx: number) {
     const removido = cart[idx];
+    trackBehavior("cart_remove", { source: "cardapio", screen, target: "cart", cartItems: Math.max(0, cartCount - (removido?.qty ?? 0)), cartDistinctItems: Math.max(0, cart.length - 1) });
     // Remover o presente da Jornada do Chef do carrinho NUNCA perde o prêmio —
     // só libera a reserva no servidor (volta a ficar "disponivel" no perfil)
     // e limpa a referência local (sem isso, a injeção validada reporia o item
@@ -2361,6 +2414,15 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     go("sc-pay");
   }
 
+  function paymentFamilyBehavior(value: string | null): "pix" | "dinheiro" | "cartao" | "misto" | "unknown" {
+    if (!value) return "unknown";
+    const normalizado = value.toLowerCase();
+    if (normalizado.includes("misto")) return "misto";
+    if (normalizado.includes("pix")) return "pix";
+    if (normalizado.includes("dinheiro")) return "dinheiro";
+    if (normalizado.includes("cart")) return "cartao";
+    return "unknown";
+  }
   function paymentLabel(value: string) { return value === "Cartao" ? "Cartão" : value === "Misto" ? "Pagamento misto" : value; }
   function paymentIcon(value: string) { const Icon = ({ Pix: Zap, Dinheiro: Banknote, Cartao: CreditCard, Misto: Shuffle } as Record<string, typeof Wallet>)[value] || Wallet; return <Icon size={20} aria-hidden="true" />; }
   function paymentHint(value: string) {
@@ -2517,6 +2579,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       } else { setErroTroco(""); }
     } else { setErroTroco(""); }
     if (hasError) return;
+    trackBehavior("order_submit_attempt", { source: "checkout", screen: "sc-pay", target: "checkout", cartItems: cartCount, cartDistinctItems: cart.length, deliveryType: delType || "unknown", paymentFamily: paymentFamilyBehavior(payment) });
     setSending(true);
     // Presente da Jornada do Chef: campo dedicado, nunca um item do carrinho.
     // O servidor reconstrói produto/preço/quantidade a partir do snapshot da
@@ -2524,12 +2587,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     // usar e (pizza) o sabor escolhido.
     const itemRecompensaJornada = cart.find((c) => c.recompensaJornadaId);
     const itensSemRecompensa = cart.filter((c) => !c.recompensaJornadaId);
-    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}), ...(c.simpleSelection ? { simpleSelection: c.simpleSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > agoraEmMs() ? resgatePontos.resgateId : undefined };
+    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, behaviorSessionId: getBehaviorSessionId() || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}), ...(c.simpleSelection ? { simpleSelection: c.simpleSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > agoraEmMs() ? resgatePontos.resgateId : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} if (itemRecompensaJornada) limparReferenciaRecompensa(localStorage); try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: agoraEmMs(), statusToken: typeof data.statusToken === "string" ? data.statusToken : undefined }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } const pagamentoRanking: RankingProspeccaoStatusPagamento = payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"; setConviteRankingPedido(false); go("sc-done"); if (pagamentoRanking === "nao_pix") void avaliarConviteRankingPosPedido(pagamentoRanking); } else { if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
-    } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
+      if (data.ok) { trackBehavior("action_result", { source: "checkout", screen: "sc-pay", target: "checkout", action: "checkout_submit", outcome: "success" }); try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} if (itemRecompensaJornada) limparReferenciaRecompensa(localStorage); try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: agoraEmMs(), statusToken: typeof data.statusToken === "string" ? data.statusToken : undefined }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } const pagamentoRanking: RankingProspeccaoStatusPagamento = payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"; setConviteRankingPedido(false); go("sc-done"); if (pagamentoRanking === "nao_pix") void avaliarConviteRankingPosPedido(pagamentoRanking); } else { trackBehavior("action_result", { source: "checkout", screen: "sc-pay", target: "checkout", action: "checkout_submit", outcome: "failure", failureCode: r.status >= 500 ? "service_unavailable" : "request_rejected" }); if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
+    } catch { trackBehavior("action_result", { source: "checkout", screen: "sc-pay", target: "checkout", action: "checkout_submit", outcome: "failure", failureCode: "network_error" }); showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
   function resetAll() { conviteRankingPagamentoAvaliadoRef.current = null; setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setBairroQuery(""); setBairroDropdownOpen(false); setRua(""); setRuaSugestoes([]); setRuaDropdownOpen(false); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setMistoPixInput(""); setMistoDinheiroInput(""); setErroMisto(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setConviteRankingPedido(false); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
 
@@ -3213,7 +3276,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                       <button
                         type="button"
                         className="pay-action-link muted"
-                        onClick={() => { setUsarOutroWhatsapp(true); setEditandoIdentidade(true); }}
+                        onClick={() => { setUsarOutroWhatsapp(true); void fetch("/api/comportamento", { method: "DELETE" }).catch(() => {}); setEditandoIdentidade(true); }}
                       >Usar outro WhatsApp</button>
                     )}
                   </div>
@@ -3234,7 +3297,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                         <button
                           type="button"
                           className="pay-action-link"
-                          onClick={() => setUsarOutroWhatsapp(true)}
+                          onClick={() => { setUsarOutroWhatsapp(true); void fetch("/api/comportamento", { method: "DELETE" }).catch(() => {}); }}
                         >Usar outro WhatsApp</button>
                       </div>
                     </div>
@@ -3247,7 +3310,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                           type="button"
                           className="pay-action-link"
                           style={{ fontSize: 12, marginTop: 6 }}
-                          onClick={() => { setUsarOutroWhatsapp(false); setTelefone(""); setErroTelefone(""); }}
+                          onClick={async () => { if (waToken) await fetch(`/api/cardapio-whatsapp-session?t=${encodeURIComponent(waToken)}`, { cache: "no-store" }).catch(() => null); setUsarOutroWhatsapp(false); setTelefone(""); setErroTelefone(""); }}
                         >Voltar a usar o WhatsApp vinculado (final {waFinal})</button>
                       )}
                       {erroTelefone && <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 4 }}>{erroTelefone}</div>}
@@ -3364,6 +3427,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             />
           )}
         </main>
+        <div style={{ padding: "4px 0 12px", textAlign: "center", fontSize: 11, color: "var(--text-secondary)" }}>
+          <a href="/privacidade" style={{ color: "inherit", textDecoration: "underline", textUnderlineOffset: 3 }}>Privacidade</a>
+        </div>
       </div>
       {cartCount > 0 && screen === "sc-cart" && (
         <div className={`delivery-cta-bar ${showBottomNav ? "stacked" : ""}`}>

@@ -986,8 +986,9 @@ describe("/cardapio (PublicCardapio) — wiring de simpleSelection (Fase 6)", ()
 
 describe("/cardapio (PublicCardapio) — carrinho preserva pizzaSelection (Fase 3)", () => {
   test("chQty (mudar quantidade) faz spread do item inteiro por índice — nunca reconstrói o item, então pizzaSelection sobrevive", () => {
-    expect(fonte).toMatch(
-      /function chQty\(idx: number, d: number\) \{ setCart\(cart\.map\(\(c, i\) => \(i === idx \? \{ \.\.\.c, qty: Math\.max\(1, c\.qty \+ d\) \} : c\)\)\); \}/
+    const bloco = fonte.slice(fonte.indexOf("function chQty("), fonte.indexOf("function rmItem("));
+    expect(bloco).toMatch(
+      /setCart\(cart\.map\(\(c, i\) => \(i === idx \? \{ \.\.\.c, qty: Math\.max\(1, c\.qty \+ d\) \} : c\)\)\);/
     );
   });
 
@@ -1028,9 +1029,10 @@ describe("/cardapio (PublicCardapio) — carrinho preserva pizzaSelection (Fase 
 
 describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores das pizzas", () => {
   test("addSimple desvia o Calzone para pickCalzone antes de qualquer outra regra de lanche", () => {
-    const bloco = fonte.slice(fonte.indexOf("function addSimple("), fonte.indexOf("function addSimple(") + 500);
+    const bloco = fonte.slice(fonte.indexOf("function addSimple("), fonte.indexOf("function addSimple(") + 1000);
     expect(bloco).toContain("if (it.available === false) return;");
-    expect(bloco).toContain("if (isCalzoneName(it.name)) { pickCalzone(); return; }");
+    expect(bloco.indexOf("if (isCalzoneName(it.name)) { pickCalzone(); return; }"))
+      .toBeGreaterThan(bloco.indexOf("if (it.available === false) return;"));
   });
 
   test("pickCalzone abre o mesmo modal de sabores (flavorModalOpen) e zera qualquer sabor anterior", () => {
@@ -1534,5 +1536,16 @@ describe("/cardapio — prospeccao de ranking sem competir com pedido/pagamento"
     expect(bloco).toContain('fetch("/api/cliente/privacidade/ranking"');
     expect(bloco).not.toContain("PATCH");
     expect(bloco).not.toContain("DELETE");
+  });
+});
+
+
+describe("/cardapio — aviso discreto de privacidade", () => {
+  test("não mostra banner de monitoramento e oferece link discreto no rodapé", () => {
+    expect(fonte).not.toContain("Se precisar de ajuda, a equipe pode conferir");
+    expect(fonte).toContain('href="/privacidade"');
+    expect(fonte).toContain(">Privacidade</a>");
+    expect(fonte).toContain('fetch("/api/comportamento", { method: "DELETE" })');
+    expect(fonte).toContain("/api/cardapio-whatsapp-session?t=");
   });
 });

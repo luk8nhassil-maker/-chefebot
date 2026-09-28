@@ -41,6 +41,7 @@ export const ROUTE_ROLES: Array<{ path: string; roles: Role[] }> = [
   { path: "/financeiro", roles: ["admin", "dev", "financeiro"] },
   { path: "/contador", roles: ["admin", "dev", "contador"] },
   { path: "/api/orders", roles: ["admin", "atendente", "dev"] },
+  { path: "/api/dev", roles: ["dev"] },
   { path: "/api/padroes", roles: ["dev"] },
   { path: "/api/funcionarios", roles: ["admin", "dev"] },
 ];
