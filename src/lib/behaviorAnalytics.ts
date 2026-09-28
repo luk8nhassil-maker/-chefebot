@@ -653,6 +653,124 @@ export async function readBehaviorFunnelOverview(params: {
   };
 }
 
+function utcMonthsBetween(startMs: number, endMs: number): string[] {
+  const months: string[] = [];
+  const start = new Date(startMs);
+  const end = new Date(endMs);
+  let year = start.getUTCFullYear();
+  let month = start.getUTCMonth();
+  const endYear = end.getUTCFullYear();
+  const endMonth = end.getUTCMonth();
+
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    months.push(`${year}${String(month + 1).padStart(2, "0")}`);
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  return months;
+}
+
+export type BehaviorCustomerSessionTimeline = {
+  sessionId: string;
+  startedAtMs: number;
+  endedAtMs: number;
+  durationSec: number;
+  converted: boolean;
+  events: BehaviorEventRecord[];
+};
+
+export type BehaviorCustomerTimeline = {
+  schemaVersion: 1;
+  startMs: number;
+  endMs: number;
+  sessions: BehaviorCustomerSessionTimeline[];
+  totalSessions: number;
+  convertedSessions: number;
+  sessionsWithoutOrder: number;
+};
+
+/**
+ * Linha do tempo individual, ainda pseudonimizada no armazenamento.
+ *
+ * O clienteId só existe como argumento server-side e é convertido para HMAC
+ * antes de qualquer acesso às chaves comportamentais. O retorno não inclui
+ * clienteId, telefone, nome ou endereço.
+ *
+ * Como a sessão é vinculada pelo seu instante de início, eventos anônimos
+ * anteriores à identificação também aparecem quando a sessão posteriormente
+ * se associa ao cliente.
+ */
+export async function readBehaviorCustomerTimeline(params: {
+  clienteId: string;
+  tenantId?: string;
+  startMs: number;
+  endMs: number;
+}): Promise<BehaviorCustomerTimeline | null> {
+  const config = behaviorAnalyticsConfig();
+  if (!config || !params.clienteId) return null;
+  if (
+    !Number.isFinite(params.startMs) ||
+    !Number.isFinite(params.endMs) ||
+    params.startMs < 0 ||
+    params.startMs > params.endMs
+  ) return null;
+
+  const tenantId = params.tenantId ?? BEHAVIOR_TENANT_DEFAULT;
+  const customerRef = deriveBehaviorCustomerRef(params.clienteId, config.hmacSecret);
+  if (!customerRef) return null;
+
+  const sessionIds = new Set<string>();
+  for (const month of utcMonthsBetween(params.startMs, params.endMs)) {
+    const ids = await aredis.zrange(
+      keyCustomerSessions(tenantId, customerRef, month),
+      params.startMs,
+      params.endMs,
+      { byScore: true },
+    );
+    for (const sessionId of ids) {
+      if (behaviorSessionIdValid(sessionId)) sessionIds.add(sessionId);
+    }
+  }
+
+  const sessions: BehaviorCustomerSessionTimeline[] = [];
+  for (const sessionId of sessionIds) {
+    const events = (await readBehaviorSessionEvents({
+      sessionId,
+      tenantId,
+      startMs: params.startMs,
+      endMs: params.endMs,
+    })).sort((a, b) => a.createdAtMs - b.createdAtMs);
+
+    if (events.length === 0) continue;
+    const startedAtMs = events[0]!.createdAtMs;
+    const endedAtMs = events[events.length - 1]!.createdAtMs;
+    sessions.push({
+      sessionId,
+      startedAtMs,
+      endedAtMs,
+      durationSec: Math.max(0, Math.round((endedAtMs - startedAtMs) / 1000)),
+      converted: events.some((event) => event.type === "order_created"),
+      events,
+    });
+  }
+
+  sessions.sort((a, b) => a.startedAtMs - b.startedAtMs);
+  const convertedSessions = sessions.filter((session) => session.converted).length;
+
+  return {
+    schemaVersion: 1,
+    startMs: params.startMs,
+    endMs: params.endMs,
+    sessions,
+    totalSessions: sessions.length,
+    convertedSessions,
+    sessionsWithoutOrder: sessions.length - convertedSessions,
+  };
+}
+
 export async function readBehaviorSessionEvents(params: {
   sessionId: string;
   tenantId?: string;
