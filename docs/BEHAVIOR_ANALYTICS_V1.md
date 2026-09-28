@@ -15,7 +15,7 @@ Esta camada é analítica. Ela não altera preço, pedido, Pix, fidelidade, Rank
 5. Nome, telefone, endereço, observação do pedido, token, OTP e texto livre não entram no evento comportamental.
 6. Preview nunca escreve telemetria comportamental real.
 7. Nenhum evento sozinho autoriza cupom ou benefício.
-8. Retenção é obrigatória e configurável; ausência de configuração mantém o coletor desligado.
+8. Em produção, a coleta fica ligada por padrão, usa retenção de 30 dias e pode ser desligada com BEHAVIOR_ANALYTICS_ENABLED=false. Em Preview nunca grava; em desenvolvimento exige ativação explícita.
 
 ## Fluxo
 
