@@ -8,6 +8,7 @@ import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
 import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
 import { destinoNextPermitido } from '@/lib/clientePedidos'
 import { fetchCliente, guardarSessaoFallback, limparSessaoFallback, telemetria } from '@/lib/clienteSessaoFront'
+import { installBehaviorPageExitTracking, trackBehavior } from '@/lib/behaviorClient'
 import {
   detectarCreditoDoPedido,
   detectarConquistaRanking,
@@ -848,6 +849,24 @@ export default function ClientePage() {
   const [previewAviso, setPreviewAviso] = useState('')
   const codigoRef = useRef<HTMLInputElement>(null)
   const fotoInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    trackBehavior('app_open', { source: 'cliente', screen: 'cliente' })
+    return installBehaviorPageExitTracking('cliente')
+  }, [])
+
+  useEffect(() => {
+    if (modoPreview) return
+    trackBehavior('screen_view', { source: 'cliente', screen: step })
+    if (step === 'perfil') {
+      trackBehavior('fidelity_open', { source: 'cliente', screen: 'perfil', target: 'fidelity' })
+    }
+  }, [step, modoPreview])
+
+  useEffect(() => {
+    if (modoPreview || mobilePanel !== 'ranking') return
+    trackBehavior('ranking_open', { source: 'ranking', screen: 'ranking', target: 'ranking' })
+  }, [mobilePanel, modoPreview])
 
   function entrarPreview() {
     if (!PREVIEW_LOCAL_DISPONIVEL) return
