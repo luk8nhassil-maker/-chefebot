@@ -63,6 +63,29 @@ type RedisBehavior = typeof redis & {
 
 const aredis = redis as RedisBehavior;
 
+export type BehaviorFunnelStage =
+  | "search"
+  | "cart"
+  | "checkout"
+  | "checkout_exit"
+  | "ranking"
+  | "cofre"
+  | "converted";
+
+function funnelStageForRecord(record: BehaviorEventRecord): BehaviorFunnelStage | null {
+  if (record.type === "search_used") return "search";
+  if (record.type === "cart_add") return "cart";
+  if (
+    record.type === "funnel_step" &&
+    (record.data.step === "entrega" || record.data.step === "pagamento")
+  ) return "checkout";
+  if (record.type === "checkout_exit_observed") return "checkout_exit";
+  if (record.type === "ranking_open") return "ranking";
+  if (record.type === "cofre_open") return "cofre";
+  if (record.type === "order_created") return "converted";
+  return null;
+}
+
 export function behaviorAnalyticsConfig(): BehaviorConfig | null {
   if (process.env.VERCEL_ENV === "preview") return null;
   if (process.env.BEHAVIOR_ANALYTICS_ENABLED !== "true") return null;
@@ -197,6 +220,18 @@ function keyCounterDay(tenantId: string, day: string): string {
 function keyCustomerSessions(tenantId: string, customerRef: string, month: string): string {
   return `behavior:customer:sessions:${tenantId}:${customerRef}:${month}`;
 }
+function keySessionsDay(tenantId: string, day: string): string {
+  return `behavior:sessions:day:${tenantId}:${day}`;
+}
+function keyStageDay(tenantId: string, stage: BehaviorFunnelStage, day: string): string {
+  return `behavior:stage:${tenantId}:${stage}:${day}`;
+}
+function keyCustomersDay(tenantId: string, day: string): string {
+  return `behavior:customers:day:${tenantId}:${day}`;
+}
+function keyCustomerSessionsDay(tenantId: string, day: string): string {
+  return `behavior:customer-sessions:day:${tenantId}:${day}`;
+}
 function keyRate(tenantId: string, sessionId: string, minute: string): string {
   return `behavior:rate:${tenantId}:${sessionId}:${minute}`;
 }
@@ -276,14 +311,43 @@ async function persistEvent(
   const dayKey = keyDay(record.tenantId, day);
   const counterKey = keyCounterDay(record.tenantId, day);
 
-  await Promise.all([
+  const stage = funnelStageForRecord(record);
+  const sessionDayKey = keySessionsDay(record.tenantId, day);
+  const customerDayKey = keyCustomersDay(record.tenantId, day);
+  const customerSessionsDayKey = keyCustomerSessionsDay(record.tenantId, day);
+
+  const writes: Array<Promise<unknown>> = [
     aredis.zadd(sessionKey, { score: record.createdAtMs, member: record.eventId }),
     aredis.expire(sessionKey, config.retentionSeconds),
     aredis.zadd(dayKey, { score: record.createdAtMs, member: record.eventId }),
     aredis.expire(dayKey, config.retentionSeconds),
+    aredis.zadd(sessionDayKey, { score: record.createdAtMs, member: record.sessionId }),
+    aredis.expire(sessionDayKey, config.retentionSeconds),
     aredis.hincrby(counterKey, record.type, 1),
     aredis.expire(counterKey, config.retentionSeconds),
-  ]);
+  ];
+
+  if (stage) {
+    const stageKey = keyStageDay(record.tenantId, stage, day);
+    writes.push(
+      aredis.zadd(stageKey, { score: record.createdAtMs, member: record.sessionId }),
+      aredis.expire(stageKey, config.retentionSeconds),
+    );
+  }
+
+  if (record.customerRef) {
+    writes.push(
+      aredis.zadd(customerDayKey, { score: record.createdAtMs, member: record.customerRef }),
+      aredis.expire(customerDayKey, config.retentionSeconds),
+      aredis.zadd(customerSessionsDayKey, {
+        score: record.createdAtMs,
+        member: `${record.customerRef}:${record.sessionId}`,
+      }),
+      aredis.expire(customerSessionsDayKey, config.retentionSeconds),
+    );
+  }
+
+  await Promise.all(writes);
 
   return {
     recorded: true,
@@ -457,6 +521,111 @@ export async function recordOrderCreatedBehaviorFact(params: {
       reason: "storage_error",
     };
   }
+}
+
+function utcDaysBetween(startMs: number, endMs: number): string[] {
+  const days: string[] = [];
+  const start = new Date(startMs);
+  const end = new Date(endMs);
+  let cursor = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+  const last = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+  while (cursor <= last) {
+    days.push(dayBucket(cursor));
+    cursor += 24 * 60 * 60 * 1000;
+  }
+  return days;
+}
+
+async function readMembersUnion(keys: string[]): Promise<Set<string>> {
+  const result = new Set<string>();
+  for (const key of keys) {
+    const members = await aredis.zrange(key, 0, "+inf", { byScore: true });
+    for (const member of members) result.add(member);
+  }
+  return result;
+}
+
+export type BehaviorFunnelOverview = {
+  schemaVersion: 1;
+  startMs: number;
+  endMs: number;
+  sessions: number;
+  identifiedCustomers: number;
+  identifiedCustomerSessions: number;
+  sessionsWithSearch: number;
+  sessionsWithCart: number;
+  sessionsReachedCheckout: number;
+  sessionsWithCheckoutExitObserved: number;
+  convertedSessions: number;
+  sessionsWithoutOrder: number;
+  cartSessionsWithoutOrder: number;
+  checkoutSessionsWithoutOrder: number;
+  conversionRatePct: number;
+};
+
+export async function readBehaviorFunnelOverview(params: {
+  tenantId?: string;
+  startMs: number;
+  endMs: number;
+}): Promise<BehaviorFunnelOverview | null> {
+  const config = behaviorAnalyticsConfig();
+  if (!config) return null;
+  if (
+    !Number.isFinite(params.startMs) ||
+    !Number.isFinite(params.endMs) ||
+    params.startMs < 0 ||
+    params.startMs > params.endMs
+  ) return null;
+
+  const tenantId = params.tenantId ?? BEHAVIOR_TENANT_DEFAULT;
+  const days = utcDaysBetween(params.startMs, params.endMs);
+
+  const [
+    sessions,
+    customers,
+    customerSessions,
+    search,
+    cart,
+    checkout,
+    checkoutExit,
+    converted,
+  ] = await Promise.all([
+    readMembersUnion(days.map((day) => keySessionsDay(tenantId, day))),
+    readMembersUnion(days.map((day) => keyCustomersDay(tenantId, day))),
+    readMembersUnion(days.map((day) => keyCustomerSessionsDay(tenantId, day))),
+    readMembersUnion(days.map((day) => keyStageDay(tenantId, "search", day))),
+    readMembersUnion(days.map((day) => keyStageDay(tenantId, "cart", day))),
+    readMembersUnion(days.map((day) => keyStageDay(tenantId, "checkout", day))),
+    readMembersUnion(days.map((day) => keyStageDay(tenantId, "checkout_exit", day))),
+    readMembersUnion(days.map((day) => keyStageDay(tenantId, "converted", day))),
+  ]);
+
+  const countWithout = (source: Set<string>, excluded: Set<string>) => {
+    let count = 0;
+    for (const id of source) if (!excluded.has(id)) count += 1;
+    return count;
+  };
+
+  return {
+    schemaVersion: 1,
+    startMs: params.startMs,
+    endMs: params.endMs,
+    sessions: sessions.size,
+    identifiedCustomers: customers.size,
+    identifiedCustomerSessions: customerSessions.size,
+    sessionsWithSearch: search.size,
+    sessionsWithCart: cart.size,
+    sessionsReachedCheckout: checkout.size,
+    sessionsWithCheckoutExitObserved: checkoutExit.size,
+    convertedSessions: converted.size,
+    sessionsWithoutOrder: countWithout(sessions, converted),
+    cartSessionsWithoutOrder: countWithout(cart, converted),
+    checkoutSessionsWithoutOrder: countWithout(checkout, converted),
+    conversionRatePct:
+      sessions.size > 0
+        ? Math.round((converted.size / sessions.size) * 10_000) / 100
+        : 0,
+  };
 }
 
 export async function readBehaviorSessionEvents(params: {
