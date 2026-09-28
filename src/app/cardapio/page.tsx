@@ -2752,7 +2752,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     <>
       <style>{CSS}</style>
       <LayoutDebugPanel />
-      {waFinal && monitoramentoAtivo && !usarOutroWhatsapp && <aside role="status" style={{ maxWidth: 720, margin: "12px auto", padding: "10px 14px", border: "1px solid var(--surface-elevated)", borderRadius: 10, color: "var(--text-secondary)", fontSize: 12, lineHeight: 1.5 }}>Se precisar de ajuda, a equipe pode conferir as etapas do cardápio acessadas pelo WhatsApp final {waFinal}. O texto da busca não fica salvo.</aside>}
+      
       <div className={`wrap ${screen === "sc-start" ? "wrap-start" : ""}`} style={{ "--steps-h": `${stepsHeight}px` } as CSSProperties}>
         {screen !== "sc-start" && (
           <div className="steps" ref={stepsRef}>
@@ -3555,6 +3555,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             />
           )}
         </main>
+        <div style={{ padding: "4px 0 12px", textAlign: "center", fontSize: 11, color: "var(--text-secondary)" }}>
+          <a href="/privacidade" style={{ color: "inherit", textDecoration: "underline", textUnderlineOffset: 3 }}>Privacidade</a>
+        </div>
       </div>
       {cartCount > 0 && screen === "sc-cart" && (
         <div className={`delivery-cta-bar ${showBottomNav ? "stacked" : ""}`}>
