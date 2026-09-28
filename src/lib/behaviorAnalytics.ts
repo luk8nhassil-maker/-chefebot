@@ -24,6 +24,7 @@ export type {
 export type BehaviorClientInput = {
   eventId: string;
   sessionId: string;
+  visitorId?: string;
   type: ClientBehaviorEventType;
   occurredAtMs?: number;
   context?: BehaviorContext;
@@ -34,6 +35,7 @@ export type BehaviorEvent = {
   eventId: string;
   tenantId: string;
   sessionId: string;
+  visitorHash: string | null;
   actorHash: string | null;
   type: BehaviorEventType;
   occurredAtMs: number;
@@ -75,6 +77,10 @@ export function pseudonimizarClienteId(clienteId: string): string | null {
   return pseudonimizarValor(clienteId);
 }
 
+export function pseudonimizarVisitanteId(visitorId: string): string | null {
+  return pseudonimizarValor("visitor:" + visitorId);
+}
+
 export async function consumirLimiteIngestaoComportamental(chaveBruta: string): Promise<boolean> {
   if (!behaviorAnalyticsEnabled()) return false;
   const hash = pseudonimizarValor(chaveBruta);
@@ -106,6 +112,9 @@ export function behaviorGlobalIndexKey(tenantId: string, day: string): string {
 }
 export function behaviorActorIndexKey(tenantId: string, actorHash: string, day: string): string {
   return `behavior:v1:actor:${tenantId}:${actorHash}:${day}`;
+}
+export function behaviorVisitorIndexKey(tenantId: string, visitorHash: string, day: string): string {
+  return `behavior:v1:visitor:${tenantId}:${visitorHash}:${day}`;
 }
 export function behaviorSessionIndexKey(tenantId: string, sessionId: string, day: string): string {
   return `behavior:v1:session:${tenantId}:${sessionId}:${day}`;
@@ -173,6 +182,8 @@ export function validarEventoClienteComportamento(raw: unknown, agoraMs = Date.n
   const obj = raw as Record<string, unknown>;
   if (typeof obj.eventId !== "string" || !UUID_RE.test(obj.eventId)) return null;
   if (typeof obj.sessionId !== "string" || !UUID_RE.test(obj.sessionId)) return null;
+  const visitorId = typeof obj.visitorId === "string" && UUID_RE.test(obj.visitorId) ? obj.visitorId : undefined;
+  if (obj.visitorId !== undefined && !visitorId) return null;
   if (!CLIENT_BEHAVIOR_EVENTS.includes(obj.type as ClientBehaviorEventType)) return null;
 
   const occurred = Number(obj.occurredAtMs);
@@ -183,6 +194,7 @@ export function validarEventoClienteComportamento(raw: unknown, agoraMs = Date.n
   return {
     eventId: obj.eventId,
     sessionId: obj.sessionId,
+    ...(visitorId ? { visitorId } : {}),
     type: obj.type as ClientBehaviorEventType,
     occurredAtMs,
     context: sanitizeContext(obj.context, false),
@@ -209,6 +221,7 @@ async function persistEvent(event: BehaviorEvent): Promise<boolean> {
     behaviorGlobalIndexKey(event.tenantId, day),
     behaviorSessionIndexKey(event.tenantId, event.sessionId, day),
   ];
+  if (event.visitorHash) keys.push(behaviorVisitorIndexKey(event.tenantId, event.visitorHash, day));
   if (event.actorHash) keys.push(behaviorActorIndexKey(event.tenantId, event.actorHash, day));
 
   for (const key of keys) {
@@ -237,6 +250,7 @@ export async function registrarEventosClienteComportamento(params: {
       eventId: input.eventId,
       tenantId,
       sessionId: input.sessionId,
+      visitorHash: input.visitorId ? pseudonimizarVisitanteId(input.visitorId) : null,
       actorHash,
       type: input.type,
       occurredAtMs: input.occurredAtMs ?? agoraMs,
@@ -253,18 +267,21 @@ export async function registrarEventoServidorComportamento(params: {
   tenantId?: string;
   clienteId?: string | null;
   sessionId: string;
+  visitorId?: string | null;
   type: ServerBehaviorEventType;
   context?: BehaviorContext;
   agoraMs?: number;
 }): Promise<boolean> {
   if (!behaviorAnalyticsEnabled()) return false;
   if (!UUID_RE.test(params.sessionId)) return false;
+  if (params.visitorId != null && !UUID_RE.test(params.visitorId)) return false;
   const agoraMs = params.agoraMs ?? Date.now();
   const event: BehaviorEvent = {
     schemaVersion: BEHAVIOR_SCHEMA_VERSION,
     eventId: randomUUID(),
     tenantId: params.tenantId ?? BEHAVIOR_TENANT_DEFAULT,
     sessionId: params.sessionId,
+    visitorHash: params.visitorId ? pseudonimizarVisitanteId(params.visitorId) : null,
     actorHash: params.clienteId ? pseudonimizarClienteId(params.clienteId) : null,
     type: params.type,
     occurredAtMs: agoraMs,
