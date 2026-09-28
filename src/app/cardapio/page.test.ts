@@ -61,6 +61,19 @@ describe("/cardapio (PublicCardapio) — menu inferior unificado com /cliente e 
   });
 });
 
+describe("/cardapio — telemetria do carrinho", () => {
+  test("cart_state acompanha apenas mudanças no carrinho e não mudanças de tela", () => {
+    const blocoCartState = fonte.slice(
+      fonte.indexOf("const cartBehaviorSignature"),
+      fonte.indexOf("const cartTemBebidaOuSuco", fonte.indexOf("const cartBehaviorSignature"))
+    );
+    expect(blocoCartState).toContain("[cartBehaviorSignature, hydrated]");
+    expect(blocoCartState).not.toContain("screen");
+    expect(blocoCartState).toContain("cartItems: Number(cartItemsRaw) || 0");
+    expect(blocoCartState).toContain("cartDistinctItems: Number(cartDistinctItemsRaw) || 0");
+  });
+});
+
 describe("/cardapio — Nome/Apelido sem mover o checkout", () => {
   const blocoEntrega = fonte.slice(
     fonte.indexOf('screen === "sc-delivery" && ('),

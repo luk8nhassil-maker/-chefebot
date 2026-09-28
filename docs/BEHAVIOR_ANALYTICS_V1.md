@@ -160,7 +160,7 @@ Assim, o custo normal é **5 comandos Redis por evento anônimo** ou **7 por eve
 | 20 | ~102 comandos | ~142 comandos |
 | 40 | ~204 comandos | ~284 comandos |
 
-A tabela supõe lotes cheios, uma janela de rate limit e eventos gravados sem retry; pedidos oficiais acrescentam **7 comandos** cada. O cliente também envia lotes após uma espera curta, então sessões com pausas podem usar mais requisições HTTP e comandos de rate limit. Reenvios idempotentes não criam eventos duplicados, mas consultam o evento existente e repetem os comandos dos índices para repará-los. São estimativas de operações Redis, não preços: o custo monetário depende do plano e da região. O Redis é usado também por outros recursos do ChefeBot; para atribuir custo real ao módulo, medir volume/comandos por namespace e comparar com a linha de base.
+A tabela supõe lotes cheios, uma janela de rate limit e eventos gravados sem retry. Cada pedido oficial acrescenta **7 comandos quando associado a um cliente** ou **5 quando anônimo**. O cliente também envia lotes após uma espera curta, então sessões com pausas podem usar mais requisições HTTP e comandos de rate limit. Reenvios idempotentes não criam eventos duplicados, mas consultam o evento existente e repetem os comandos dos índices para repará-los. São estimativas de operações Redis, não preços: o custo monetário depende do plano e da região. O Redis é usado também por outros recursos do ChefeBot; para atribuir custo real ao módulo, instrumentar contadores de operações na aplicação para as chaves `behavior:v1` e comparar com a linha de base geral do Redis.
 
 ## Release gates
 
