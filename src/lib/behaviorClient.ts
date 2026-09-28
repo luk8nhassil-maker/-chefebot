@@ -4,12 +4,17 @@ import { fetchCliente } from "./clienteSessaoFront";
 import type { BehaviorContext, ClientBehaviorEventType } from "./behaviorAnalyticsTypes";
 
 const SESSION_KEY = "cf_behavior_session_v1";
+const SESSION_LAST_ACTIVITY_KEY = "cf_behavior_session_last_v1";
+const SESSION_APP_OPEN_KEY = "cf_behavior_app_open_v1";
+const VISITOR_KEY = "cf_behavior_visitor_v1";
+const SESSION_IDLE_MS = 30 * 60 * 1000;
 const QUEUE_MAX = 20;
 const FLUSH_DELAY_MS = 1200;
 
 type QueuedEvent = {
   eventId: string;
   sessionId: string;
+  visitorId?: string;
   type: ClientBehaviorEventType;
   occurredAtMs: number;
   context?: BehaviorContext;
@@ -35,13 +40,38 @@ function uuid(): string {
   });
 }
 
+export function getBehaviorVisitorId(): string | null {
+  if (!enabledOnClient() || typeof window === "undefined") return null;
+  try {
+    const atual = localStorage.getItem(VISITOR_KEY);
+    if (atual && /^[0-9a-f-]{36}$/i.test(atual)) return atual;
+    const novo = uuid();
+    localStorage.setItem(VISITOR_KEY, novo);
+    return novo;
+  } catch {
+    return null;
+  }
+}
+
 export function getBehaviorSessionId(): string | null {
   if (!enabledOnClient() || typeof window === "undefined") return null;
   try {
+    const agora = Date.now();
     const atual = sessionStorage.getItem(SESSION_KEY);
-    if (atual && /^[0-9a-f-]{36}$/i.test(atual)) return atual;
+    const ultimaAtividade = Number(sessionStorage.getItem(SESSION_LAST_ACTIVITY_KEY) ?? "0");
+    const atualValido = !!atual && /^[0-9a-f-]{36}$/i.test(atual);
+    const aindaAtiva = atualValido && Number.isFinite(ultimaAtividade) && ultimaAtividade > 0
+      && agora - ultimaAtividade <= SESSION_IDLE_MS;
+
+    if (atualValido && aindaAtiva) {
+      sessionStorage.setItem(SESSION_LAST_ACTIVITY_KEY, String(agora));
+      return atual;
+    }
+
     const novo = uuid();
     sessionStorage.setItem(SESSION_KEY, novo);
+    sessionStorage.setItem(SESSION_LAST_ACTIVITY_KEY, String(agora));
+    sessionStorage.removeItem(SESSION_APP_OPEN_KEY);
     return novo;
   } catch {
     return null;
@@ -90,6 +120,14 @@ export function trackBehavior(type: ClientBehaviorEventType, context?: BehaviorC
   if (!enabledOnClient()) return;
   const sessionId = getBehaviorSessionId();
   if (!sessionId) return;
+  const visitorId = getBehaviorVisitorId();
+
+  if (type === "app_open") {
+    try {
+      if (sessionStorage.getItem(SESSION_APP_OPEN_KEY) === sessionId) return;
+      sessionStorage.setItem(SESSION_APP_OPEN_KEY, sessionId);
+    } catch {}
+  }
 
   const contextoFinal: BehaviorContext | undefined =
     type === "app_open"
@@ -99,6 +137,7 @@ export function trackBehavior(type: ClientBehaviorEventType, context?: BehaviorC
   queue.push({
     eventId: uuid(),
     sessionId,
+    ...(visitorId ? { visitorId } : {}),
     type,
     occurredAtMs: Date.now(),
     ...(contextoFinal ? { context: contextoFinal } : {}),
