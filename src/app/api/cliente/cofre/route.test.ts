@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   buscarClientePorId: vi.fn(),
   derivarClienteIdPorTelefone: vi.fn(),
   obterCofreClienteSomenteLeitura: vi.fn(),
+  cofreChefReadModelHabilitado: vi.fn(),
 }));
 
 vi.mock("@/lib/clienteAuth", () => ({
@@ -22,12 +23,14 @@ vi.mock("@/lib/fidelidade", () => ({
 
 vi.mock("@/lib/cofreChefReadModel", () => ({
   obterCofreClienteSomenteLeitura: mocks.obterCofreClienteSomenteLeitura,
+  cofreChefReadModelHabilitado: mocks.cofreChefReadModelHabilitado,
 }));
 
 import { GET } from "./route";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.cofreChefReadModelHabilitado.mockReturnValue(true);
   mocks.lerSessaoCliente.mockResolvedValue({
     clienteId: "cli_sessao",
     telefone: "98999999999",
@@ -58,6 +61,17 @@ beforeEach(() => {
 });
 
 describe("GET /api/cliente/cofre", () => {
+  test("release gate fechado responde 404 antes de qualquer leitura", async () => {
+    mocks.cofreChefReadModelHabilitado.mockReturnValue(false);
+
+    const res = await GET(new NextRequest("https://chefedapizza.com.br/api/cliente/cofre"));
+
+    expect(res.status).toBe(404);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.lerSessaoCliente).not.toHaveBeenCalled();
+    expect(mocks.obterCofreClienteSomenteLeitura).not.toHaveBeenCalled();
+  });
+
   test("exige sessão do cliente", async () => {
     mocks.lerSessaoCliente.mockResolvedValue(null);
 
