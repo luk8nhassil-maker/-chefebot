@@ -1366,6 +1366,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // token opaco e os 4 últimos dígitos — o phone completo fica no servidor.
   const [waToken, setWaToken] = useState<string | null>(null);
   const [waFinal, setWaFinal] = useState("");
+  const [monitoramentoAtivo, setMonitoramentoAtivo] = useState(false);
   // Vínculo automático do token é a fonte principal enquanto ativo — só deixa
   // de valer se o cliente pedir explicitamente para usar outro WhatsApp.
   const [usarOutroWhatsapp, setUsarOutroWhatsapp] = useState(false);
@@ -1455,7 +1456,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         const r = await fetch(`/api/cardapio-whatsapp-session?t=${encodeURIComponent(token)}`, { cache: "no-store" });
         const data = await r.json();
         if (data?.ok && data.phoneFinal) {
-          trackBehavior("whatsapp_link_verified", { source: "cardapio", screen: "sc-start", referrerKind: "whatsapp_link" });
+          setMonitoramentoAtivo(data.monitoramentoAtivo === true);
+          if (data.monitoramentoAtivo === true) trackBehavior("whatsapp_link_verified", { source: "cardapio", screen: "sc-start", referrerKind: "whatsapp_link" });
           setWaToken(token); setWaFinal(String(data.phoneFinal));
           try { sessionStorage.setItem("cf_wa_token", token); sessionStorage.setItem("cf_wa_final", String(data.phoneFinal)); } catch {}
         } else {
@@ -2750,7 +2752,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     <>
       <style>{CSS}</style>
       <LayoutDebugPanel />
-      {waFinal && !usarOutroWhatsapp && <aside role="status" style={{ maxWidth: 720, margin: "12px auto", padding: "10px 14px", border: "1px solid var(--surface-elevated)", borderRadius: 10, color: "var(--text-secondary)", fontSize: 12, lineHeight: 1.5 }}>Para ajudar a equipe a resolver problemas no cardápio, telas e etapas acessadas neste navegador podem ser associadas ao WhatsApp final {waFinal} por até 30 dias. Não registramos o texto digitado na busca nem endereço ou dados de pagamento nesta trilha. Ao escolher outro WhatsApp, esse vínculo é removido.</aside>}
+      {waFinal && monitoramentoAtivo && !usarOutroWhatsapp && <aside role="status" style={{ maxWidth: 720, margin: "12px auto", padding: "10px 14px", border: "1px solid var(--surface-elevated)", borderRadius: 10, color: "var(--text-secondary)", fontSize: 12, lineHeight: 1.5 }}>Para ajudar a equipe a resolver problemas no cardápio, telas e etapas acessadas neste navegador podem ser associadas ao WhatsApp final {waFinal} por até 30 dias. Não registramos o texto digitado na busca nem endereço ou dados de pagamento nesta trilha. Ao escolher outro WhatsApp, esse vínculo é removido.</aside>}
       <div className={`wrap ${screen === "sc-start" ? "wrap-start" : ""}`} style={{ "--steps-h": `${stepsHeight}px` } as CSSProperties}>
         {screen !== "sc-start" && (
           <div className="steps" ref={stepsRef}>

@@ -42,7 +42,7 @@ describe("GET /api/cardapio-whatsapp-session", () => {
     const body = await response.json();
     const cookie = response.headers.get("set-cookie") ?? "";
 
-    expect(body).toEqual({ ok: true, origem: "whatsapp", phoneFinal: "9999", phoneMascarado: "(44) 9••••-9999" });
+    expect(body).toEqual({ ok: true, origem: "whatsapp", monitoramentoAtivo: true, phoneFinal: "9999", phoneMascarado: "(44) 9••••-9999" });
     expect(JSON.stringify(body)).not.toContain("5544999999999");
     expect(cookie).toContain("behavior-link-v1=");
     expect(cookie).toContain("HttpOnly");

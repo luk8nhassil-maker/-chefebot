@@ -3,9 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 function ler(relativo: string): string {
-  return readFileSync(fileURLToPath(new URL(relativo, import.meta.url)), "utf-8").replace(/\r
-/g, "
-");
+  return readFileSync(fileURLToPath(new URL(relativo, import.meta.url)), "utf-8");
 }
 
 const cardapio = ler("../app/cardapio/page.tsx");

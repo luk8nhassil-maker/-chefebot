@@ -28,16 +28,18 @@ export async function GET(req: NextRequest) {
       // best-effort — nunca bloqueia a resolução do token
     }
     // phoneMascarado: formato de exibição "(45) 9••••-0691" para confirmação. O telefone completo nunca volta ao navegador.
+    const monitoramentoAtivo = behaviorAnalyticsEnabled();
     const response = NextResponse.json({
       ok: true,
       origem: "whatsapp",
+      monitoramentoAtivo,
       phoneFinal: mascararPhone(resolvido.phone),
       phoneMascarado: mascararTelefoneExibicao(resolvido.phone),
     }, { headers: { "Cache-Control": "no-store" } });
 
     // Associa a navegação após validar o link oficial. Cookie HttpOnly contém
     // somente pseudônimo assinado, tem finalidade restrita à telemetria e não autentica pedidos.
-    if (behaviorAnalyticsEnabled()) {
+    if (monitoramentoAtivo) {
       const clienteId = derivarClienteIdPorTelefone(resolvido.phone);
       const tokenComportamento = clienteId ? criarVinculoCookieComportamento(clienteId) : null;
       if (tokenComportamento) response.cookies.set("behavior-link-v1", tokenComportamento, {
