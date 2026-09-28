@@ -145,6 +145,22 @@ function sanitizeContext(input: unknown, allowPedidoId = false): BehaviorContext
   if (["ranking","cofre","fidelity","cart","checkout","orders","tracking"].includes(String(raw.target))) {
     out.target = raw.target as BehaviorContext["target"];
   }
+  if (["mobile","tablet","desktop","unknown"].includes(String(raw.deviceClass))) {
+    out.deviceClass = raw.deviceClass as BehaviorContext["deviceClass"];
+  }
+  if (["compact","medium","wide","unknown"].includes(String(raw.viewportClass))) {
+    out.viewportClass = raw.viewportClass as BehaviorContext["viewportClass"];
+  }
+  if (["standalone","browser","unknown"].includes(String(raw.displayMode))) {
+    out.displayMode = raw.displayMode as BehaviorContext["displayMode"];
+  }
+  if (["direct","internal","external","whatsapp_link","unknown"].includes(String(raw.referrerKind))) {
+    out.referrerKind = raw.referrerKind as BehaviorContext["referrerKind"];
+  }
+  const engagementMs = Number(raw.engagementMs);
+  if (Number.isInteger(engagementMs) && engagementMs >= 0 && engagementMs <= 24 * 60 * 60 * 1000) {
+    out.engagementMs = engagementMs;
+  }
   if (allowPedidoId) {
     const pedidoId = sanitizeSafeId(raw.pedidoId);
     if (pedidoId) out.pedidoId = pedidoId;
