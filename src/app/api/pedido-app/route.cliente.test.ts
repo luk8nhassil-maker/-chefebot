@@ -113,7 +113,10 @@ describe("POST /api/pedido-app — vinculo opcional com area do cliente", () => 
 
     expect(res.status).toBe(200);
     expect(registrarEventoServidorComportamentoMock).toHaveBeenCalledWith(expect.objectContaining({
-      clienteId: "cli_11900000001",
+      // A identidade canônica da fidelidade/analytics vem do telefone do
+      // próprio pedido, não do cookie. Mantém a mesma autoridade já usada
+      // pelo crédito de Estrelas e evita duas identidades para uma compra.
+      clienteId: "cli_86999998888",
       sessionId,
       type: "order_created",
       context: expect.objectContaining({
