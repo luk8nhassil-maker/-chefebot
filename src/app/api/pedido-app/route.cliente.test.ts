@@ -37,9 +37,11 @@ beforeEach(() => {
 
 const itemPizza = { kind: "pizza" as const, name: "Pizza G", detail: "Calabresa", price: 50, qty: 2 };
 
-function pedidoRequest(opts: { clienteToken?: string; itens?: unknown[] } = {}) {
+function pedidoRequest(opts: { clienteToken?: string; itens?: unknown[]; cliente?: string; nome?: string; apelido?: string } = {}) {
   const body = {
-    cliente: "Fulano de Tal",
+    cliente: opts.cliente ?? "Fulano de Tal",
+    ...(opts.nome !== undefined ? { nome: opts.nome } : {}),
+    ...(opts.apelido !== undefined ? { apelido: opts.apelido } : {}),
     telefone: "86999998888",
     itens: opts.itens ?? [itemPizza],
     tipoEntrega: "retirada",
@@ -61,6 +63,16 @@ describe("POST /api/pedido-app — vinculo opcional com area do cliente", () => 
     const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidosSalvos).toHaveLength(1);
     expect(pedidosSalvos[0].clienteId).toBeUndefined();
+  });
+
+  test("apelido sozinho identifica o pedido sem ser salvo como nome", async () => {
+    const res = await POST(pedidoRequest({ cliente: "Binho", apelido: "Binho" }));
+    expect(res.status).toBe(200);
+
+    const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidosSalvos[0].cliente).toBe("Binho");
+    expect(pedidosSalvos[0].apelidoCliente).toBe("Binho");
+    expect(pedidosSalvos[0].nomeCliente).toBeUndefined();
   });
 
   test("cliente logado tem o pedido vinculado ao clienteId e a contagem de pizzas", async () => {
