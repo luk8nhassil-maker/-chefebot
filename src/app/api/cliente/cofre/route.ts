@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
 import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
-import { obterCofreClienteSomenteLeitura } from "@/lib/cofreChefReadModel";
+import {
+  cofreChefReadModelHabilitado,
+  obterCofreClienteSomenteLeitura,
+} from "@/lib/cofreChefReadModel";
 
 // GET /api/cliente/cofre
 //
@@ -19,6 +22,13 @@ import { obterCofreClienteSomenteLeitura } from "@/lib/cofreChefReadModel";
 // - cria pedido/Pix;
 // - imprime ou altera estoque.
 export async function GET(req: NextRequest) {
+  if (!cofreChefReadModelHabilitado()) {
+    return NextResponse.json(
+      { error: "Recurso indisponivel" },
+      { status: 404, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   const payload = await lerSessaoCliente(req);
   if (!payload) {
     return NextResponse.json(
