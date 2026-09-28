@@ -28,6 +28,15 @@ import {
   type RankingProspeccaoStatusPagamento,
 } from "@/lib/rankingProspeccao";
 import { resolverIdentidadeCheckout } from "@/lib/checkoutIdentidade";
+import {
+  getBehaviorSessionId,
+  trackBehavior,
+  trackBehaviorBeacon,
+} from "@/lib/behaviorClient";
+import {
+  classifyBehaviorPaymentMethod,
+  type BehaviorFunnelStep,
+} from "@/lib/behaviorEvents";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -83,6 +92,24 @@ export type MenuType = {
   // catálogo oficial — ver isMiniPizzaName — e categorias novas sem
   // equivalente legado ficam vazias até o catálogo carregar, nunca quebram).
   catalog?: SimpleCatalog;
+};
+
+const BEHAVIOR_FUNNEL_BY_SCREEN: Record<string, BehaviorFunnelStep> = {
+  "sc-start": "inicio",
+  "sc-list": "lista",
+  "sc-novidades": "lista",
+  "sc-build": "montagem",
+  "sc-border": "montagem",
+  "sc-addons": "montagem",
+  "sc-suco-leite": "montagem",
+  "sc-macarronada-size": "montagem",
+  "sc-macarronada-addon": "montagem",
+  "sc-another": "montagem",
+  "sc-cart": "sacola",
+  "sc-delivery": "entrega",
+  "sc-pay": "pagamento",
+  "sc-done": "concluido",
+  "sc-promo": "promocao",
 };
 
 // ==================== ADMIN CARDÁPIO ====================
@@ -1407,6 +1434,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const nomeRef = useRef<HTMLInputElement>(null);
   const apelidoRef = useRef<HTMLInputElement>(null);
   const telefoneRef = useRef<HTMLInputElement>(null);
+  const behaviorCartInitializedRef = useRef(false);
+  const behaviorCartPreviousRef = useRef({ items: 0, distinct: 0 });
+  const behaviorFunnelPreviousRef = useRef<BehaviorFunnelStep | null>(null);
 
   // Vínculo WhatsApp: valida o token do link (?t=) no servidor e guarda só na
   // sessão do navegador. Token inválido/expirado nunca quebra o fluxo — o
@@ -1591,6 +1621,94 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
 
   }, [hydrated, cart, screen, delType, bairroIdx, rua, numero, referencia, payment, trocoOpcao, troco, observacao, plan]);
 
+  // Customer 360 — observa apenas a jornada, nunca preço/PII do navegador.
+  // A primeira hidratação da sacola vira baseline para não transformar um
+  // rascunho restaurado em falso "cart_add".
+  useEffect(() => {
+    if (!hydrated) return;
+    const items = cart.reduce((sum, item) => sum + item.qty, 0);
+    const distinct = cart.length;
+
+    if (!behaviorCartInitializedRef.current) {
+      behaviorCartInitializedRef.current = true;
+      behaviorCartPreviousRef.current = { items, distinct };
+      return;
+    }
+
+    const previous = behaviorCartPreviousRef.current;
+    if (items > previous.items) {
+      trackBehavior("cart_add", {
+        page: "cardapio",
+        cartItems: items,
+        cartDistinctItems: distinct,
+      });
+    } else if (items < previous.items) {
+      trackBehavior("cart_remove", {
+        page: "cardapio",
+        cartItems: items,
+        cartDistinctItems: distinct,
+      });
+    }
+    behaviorCartPreviousRef.current = { items, distinct };
+  }, [hydrated, cart]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const step = BEHAVIOR_FUNNEL_BY_SCREEN[screen] ?? "outro";
+    if (behaviorFunnelPreviousRef.current === step) return;
+    behaviorFunnelPreviousRef.current = step;
+
+    trackBehavior("funnel_step", {
+      page: "cardapio",
+      step,
+      ...(delType ? { deliveryType: delType } : {}),
+      ...(payment ? { paymentMethod: classifyBehaviorPaymentMethod(payment) } : {}),
+    });
+  }, [hydrated, screen, delType, payment]);
+
+  useEffect(() => {
+    if (!hydrated || cart.length === 0) return;
+    if (screen !== "sc-delivery" && screen !== "sc-pay") return;
+
+    const onPageHide = () => {
+      trackBehaviorBeacon("checkout_exit_observed", {
+        page: "cardapio",
+        step: screen === "sc-pay" ? "pagamento" : "entrega",
+        ...(delType ? { deliveryType: delType } : {}),
+        ...(payment ? { paymentMethod: classifyBehaviorPaymentMethod(payment) } : {}),
+      });
+    };
+
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [hydrated, cart.length, screen, delType, payment]);
+
+  useEffect(() => {
+    const query = listSearchQuery.trim();
+    if (!hydrated || !query) return;
+    const timer = window.setTimeout(() => {
+      trackBehavior("search_used", {
+        page: "cardapio",
+        category: listCat,
+        queryLength: query.length,
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [hydrated, listSearchQuery, listCat]);
+
+  useEffect(() => {
+    const query = flavorSearchQuery.trim();
+    if (!hydrated || !query) return;
+    const timer = window.setTimeout(() => {
+      trackBehavior("search_used", {
+        page: "cardapio",
+        category: "pizza_flavor",
+        queryLength: query.length,
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [hydrated, flavorSearchQuery]);
+
   useEffect(() => {
     if (!restoredDraft) return;
     const t = setTimeout(() => setRestoredDraft(false), 5000);
@@ -1676,7 +1794,17 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     return () => clearInterval(id);
   }, [screen, promos.length]);
 
-  function abrirPromocao(p: PromocaoPublica) { setPromoSel(p); setPromoSabor(null); go("sc-promo"); }
+  function abrirPromocao(p: PromocaoPublica) {
+    trackBehavior("product_open", {
+      page: "cardapio",
+      category: "promocao",
+      itemKind: "promo",
+      itemRef: p.id,
+    });
+    setPromoSel(p);
+    setPromoSabor(null);
+    go("sc-promo");
+  }
   function promoPrecisaSabor(p: PromocaoPublica) { return p.mainItems.some((m) => m.category === "pizza" && m.customerMustChooseFlavor !== false); }
   function promoInclusos(p: PromocaoPublica) {
     return p.freeItems.map((f) => `${f.quantity > 1 ? `${f.quantity}x ` : ""}${f.productName} grátis`).join(" + ");
@@ -2196,7 +2324,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   function continueBuild() { if (!buildOk) return; if (miniPizzaMode) addMiniPizza(); else if (calzoneMode) addCalzone(); else if (pastelMode) addPastel(); else if (isMiniSize) finalizarPizza(null, 0, []); else go("sc-border"); }
   function confirmFromModal() { if (!buildOk) return; setFlavorModalOpen(false); continueBuild(); }
   function addAnother() { setPlan({ total: 0, current: pizzasNoCarrinho() + 1, openEnded: true }); resetBuild(); go("sc-build"); }
-  function goCat(cat: "lanche" | "macarronada" | "bebida" | "suco" | "hamburguer" | "pastelForno" | "vitamina") { setListCat(cat); go("sc-list"); }
+  function goCat(cat: "lanche" | "macarronada" | "bebida" | "suco" | "hamburguer" | "pastelForno" | "vitamina") {
+    setListCat(cat);
+    go("sc-list");
+  }
   function isMacarronada(it: { name: string; sizes?: { code: string; price: number }[] }) {
     return it.name.toLowerCase().includes("macarronada") && Array.isArray(it.sizes) && it.sizes.length > 0;
   }
@@ -2204,8 +2335,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     if (Array.isArray(it.sizes) && it.sizes.length > 0) return `A partir de ${money(Math.min(...it.sizes.map((s) => s.price)))}`;
     return money(it.price);
   }
-  function addSimple(it: { name: string; price: number; available?: boolean; sizes?: { code: string; price: number }[]; flavors?: string[] }, emoji: string) {
+  function addSimple(it: { id?: string; name: string; price: number; available?: boolean; sizes?: { code: string; price: number }[]; flavors?: string[] }, emoji: string) {
     if (it.available === false) return;
+    trackBehavior("product_open", {
+      page: "cardapio",
+      category: listCat,
+      itemKind: "simple",
+      ...(it.id ? { itemRef: it.id } : {}),
+    });
     if (isCalzoneName(it.name)) { pickCalzone(); return; }
     // Produtos de sabor único do catálogo oficial fora do Calzone (Pastel de
     // Forno, Pastel de Feira) — exigem 1 sabor antes de ir pra sacola, mesmo
@@ -2559,7 +2696,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     // usar e (pizza) o sabor escolhido.
     const itemRecompensaJornada = cart.find((c) => c.recompensaJornadaId);
     const itensSemRecompensa = cart.filter((c) => !c.recompensaJornadaId);
-    const payload = { cliente: identificacaoPedido, ...(identidadeCheckout.nome ? { nome: identidadeCheckout.nome } : {}), ...(identidadeCheckout.apelido ? { apelido: identidadeCheckout.apelido } : {}), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}), ...(c.simpleSelection ? { simpleSelection: c.simpleSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > agoraEmMs() ? resgatePontos.resgateId : undefined };
+    const payload = { cliente: identificacaoPedido, behaviorSessionId: getBehaviorSessionId() ?? undefined, ...(identidadeCheckout.nome ? { nome: identidadeCheckout.nome } : {}), ...(identidadeCheckout.apelido ? { apelido: identidadeCheckout.apelido } : {}), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}), ...(c.simpleSelection ? { simpleSelection: c.simpleSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > agoraEmMs() ? resgatePontos.resgateId : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();

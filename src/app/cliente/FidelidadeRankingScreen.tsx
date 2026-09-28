@@ -15,6 +15,7 @@ import {
   type ParticipanteDisputa,
 } from '@/lib/rankingRetencao'
 import type { EventoRankingRetencao } from '@/lib/rankingRetencaoTelemetria'
+import { trackBehavior } from '@/lib/behaviorClient'
 import type {
   PainelFidelidade,
   VariacaoPosicaoRanking,
@@ -123,6 +124,12 @@ export function FidelidadeRankingScreen({
   onTelemetria,
   onClose,
 }: FidelidadeRankingScreenProps) {
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/dev/')) {
+      trackBehavior('ranking_open', { page: 'ranking' })
+    }
+  }, [])
+
   const [aba, setAba] = useState<'participantes' | 'minha' | 'geral'>('minha')
   const [sheetSubirAberto, setSheetSubirAberto] = useState(false)
   const [momentoAberto, setMomentoAberto] = useState<MomentoRanking | null>(() => escolherMomentoPrincipal(ranking, gamificacao, indicacao, posPedido, !!onCompartilharConquista && indicacao?.ativa === true && indicacao.compartilhamentoLiberado !== false, !!onIndicarAmigo, !!onNovoPedido))

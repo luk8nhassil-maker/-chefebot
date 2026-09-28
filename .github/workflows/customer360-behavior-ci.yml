@@ -1,0 +1,193 @@
+name: customer360-behavior-ci
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/behaviorEvents.ts"
+      - "src/lib/behaviorEvents.test.ts"
+      - "src/lib/behaviorAnalytics.ts"
+      - "src/lib/behaviorAnalytics.test.ts"
+      - "src/lib/behaviorClient.ts"
+      - "src/lib/behaviorInsights.ts"
+      - "src/lib/behaviorInsights.test.ts"
+      - "src/components/CustomerBehaviorTracker.tsx"
+      - "src/app/layout.tsx"
+      - "src/app/api/comportamento/evento/**"
+      - "src/app/api/admin/customer360/**"
+      - "src/app/api/pedido-app/route.ts"
+      - "src/app/cardapio/page.tsx"
+      - "src/app/cardapio/page.test.ts"
+      - "src/app/cliente/FidelidadeRankingScreen.tsx"
+      - "src/app/dev/customer360/**"
+      - "src/proxy.ts"
+      - "src/proxy.customer360-preview.test.ts"
+      - "docs/CUSTOMER360_BEHAVIOR_V1.md"
+      - "scripts/e2e-customer360-preview.mjs"
+      - ".github/workflows/customer360-behavior-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: customer360-behavior-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout exact HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Focused Customer 360 tests
+        run: >-
+          npm test --
+          src/lib/behaviorEvents.test.ts
+          src/lib/behaviorAnalytics.test.ts
+          src/lib/behaviorInsights.test.ts
+          src/app/api/comportamento/evento/route.test.ts
+          src/app/api/admin/customer360/overview/route.test.ts
+          src/app/cardapio/page.test.ts
+          src/app/api/pedido-app/route.cliente.test.ts
+          src/proxy.customer360-preview.test.ts
+
+      - name: Lint patch
+        run: >-
+          npm run lint --
+          src/lib/behaviorEvents.ts
+          src/lib/behaviorEvents.test.ts
+          src/lib/behaviorAnalytics.ts
+          src/lib/behaviorAnalytics.test.ts
+          src/lib/behaviorClient.ts
+          src/lib/behaviorInsights.ts
+          src/lib/behaviorInsights.test.ts
+          src/components/CustomerBehaviorTracker.tsx
+          src/app/layout.tsx
+          src/app/api/comportamento/evento/route.ts
+          src/app/api/comportamento/evento/route.test.ts
+          src/app/api/admin/customer360/overview/route.ts
+          src/app/api/admin/customer360/overview/route.test.ts
+          src/app/api/pedido-app/route.ts
+          src/app/cardapio/page.tsx
+          src/app/cardapio/page.test.ts
+          src/app/cliente/FidelidadeRankingScreen.tsx
+          src/app/dev/customer360/page.tsx
+          src/app/dev/customer360/Customer360Preview.tsx
+          src/proxy.ts
+          src/proxy.customer360-preview.test.ts
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Full suite
+        run: npm test
+
+      - name: Preview build
+        env:
+          VERCEL_ENV: preview
+          UPSTASH_DISABLE_TELEMETRY: "1"
+          KV_REST_API_URL: http://127.0.0.1:9
+          KV_REST_API_TOKEN: customer360-ci-token-not-real
+          AUTH_SECRET: customer360-ci-auth-secret-not-real-long-enough
+          KELLYNE_PASSWORD: customer360-ci-password-not-real
+          BEHAVIOR_ANALYTICS_ENABLED: "true"
+          BEHAVIOR_ANALYTICS_HMAC_SECRET: "customer360-preview-secret-not-real-1234567890"
+          BEHAVIOR_ANALYTICS_RETENTION_DAYS: "90"
+        run: npm run build
+
+  hermetic-preview:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      VERCEL_ENV: "preview"
+      CHEFEBOT_E2E: "1"
+      UPSTASH_DISABLE_TELEMETRY: "1"
+      KV_REST_API_URL: "http://127.0.0.1:9"
+      KV_REST_API_TOKEN: "customer360-preview-token-not-real"
+      AUTH_SECRET: "customer360-preview-auth-secret-not-real-long-enough"
+      KELLYNE_PASSWORD: "customer360-preview-password-not-real"
+      BEHAVIOR_ANALYTICS_ENABLED: "true"
+      BEHAVIOR_ANALYTICS_HMAC_SECRET: "customer360-preview-secret-not-real-1234567890"
+      BEHAVIOR_ANALYTICS_RETENTION_DAYS: "90"
+      E2E_BASE_URL: "http://127.0.0.1:3000"
+      PREVIEW_OUTPUT_DIR: "/tmp/customer360-preview"
+
+    steps:
+      - name: Checkout exact HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Register HEAD
+        run: echo "PREVIEW_GIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Install isolated Playwright
+        run: |
+          mkdir -p /tmp/playwright-node
+          cd /tmp/playwright-node
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0
+          npx playwright install --with-deps chromium
+          echo "PLAYWRIGHT_MODULE_PATH=/tmp/playwright-node/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
+
+      - name: Build isolated Preview
+        run: npm run build
+
+      - name: Start isolated app
+        run: |
+          npm run start -- -p 3000 -H 127.0.0.1 > /tmp/customer360-next.log 2>&1 &
+          echo $! > /tmp/customer360-next.pid
+
+      - name: Wait for Customer 360
+        run: |
+          for i in $(seq 1 60); do
+            if node -e "fetch('http://127.0.0.1:3000/dev/customer360').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"; then
+              echo "Customer 360 Preview ready."
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/customer360-next.log || true
+          exit 1
+
+      - name: Validate desktop/mobile with no behavioral writes
+        run: node scripts/e2e-customer360-preview.mjs
+
+      - name: Upload visual evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: customer360-preview-${{ github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/customer360-preview
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: App log on failure
+        if: failure()
+        run: cat /tmp/customer360-next.log || true
+
+      - name: Stop isolated app
+        if: always()
+        run: |
+          if [ -f /tmp/customer360-next.pid ]; then
+            kill "$(cat /tmp/customer360-next.pid)" 2>/dev/null || true
+          fi

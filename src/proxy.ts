@@ -108,7 +108,8 @@ export async function proxy(req: NextRequest) {
     (
       pathname === "/dev/ranking-retencao" ||
       pathname === "/dev/ranking-prospeccao" ||
-      pathname === "/dev/cofre-chefe"
+      pathname === "/dev/cofre-chefe" ||
+      pathname === "/dev/customer360"
     )) {
     return NextResponse.next();
   }
