@@ -65,10 +65,28 @@ export function behaviorAnalyticsEnabled(): boolean {
   return retentionDays() !== null && hashSecret() !== null;
 }
 
-export function pseudonimizarClienteId(clienteId: string): string | null {
+function pseudonimizarValor(valor: string): string | null {
   const secret = hashSecret();
-  if (!secret || !clienteId) return null;
-  return createHmac("sha256", secret).update(clienteId).digest("hex").slice(0, 32);
+  if (!secret || !valor) return null;
+  return createHmac("sha256", secret).update(valor).digest("hex").slice(0, 32);
+}
+
+export function pseudonimizarClienteId(clienteId: string): string | null {
+  return pseudonimizarValor(clienteId);
+}
+
+export async function consumirLimiteIngestaoComportamental(chaveBruta: string): Promise<boolean> {
+  if (!behaviorAnalyticsEnabled()) return false;
+  const hash = pseudonimizarValor(chaveBruta);
+  if (!hash) return false;
+  const janela = Math.floor(Date.now() / 60_000);
+  const chave = `behavior:v1:rate:${hash}:${janela}`;
+  const contador = await redis.incr(chave);
+  if (contador === 1) await redis.expire(chave, 90);
+  // O cliente oficial envia lotes, portanto 120 requisições/minuto oferece
+  // ampla folga operacional e bloqueia loops/abuso acidental antes de gerar
+  // volume desnecessário no Redis. O limite é técnico, não regra comercial.
+  return contador <= 120;
 }
 
 function bucketDia(ms: number): string {
