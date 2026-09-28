@@ -89,7 +89,7 @@ export async function consumirLimiteIngestaoComportamental(chaveBruta: string): 
   return contador <= 120;
 }
 
-function bucketDia(ms: number): string {
+export function behaviorDayBucket(ms: number): string {
   const d = new Date(ms);
   return [
     d.getUTCFullYear(),
@@ -98,16 +98,16 @@ function bucketDia(ms: number): string {
   ].join("");
 }
 
-function eventKey(tenantId: string, eventId: string): string {
+export function behaviorEventKey(tenantId: string, eventId: string): string {
   return `behavior:v1:event:${tenantId}:${eventId}`;
 }
-function globalIndexKey(tenantId: string, day: string): string {
+export function behaviorGlobalIndexKey(tenantId: string, day: string): string {
   return `behavior:v1:idx:${tenantId}:${day}`;
 }
-function actorIndexKey(tenantId: string, actorHash: string, day: string): string {
+export function behaviorActorIndexKey(tenantId: string, actorHash: string, day: string): string {
   return `behavior:v1:actor:${tenantId}:${actorHash}:${day}`;
 }
-function sessionIndexKey(tenantId: string, sessionId: string, day: string): string {
+export function behaviorSessionIndexKey(tenantId: string, sessionId: string, day: string): string {
   return `behavior:v1:session:${tenantId}:${sessionId}:${day}`;
 }
 
@@ -184,16 +184,16 @@ async function persistEvent(event: BehaviorEvent): Promise<boolean> {
   const days = retentionDays();
   if (!days) return false;
   const ttl = days * 24 * 60 * 60;
-  const day = bucketDia(event.receivedAtMs);
+  const day = behaviorDayBucket(event.receivedAtMs);
 
-  const created = await redis.set(eventKey(event.tenantId, event.eventId), event, { nx: true, ex: ttl });
+  const created = await redis.set(behaviorEventKey(event.tenantId, event.eventId), event, { nx: true, ex: ttl });
   if (!created) return false;
 
   const keys: string[] = [
-    globalIndexKey(event.tenantId, day),
-    sessionIndexKey(event.tenantId, event.sessionId, day),
+    behaviorGlobalIndexKey(event.tenantId, day),
+    behaviorSessionIndexKey(event.tenantId, event.sessionId, day),
   ];
-  if (event.actorHash) keys.push(actorIndexKey(event.tenantId, event.actorHash, day));
+  if (event.actorHash) keys.push(behaviorActorIndexKey(event.tenantId, event.actorHash, day));
 
   for (const key of keys) {
     await bredis.zadd(key, { score: event.receivedAtMs, member: event.eventId });
