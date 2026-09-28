@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   obterParticipacaoRanking: vi.fn(),
@@ -41,9 +41,29 @@ vi.mock("./rankingClientes", () => ({
   reindexarPorFiltro: mocks.reindexarPorFiltro,
 }));
 
-import { obterCofreClienteSomenteLeitura } from "./cofreChefReadModel";
+import {
+  cofreChefReadModelHabilitado,
+  obterCofreClienteSomenteLeitura,
+} from "./cofreChefReadModel";
 
 const AGORA = Date.parse("2026-09-27T21:00:00.000Z");
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("cofreChefReadModelHabilitado", () => {
+  test("fica fechado por padrão e só abre com true explícito", () => {
+    vi.stubEnv("COFRE_CHEFE_READMODEL_ATIVO", "");
+    expect(cofreChefReadModelHabilitado()).toBe(false);
+
+    vi.stubEnv("COFRE_CHEFE_READMODEL_ATIVO", "false");
+    expect(cofreChefReadModelHabilitado()).toBe(false);
+
+    vi.stubEnv("COFRE_CHEFE_READMODEL_ATIVO", "true");
+    expect(cofreChefReadModelHabilitado()).toBe(true);
+  });
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
