@@ -112,7 +112,10 @@ async function idsFromDailyIndexes(
   let truncated = false;
   for (const dayMs of dayStartsBetween(startMs, endMs)) {
     const day = behaviorDayBucket(dayMs);
-    const current = await rredis.zrange(buildKey(day), 0, -1).catch(() => []);
+    const currentRaw = await rredis.zrange(buildKey(day), 0, -1).catch(() => []);
+    const current = Array.isArray(currentRaw)
+      ? currentRaw.filter((id): id is string => typeof id === "string")
+      : [];
     for (const id of current) {
       if (ids.length >= cap) {
         truncated = true;
