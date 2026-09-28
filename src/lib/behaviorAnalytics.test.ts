@@ -53,6 +53,7 @@ import {
   behaviorAnalyticsEnabled,
   deriveBehaviorCustomerRef,
   publicBehaviorEventValid,
+  readBehaviorCustomerTimeline,
   readBehaviorFunnelOverview,
   readBehaviorSessionEvents,
   recordOrderCreatedBehaviorFact,
@@ -244,6 +245,55 @@ describe("evento público comportamental", () => {
     expect(events).toHaveLength(2);
     expect(events[0].actor).toBe("anonymous");
     expect(events[1].actor).toBe("authenticated");
+  });
+});
+
+describe("linha do tempo individual", () => {
+  test("vincula ao cliente a sessão inteira, inclusive eventos anteriores à identificação", async () => {
+    await recordPublicBehaviorEvent({
+      eventId: EVENT,
+      sessionId: SESSION,
+      type: "app_open",
+      data: { page: "cardapio" },
+      nowMs: 1_780_000_000_000,
+    });
+    await recordPublicBehaviorEvent({
+      eventId: EVENT2,
+      sessionId: SESSION,
+      type: "product_open",
+      data: { page: "cardapio", itemKind: "simple", itemRef: "bebida_2l" },
+      nowMs: 1_780_000_001_000,
+    });
+    await recordOrderCreatedBehaviorFact({
+      pedidoId: "pedido-vinculo",
+      sessionId: SESSION,
+      clienteId: "cli_a",
+      totalCents: 6000,
+      itemCount: 2,
+      deliveryType: "delivery",
+      payment: "Pix",
+      nowMs: 1_780_000_002_000,
+    });
+
+    const timeline = await readBehaviorCustomerTimeline({
+      clienteId: "cli_a",
+      startMs: 1_779_999_999_000,
+      endMs: 1_780_000_003_000,
+    });
+
+    expect(timeline?.totalSessions).toBe(1);
+    expect(timeline?.convertedSessions).toBe(1);
+    expect(timeline?.sessions[0]?.events.map((event) => event.type)).toEqual([
+      "app_open",
+      "product_open",
+      "order_created",
+    ]);
+    expect(timeline?.sessions[0]?.events[0]?.actor).toBe("anonymous");
+    expect(timeline?.sessions[0]?.events[2]?.actor).toBe("authenticated");
+
+    const serialized = JSON.stringify(timeline);
+    expect(serialized).not.toContain("cli_a");
+    expect(serialized).not.toContain("pedido-vinculo");
   });
 });
 
