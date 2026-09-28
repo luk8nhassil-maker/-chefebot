@@ -39,6 +39,10 @@ export type CalibracaoComportamentalCofre = {
   };
 };
 
+export function cofreChefCalibracaoHabilitada(): boolean {
+  return process.env.COFRE_CHEFE_CALIBRACAO_ATIVA === "true";
+}
+
 const DIA_MS = 24 * 60 * 60 * 1000;
 
 function quantilLinear(valores: number[], p: number): number | null {
