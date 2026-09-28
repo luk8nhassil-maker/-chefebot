@@ -1,0 +1,150 @@
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+const store = new Map<string, unknown>();
+const zsets = new Map<string, string[]>();
+
+vi.mock("./redis", () => ({
+  redis: {
+    get: vi.fn(async (key: string) => store.get(key) ?? null),
+    zrange: vi.fn(async (key: string) => zsets.get(key) ?? []),
+  },
+}));
+
+import {
+  behaviorActorIndexKey,
+  behaviorDayBucket,
+  behaviorEventKey,
+  behaviorGlobalIndexKey,
+  behaviorSessionIndexKey,
+  pseudonimizarClienteId,
+  type BehaviorEvent,
+} from "./behaviorAnalytics";
+import {
+  consultarTimelineComportamentalCliente,
+  resumirFunilComportamental,
+} from "./behaviorAnalyticsRead";
+
+const DAY = Date.parse("2026-09-28T00:00:00.000Z");
+const END = DAY + 24 * 60 * 60 * 1000 - 1;
+const TENANT = "default";
+const CLIENTE = "cli_cliente_exemplo";
+const SESSION = "22222222-2222-4222-8222-222222222222";
+
+function put(event: BehaviorEvent) {
+  store.set(behaviorEventKey(TENANT, event.eventId), event);
+  const day = behaviorDayBucket(event.receivedAtMs);
+  const globalKey = behaviorGlobalIndexKey(TENANT, day);
+  zsets.set(globalKey, [...(zsets.get(globalKey) ?? []), event.eventId]);
+  const sessionKey = behaviorSessionIndexKey(TENANT, event.sessionId, day);
+  zsets.set(sessionKey, [...(zsets.get(sessionKey) ?? []), event.eventId]);
+  if (event.actorHash) {
+    const actorKey = behaviorActorIndexKey(TENANT, event.actorHash, day);
+    zsets.set(actorKey, [...(zsets.get(actorKey) ?? []), event.eventId]);
+  }
+}
+
+function ev(params: {
+  id: string;
+  type: BehaviorEvent["type"];
+  offsetMin: number;
+  actorHash?: string | null;
+  sessionId?: string;
+}): BehaviorEvent {
+  return {
+    schemaVersion: 1,
+    eventId: params.id,
+    tenantId: TENANT,
+    sessionId: params.sessionId ?? SESSION,
+    actorHash: params.actorHash ?? null,
+    type: params.type,
+    occurredAtMs: DAY + params.offsetMin * 60_000,
+    receivedAtMs: DAY + params.offsetMin * 60_000,
+    context: { source: params.type === "order_created" ? "checkout" : "cardapio" },
+  };
+}
+
+beforeEach(() => {
+  store.clear();
+  zsets.clear();
+  vi.stubEnv("BEHAVIOR_ANALYTICS_HASH_SECRET", "behavior-read-test-key-material-123456");
+});
+
+afterEach(() => vi.unstubAllEnvs());
+
+describe("consultarTimelineComportamentalCliente", () => {
+  test("recupera eventos anônimos anteriores quando a sessão foi ligada ao cliente depois", async () => {
+    const actorHash = pseudonimizarClienteId(CLIENTE)!;
+    put(ev({ id: "e-open", type: "app_open", offsetMin: 0 }));
+    put(ev({ id: "e-cart", type: "cart_state", offsetMin: 5 }));
+    put(ev({ id: "e-order", type: "order_created", offsetMin: 10, actorHash }));
+
+    const result = await consultarTimelineComportamentalCliente({
+      clienteId: CLIENTE,
+      startMs: DAY,
+      endMs: END,
+    });
+
+    expect(result.truncated).toBe(false);
+    expect(result.events.map((event) => event.type)).toEqual([
+      "order_created",
+      "cart_state",
+      "app_open",
+    ]);
+    expect(result.events.find((event) => event.type === "app_open")?.identificado).toBe(false);
+    expect(result.events.find((event) => event.type === "order_created")?.identificado).toBe(true);
+    expect(JSON.stringify(result.events)).not.toContain(actorHash);
+    expect(JSON.stringify(result.events)).not.toContain(CLIENTE);
+  });
+
+  test("não mistura sessão de outro cliente", async () => {
+    const actorHash = pseudonimizarClienteId(CLIENTE)!;
+    put(ev({ id: "e-order", type: "order_created", offsetMin: 10, actorHash }));
+    put(ev({
+      id: "e-other",
+      type: "app_open",
+      offsetMin: 3,
+      sessionId: "33333333-3333-4333-8333-333333333333",
+    }));
+
+    const result = await consultarTimelineComportamentalCliente({
+      clienteId: CLIENTE,
+      startMs: DAY,
+      endMs: END,
+    });
+
+    expect(result.events.map((event) => event.type)).toEqual(["order_created"]);
+  });
+});
+
+describe("resumirFunilComportamental", () => {
+  test("mede sessões, checkout, compra e abandono sem identificar pessoas", async () => {
+    const actorHash = pseudonimizarClienteId(CLIENTE)!;
+    put(ev({ id: "a1", type: "app_open", offsetMin: 0 }));
+    put(ev({ id: "a2", type: "checkout_start", offsetMin: 5 }));
+    put(ev({ id: "a3", type: "order_created", offsetMin: 20, actorHash }));
+
+    const sessionB = "44444444-4444-4444-8444-444444444444";
+    put(ev({ id: "b1", type: "app_open", offsetMin: 1, sessionId: sessionB }));
+    put(ev({ id: "b2", type: "checkout_start", offsetMin: 8, sessionId: sessionB }));
+
+    const summary = await resumirFunilComportamental({
+      startMs: DAY,
+      endMs: END,
+    });
+
+    expect(summary.sessions).toBe(2);
+    expect(summary.sessionsWithCheckout).toBe(2);
+    expect(summary.sessionsWithOrder).toBe(1);
+    expect(summary.sessionsWithoutOrder).toBe(1);
+    expect(summary.checkoutToOrderRate).toBe(50);
+    expect(summary.sessionToOrderRate).toBe(50);
+    expect(summary.medianMinutesFirstOpenToOrder).toBe(20);
+    expect(summary.byType).toEqual({
+      app_open: 2,
+      checkout_start: 2,
+      order_created: 1,
+    });
+    expect(JSON.stringify(summary)).not.toContain(actorHash);
+    expect(JSON.stringify(summary)).not.toContain(CLIENTE);
+  });
+});
