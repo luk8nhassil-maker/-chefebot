@@ -61,6 +61,41 @@ describe("/cardapio (PublicCardapio) — menu inferior unificado com /cliente e 
   });
 });
 
+describe("/cardapio — Nome/Apelido sem mover o checkout", () => {
+  const blocoEntrega = fonte.slice(
+    fonte.indexOf('screen === "sc-delivery" && ('),
+    fonte.indexOf('screen === "sc-pay" && (')
+  );
+  const blocoPagamento = fonte.slice(
+    fonte.indexOf('screen === "sc-pay" && ('),
+    fonte.indexOf('screen === "sc-done" && (')
+  );
+
+  test("mantém identificação na etapa atual de pagamento, sem mover para Entrega", () => {
+    expect(blocoEntrega).not.toContain("Seu nome");
+    expect(blocoEntrega).not.toContain("<label>Apelido</label>");
+    expect(blocoPagamento).toContain("Pra quem é o pedido?");
+    expect(blocoPagamento).toContain("<label>Seu nome</label>");
+    expect(blocoPagamento).toContain("<label>Apelido</label>");
+  });
+
+  test("regra visível informa que basta nome ou apelido", () => {
+    expect(blocoPagamento).toContain("Preencha nome ou apelido. Um dos dois já basta.");
+    expect(fonte).toContain("resolverIdentidadeCheckout({ nome, apelido })");
+  });
+
+  test("payload envia identificação principal e preserva campos estruturados", () => {
+    expect(fonte).toContain("cliente: identificacaoPedido");
+    expect(fonte).toContain("identidadeCheckout.nome ? { nome: identidadeCheckout.nome }");
+    expect(fonte).toContain("identidadeCheckout.apelido ? { apelido: identidadeCheckout.apelido }");
+  });
+
+  test("cliente cadastrado é hidratado no mesmo bloco sem criar tela nova", () => {
+    expect(fonte).toContain('fetchCliente("/api/cliente/perfil", { cache: "no-store" })');
+    expect(fonte).not.toContain("sc-identidade");
+  });
+});
+
 // Etapa 2 do fluxo de "Pix pendente": home (tela sc-start) só pode mostrar
 // promoção ativa — nenhum card de notificação/estado operacional de pedido.
 describe("/cardapio (PublicCardapio) — Etapa 2: home limpa + barra global de Pix pendente", () => {
