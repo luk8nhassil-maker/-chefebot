@@ -986,8 +986,9 @@ describe("/cardapio (PublicCardapio) — wiring de simpleSelection (Fase 6)", ()
 
 describe("/cardapio (PublicCardapio) — carrinho preserva pizzaSelection (Fase 3)", () => {
   test("chQty (mudar quantidade) faz spread do item inteiro por índice — nunca reconstrói o item, então pizzaSelection sobrevive", () => {
-    expect(fonte).toMatch(
-      /function chQty\(idx: number, d: number\) \{ setCart\(cart\.map\(\(c, i\) => \(i === idx \? \{ \.\.\.c, qty: Math\.max\(1, c\.qty \+ d\) \} : c\)\)\); \}/
+    const bloco = fonte.slice(fonte.indexOf("function chQty("), fonte.indexOf("function rmItem("));
+    expect(bloco).toMatch(
+      /setCart\\(cart\\.map\\(\\(c, i\\) => \\(i === idx \\? \\{ \\.\\.\\.c, qty: Math\\.max\\(1, c\\.qty \\+ d\\) \\} : c\\)\\)\\);/
     );
   });
 
