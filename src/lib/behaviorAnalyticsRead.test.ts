@@ -117,6 +117,38 @@ describe("consultarTimelineComportamentalCliente", () => {
 });
 
 describe("resumirFunilComportamental", () => {
+  test("mede busca, interesse, carrinho, abandono e tempo ativo por sessão", async () => {
+    const sessionA = SESSION;
+    put(ev({ id: "m1", type: "app_open", offsetMin: 0, sessionId: sessionA }));
+    put(ev({ id: "m2", type: "search_used", offsetMin: 1, sessionId: sessionA }));
+    put(ev({ id: "m3", type: "product_view", offsetMin: 2, sessionId: sessionA }));
+    put(ev({ id: "m4", type: "cart_add", offsetMin: 3, sessionId: sessionA }));
+    put(ev({ id: "m5", type: "checkout_start", offsetMin: 4, sessionId: sessionA }));
+    const exitA = ev({ id: "m6", type: "page_exit", offsetMin: 10, sessionId: sessionA });
+    exitA.context = { source: "cardapio", engagementMs: 120_000 };
+    put(exitA);
+
+    const sessionB = "55555555-5555-4555-8555-555555555555";
+    put(ev({ id: "n1", type: "app_open", offsetMin: 0, sessionId: sessionB }));
+    const exitB = ev({ id: "n2", type: "page_exit", offsetMin: 2, sessionId: sessionB });
+    exitB.context = { source: "cardapio", engagementMs: 60_000 };
+    put(exitB);
+
+    const summary = await resumirFunilComportamental({
+      startMs: DAY,
+      endMs: END,
+    });
+
+    expect(summary.sessions).toBe(2);
+    expect(summary.sessionsWithSearch).toBe(1);
+    expect(summary.sessionsWithProductView).toBe(1);
+    expect(summary.sessionsWithCart).toBe(1);
+    expect(summary.sessionsWithCheckout).toBe(1);
+    expect(summary.abandonedCheckoutSessions).toBe(1);
+    expect(summary.sessionsWithOrder).toBe(0);
+    expect(summary.medianEngagementSeconds).toBe(90);
+  });
+
   test("mede sessões, checkout, compra e abandono sem identificar pessoas", async () => {
     const actorHash = pseudonimizarClienteId(CLIENTE)!;
     put(ev({ id: "a1", type: "app_open", offsetMin: 0 }));
