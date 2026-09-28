@@ -61,6 +61,27 @@ describe("/cardapio (PublicCardapio) — menu inferior unificado com /cliente e 
   });
 });
 
+describe("/cardapio — informação de privacidade", () => {
+  const fontePrivacidade = readFileSync(
+    fileURLToPath(new URL("../privacidade/page.tsx", import.meta.url)),
+    "utf-8"
+  ).replace(/\\r\\n/g, "\\n");
+
+  test("não exibe um banner de telemetria e oferece acesso discreto à página de privacidade", () => {
+    expect(fonte).not.toContain("Se precisar de ajuda, a equipe pode conferir");
+    expect(fonte).not.toContain("<aside role=\"status\"");
+    expect(fonte).toContain('href="/privacidade"');
+  });
+
+  test("a página explica vínculo, acesso Dev, retenção e dados excluídos da telemetria", () => {
+    expect(fontePrivacidade).toContain("identificador pseudonimizado");
+    expect(fontePrivacidade).toContain("perfil Dev");
+    expect(fontePrivacidade).toContain("BEHAVIOR_ANALYTICS_RETENTION_DAYS");
+    expect(fontePrivacidade).toContain("O texto digitado na busca");
+    expect(fontePrivacidade).toContain("payload do Pix");
+  });
+});
+
 describe("/cardapio — telemetria do carrinho", () => {
   test("cart_state acompanha apenas mudanças no carrinho e não mudanças de tela", () => {
     const blocoCartState = fonte.slice(
