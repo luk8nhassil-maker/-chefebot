@@ -72,7 +72,7 @@ jobs:
       - name: Instalar dependências
         run: npm ci
 
-      - name: Testes focados do Cofre, score e identificação do checkout
+      - name: Testes focados do Cofre, comportamento e checkout
         run: >-
           npm test --
           src/lib/cofreChef.test.ts
@@ -82,21 +82,11 @@ jobs:
           src/app/api/cliente/cofre/route.test.ts
           src/app/api/admin/cofre/calibracao/route.test.ts
           src/lib/behaviorAnalytics.test.ts
-          src/lib/behaviorAnalyticsRead.ts
           src/lib/behaviorAnalyticsRead.test.ts
           src/lib/behaviorInstrumentation.test.ts
-          src/lib/behaviorAnalyticsRead.test.ts
-          src/lib/behaviorInstrumentation.test.ts
-          src/app/api/admin/comportamento/resumo/route.test.ts
-          src/app/api/admin/comportamento/cliente/route.test.ts
           src/app/api/comportamento/route.test.ts
-          src/app/api/admin/comportamento/resumo/route.ts
           src/app/api/admin/comportamento/resumo/route.test.ts
-          src/app/api/admin/comportamento/cliente/route.ts
           src/app/api/admin/comportamento/cliente/route.test.ts
-          src/app/cliente/page.tsx
-          src/app/cliente/pedidos/page.tsx
-          src/app/rastrear/[pedidoId]/page.tsx
           src/lib/checkoutIdentidade.test.ts
           src/lib/clientes.test.ts
           src/app/api/cliente/perfil/route.test.ts
@@ -118,9 +108,19 @@ jobs:
           src/lib/behaviorAnalyticsTypes.ts
           src/lib/behaviorAnalytics.ts
           src/lib/behaviorAnalytics.test.ts
+          src/lib/behaviorAnalyticsRead.ts
+          src/lib/behaviorAnalyticsRead.test.ts
+          src/lib/behaviorInstrumentation.test.ts
           src/lib/behaviorClient.ts
           src/app/api/comportamento/route.ts
           src/app/api/comportamento/route.test.ts
+          src/app/api/admin/comportamento/resumo/route.ts
+          src/app/api/admin/comportamento/resumo/route.test.ts
+          src/app/api/admin/comportamento/cliente/route.ts
+          src/app/api/admin/comportamento/cliente/route.test.ts
+          src/app/cliente/page.tsx
+          src/app/cliente/pedidos/page.tsx
+          src/app/rastrear/[pedidoId]/page.tsx
           src/lib/checkoutIdentidade.ts
           src/lib/checkoutIdentidade.test.ts
           src/lib/clientes.ts
