@@ -57,6 +57,16 @@ describe("POST /api/comportamento", () => {
     expect(mocks.registrarEventosClienteComportamento).not.toHaveBeenCalled();
   });
 
+  test("rejeita corpo acima do limite mesmo com content-length falsamente pequeno", async () => {
+    const res = await POST(req(
+      { events: [{ ...EVENTO_VALIDO, campoExtra: "x".repeat(33 * 1024) }] },
+      { "content-length": "1" },
+    ));
+
+    expect(res.status).toBe(413);
+    expect(mocks.registrarEventosClienteComportamento).not.toHaveBeenCalled();
+  });
+
   test("rejeita lote vazio ou acima de 20 eventos", async () => {
     expect((await POST(req({ events: [] }))).status).toBe(400);
     expect((await POST(req({ events: Array.from({ length: 21 }, () => EVENTO_VALIDO) }))).status).toBe(400);

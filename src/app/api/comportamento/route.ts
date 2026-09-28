@@ -10,6 +10,43 @@ import {
 const MAX_BODY_BYTES = 32 * 1024;
 const MAX_EVENTS_PER_REQUEST = 20;
 
+async function lerJsonComLimite(req: NextRequest): Promise<
+  { ok: true; value: unknown } | { ok: false; status: 400 | 413 }
+> {
+  const reader = req.body?.getReader();
+  if (!reader) return { ok: false, status: 400 };
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_BODY_BYTES) {
+        void reader.cancel().catch(() => undefined);
+        return { ok: false, status: 413 };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return { ok: false, status: 400 };
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  try {
+    return { ok: true, value: JSON.parse(new TextDecoder().decode(bytes)) as unknown };
+  } catch {
+    return { ok: false, status: 400 };
+  }
+}
+
 export async function POST(req: NextRequest) {
   if (!behaviorAnalyticsEnabled()) {
     return NextResponse.json(
@@ -26,17 +63,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
+  const parsed = await lerJsonComLimite(req);
+  if (!parsed.ok) {
     return NextResponse.json(
-      { ok: false, error: "json_invalido" },
-      { status: 400, headers: { "Cache-Control": "no-store" } },
+      {
+        ok: false,
+        error: parsed.status === 413 ? "payload_muito_grande" : "json_invalido",
+      },
+      { status: parsed.status, headers: { "Cache-Control": "no-store" } },
     );
   }
 
-  const rawEvents = (body as { events?: unknown } | null)?.events;
+  const rawEvents = (parsed.value as { events?: unknown } | null)?.events;
   if (!Array.isArray(rawEvents) || rawEvents.length === 0 || rawEvents.length > MAX_EVENTS_PER_REQUEST) {
     return NextResponse.json(
       { ok: false, error: "eventos_invalidos" },

@@ -195,16 +195,8 @@ type RedisBehavior = typeof redis & {
 };
 const bredis = redis as RedisBehavior;
 
-async function persistEvent(event: BehaviorEvent): Promise<boolean> {
-  if (!behaviorAnalyticsEnabled()) return false;
-  const days = retentionDays();
-  if (!days) return false;
-  const ttl = days * 24 * 60 * 60;
+async function indexEvent(event: BehaviorEvent, ttl: number): Promise<void> {
   const day = behaviorDayBucket(event.receivedAtMs);
-
-  const created = await redis.set(behaviorEventKey(event.tenantId, event.eventId), event, { nx: true, ex: ttl });
-  if (!created) return false;
-
   const keys: string[] = [
     behaviorGlobalIndexKey(event.tenantId, day),
     behaviorSessionIndexKey(event.tenantId, event.sessionId, day),
@@ -212,10 +204,38 @@ async function persistEvent(event: BehaviorEvent): Promise<boolean> {
   if (event.actorHash) keys.push(behaviorActorIndexKey(event.tenantId, event.actorHash, day));
 
   for (const key of keys) {
+    // ZADD é idempotente para o mesmo eventId; repetir também corrige TTL
+    // ausente se uma tentativa anterior parou no meio dos índices.
     await bredis.zadd(key, { score: event.receivedAtMs, member: event.eventId });
     await bredis.expire(key, ttl);
   }
-  return true;
+}
+
+async function persistEvent(event: BehaviorEvent): Promise<boolean> {
+  if (!behaviorAnalyticsEnabled()) return false;
+  const days = retentionDays();
+  if (!days) return false;
+  const ttl = days * 24 * 60 * 60;
+  const eventKey = behaviorEventKey(event.tenantId, event.eventId);
+  const created = await redis.set(eventKey, event, { nx: true, ex: ttl });
+
+  // Se uma tentativa anterior gravou o evento e falhou ao criar um índice,
+  // o retry relê a versão canônica e repara os índices sem sobrescrever dados.
+  // Em colisão de eventId, indexamos o evento já persistido, nunca o payload novo.
+  const canonicalEvent = created
+    ? event
+    : await redis.get<BehaviorEvent>(eventKey).catch(() => null);
+  if (
+    !canonicalEvent
+    || canonicalEvent.schemaVersion !== BEHAVIOR_SCHEMA_VERSION
+    || canonicalEvent.eventId !== event.eventId
+    || canonicalEvent.tenantId !== event.tenantId
+  ) {
+    return false;
+  }
+
+  await indexEvent(canonicalEvent, ttl);
+  return Boolean(created);
 }
 
 export async function registrarEventosClienteComportamento(params: {

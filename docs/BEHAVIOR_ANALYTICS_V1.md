@@ -143,9 +143,7 @@ Namespace:
 - behavior:v1:session:{tenant}:{sessionId}:{YYYYMMDD}
 - behavior:v1:rate:{hash}:{janela}
 
-Eventos são idempotentes por eventId.
-
-Todos os eventos e índices recebem TTL de retenção.
+Eventos são idempotentes por eventId. Se a gravação do evento tiver sucesso e a criação de algum índice falhar, o retry relê o evento canônico e completa os índices com operações idempotentes, sem substituir o evento. Todos os eventos e índices recebem TTL de retenção.
 
 ## Release gates
 

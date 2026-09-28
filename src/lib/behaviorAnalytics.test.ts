@@ -3,9 +3,12 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 const store = new Map<string, unknown>();
 const zsets = new Map<string, Array<{ score: number; member: string }>>();
 const expirations = new Map<string, number>();
+let zaddCalls = 0;
+let failOnZaddCall = -1;
 
 vi.mock("./redis", () => ({
   redis: {
+    get: vi.fn(async (key: string) => store.get(key) ?? null),
     set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
       if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
@@ -13,6 +16,8 @@ vi.mock("./redis", () => ({
       return "OK";
     }),
     zadd: vi.fn(async (key: string, value: { score: number; member: string }) => {
+      zaddCalls += 1;
+      if (zaddCalls === failOnZaddCall) throw new Error("falha simulada de índice");
       const arr = zsets.get(key) ?? [];
       zsets.set(key, [...arr.filter((x) => x.member !== value.member), value]);
       return 1;
@@ -31,6 +36,8 @@ vi.mock("./redis", () => ({
 
 import {
   behaviorAnalyticsEnabled,
+  behaviorGlobalIndexKey,
+  behaviorSessionIndexKey,
   pseudonimizarClienteId,
   consumirLimiteIngestaoComportamental,
   registrarEventosClienteComportamento,
@@ -45,6 +52,8 @@ beforeEach(() => {
   store.clear();
   zsets.clear();
   expirations.clear();
+  zaddCalls = 0;
+  failOnZaddCall = -1;
   vi.stubEnv("BEHAVIOR_ANALYTICS_ENABLED", "true");
   vi.stubEnv("BEHAVIOR_ANALYTICS_RETENTION_DAYS", "180");
   vi.stubEnv("BEHAVIOR_ANALYTICS_HASH_SECRET", "behavior-test-key-material-123456789");
@@ -172,6 +181,33 @@ describe("persistência pseudonimizada", () => {
     expect([...zsets.keys()].some((k) => k.startsWith("behavior:v1:visitor:"))).toBe(false);
     expect(serializado).toContain(hash!);
     expect([...zsets.keys()].some((k) => k.includes("behavior:v1:actor:default:" + hash))).toBe(true);
+    expect([...expirations.values()].every((ttl) => ttl === 180 * 24 * 60 * 60)).toBe(true);
+  });
+
+  test("retry repara índice parcial sem sobrescrever o evento canônico", async () => {
+    const params = {
+      events: [{
+        eventId: EVENT_ID,
+        sessionId: SESSION_ID,
+        type: "app_open" as const,
+        occurredAtMs: AGORA,
+        context: { source: "cardapio" as const },
+      }],
+      agoraMs: AGORA,
+    };
+    failOnZaddCall = 2;
+    await expect(registrarEventosClienteComportamento(params)).rejects.toThrow("falha simulada de índice");
+    expect(zsets.size).toBe(1);
+
+    failOnZaddCall = -1;
+    zaddCalls = 0;
+    expect(await registrarEventosClienteComportamento(params)).toEqual({ accepted: 0, duplicated: 1 });
+    expect(zsets.get(behaviorGlobalIndexKey("default", "20260928"))).toEqual([
+      { score: AGORA, member: EVENT_ID },
+    ]);
+    expect(zsets.get(behaviorSessionIndexKey("default", SESSION_ID, "20260928"))).toEqual([
+      { score: AGORA, member: EVENT_ID },
+    ]);
     expect([...expirations.values()].every((ttl) => ttl === 180 * 24 * 60 * 60)).toBe(true);
   });
 
