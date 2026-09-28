@@ -55,6 +55,8 @@ describe("instrumentação comportamental — cobertura essencial", () => {
     expect(behaviorClient).toContain('displayMode');
     expect(behaviorClient).toContain('referrerKind');
     expect(behaviorClient).toContain('engagementMs');
+    expect(behaviorClient).not.toContain("localStorage");
+    expect(behaviorClient).not.toContain("getBehaviorVisitorId");
     expect(behaviorClient).not.toContain("navigator.userAgent");
     expect(behaviorClient).not.toContain("geolocation");
   });

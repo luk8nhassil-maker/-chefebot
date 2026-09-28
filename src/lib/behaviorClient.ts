@@ -6,7 +6,6 @@ import type { BehaviorContext, ClientBehaviorEventType } from "./behaviorAnalyti
 const SESSION_KEY = "cf_behavior_session_v1";
 const SESSION_LAST_ACTIVITY_KEY = "cf_behavior_session_last_v1";
 const SESSION_APP_OPEN_KEY = "cf_behavior_app_open_v1";
-const VISITOR_KEY = "cf_behavior_visitor_v1";
 const SESSION_IDLE_MS = 30 * 60 * 1000;
 const QUEUE_MAX = 20;
 const FLUSH_DELAY_MS = 1200;
@@ -14,7 +13,6 @@ const FLUSH_DELAY_MS = 1200;
 type QueuedEvent = {
   eventId: string;
   sessionId: string;
-  visitorId?: string;
   type: ClientBehaviorEventType;
   occurredAtMs: number;
   context?: BehaviorContext;
@@ -38,19 +36,6 @@ function uuid(): string {
     const v = c === "x" ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
-}
-
-export function getBehaviorVisitorId(): string | null {
-  if (!enabledOnClient() || typeof window === "undefined") return null;
-  try {
-    const atual = localStorage.getItem(VISITOR_KEY);
-    if (atual && /^[0-9a-f-]{36}$/i.test(atual)) return atual;
-    const novo = uuid();
-    localStorage.setItem(VISITOR_KEY, novo);
-    return novo;
-  } catch {
-    return null;
-  }
 }
 
 export function getBehaviorSessionId(): string | null {
@@ -120,7 +105,6 @@ export function trackBehavior(type: ClientBehaviorEventType, context?: BehaviorC
   if (!enabledOnClient()) return;
   const sessionId = getBehaviorSessionId();
   if (!sessionId) return;
-  const visitorId = getBehaviorVisitorId();
 
   if (type === "app_open") {
     try {
@@ -137,7 +121,6 @@ export function trackBehavior(type: ClientBehaviorEventType, context?: BehaviorC
   queue.push({
     eventId: uuid(),
     sessionId,
-    ...(visitorId ? { visitorId } : {}),
     type,
     occurredAtMs: Date.now(),
     ...(contextoFinal ? { context: contextoFinal } : {}),

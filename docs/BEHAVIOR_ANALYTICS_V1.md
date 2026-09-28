@@ -35,7 +35,7 @@ Navegador
 
 Cada aba recebe um sessionId UUID salvo em sessionStorage.
 
-Antes de o cliente ser identificado, eventos ficam vinculados somente à sessão.
+Antes de o cliente ser identificado, eventos ficam vinculados somente à sessão. Não há identificador anônimo persistente entre sessões nem índice comportamental por visitante.
 
 Quando a mesma sessão produz um fato autenticado ou um pedido oficial, o servidor registra um evento associado ao cliente pseudonimizado. A leitura individual pode então recuperar também os eventos anônimos anteriores daquela mesma sessão.
 

@@ -82,6 +82,7 @@ describe("validarEventoClienteComportamento", () => {
     const evento = validarEventoClienteComportamento({
       eventId: EVENT_ID,
       sessionId: SESSION_ID,
+      visitorId: "33333333-3333-4333-8333-333333333333",
       type: "screen_view",
       occurredAtMs: AGORA,
       context: {
@@ -116,6 +117,7 @@ describe("validarEventoClienteComportamento", () => {
       },
     });
     expect(JSON.stringify(evento)).not.toContain("nao_deve_persistir");
+    expect(JSON.stringify(evento)).not.toContain("visitorId");
   });
 
   test("descarta contexto técnico fora da allowlist ou duração impossível", () => {
@@ -166,6 +168,8 @@ describe("persistência pseudonimizada", () => {
     expect(resultado).toEqual({ accepted: 1, duplicated: 0 });
     const serializado = JSON.stringify([...store.entries()]);
     expect(serializado).not.toContain(clienteIdCru);
+    expect(serializado).not.toContain("visitorHash");
+    expect([...zsets.keys()].some((k) => k.startsWith("behavior:v1:visitor:"))).toBe(false);
     expect(serializado).toContain(hash!);
     expect([...zsets.keys()].some((k) => k.includes("behavior:v1:actor:default:" + hash))).toBe(true);
     expect([...expirations.values()].every((ttl) => ttl === 180 * 24 * 60 * 60)).toBe(true);
