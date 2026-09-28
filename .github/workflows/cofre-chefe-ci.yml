@@ -59,7 +59,7 @@ jobs:
       - name: Instalar dependências
         run: npm ci
 
-      - name: Testes focados do Cofre e score
+      - name: Testes focados do Cofre, score e identificação do checkout
         run: >-
           npm test --
           src/lib/cofreChef.test.ts
@@ -68,15 +68,6 @@ jobs:
           src/lib/temporadas.test.ts
           src/app/api/cliente/cofre/route.test.ts
           src/app/api/admin/cofre/calibracao/route.test.ts
-          src/lib/checkoutIdentidade.ts
-          src/lib/checkoutIdentidade.test.ts
-          src/lib/clientes.ts
-          src/lib/clientes.test.ts
-          src/app/api/cliente/perfil/route.ts
-          src/app/api/cliente/perfil/route.test.ts
-          src/app/cardapio/page.tsx
-          src/app/api/pedido-app/route.ts
-          src/app/api/pedido-app/route.cliente.test.ts
           src/lib/checkoutIdentidade.test.ts
           src/lib/clientes.test.ts
           src/app/api/cliente/perfil/route.test.ts
@@ -94,12 +85,21 @@ jobs:
           src/lib/cofreChefReadModel.test.ts
           src/lib/cofreChefCalibracao.ts
           src/lib/cofreChefCalibracao.test.ts
+          src/lib/checkoutIdentidade.ts
+          src/lib/checkoutIdentidade.test.ts
+          src/lib/clientes.ts
+          src/lib/clientes.test.ts
           src/lib/temporadas.ts
           src/lib/temporadas.test.ts
           src/app/api/cliente/cofre/route.ts
           src/app/api/cliente/cofre/route.test.ts
           src/app/api/admin/cofre/calibracao/route.ts
           src/app/api/admin/cofre/calibracao/route.test.ts
+          src/app/api/cliente/perfil/route.ts
+          src/app/api/cliente/perfil/route.test.ts
+          src/app/api/pedido-app/route.ts
+          src/app/api/pedido-app/route.cliente.test.ts
+          src/app/cardapio/page.tsx
           src/lib/rankingClientes.ts
           src/lib/rankingClientes.test.ts
           src/lib/rankingScoreAutoridadeUnica.integration.test.ts
