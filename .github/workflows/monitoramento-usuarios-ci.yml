@@ -1,0 +1,110 @@
+name: monitoramento-usuarios-ci
+
+on:
+  pull_request:
+    paths:
+      - "docs/BEHAVIOR_ANALYTICS_V1.md"
+      - "src/lib/behaviorAnalytics*.ts"
+      - "src/lib/behaviorClient.ts"
+      - "src/lib/behaviorInstrumentation.test.ts"
+      - "src/app/api/comportamento/**"
+      - "src/app/api/dev/comportamento/**"
+      - "src/app/api/cardapio-whatsapp-session/**"
+      - "src/app/api/pedido-app/route.ts"
+      - "src/app/cardapio/page.tsx"
+      - "src/app/cardapio/page.test.ts"
+      - "src/app/cliente/page.tsx"
+      - "src/app/cliente/pedidos/page.tsx"
+      - "src/app/rastrear/[pedidoId]/page.tsx"
+      - "src/app/dev/monitoramento-usuarios/**"
+      - "src/app/dev/page.tsx"
+      - "src/app/privacidade/page.tsx"
+      - "src/lib/auth.ts"
+      - ".github/workflows/monitoramento-usuarios-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monitoramento-usuarios-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      VERCEL_ENV: preview
+      UPSTASH_DISABLE_TELEMETRY: "1"
+      KV_REST_API_URL: "http://127.0.0.1:9"
+      KV_REST_API_TOKEN: "monitoramento-ci-token-nao-real"
+      AUTH_SECRET: "monitoramento-ci-auth-secret-nao-real-com-tamanho-suficiente"
+      KELLYNE_PASSWORD: "monitoramento-ci-senha-nao-real"
+      BEHAVIOR_ANALYTICS_ENABLED: "true"
+      NEXT_PUBLIC_BEHAVIOR_ANALYTICS_ENABLED: "true"
+      BEHAVIOR_ANALYTICS_RETENTION_DAYS: "30"
+      BEHAVIOR_ANALYTICS_HASH_SECRET: "monitoramento-ci-hash-secret-nao-real-com-tamanho"
+    steps:
+      - name: Checkout do commit exato
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Configurar Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados de telemetria e fluxos adjacentes
+        run: >-
+          npm test --
+          src/lib/behaviorAnalytics.test.ts
+          src/lib/behaviorAnalyticsRead.test.ts
+          src/lib/behaviorInstrumentation.test.ts
+          src/app/api/comportamento/route.test.ts
+          src/app/api/cardapio-whatsapp-session/route.test.ts
+          src/app/api/pedido-app/route.cliente.test.ts
+          src/app/cardapio/page.test.ts
+
+      - name: Lint dos arquivos alterados
+        run: >-
+          npm run lint --
+          src/lib/behaviorAnalyticsTypes.ts
+          src/lib/behaviorAnalytics.ts
+          src/lib/behaviorAnalytics.test.ts
+          src/lib/behaviorAnalyticsRead.ts
+          src/lib/behaviorAnalyticsRead.test.ts
+          src/lib/behaviorClient.ts
+          src/lib/behaviorInstrumentation.test.ts
+          src/app/api/comportamento/route.ts
+          src/app/api/comportamento/route.test.ts
+          src/app/api/dev/comportamento/cliente/route.ts
+          src/app/api/dev/comportamento/resumo/route.ts
+          src/app/api/cardapio-whatsapp-session/route.ts
+          src/app/api/cardapio-whatsapp-session/route.test.ts
+          src/app/api/pedido-app/route.ts
+          src/app/cardapio/page.tsx
+          src/app/cardapio/page.test.ts
+          src/app/cliente/page.tsx
+          src/app/cliente/pedidos/page.tsx
+          src/app/rastrear/[pedidoId]/page.tsx
+          src/app/dev/monitoramento-usuarios/MonitoramentoUsuarios.tsx
+          src/app/dev/monitoramento-usuarios/page.tsx
+          src/app/dev/page.tsx
+          src/app/privacidade/page.tsx
+          src/lib/auth.ts
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Suíte completa
+        run: npm test
+
+      - name: Build com telemetria bloqueada no Preview
+        run: npm run build
