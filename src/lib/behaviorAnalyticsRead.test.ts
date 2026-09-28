@@ -56,6 +56,7 @@ function ev(params: {
     eventId: params.id,
     tenantId: TENANT,
     sessionId: params.sessionId ?? SESSION,
+    visitorHash: null,
     actorHash: params.actorHash ?? null,
     type: params.type,
     occurredAtMs: DAY + params.offsetMin * 60_000,
