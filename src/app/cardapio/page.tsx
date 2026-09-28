@@ -28,6 +28,11 @@ import {
   type RankingProspeccaoStatusPagamento,
 } from "@/lib/rankingProspeccao";
 import { resolverIdentidadeCheckout } from "@/lib/checkoutIdentidade";
+import {
+  getBehaviorSessionId,
+  installBehaviorPageExitTracking,
+  trackBehavior,
+} from "@/lib/behaviorClient";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -1408,6 +1413,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const apelidoRef = useRef<HTMLInputElement>(null);
   const telefoneRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    trackBehavior("app_open", { source: "cardapio", screen: "sc-start" });
+    return installBehaviorPageExitTracking("cardapio");
+  }, []);
+
   // Vínculo WhatsApp: valida o token do link (?t=) no servidor e guarda só na
   // sessão do navegador. Token inválido/expirado nunca quebra o fluxo — o
   // checkout volta a pedir o WhatsApp manualmente.
@@ -2292,6 +2302,41 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const base = { source: "cardapio" as const, screen };
+    trackBehavior("screen_view", base);
+    if (screen === "sc-delivery") {
+      trackBehavior("delivery_step_view", {
+        source: "checkout",
+        screen,
+        target: "checkout",
+        cartItems: cartCount,
+        cartDistinctItems: cart.length,
+      });
+    } else if (screen === "sc-pay") {
+      trackBehavior("payment_step_view", {
+        source: "checkout",
+        screen,
+        target: "checkout",
+        cartItems: cartCount,
+        cartDistinctItems: cart.length,
+      });
+    }
+  }, [screen, hydrated, cartCount, cart.length]);
+
+  const cartBehaviorSignature = cart.map((item) => String(item.kind) + ":" + String(item.qty)).join("|");
+  useEffect(() => {
+    if (!hydrated) return;
+    trackBehavior("cart_state", {
+      source: "cardapio",
+      screen,
+      target: "cart",
+      cartItems: cartCount,
+      cartDistinctItems: cart.length,
+    });
+  }, [cartBehaviorSignature, hydrated, screen, cartCount, cart.length]);
   const cartTemBebidaOuSuco = cart.some((c) => [...bebidasEfetivas, ...sucosEfetivos].some((m) => m.name === c.name));
   const showUpsellBebida = !upsellBebidaIgnorado && !cartTemBebidaOuSuco && ["pizza", "lanche", "macarronada"].includes(lastAddedKind || "");
   function sairDoPosItemSemBebida(destino: "sc-start" | "sc-cart") { if (showUpsellBebida) setUpsellBebidaIgnorado(true); go(destino); }
@@ -2388,6 +2433,16 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     }
     setErroEntrega("");
     go("sc-pay");
+  }
+
+  function paymentFamilyBehavior(value: string | null): "pix" | "dinheiro" | "cartao" | "misto" | "unknown" {
+    if (!value) return "unknown";
+    const normalizado = value.toLowerCase();
+    if (normalizado.includes("misto")) return "misto";
+    if (normalizado.includes("pix")) return "pix";
+    if (normalizado.includes("dinheiro")) return "dinheiro";
+    if (normalizado.includes("cart")) return "cartao";
+    return "unknown";
   }
 
   function paymentLabel(value: string) { return value === "Cartao" ? "Cartão" : value === "Misto" ? "Pagamento misto" : value; }
@@ -2552,6 +2607,15 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       } else { setErroTroco(""); }
     } else { setErroTroco(""); }
     if (hasError) return;
+    trackBehavior("order_submit_attempt", {
+      source: "checkout",
+      screen: "sc-pay",
+      target: "checkout",
+      cartItems: cartCount,
+      cartDistinctItems: cart.length,
+      deliveryType: delType || "unknown",
+      paymentFamily: paymentFamilyBehavior(payment),
+    });
     setSending(true);
     // Presente da Jornada do Chef: campo dedicado, nunca um item do carrinho.
     // O servidor reconstrói produto/preço/quantidade a partir do snapshot da
@@ -2559,7 +2623,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     // usar e (pizza) o sabor escolhido.
     const itemRecompensaJornada = cart.find((c) => c.recompensaJornadaId);
     const itensSemRecompensa = cart.filter((c) => !c.recompensaJornadaId);
-    const payload = { cliente: identificacaoPedido, ...(identidadeCheckout.nome ? { nome: identidadeCheckout.nome } : {}), ...(identidadeCheckout.apelido ? { apelido: identidadeCheckout.apelido } : {}), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}), ...(c.simpleSelection ? { simpleSelection: c.simpleSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > agoraEmMs() ? resgatePontos.resgateId : undefined };
+    const payload = { cliente: identificacaoPedido, ...(identidadeCheckout.nome ? { nome: identidadeCheckout.nome } : {}), ...(identidadeCheckout.apelido ? { apelido: identidadeCheckout.apelido } : {}), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, behaviorSessionId: getBehaviorSessionId() || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}), ...(c.simpleSelection ? { simpleSelection: c.simpleSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > agoraEmMs() ? resgatePontos.resgateId : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
