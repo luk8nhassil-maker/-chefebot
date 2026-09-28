@@ -68,7 +68,21 @@ afterEach(() => {
 });
 
 describe("behaviorAnalyticsEnabled", () => {
-  test("fica fechado com configuração incompleta", () => {
+  test("produção ativa por padrão com retenção padrão e segredo de autenticação", () => {
+    vi.stubEnv("BEHAVIOR_ANALYTICS_ENABLED", "");
+    vi.stubEnv("BEHAVIOR_ANALYTICS_RETENTION_DAYS", "");
+    vi.stubEnv("BEHAVIOR_ANALYTICS_HASH_SECRET", "");
+    vi.stubEnv("AUTH_SECRET", "behavior-test-auth-secret-material-123456");
+    expect(behaviorAnalyticsEnabled()).toBe(true);
+  });
+
+  test("produção pode desligar coleta explicitamente", () => {
+    vi.stubEnv("BEHAVIOR_ANALYTICS_ENABLED", "false");
+    expect(behaviorAnalyticsEnabled()).toBe(false);
+  });
+
+  test("fica fechado fora de produção sem ativação explícita", () => {
+    vi.stubEnv("VERCEL_ENV", "development");
     vi.stubEnv("BEHAVIOR_ANALYTICS_ENABLED", "");
     expect(behaviorAnalyticsEnabled()).toBe(false);
   });
