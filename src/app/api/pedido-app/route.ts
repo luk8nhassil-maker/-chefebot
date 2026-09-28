@@ -13,6 +13,8 @@ import { temDinheiroNoPagamento, valorDinheiroEsperado, temPixNoPagamento, valor
 import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
 import { atualizarIdentidadeCliente, buscarClientePorId, sanitizeTelefoneCliente } from "@/lib/clientes";
 import { resolverIdentidadeCheckout } from "@/lib/checkoutIdentidade";
+import { registrarEventoServidorComportamento } from "@/lib/behaviorAnalytics";
+import type { BehaviorContext } from "@/lib/behaviorAnalyticsTypes";
 import { calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
 import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice, contarPizzasPagasParaFidelidade } from "@/lib/pedidoAppItens";
 import {
@@ -70,6 +72,8 @@ type PedidoApp = {
   semTelefonePainel?: boolean;
   whatsappToken?: string;
   usarOutroWhatsapp?: boolean;
+  /** Sessão comportamental aleatória do navegador; não contém PII. */
+  behaviorSessionId?: string;
   itens: ItemApp[];
   tipoEntrega: "delivery" | "retirada" | "dine_in";
   bairro?: string;
@@ -95,6 +99,15 @@ type PedidoApp = {
    * contrário. Nunca contém PII (ver src/survival/clientRequestId.ts). */
   clientRequestId?: string;
 };
+
+function paymentFamilyBehaviorServer(pagamento: string): NonNullable<BehaviorContext["paymentFamily"]> {
+  const normalizado = String(pagamento || "").toLowerCase();
+  if (normalizado.includes("misto")) return "misto";
+  if (normalizado.includes("pix")) return "pix";
+  if (normalizado.includes("dinheiro")) return "dinheiro";
+  if (normalizado.includes("cart")) return "cartao";
+  return "unknown";
+}
 
 type ConfigPizzariaPix = {
   nomePizzaria?: string;
@@ -1938,6 +1951,27 @@ export async function POST(req: NextRequest) {
       await redis
         .eval(LIBERAR_CLAIM_SE_DONO_SCRIPT, [chaveClaimPedido(clientRequestId)], [montarValorClaim(ownerToken, requestFingerprint)])
         .catch((err) => logSurvivalErro("idempotencia_pedido", "liberacao", "eval_falhou", err));
+    }
+
+    if (body.behaviorSessionId) {
+      try {
+        await registrarEventoServidorComportamento({
+          clienteId: clienteIdPontos ?? clienteId ?? null,
+          sessionId: body.behaviorSessionId,
+          type: "order_created",
+          context: {
+            source: "checkout",
+            target: "checkout",
+            pedidoId,
+            deliveryType: body.tipoEntrega,
+            paymentFamily: paymentFamilyBehaviorServer(body.pagamento),
+          },
+        });
+      } catch (err) {
+        // Analytics é sempre secundário: nunca pode mudar a confirmação real
+        // do pedido nem transformar sucesso em erro.
+        console.error("[ChefeBot] Erro ao registrar conversão comportamental (ignorado):", err);
+      }
     }
 
     const resposta: PedidoAppRespostaSucesso = {
