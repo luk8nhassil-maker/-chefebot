@@ -10,6 +10,7 @@ import {
   BEHAVIOR_FUNNEL_STEPS,
   BEHAVIOR_PAGES,
   PUBLIC_BEHAVIOR_EVENTS,
+  classifyBehaviorPaymentMethod,
   type BehaviorEventData,
   type BehaviorEventType,
   type BehaviorPaymentMethod,
@@ -368,19 +369,6 @@ export async function recordPublicBehaviorEvent(params: {
   }
 }
 
-function sanitizePaymentMethod(value: string | undefined): BehaviorPaymentMethod {
-  const lower = (value ?? "").toLowerCase();
-  const pix = lower.includes("pix");
-  const dinheiro = lower.includes("dinheiro");
-  const cartao = lower.includes("cart");
-  const total = Number(pix) + Number(dinheiro) + Number(cartao);
-  if (total > 1) return "misto";
-  if (pix) return "pix";
-  if (dinheiro) return "dinheiro";
-  if (cartao) return "cartao";
-  return "outro";
-}
-
 export async function recordOrderCreatedBehaviorFact(params: {
   tenantId?: string;
   pedidoId: string;
@@ -455,7 +443,7 @@ export async function recordOrderCreatedBehaviorFact(params: {
         orderTotalCents: Math.max(0, Math.trunc(params.totalCents)),
         orderItemCount: Math.max(0, Math.trunc(params.itemCount)),
         ...(deliveryType ? { deliveryType } : {}),
-        paymentMethod: sanitizePaymentMethod(params.payment),
+        paymentMethod: classifyBehaviorPaymentMethod(params.payment),
       },
       authority: "server_fact",
     };
