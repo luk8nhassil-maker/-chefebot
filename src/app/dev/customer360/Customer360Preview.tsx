@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import {
   buildBehaviorSessionInsights,
   buildCustomerBehaviorFeatureVector,
@@ -68,14 +68,14 @@ function money(cents: number | null) {
   return (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-const shell: React.CSSProperties = {
+const shell: CSSProperties = {
   minHeight: "100vh",
   padding: "28px 18px 56px",
   background: "linear-gradient(180deg,#101010,#1b1b1b)",
   color: "#f8f8f8",
   fontFamily: "Arial, sans-serif",
 };
-const card: React.CSSProperties = {
+const card: CSSProperties = {
   background: "rgba(255,255,255,.06)",
   border: "1px solid rgba(255,255,255,.1)",
   borderRadius: 20,
