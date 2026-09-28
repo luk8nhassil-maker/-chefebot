@@ -1,59 +1,127 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { vi, describe, test, expect, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const mocks = vi.hoisted(() => ({
-  validarTokenCardapio: vi.fn(),
-  mascararPhone: vi.fn(),
-  mascararTelefoneExibicao: vi.fn(),
+const PHONE = "5599974000691";
+const TOKEN = "a".repeat(32);
+
+const redisStore = new Map<string, unknown>();
+vi.mock("@/lib/redis", () => ({
+  redis: {
+    get: vi.fn(async (key: string) => (redisStore.has(key) ? redisStore.get(key) : null)),
+    set: vi.fn(async (key: string, value: unknown) => { redisStore.set(key, value); return "OK"; }),
+  },
+}));
+
+const { sincronizarCronometroMock } = vi.hoisted(() => ({
+  sincronizarCronometroMock: vi.fn(async () => {}),
+}));
+vi.mock("@/lib/inatividadeConversa", () => ({
+  sincronizarCronometroInatividade: sincronizarCronometroMock,
+}));
+
+const behaviorMocks = vi.hoisted(() => ({
   derivarClienteIdPorTelefone: vi.fn(),
   criarVinculoCookieComportamento: vi.fn(),
   behaviorAnalyticsEnabled: vi.fn(),
-  sincronizarCronometroInatividade: vi.fn(),
 }));
-vi.mock("@/lib/cardapioToken", () => ({
-  validarTokenCardapio: mocks.validarTokenCardapio,
-  mascararPhone: mocks.mascararPhone,
-  mascararTelefoneExibicao: mocks.mascararTelefoneExibicao,
+vi.mock("@/lib/fidelidade", () => ({
+  derivarClienteIdPorTelefone: behaviorMocks.derivarClienteIdPorTelefone,
 }));
-vi.mock("@/lib/fidelidade", () => ({ derivarClienteIdPorTelefone: mocks.derivarClienteIdPorTelefone }));
 vi.mock("@/lib/behaviorAnalytics", () => ({
-  criarVinculoCookieComportamento: mocks.criarVinculoCookieComportamento,
-  behaviorAnalyticsEnabled: mocks.behaviorAnalyticsEnabled,
+  criarVinculoCookieComportamento: behaviorMocks.criarVinculoCookieComportamento,
+  behaviorAnalyticsEnabled: behaviorMocks.behaviorAnalyticsEnabled,
 }));
-vi.mock("@/lib/inatividadeConversa", () => ({ sincronizarCronometroInatividade: mocks.sincronizarCronometroInatividade }));
 
 import { GET } from "./route";
 
+function requestSessao(token?: string) {
+  const url = token
+    ? `http://localhost/api/cardapio-whatsapp-session?t=${token}`
+    : "http://localhost/api/cardapio-whatsapp-session";
+  return new NextRequest(url);
+}
+
 beforeEach(() => {
-  vi.clearAllMocks();
-  mocks.validarTokenCardapio.mockResolvedValue({ phone: "5544999999999" });
-  mocks.mascararPhone.mockReturnValue("9999");
-  mocks.mascararTelefoneExibicao.mockReturnValue("(44) 9••••-9999");
-  mocks.derivarClienteIdPorTelefone.mockReturnValue("cli_5544999999999");
-  mocks.criarVinculoCookieComportamento.mockReturnValue("pseudonym.signature");
-  mocks.behaviorAnalyticsEnabled.mockReturnValue(true);
-  mocks.sincronizarCronometroInatividade.mockResolvedValue(undefined);
+  redisStore.clear();
+  sincronizarCronometroMock.mockClear();
+  behaviorMocks.derivarClienteIdPorTelefone.mockReturnValue("cliente-pseudonimizado");
+  behaviorMocks.criarVinculoCookieComportamento.mockReturnValue("hash.assinado");
+  behaviorMocks.behaviorAnalyticsEnabled.mockReturnValue(true);
 });
 
-describe("GET /api/cardapio-whatsapp-session", () => {
-  test("associa o link validado com cookie HttpOnly restrito à telemetria e resposta sem telefone", async () => {
-    const req = new NextRequest("https://chefedapizza.com.br/api/cardapio-whatsapp-session?t=opaque");
-    const response = await GET(req);
-    const body = await response.json();
-    const cookie = response.headers.get("set-cookie") ?? "";
+describe("GET /api/cardapio-whatsapp-session — reconhecimento do WhatsApp do link", () => {
+  test("token válido devolve só as máscaras (4 finais + formato de exibição), nunca o número completo", async () => {
+    redisStore.set(`cardapio:token:${TOKEN}`, { phone: PHONE, createdAt: Date.now() });
 
-    expect(body).toEqual({ ok: true, origem: "whatsapp", monitoramentoAtivo: true, phoneFinal: "9999", phoneMascarado: "(44) 9••••-9999" });
-    expect(JSON.stringify(body)).not.toContain("5544999999999");
+    const res = await GET(requestSessao(TOKEN));
+    const body = await res.json();
+
+    expect(body.ok).toBe(true);
+    expect(body.phoneFinal).toBe("0691");
+    expect(body.phoneMascarado).toBe("(99) 9••••-0691");
+    expect(body.monitoramentoAtivo).toBe(true);
+
+    const serializado = JSON.stringify(body);
+    expect(serializado).not.toContain(PHONE);
+    expect(serializado).not.toContain(PHONE.slice(-8));
+    expect(serializado).not.toContain("7400");
+  });
+
+  test("token inexistente/expirado devolve ok:false sem detalhes", async () => {
+    const res = await GET(requestSessao(TOKEN));
+    const body = await res.json();
+    expect(body).toEqual({ ok: false });
+  });
+
+  test("sem token devolve ok:false", async () => {
+    const res = await GET(requestSessao());
+    const body = await res.json();
+    expect(body).toEqual({ ok: false });
+  });
+});
+
+describe("GET /api/cardapio-whatsapp-session — pausa o cronômetro de cancelamento por inatividade", () => {
+  test("token válido avisa o cronômetro como 'cliente' (pausa sem registrar mensagem falsa)", async () => {
+    redisStore.set(`cardapio:token:${TOKEN}`, { phone: PHONE, createdAt: Date.now() });
+    await GET(requestSessao(TOKEN));
+    expect(sincronizarCronometroMock).toHaveBeenCalledWith(PHONE, "cliente");
+  });
+
+  test("token inválido/expirado nunca chama o cronômetro", async () => {
+    await GET(requestSessao(TOKEN));
+    expect(sincronizarCronometroMock).not.toHaveBeenCalled();
+  });
+
+  test("falha ao sincronizar o cronômetro nunca derruba a resolução do token", async () => {
+    redisStore.set(`cardapio:token:${TOKEN}`, { phone: PHONE, createdAt: Date.now() });
+    sincronizarCronometroMock.mockRejectedValueOnce(new Error("qstash indisponivel"));
+    const res = await GET(requestSessao(TOKEN));
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.phoneFinal).toBe("0691");
+  });
+});
+
+describe("GET /api/cardapio-whatsapp-session — vínculo restrito para telemetria", () => {
+  test("cookie HttpOnly usa pseudônimo, escopo da API e não contém o telefone", async () => {
+    redisStore.set(`cardapio:token:${TOKEN}`, { phone: PHONE, createdAt: Date.now() });
+    const response = await GET(requestSessao(TOKEN));
+    const cookie = response.headers.get("set-cookie") ?? "";
     expect(cookie).toContain("behavior-link-v1=");
     expect(cookie).toContain("HttpOnly");
     expect(cookie).toContain("Path=/api/comportamento");
-    expect(cookie).not.toContain("5544999999999");
+    expect(cookie).not.toContain(PHONE);
+    expect(behaviorMocks.derivarClienteIdPorTelefone).toHaveBeenCalledWith(PHONE);
+    expect(behaviorMocks.criarVinculoCookieComportamento).toHaveBeenCalledWith("cliente-pseudonimizado");
   });
 
-  test("não cria identidade de telemetria com o gate desligado", async () => {
-    mocks.behaviorAnalyticsEnabled.mockReturnValue(false);
-    const response = await GET(new NextRequest("https://chefedapizza.com.br/api/cardapio-whatsapp-session?t=opaque"));
+  test("não cria vínculo quando o coletor está desligado", async () => {
+    redisStore.set(`cardapio:token:${TOKEN}`, { phone: PHONE, createdAt: Date.now() });
+    behaviorMocks.behaviorAnalyticsEnabled.mockReturnValue(false);
+    const response = await GET(requestSessao(TOKEN));
+    const body = await response.json();
+    expect(body.monitoramentoAtivo).toBe(false);
     expect(response.headers.get("set-cookie")).toBeNull();
-    expect(mocks.criarVinculoCookieComportamento).not.toHaveBeenCalled();
+    expect(behaviorMocks.criarVinculoCookieComportamento).not.toHaveBeenCalled();
   });
 });
