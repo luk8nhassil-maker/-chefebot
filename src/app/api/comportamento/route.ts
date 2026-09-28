@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoCliente } from "@/lib/clienteAuth";
 import {
   behaviorAnalyticsEnabled,
+  consumirLimiteIngestaoComportamental,
   registrarEventosClienteComportamento,
   validarEventoClienteComportamento,
 } from "@/lib/behaviorAnalytics";
@@ -40,6 +41,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { ok: false, error: "eventos_invalidos" },
       { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  const primeiroEvento = rawEvents[0] as { sessionId?: unknown } | undefined;
+  const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const rateIdentity = forwarded || (typeof primeiroEvento?.sessionId === "string" ? "session:" + primeiroEvento.sessionId : "unknown");
+  const dentroDoLimite = await consumirLimiteIngestaoComportamental(rateIdentity).catch(() => false);
+  if (!dentroDoLimite) {
+    return NextResponse.json(
+      { ok: false, error: "limite_temporario" },
+      { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": "60" } },
     );
   }
 
