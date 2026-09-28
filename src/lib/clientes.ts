@@ -4,6 +4,7 @@ export type Cliente = {
   clienteId: string;
   telefone: string;
   nome?: string;
+  apelido?: string;
   createdAt: string;
   updatedAt: string;
   lastLoginAt: string;
@@ -40,6 +41,10 @@ export function normalizarNomeCliente(nome: unknown): string {
   if (typeof nome !== "string") return "";
   const limpo = nome.replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim();
   return limpo.slice(0, 60).trim();
+}
+
+export function normalizarApelidoCliente(apelido: unknown): string {
+  return normalizarNomeCliente(apelido);
 }
 
 function chaveCliente(telefoneSanitizado: string): string {
@@ -150,6 +155,33 @@ export async function ativarFidelidadeCliente(telefone: string, nome: string): P
   return atualizado;
 }
 
+
+/**
+ * Atualiza Nome/Apelido do perfil sem mexer em fidelidade, telefone ou sessão.
+ * Campos vazios são ignorados: preencher um não apaga o outro.
+ */
+export async function atualizarIdentidadeCliente(
+  telefone: string,
+  identidade: { nome?: unknown; apelido?: unknown },
+): Promise<Cliente> {
+  const tel = sanitizeTelefoneCliente(telefone);
+  const existente = await buscarClientePorTelefone(tel);
+  if (!existente) throw new Error("cliente_nao_encontrado");
+
+  const nome = normalizarNomeCliente(identidade.nome);
+  const apelido = normalizarApelidoCliente(identidade.apelido);
+  if (!nome && !apelido) throw new Error("identidade_invalida");
+
+  const agora = new Date().toISOString();
+  const atualizado: Cliente = {
+    ...existente,
+    ...(nome ? { nome } : {}),
+    ...(apelido ? { apelido } : {}),
+    updatedAt: agora,
+  };
+  await redis.set(chaveCliente(tel), atualizado);
+  return atualizado;
+}
 
 export async function registrarFotoPerfilCliente(
   telefone: string,
