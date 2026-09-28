@@ -5,6 +5,11 @@ on:
     paths:
       - "src/lib/cofreChef.ts"
       - "src/lib/cofreChef.test.ts"
+      - "src/lib/cofreChefReadModel.ts"
+      - "src/lib/cofreChefReadModel.test.ts"
+      - "src/lib/temporadas.ts"
+      - "src/lib/temporadas.test.ts"
+      - "src/app/api/cliente/cofre/**"
       - "src/lib/rankingClientes.ts"
       - "src/lib/rankingClientes.test.ts"
       - "src/lib/rankingScoreAutoridadeUnica.integration.test.ts"
@@ -47,6 +52,9 @@ jobs:
         run: >-
           npm test --
           src/lib/cofreChef.test.ts
+          src/lib/cofreChefReadModel.test.ts
+          src/lib/temporadas.test.ts
+          src/app/api/cliente/cofre/route.test.ts
           src/lib/rankingClientes.test.ts
           src/lib/rankingScoreAutoridadeUnica.integration.test.ts
           src/proxy.cofre-preview.test.ts
@@ -56,6 +64,12 @@ jobs:
           npm run lint --
           src/lib/cofreChef.ts
           src/lib/cofreChef.test.ts
+          src/lib/cofreChefReadModel.ts
+          src/lib/cofreChefReadModel.test.ts
+          src/lib/temporadas.ts
+          src/lib/temporadas.test.ts
+          src/app/api/cliente/cofre/route.ts
+          src/app/api/cliente/cofre/route.test.ts
           src/lib/rankingClientes.ts
           src/lib/rankingClientes.test.ts
           src/lib/rankingScoreAutoridadeUnica.integration.test.ts
