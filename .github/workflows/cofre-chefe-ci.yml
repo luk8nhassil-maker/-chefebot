@@ -1,0 +1,81 @@
+name: cofre-chefe-ci
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/cofreChef.ts"
+      - "src/lib/cofreChef.test.ts"
+      - "src/lib/rankingClientes.ts"
+      - "src/lib/rankingClientes.test.ts"
+      - "src/lib/rankingScoreAutoridadeUnica.integration.test.ts"
+      - "src/app/dev/cofre-chefe/**"
+      - "src/proxy.ts"
+      - "src/proxy.cofre-preview.test.ts"
+      - "docs/COFRE_DO_CHEFE_V1.md"
+      - ".github/workflows/cofre-chefe-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cofre-chefe-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      VERCEL_ENV: preview
+      UPSTASH_DISABLE_TELEMETRY: "1"
+      KV_REST_API_URL: http://127.0.0.1:9
+      KV_REST_API_TOKEN: cofre-ci-token-nao-real
+      AUTH_SECRET: cofre-ci-auth-secret-nao-real-com-tamanho-suficiente
+      KELLYNE_PASSWORD: cofre-ci-senha-nao-real
+
+    steps:
+      - name: Checkout do HEAD exato
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados do Cofre e score
+        run: >-
+          npm test --
+          src/lib/cofreChef.test.ts
+          src/lib/rankingClientes.test.ts
+          src/lib/rankingScoreAutoridadeUnica.integration.test.ts
+          src/proxy.cofre-preview.test.ts
+
+      - name: Lint do patch
+        run: >-
+          npm run lint --
+          src/lib/cofreChef.ts
+          src/lib/cofreChef.test.ts
+          src/lib/rankingClientes.ts
+          src/lib/rankingClientes.test.ts
+          src/lib/rankingScoreAutoridadeUnica.integration.test.ts
+          src/app/dev/cofre-chefe/page.tsx
+          src/app/dev/cofre-chefe/CofreChefePreview.tsx
+          src/proxy.ts
+          src/proxy.cofre-preview.test.ts
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Suíte completa
+        run: npm test
+
+      - name: Build de produção em modo Preview
+        run: npm run build
