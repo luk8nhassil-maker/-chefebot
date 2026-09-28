@@ -210,6 +210,9 @@ function keySession(tenantId: string, sessionId: string): string {
 function keySessionOwner(tenantId: string, sessionId: string): string {
   return `behavior:session:owner:${tenantId}:${sessionId}`;
 }
+function keySessionStart(tenantId: string, sessionId: string): string {
+  return `behavior:session:start:${tenantId}:${sessionId}`;
+}
 function keyDay(tenantId: string, day: string): string {
   return `behavior:day:${tenantId}:${day}`;
 }
@@ -279,13 +282,31 @@ async function linkSessionToCustomer(params: {
     await aredis.expire(ownerKey, config.retentionSeconds);
   }
 
+  const storedStart = await redis.get<number>(keySessionStart(tenantId, sessionId));
+  const sessionStartMs =
+    typeof storedStart === "number" && Number.isFinite(storedStart) && storedStart > 0
+      ? storedStart
+      : nowMs;
   const customerKey = keyCustomerSessions(
     tenantId,
     customerRef,
-    monthBucket(nowMs),
+    monthBucket(sessionStartMs),
   );
-  await aredis.zadd(customerKey, { score: nowMs, member: sessionId });
-  await aredis.expire(customerKey, config.retentionSeconds);
+  const startDay = dayBucket(sessionStartMs);
+  const customerDayKey = keyCustomersDay(tenantId, startDay);
+  const customerSessionsDayKey = keyCustomerSessionsDay(tenantId, startDay);
+
+  await Promise.all([
+    aredis.zadd(customerKey, { score: sessionStartMs, member: sessionId }),
+    aredis.expire(customerKey, config.retentionSeconds),
+    aredis.zadd(customerDayKey, { score: sessionStartMs, member: customerRef }),
+    aredis.expire(customerDayKey, config.retentionSeconds),
+    aredis.zadd(customerSessionsDayKey, {
+      score: sessionStartMs,
+      member: `${customerRef}:${sessionId}`,
+    }),
+    aredis.expire(customerSessionsDayKey, config.retentionSeconds),
+  ]);
   return "linked";
 }
 
@@ -307,6 +328,7 @@ async function persistEvent(
 
   const day = dayBucket(record.createdAtMs);
   const sessionKey = keySession(record.tenantId, record.sessionId);
+  const sessionStartKey = keySessionStart(record.tenantId, record.sessionId);
   const dayKey = keyDay(record.tenantId, day);
   const counterKey = keyCounterDay(record.tenantId, day);
 
@@ -316,6 +338,10 @@ async function persistEvent(
   const customerSessionsDayKey = keyCustomerSessionsDay(record.tenantId, day);
 
   const writes: Array<Promise<unknown>> = [
+    redis.set(sessionStartKey, record.createdAtMs, {
+      nx: true,
+      ex: config.retentionSeconds,
+    }),
     aredis.zadd(sessionKey, { score: record.createdAtMs, member: record.eventId }),
     aredis.expire(sessionKey, config.retentionSeconds),
     aredis.zadd(dayKey, { score: record.createdAtMs, member: record.eventId }),
