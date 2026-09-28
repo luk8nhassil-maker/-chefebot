@@ -7,9 +7,12 @@ on:
       - "src/lib/cofreChef.test.ts"
       - "src/lib/cofreChefReadModel.ts"
       - "src/lib/cofreChefReadModel.test.ts"
+      - "src/lib/cofreChefCalibracao.ts"
+      - "src/lib/cofreChefCalibracao.test.ts"
       - "src/lib/temporadas.ts"
       - "src/lib/temporadas.test.ts"
       - "src/app/api/cliente/cofre/**"
+      - "src/app/api/admin/cofre/**"
       - "src/lib/rankingClientes.ts"
       - "src/lib/rankingClientes.test.ts"
       - "src/lib/rankingScoreAutoridadeUnica.integration.test.ts"
@@ -53,8 +56,10 @@ jobs:
           npm test --
           src/lib/cofreChef.test.ts
           src/lib/cofreChefReadModel.test.ts
+          src/lib/cofreChefCalibracao.test.ts
           src/lib/temporadas.test.ts
           src/app/api/cliente/cofre/route.test.ts
+          src/app/api/admin/cofre/calibracao/route.test.ts
           src/lib/rankingClientes.test.ts
           src/lib/rankingScoreAutoridadeUnica.integration.test.ts
           src/proxy.cofre-preview.test.ts
@@ -66,10 +71,14 @@ jobs:
           src/lib/cofreChef.test.ts
           src/lib/cofreChefReadModel.ts
           src/lib/cofreChefReadModel.test.ts
+          src/lib/cofreChefCalibracao.ts
+          src/lib/cofreChefCalibracao.test.ts
           src/lib/temporadas.ts
           src/lib/temporadas.test.ts
           src/app/api/cliente/cofre/route.ts
           src/app/api/cliente/cofre/route.test.ts
+          src/app/api/admin/cofre/calibracao/route.ts
+          src/app/api/admin/cofre/calibracao/route.test.ts
           src/lib/rankingClientes.ts
           src/lib/rankingClientes.test.ts
           src/lib/rankingScoreAutoridadeUnica.integration.test.ts
