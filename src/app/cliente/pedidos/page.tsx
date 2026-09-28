@@ -7,6 +7,7 @@ import ClientBottomNav from '@/components/ClientBottomNav'
 import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
 import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
 import { fetchCliente } from '@/lib/clienteSessaoFront'
+import { installBehaviorPageExitTracking, trackBehavior } from '@/lib/behaviorClient'
 import {
   filtrarPedidosPorBusca,
   statusVisualPedido,
@@ -57,6 +58,7 @@ function CardPedido({ p }: { p: PedidoClienteResumo }) {
   return (
     <Link
       href={`/rastrear/${p.id}`}
+      onClick={() => trackBehavior('screen_view', { source: 'orders', screen: 'pedido_detalhe', target: 'tracking' })}
       style={{
         display: 'block',
         background: cores.cardBg,
@@ -124,6 +126,12 @@ export default function ClientePedidosPage() {
   const [busca, setBusca] = useState('')
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  useEffect(() => {
+    trackBehavior('app_open', { source: 'orders', screen: 'cliente-pedidos' })
+    trackBehavior('screen_view', { source: 'orders', screen: 'cliente-pedidos', target: 'orders' })
+    return installBehaviorPageExitTracking('orders')
+  }, [])
+
   const carregar = useCallback(async () => {
     try {
       const res = await fetchCliente('/api/cliente/pedidos', { cache: 'no-store' })
@@ -183,6 +191,21 @@ export default function ClientePedidosPage() {
   }
 
   const filtrados = useMemo(() => filtrarPedidosPorBusca(pedidos, busca), [pedidos, busca])
+
+  useEffect(() => {
+    const query = busca.trim()
+    if (query.length < 2) return
+    const timer = setTimeout(() => {
+      trackBehavior('search_used', {
+        source: 'orders',
+        screen: 'cliente-pedidos',
+        target: 'orders',
+        queryLength: query.length,
+        resultCount: filtrados.length,
+      })
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [busca, filtrados.length])
 
   return (
     <div style={{ background: cores.fundo, minHeight: '100dvh', fontFamily: 'Archivo, sans-serif', color: cores.navy, display: 'flex', flexDirection: 'column' }}>
