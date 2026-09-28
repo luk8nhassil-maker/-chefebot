@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Archivo, Geist_Mono } from "next/font/google";
 import AssinaturaChefeBotGate from "@/components/AssinaturaChefeBotGate";
+import CustomerBehaviorTracker from "@/components/CustomerBehaviorTracker";
 import "./globals.css";
 
 const archivo = Archivo({
@@ -72,6 +73,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col">
         {children}
+        <CustomerBehaviorTracker />
         <AssinaturaChefeBotGate />
       </body>
     </html>
