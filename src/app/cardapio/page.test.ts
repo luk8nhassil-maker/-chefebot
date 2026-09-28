@@ -96,6 +96,39 @@ describe("/cardapio — Nome/Apelido sem mover o checkout", () => {
   });
 });
 
+describe("/cardapio — Customer 360 comportamental", () => {
+  test("envia apenas sessionId opaco junto ao pedido, nunca identidade comportamental inventada", () => {
+    expect(fonte).toContain("behaviorSessionId: getBehaviorSessionId() ?? undefined");
+    expect(fonte).not.toContain("behaviorClienteId:");
+    expect(fonte).not.toContain("behaviorTelefone:");
+  });
+
+  test("monitora profundidade do funil sem alterar o stepper visual existente", () => {
+    expect(fonte).toContain("BEHAVIOR_FUNNEL_BY_SCREEN");
+    expect(fonte).toContain('trackBehavior("funnel_step"');
+    expect(fonte).toContain('"sc-cart": "sacola"');
+    expect(fonte).toContain('"sc-delivery": "entrega"');
+    expect(fonte).toContain('"sc-pay": "pagamento"');
+  });
+
+  test("rascunho restaurado vira baseline e não falso cart_add", () => {
+    expect(fonte).toContain("behaviorCartInitializedRef");
+    expect(fonte).toContain("behaviorCartPreviousRef.current = { items, distinct }");
+  });
+
+  test("busca coleta apenas comprimento/categoria, nunca o texto da busca no payload", () => {
+    expect(fonte).toContain('trackBehavior("search_used"');
+    expect(fonte).toContain("queryLength: query.length");
+    expect(fonte).not.toContain("query: listSearchQuery");
+    expect(fonte).not.toContain("query: flavorSearchQuery");
+  });
+
+  test("saída observada no checkout é evento comportamental e não pedido inventado", () => {
+    expect(fonte).toContain('trackBehaviorBeacon("checkout_exit_observed"');
+    expect(fonte).not.toContain('trackBehavior("order_created"');
+  });
+});
+
 // Etapa 2 do fluxo de "Pix pendente": home (tela sc-start) só pode mostrar
 // promoção ativa — nenhum card de notificação/estado operacional de pedido.
 describe("/cardapio (PublicCardapio) — Etapa 2: home limpa + barra global de Pix pendente", () => {
