@@ -1,6 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Flag pública sem segredo: ativa comportamento apenas no build de produção
+  // por padrão; permite desligar com NEXT_PUBLIC_BEHAVIOR_ANALYTICS_ENABLED=false.
+  env: {
+    NEXT_PUBLIC_BEHAVIOR_ANALYTICS_ENABLED:
+      process.env.NEXT_PUBLIC_BEHAVIOR_ANALYTICS_ENABLED ??
+      (process.env.VERCEL_ENV === "production" ? "true" : "false"),
+  },
   async headers() {
     return [
       {
