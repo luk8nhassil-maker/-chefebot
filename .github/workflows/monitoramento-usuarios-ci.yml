@@ -104,6 +104,7 @@ jobs:
           src/app/dev/page.tsx
           src/app/privacidade/page.tsx
           src/lib/auth.ts
+          next.config.ts
 
       - name: Typecheck
         run: npx tsc --noEmit
