@@ -1969,7 +1969,10 @@ export async function POST(req: NextRequest) {
         await recordOrderCreatedBehaviorFact({
           pedidoId,
           sessionId: behaviorSessionId,
-          clienteId: clienteId ?? null,
+          // Pedido web anônimo também pode ser vinculado ao cliente canônico
+          // pelo telefone oficial do próprio pedido, sem armazenar o telefone
+          // no evento. É a mesma identidade derivada já usada pela fidelidade.
+          clienteId: clienteId ?? derivarClienteIdPorTelefone(telefonePedido) ?? null,
           totalCents: Math.max(0, Math.round(total * 100)),
           itemCount: behaviorItemCount,
           deliveryType: body.tipoEntrega,
