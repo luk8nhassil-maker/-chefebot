@@ -1287,6 +1287,33 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     setPrevListCat(listCat);
     setListSearchQuery("");
   }
+
+  useEffect(() => {
+    const query = listSearchQuery.trim();
+    if (query.length < 2) return;
+    const timer = setTimeout(() => {
+      trackBehavior("search_used", {
+        source: "cardapio",
+        screen: "sc-list",
+        categoryId: listCat,
+        queryLength: query.length,
+      });
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [listSearchQuery, listCat]);
+
+  useEffect(() => {
+    const query = flavorSearchQuery.trim();
+    if (!flavorModalOpen || query.length < 2) return;
+    const timer = setTimeout(() => {
+      trackBehavior("search_used", {
+        source: "cardapio",
+        screen: "flavor-modal",
+        queryLength: query.length,
+      });
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [flavorSearchQuery, flavorModalOpen]);
   // Upsell contextual de bebida: rastreia o tipo do último item adicionado e
   // se o cliente já ignorou a sugestão nesta compra (reseta só em resetAll()).
   const [lastAddedKind, setLastAddedKind] = useState<"pizza" | "lanche" | "macarronada" | "bebida" | "suco" | null>(null);
@@ -1885,6 +1912,15 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // pickFlavor/continueBuild abaixo.
   const isMiniSize = size === "MINI" && !miniPizzaMode;
   function pickFlavor(f: string) {
+    const flavorId = menu.pizzaCatalog?.flavors.find((flavor) => flavor.name === f)?.id
+      ?? (menu.catalog
+        ? todosOsProdutos(menu.catalog).flatMap((produto) => produto.flavors ?? []).find((flavor) => flavor.name === f)?.id
+        : undefined);
+    trackBehavior("product_view", {
+      source: "cardapio",
+      screen: "flavor-modal",
+      ...(flavorId ? { productId: flavorId } : {}),
+    });
     const atual = { f1, f2 };
     const next = nextFlavorSelection(atual, f, miniPizzaMode || calzoneMode || pastelMode || isMiniSize);
     // Limite de 2 sabores atingido: nextFlavorSelection recusa o toque
@@ -2206,7 +2242,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   function continueBuild() { if (!buildOk) return; if (miniPizzaMode) addMiniPizza(); else if (calzoneMode) addCalzone(); else if (pastelMode) addPastel(); else if (isMiniSize) finalizarPizza(null, 0, []); else go("sc-border"); }
   function confirmFromModal() { if (!buildOk) return; setFlavorModalOpen(false); continueBuild(); }
   function addAnother() { setPlan({ total: 0, current: pizzasNoCarrinho() + 1, openEnded: true }); resetBuild(); go("sc-build"); }
-  function goCat(cat: "lanche" | "macarronada" | "bebida" | "suco" | "hamburguer" | "pastelForno" | "vitamina") { setListCat(cat); go("sc-list"); }
+  function goCat(cat: "lanche" | "macarronada" | "bebida" | "suco" | "hamburguer" | "pastelForno" | "vitamina") {
+    trackBehavior("category_view", { source: "cardapio", screen: "sc-list", categoryId: cat });
+    setListCat(cat);
+    go("sc-list");
+  }
   function isMacarronada(it: { name: string; sizes?: { code: string; price: number }[] }) {
     return it.name.toLowerCase().includes("macarronada") && Array.isArray(it.sizes) && it.sizes.length > 0;
   }
@@ -2216,6 +2256,15 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   function addSimple(it: { name: string; price: number; available?: boolean; sizes?: { code: string; price: number }[]; flavors?: string[] }, emoji: string) {
     if (it.available === false) return;
+    const behaviorProductId = menu.catalog
+      ? todosOsProdutos(menu.catalog).find((produto) => produto.name === it.name)?.id
+      : undefined;
+    trackBehavior("product_view", {
+      source: "cardapio",
+      screen: "sc-list",
+      categoryId: listCat,
+      ...(behaviorProductId ? { productId: behaviorProductId } : {}),
+    });
     if (isCalzoneName(it.name)) { pickCalzone(); return; }
     // Produtos de sabor único do catálogo oficial fora do Calzone (Pastel de
     // Forno, Pastel de Feira) — exigem 1 sabor antes de ir pra sacola, mesmo
@@ -2231,6 +2280,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     const ex = cart.find((c) => c.kind === "simple" && c.name === it.name);
     if (ex) { setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c))); }
     else { setCart([...cart, { emoji, kind: "simple", name: it.name, detail: "", price: it.price, qty: 1, keys: [it.name], ...(simpleSelection ? { simpleSelection } : {}) }]); }
+    trackBehavior("cart_add", {
+      source: "cardapio",
+      screen: "sc-list",
+      target: "cart",
+      ...(behaviorProductId ? { productId: behaviorProductId } : {}),
+      cartItems: cartCount + 1,
+      cartDistinctItems: ex ? cart.length : cart.length + 1,
+    });
     setLastAddedKind(listCat === "bebida" ? "bebida" : "lanche");
     showToast(`${it.name} adicionado!`);
   }
@@ -2340,9 +2397,25 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const cartTemBebidaOuSuco = cart.some((c) => [...bebidasEfetivas, ...sucosEfetivos].some((m) => m.name === c.name));
   const showUpsellBebida = !upsellBebidaIgnorado && !cartTemBebidaOuSuco && ["pizza", "lanche", "macarronada"].includes(lastAddedKind || "");
   function sairDoPosItemSemBebida(destino: "sc-start" | "sc-cart") { if (showUpsellBebida) setUpsellBebidaIgnorado(true); go(destino); }
-  function chQty(idx: number, d: number) { setCart(cart.map((c, i) => (i === idx ? { ...c, qty: Math.max(1, c.qty + d) } : c))); }
+  function chQty(idx: number, d: number) {
+    trackBehavior("cart_quantity_change", {
+      source: "cardapio",
+      screen,
+      target: "cart",
+      cartItems: cartCount,
+      cartDistinctItems: cart.length,
+    });
+    setCart(cart.map((c, i) => (i === idx ? { ...c, qty: Math.max(1, c.qty + d) } : c)));
+  }
   function rmItem(idx: number) {
     const removido = cart[idx];
+    trackBehavior("cart_remove", {
+      source: "cardapio",
+      screen,
+      target: "cart",
+      cartItems: Math.max(0, cartCount - (removido?.qty ?? 0)),
+      cartDistinctItems: Math.max(0, cart.length - 1),
+    });
     // Remover o presente da Jornada do Chef do carrinho NUNCA perde o prêmio —
     // só libera a reserva no servidor (volta a ficar "disponivel" no perfil)
     // e limpa a referência local (sem isso, a injeção validada reporia o item
