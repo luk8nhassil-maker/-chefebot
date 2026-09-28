@@ -7,6 +7,7 @@ export type BehaviorInsightEvent = {
   authority: "client_observed" | "server_fact";
   data?: {
     page?: string;
+    step?: string;
     orderTotalCents?: number;
   };
 };
@@ -84,8 +85,8 @@ function deepestStage(events: BehaviorInsightEvent[]): BehaviorJourneyDepth {
     events.some((event) =>
       event.type === "checkout_exit_observed" ||
       (event.type === "funnel_step" && (
-        event.data?.page === "pagamento" ||
-        event.data?.page === "entrega"
+        event.data?.step === "pagamento" ||
+        event.data?.step === "entrega"
       )),
     )
   ) {
