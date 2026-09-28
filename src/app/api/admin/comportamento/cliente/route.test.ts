@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   verifyToken: vi.fn(),
   behaviorAnalyticsEnabled: vi.fn(),
   consultarTimelineComportamentalCliente: vi.fn(),
+  resumirTimelineComportamentalCliente: vi.fn(),
   derivarClienteIdPorTelefone: vi.fn(),
   buscarClientePorTelefone: vi.fn(),
   sanitizeTelefoneCliente: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock("@/lib/behaviorAnalytics", () => ({
 }));
 vi.mock("@/lib/behaviorAnalyticsRead", () => ({
   consultarTimelineComportamentalCliente: mocks.consultarTimelineComportamentalCliente,
+  resumirTimelineComportamentalCliente: mocks.resumirTimelineComportamentalCliente,
 }));
 vi.mock("@/lib/fidelidade", () => ({
   derivarClienteIdPorTelefone: mocks.derivarClienteIdPorTelefone,
@@ -62,6 +64,25 @@ beforeEach(() => {
       identificado: false,
     }],
   });
+  mocks.resumirTimelineComportamentalCliente.mockReturnValue({
+    schemaVersion: 1,
+    mode: "behavior_customer_summary_read_only",
+    sessions: 1,
+    sessionsWithOrder: 0,
+    sessionsWithoutOrder: 1,
+    appOpens: 1,
+    searches: 0,
+    productViews: 0,
+    cartInteractions: 0,
+    checkoutStarts: 0,
+    rankingOpens: 0,
+    fidelityOpens: 0,
+    totalEngagementSeconds: 0,
+    medianEngagementSeconds: null,
+    medianDaysBetweenSessions: null,
+    firstSeenAtMs: 1,
+    lastSeenAtMs: 1,
+  });
 });
 
 describe("POST /api/admin/comportamento/cliente", () => {
@@ -99,6 +120,12 @@ describe("POST /api/admin/comportamento/cliente", () => {
       apelido: "Mah",
       cadastradoEm: "2026-09-01T00:00:00.000Z",
     });
+    expect(body.summary).toEqual(expect.objectContaining({
+      sessions: 1,
+      sessionsWithoutOrder: 1,
+      appOpens: 1,
+    }));
+    expect(mocks.resumirTimelineComportamentalCliente).toHaveBeenCalledWith(body.timeline.events);
     const serializado = JSON.stringify(body);
     expect(serializado).not.toContain("5599999999999");
     expect(serializado).not.toContain("actorHash");
