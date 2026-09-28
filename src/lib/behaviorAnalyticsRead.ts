@@ -32,6 +32,26 @@ export type BehaviorTimelineEvent = {
   identificado: boolean;
 };
 
+export type BehaviorCustomerSummary = {
+  schemaVersion: 1;
+  mode: "behavior_customer_summary_read_only";
+  sessions: number;
+  sessionsWithOrder: number;
+  sessionsWithoutOrder: number;
+  appOpens: number;
+  searches: number;
+  productViews: number;
+  cartInteractions: number;
+  checkoutStarts: number;
+  rankingOpens: number;
+  fidelityOpens: number;
+  totalEngagementSeconds: number;
+  medianEngagementSeconds: number | null;
+  medianDaysBetweenSessions: number | null;
+  firstSeenAtMs: number | null;
+  lastSeenAtMs: number | null;
+};
+
 export type BehaviorFunnelSummary = {
   schemaVersion: 1;
   mode: "behavior_summary_read_only";
@@ -177,6 +197,91 @@ export async function consultarTimelineComportamentalCliente(params: {
     }));
 
   return { events, truncated };
+}
+
+export function resumirTimelineComportamentalCliente(
+  events: BehaviorTimelineEvent[],
+): BehaviorCustomerSummary {
+  const ordered = [...events].sort((a, b) => a.occurredAtMs - b.occurredAtMs);
+  const bySession = new Map<string, BehaviorTimelineEvent[]>();
+  for (const event of ordered) {
+    const list = bySession.get(event.sessionId) ?? [];
+    list.push(event);
+    bySession.set(event.sessionId, list);
+  }
+
+  let sessionsWithOrder = 0;
+  let appOpens = 0;
+  let searches = 0;
+  let productViews = 0;
+  let cartInteractions = 0;
+  let checkoutStarts = 0;
+  let rankingOpens = 0;
+  let fidelityOpens = 0;
+  let totalEngagementMs = 0;
+  const engagementBySessionSeconds: number[] = [];
+  const sessionStarts: number[] = [];
+
+  for (const list of bySession.values()) {
+    const sorted = [...list].sort((a, b) => a.occurredAtMs - b.occurredAtMs);
+    if (sorted[0]) sessionStarts.push(sorted[0].occurredAtMs);
+    if (sorted.some((event) => event.type === "order_created")) sessionsWithOrder += 1;
+
+    let sessionEngagementMs = 0;
+    for (const event of sorted) {
+      if (event.type === "app_open") appOpens += 1;
+      if (event.type === "search_used") searches += 1;
+      if (event.type === "product_view") productViews += 1;
+      if (
+        event.type === "cart_state" ||
+        event.type === "cart_add" ||
+        event.type === "cart_remove" ||
+        event.type === "cart_quantity_change"
+      ) cartInteractions += 1;
+      if (
+        event.type === "checkout_start" ||
+        event.type === "delivery_step_view" ||
+        event.type === "payment_step_view" ||
+        event.type === "order_submit_attempt"
+      ) checkoutStarts += 1;
+      if (event.type === "ranking_open") rankingOpens += 1;
+      if (event.type === "fidelity_open") fidelityOpens += 1;
+      if (event.type === "page_exit") sessionEngagementMs += event.context.engagementMs ?? 0;
+    }
+    if (sessionEngagementMs > 0) engagementBySessionSeconds.push(sessionEngagementMs / 1000);
+    totalEngagementMs += sessionEngagementMs;
+  }
+
+  const gapsDays: number[] = [];
+  const starts = [...new Set(sessionStarts)].sort((a, b) => a - b);
+  for (let i = 1; i < starts.length; i++) {
+    const gap = (starts[i]! - starts[i - 1]!) / (24 * 60 * 60 * 1000);
+    if (gap >= 0) gapsDays.push(gap);
+  }
+
+  const medianEngagement = median(engagementBySessionSeconds);
+  const medianGap = median(gapsDays);
+  const sessions = bySession.size;
+
+  return {
+    schemaVersion: 1,
+    mode: "behavior_customer_summary_read_only",
+    sessions,
+    sessionsWithOrder,
+    sessionsWithoutOrder: Math.max(sessions - sessionsWithOrder, 0),
+    appOpens,
+    searches,
+    productViews,
+    cartInteractions,
+    checkoutStarts,
+    rankingOpens,
+    fidelityOpens,
+    totalEngagementSeconds: Math.round(totalEngagementMs / 100) / 10,
+    medianEngagementSeconds: medianEngagement === null ? null : Math.round(medianEngagement * 10) / 10,
+    medianDaysBetweenSessions: medianGap === null ? null : Math.round(medianGap * 10) / 10,
+    firstSeenAtMs: ordered[0]?.occurredAtMs ?? null,
+    lastSeenAtMs: ordered[ordered.length - 1]?.occurredAtMs ?? null,
+  };
 }
 
 export async function resumirFunilComportamental(params: {
