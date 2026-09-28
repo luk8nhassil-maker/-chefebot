@@ -312,6 +312,8 @@ export async function registrarEventosClienteComportamento(params: {
 export async function registrarEventoServidorComportamento(params: {
   tenantId?: string;
   clienteId?: string | null;
+  /** Pseudônimo já verificado a partir do cookie assinado de vínculo. */
+  actorHash?: string | null;
   sessionId: string;
   type: ServerBehaviorEventType;
   context?: BehaviorContext;
@@ -325,7 +327,11 @@ export async function registrarEventoServidorComportamento(params: {
     eventId: randomUUID(),
     tenantId: params.tenantId ?? BEHAVIOR_TENANT_DEFAULT,
     sessionId: params.sessionId,
-    actorHash: params.clienteId ? pseudonimizarClienteId(params.clienteId) : null,
+    actorHash: params.clienteId
+      ? pseudonimizarClienteId(params.clienteId)
+      : params.actorHash && SAFE_ACTOR_HASH_RE.test(params.actorHash)
+        ? params.actorHash
+        : null,
     type: params.type,
     occurredAtMs: agoraMs,
     receivedAtMs: agoraMs,

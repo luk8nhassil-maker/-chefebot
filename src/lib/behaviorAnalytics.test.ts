@@ -43,6 +43,7 @@ import {
   validarVinculoCookieComportamento,
   consumirLimiteIngestaoComportamental,
   registrarEventosClienteComportamento,
+  registrarEventoServidorComportamento,
   validarEventoClienteComportamento,
 } from "./behaviorAnalytics";
 
@@ -257,5 +258,31 @@ describe("vínculo pseudonimizado do WhatsApp", () => {
     expect(validarVinculoCookieComportamento(token, AGORA)).toBe(pseudonimizarClienteId("cli_5544999999999"));
     expect(validarVinculoCookieComportamento(token + "x", AGORA)).toBeNull();
     expect(validarVinculoCookieComportamento(token, AGORA + 31 * 24 * 60 * 60 * 1000)).toBeNull();
+  });
+});
+
+describe("registrarEventoServidorComportamento", () => {
+  test("associa conversão apenas ao pseudônimo validado fornecido pelo servidor", async () => {
+    const actorHash = "a".repeat(32);
+    expect(await registrarEventoServidorComportamento({
+      actorHash,
+      sessionId: SESSION_ID,
+      type: "order_created",
+      context: { source: "checkout", pedidoId: "pedido_123" },
+      agoraMs: AGORA,
+    })).toBe(true);
+    const evento = [...store.entries()].find(([key]) => key.startsWith("behavior:v1:event:"))?.[1] as { actorHash?: string } | undefined;
+    expect(evento?.actorHash).toBe(actorHash);
+  });
+
+  test("descarta pseudônimo malformado e não vincula telefone digitado", async () => {
+    await registrarEventoServidorComportamento({
+      actorHash: "5544999999999",
+      sessionId: SESSION_ID,
+      type: "order_created",
+      agoraMs: AGORA,
+    });
+    const evento = [...store.entries()].find(([key]) => key.startsWith("behavior:v1:event:"))?.[1] as { actorHash?: string | null } | undefined;
+    expect(evento?.actorHash).toBeNull();
   });
 });

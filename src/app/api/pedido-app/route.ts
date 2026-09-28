@@ -11,7 +11,7 @@ import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promoca
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 import { temDinheiroNoPagamento, valorDinheiroEsperado, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
 import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { registrarEventoServidorComportamento } from "@/lib/behaviorAnalytics";
+import { registrarEventoServidorComportamento, validarVinculoCookieComportamento } from "@/lib/behaviorAnalytics";
 import type { BehaviorContext } from "@/lib/behaviorAnalyticsTypes";
 import { buscarClientePorId, sanitizeTelefoneCliente } from "@/lib/clientes";
 import { calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
@@ -1924,7 +1924,10 @@ export async function POST(req: NextRequest) {
     if (typeof body.behaviorSessionId === "string" && body.behaviorSessionId) {
       try {
         await registrarEventoServidorComportamento({
-          clienteId: clienteIdPontos ?? null,
+          clienteId: clienteId ?? null,
+          actorHash: body.usarOutroWhatsapp === true
+            ? null
+            : validarVinculoCookieComportamento(req.cookies.get("behavior-link-v1")?.value),
           sessionId: body.behaviorSessionId,
           type: "order_created",
           context: {
