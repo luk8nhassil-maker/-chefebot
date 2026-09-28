@@ -27,6 +27,7 @@ import {
   deveMostrarConviteRankingPosPedido,
   type RankingProspeccaoStatusPagamento,
 } from "@/lib/rankingProspeccao";
+import { resolverIdentidadeCheckout } from "@/lib/checkoutIdentidade";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -1325,6 +1326,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const stepsRef = useRef<HTMLDivElement | null>(null);
   const [stepsHeight, setStepsHeight] = useState(46);
   const [nome, setNome] = useState("");
+  const [apelido, setApelido] = useState("");
   const [payment, setPayment] = useState<string | null>(null);
   const [troco, setTroco] = useState("");
   const [telefone, setTelefone] = useState("");
@@ -1403,6 +1405,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const pagamentoRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nomeRef = useRef<HTMLInputElement>(null);
+  const apelidoRef = useRef<HTMLInputElement>(null);
   const telefoneRef = useRef<HTMLInputElement>(null);
 
   // Vínculo WhatsApp: valida o token do link (?t=) no servidor e guarda só na
@@ -1448,8 +1451,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   useEffect(() => {
     const timer = setTimeout(() => {
       try {
-        const n = localStorage.getItem("cf_nome"); const t = localStorage.getItem("cf_tel");
-        if (n) setNome(n); if (t) setTelefone(t);
+        const n = localStorage.getItem("cf_nome");
+        const a = localStorage.getItem("cf_apelido");
+        const t = localStorage.getItem("cf_tel");
+        if (n) setNome(n);
+        if (a) setApelido(a);
+        if (t) setTelefone(t);
         // Cliente vinculado ao WhatsApp (token do link) não precisa ter telefone
         // salvo no navegador para já ver o pedido identificado — lê a mesma
         // sessionStorage que a validação do token grava (evita depender da ordem
@@ -1457,7 +1464,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         // atualizado neste mesmo ciclo de render).
         const temVinculoWa = !!sessionStorage.getItem("cf_wa_final");
         const telValido = !!t && t.replace(/\D/g, "").length >= 10;
-        if (n && n.trim() && (telValido || temVinculoWa)) setEditandoIdentidade(false);
+        if ((n?.trim() || a?.trim()) && (telValido || temVinculoWa)) setEditandoIdentidade(false);
         else setEditandoIdentidade(true);
       } catch { setEditandoIdentidade(true); }
       try {
@@ -1488,6 +1495,26 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       setHydrated(true);
     }, 0);
     return () => clearTimeout(timer);
+  }, []);
+
+  // Cliente já cadastrado: hidrata Nome/Apelido/telefone no mesmo bloco
+  // existente do checkout. 401/erro simplesmente mantém o fluxo público.
+  useEffect(() => {
+    let ativo = true;
+    fetchCliente("/api/cliente/perfil", { cache: "no-store" })
+      .then(async (res) => {
+        if (!ativo || !res.ok) return;
+        const data = await res.json();
+        const nomePerfil = typeof data?.cliente?.nome === "string" ? data.cliente.nome.trim() : "";
+        const apelidoPerfil = typeof data?.cliente?.apelido === "string" ? data.cliente.apelido.trim() : "";
+        const telefonePerfil = typeof data?.cliente?.telefone === "string" ? data.cliente.telefone.trim() : "";
+        if (nomePerfil) setNome((atual) => atual.trim() ? atual : nomePerfil);
+        if (apelidoPerfil) setApelido((atual) => atual.trim() ? atual : apelidoPerfil);
+        if (telefonePerfil) setTelefone((atual) => atual.trim() ? atual : formatTel(telefonePerfil));
+        if ((nomePerfil || apelidoPerfil) && telefonePerfil) setEditandoIdentidade(false);
+      })
+      .catch(() => {});
+    return () => { ativo = false; };
   }, []);
 
   // Autocomplete de rua (objetivo 8): busca sugestões da memória universal
@@ -2313,7 +2340,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const ruaErro = enderecoErroAtivo && !ruaOk;
   const numeroErro = enderecoErroAtivo && !numeroOk;
   const enderecoErroStyle = { borderColor: "var(--danger)", background: "color-mix(in srgb, var(--danger) 8%, transparent)", boxShadow: "0 0 0 1px color-mix(in srgb, var(--danger) 18%, transparent)" };
-  const payOk = !!nome.trim() && (telefoneValido(telefone) || vinculoWhatsappAtivo) && !!payment;
+  const identidadeCheckout = resolverIdentidadeCheckout({ nome, apelido });
+  const identificacaoPedido = identidadeCheckout.exibicao;
+  const payOk = identidadeCheckout.valida && (telefoneValido(telefone) || vinculoWhatsappAtivo) && !!payment;
 
   const esgotadosKey = esgotados.join("|");
   const cartEsgotado = cart.some((c) => cartItemEsgotado(c.keys, esgotados));
@@ -2474,8 +2503,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     if (cartEsgotado) { showToast("Um item do seu pedido ficou esgotado. Remova para continuar."); return; }
     if (delType === "delivery" && !delOk) { setErroEntrega(getEnderecoErro()); go("sc-delivery"); return; }
     let hasError = false;
-    if (!nome.trim()) { setErroNome("Me diz seu nome pra gente identificar o pedido."); setEditandoIdentidade(true); nomeRef.current?.focus(); hasError = true; }
-    else { setErroNome(""); }
+    if (!identidadeCheckout.valida) {
+      setErroNome("Informe seu nome ou apelido pra gente identificar o pedido.");
+      setEditandoIdentidade(true);
+      nomeRef.current?.focus();
+      hasError = true;
+    } else {
+      setErroNome("");
+    }
     if (!telefoneValido(telefone) && !vinculoWhatsappAtivo) { setErroTelefone("Coloca um WhatsApp válido pra pizzaria falar com você se precisar."); setEditandoIdentidade(true); if (!hasError) telefoneRef.current?.focus(); hasError = true; }
     else { setErroTelefone(""); }
     if (!payment) { setErroPagamento("pagamento"); if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); hasError = true; }
@@ -2524,11 +2559,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     // usar e (pizza) o sabor escolhido.
     const itemRecompensaJornada = cart.find((c) => c.recompensaJornadaId);
     const itensSemRecompensa = cart.filter((c) => !c.recompensaJornadaId);
-    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}), ...(c.simpleSelection ? { simpleSelection: c.simpleSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > agoraEmMs() ? resgatePontos.resgateId : undefined };
+    const payload = { cliente: identificacaoPedido, ...(identidadeCheckout.nome ? { nome: identidadeCheckout.nome } : {}), ...(identidadeCheckout.apelido ? { apelido: identidadeCheckout.apelido } : {}), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}), ...(c.simpleSelection ? { simpleSelection: c.simpleSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > agoraEmMs() ? resgatePontos.resgateId : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} if (itemRecompensaJornada) limparReferenciaRecompensa(localStorage); try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: agoraEmMs(), statusToken: typeof data.statusToken === "string" ? data.statusToken : undefined }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } const pagamentoRanking: RankingProspeccaoStatusPagamento = payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"; setConviteRankingPedido(false); go("sc-done"); if (pagamentoRanking === "nao_pix") void avaliarConviteRankingPosPedido(pagamentoRanking); } else { if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
+      if (data.ok) { try { if (identidadeCheckout.nome) localStorage.setItem("cf_nome", identidadeCheckout.nome); else localStorage.removeItem("cf_nome"); if (identidadeCheckout.apelido) localStorage.setItem("cf_apelido", identidadeCheckout.apelido); else localStorage.removeItem("cf_apelido"); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} if (itemRecompensaJornada) limparReferenciaRecompensa(localStorage); try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: agoraEmMs(), statusToken: typeof data.statusToken === "string" ? data.statusToken : undefined }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } const pagamentoRanking: RankingProspeccaoStatusPagamento = payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"; setConviteRankingPedido(false); go("sc-done"); if (pagamentoRanking === "nao_pix") void avaliarConviteRankingPosPedido(pagamentoRanking); } else { if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
   function resetAll() { conviteRankingPagamentoAvaliadoRef.current = null; setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setBairroQuery(""); setBairroDropdownOpen(false); setRua(""); setRuaSugestoes([]); setRuaDropdownOpen(false); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setMistoPixInput(""); setMistoDinheiroInput(""); setErroMisto(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setConviteRankingPedido(false); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
@@ -3193,13 +3228,16 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               </div>
 
               {/* Bloco: Identificação */}
-              {!editandoIdentidade && nome.trim() && (telefoneValido(telefone) || vinculoWhatsappAtivo) ? (
+              {!editandoIdentidade && identidadeCheckout.valida && (telefoneValido(telefone) || vinculoWhatsappAtivo) ? (
                 <div className="pay-section-card">
                   <div className="pay-section-title">Pedido identificado</div>
                   <div className="identidade-row">
                     <div className="identidade-avatar" aria-hidden="true">{ICONS.pessoa}</div>
                     <div className="identidade-info">
-                      <div className="identidade-nome">{nome.trim()}</div>
+                      <div className="identidade-nome">{identificacaoPedido}</div>
+                      {identidadeCheckout.nome && identidadeCheckout.apelido && (
+                        <span className="identidade-tel">Apelido: {identidadeCheckout.apelido}</span>
+                      )}
                       {vinculoWhatsappAtivo
                         ? <span className="wa-badge">✅ Vinculado ao WhatsApp · final {waFinal}</span>
                         : <span className="identidade-tel">{telefone}</span>}
@@ -3208,7 +3246,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   <p className="identidade-explicacao">Vamos usar esses dados neste pedido.<br />Se estiver tudo certo, é só escolher o pagamento.</p>
                   <div className="pay-divider" />
                   <div className="pay-actions-row">
-                    <button type="button" className="pay-action-link" onClick={() => setEditandoIdentidade(true)}>{vinculoWhatsappAtivo ? "Alterar nome" : "Alterar dados"}</button>
+                    <button type="button" className="pay-action-link" onClick={() => setEditandoIdentidade(true)}>{vinculoWhatsappAtivo ? "Alterar identificação" : "Alterar dados"}</button>
                     {vinculoWhatsappAtivo && (
                       <button
                         type="button"
@@ -3224,7 +3262,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   <p className="pay-section-help">Rapidinho: é só pra gente identificar seu pedido e falar com você se precisar.</p>
                   <div className="field">
                     <label>Seu nome</label>
-                    <input ref={nomeRef} value={nome} onChange={(e) => { setNome(e.target.value); if (erroNome) setErroNome(""); }} placeholder="Como te chamamos?" />
+                    <input ref={nomeRef} value={nome} onChange={(e) => { setNome(e.target.value); if (erroNome) setErroNome(""); }} placeholder="Seu nome" />
+                  </div>
+                  <div className="field">
+                    <label>Apelido</label>
+                    <input ref={apelidoRef} value={apelido} onChange={(e) => { setApelido(e.target.value); if (erroNome) setErroNome(""); }} placeholder="Como prefere ser chamado?" />
+                    <div style={{ color: "var(--text-sub)", fontSize: 12, marginTop: 4 }}>Preencha nome ou apelido. Um dos dois já basta.</div>
                     {erroNome && <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 4 }}>{erroNome}</div>}
                   </div>
                   {vinculoWhatsappAtivo ? (
@@ -3272,7 +3315,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <div className="success">
                 <div className={`check ${isPagamentoPix ? "check-compact" : ""}`}>{ICONS.check}</div>
                 <h2 className={isPagamentoPix ? "success-h2-compact" : ""}>Pedido recebido!</h2>
-                <p className={isPagamentoPix ? "success-p-compact" : ""}>Valeu, {nome.split(" ")[0]}! A pizzaria já recebeu seu pedido{isPagamentoPix ? "." : " e vai começar a preparar em breve."}</p>
+                <p className={isPagamentoPix ? "success-p-compact" : ""}>Valeu, {identificacaoPedido.split(" ")[0]}! A pizzaria já recebeu seu pedido{isPagamentoPix ? "." : " e vai começar a preparar em breve."}</p>
                 {pedidoConfirmado && (
                   <>
                     {!isPagamentoPix && (
