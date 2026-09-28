@@ -18,6 +18,14 @@ vi.mock("@/lib/numeracao", () => ({
   gerarIdPedidoUnico: vi.fn(async () => Date.now().toString()),
 }));
 
+const { registrarEventoServidorComportamentoMock } = vi.hoisted(() => ({
+  registrarEventoServidorComportamentoMock: vi.fn(async () => true),
+}));
+
+vi.mock("@/lib/behaviorAnalytics", () => ({
+  registrarEventoServidorComportamento: registrarEventoServidorComportamentoMock,
+}));
+
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
   verificarTokenCliente: vi.fn(async (token: string) => {
@@ -33,11 +41,12 @@ import { POST } from "./route";
 beforeEach(() => {
   redisStore.clear();
   vi.mocked(fetch).mockClear();
+  registrarEventoServidorComportamentoMock.mockClear();
 });
 
 const itemPizza = { kind: "pizza" as const, name: "Pizza G", detail: "Calabresa", price: 50, qty: 2 };
 
-function pedidoRequest(opts: { clienteToken?: string; itens?: unknown[]; cliente?: string; nome?: string; apelido?: string } = {}) {
+function pedidoRequest(opts: { clienteToken?: string; itens?: unknown[]; cliente?: string; nome?: string; apelido?: string; behaviorSessionId?: string } = {}) {
   const body = {
     cliente: opts.cliente ?? "Fulano de Tal",
     ...(opts.nome !== undefined ? { nome: opts.nome } : {}),
@@ -47,6 +56,7 @@ function pedidoRequest(opts: { clienteToken?: string; itens?: unknown[]; cliente
     tipoEntrega: "retirada",
     pagamento: "Dinheiro",
     troco: "Sem troco",
+    ...(opts.behaviorSessionId ? { behaviorSessionId: opts.behaviorSessionId } : {}),
   };
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.clienteToken) headers.cookie = `cliente-token=${opts.clienteToken}`;
@@ -92,6 +102,27 @@ describe("POST /api/pedido-app — vinculo opcional com area do cliente", () => 
 
     const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidosSalvos[0].clienteId).toBeUndefined();
+  });
+
+  test("pedido criado vincula a sessao comportamental ao fato oficial sem afetar o pedido", async () => {
+    const sessionId = "22222222-2222-4222-8222-222222222222";
+    const res = await POST(pedidoRequest({
+      clienteToken: "token-cliente-logado",
+      behaviorSessionId: sessionId,
+    }));
+
+    expect(res.status).toBe(200);
+    expect(registrarEventoServidorComportamentoMock).toHaveBeenCalledWith(expect.objectContaining({
+      clienteId: "cli_11900000001",
+      sessionId,
+      type: "order_created",
+      context: expect.objectContaining({
+        source: "checkout",
+        target: "checkout",
+        deliveryType: "retirada",
+        paymentFamily: "dinheiro",
+      }),
+    }));
   });
 
   test("bebida nao entra na contagem de pizzas para fidelidade", async () => {
