@@ -1876,6 +1876,13 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // Lanches): trava em 1 sabor só, sem meio a meio. Ver pickFlavor abaixo.
   function pickCalzone() {
     if (!calzoneItem || calzoneEsgotada) return;
+    const behaviorProductId = menu.catalog?.calzone.find((produto) => produto.name === calzoneItem.name)?.id;
+    trackBehavior("product_view", {
+      source: "cardapio",
+      screen: "sc-list",
+      categoryId: "lanche",
+      ...(behaviorProductId ? { productId: behaviorProductId } : {}),
+    });
     setMiniPizzaMode(false);
     setCalzoneMode(true);
     setPastelMode(false);
@@ -2256,6 +2263,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   function addSimple(it: { name: string; price: number; available?: boolean; sizes?: { code: string; price: number }[]; flavors?: string[] }, emoji: string) {
     if (it.available === false) return;
+    if (isCalzoneName(it.name)) { pickCalzone(); return; }
     const behaviorProductId = menu.catalog
       ? todosOsProdutos(menu.catalog).find((produto) => produto.name === it.name)?.id
       : undefined;
@@ -2265,7 +2273,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       categoryId: listCat,
       ...(behaviorProductId ? { productId: behaviorProductId } : {}),
     });
-    if (isCalzoneName(it.name)) { pickCalzone(); return; }
     // Produtos de sabor único do catálogo oficial fora do Calzone (Pastel de
     // Forno, Pastel de Feira) — exigem 1 sabor antes de ir pra sacola, mesmo
     // fluxo do Calzone acima, nunca adicionados direto.
@@ -2397,7 +2404,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const cartTemBebidaOuSuco = cart.some((c) => [...bebidasEfetivas, ...sucosEfetivos].some((m) => m.name === c.name));
   const showUpsellBebida = !upsellBebidaIgnorado && !cartTemBebidaOuSuco && ["pizza", "lanche", "macarronada"].includes(lastAddedKind || "");
   function sairDoPosItemSemBebida(destino: "sc-start" | "sc-cart") { if (showUpsellBebida) setUpsellBebidaIgnorado(true); go(destino); }
-  function chQty(idx: number, d: number) {
+  function chQty(idx: number, d: number) { setCart(cart.map((c, i) => (i === idx ? { ...c, qty: Math.max(1, c.qty + d) } : c))); }
+  function trackCartQuantityChange() {
     trackBehavior("cart_quantity_change", {
       source: "cardapio",
       screen,
@@ -2405,7 +2413,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       cartItems: cartCount,
       cartDistinctItems: cart.length,
     });
-    setCart(cart.map((c, i) => (i === idx ? { ...c, qty: Math.max(1, c.qty + d) } : c)));
   }
   function rmItem(idx: number) {
     const removido = cart[idx];
@@ -3111,7 +3118,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                       const cartQty = cartIdx >= 0 ? cart[cartIdx].qty : 0;
                       return (<div key={"id" in it ? it.id : i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addSimple(it, cfg.emoji); } }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title opt-title-with-badge">{it.name}{noveltyActive && isNewCatalogItemId("id" in it ? it.id : undefined) && <NoveltyBadge />}</div>{esg ? <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div> : ing ? <div className="opt-desc opt-desc-ingredients">{ing}</div> : null}</div>{!esg && semConfig && cartQty > 0 ? (
                         <div className="qty-pill qty-pill-sm" onClick={(e) => e.stopPropagation()}>
-                          <button type="button" aria-label={`Diminuir quantidade de ${it.name}`} onClick={() => chQty(cartIdx, -1)}><Minus size={13} aria-hidden="true" /></button>
+                          <button type="button" aria-label={`Diminuir quantidade de ${it.name}`} onClick={() => { trackCartQuantityChange(); chQty(cartIdx, -1); }}><Minus size={13} aria-hidden="true" /></button>
                           <span>{cartQty}</span>
                           <button type="button" aria-label={`Aumentar quantidade de ${it.name}`} onClick={() => addSimple(it, cfg.emoji)}><Plus size={13} aria-hidden="true" /></button>
                         </div>
@@ -3213,7 +3220,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               )}
               <div className="screen-head"><h2>Confira os itens</h2><p>Tudo certo? Então bora finalizar.</p></div>
               {cart.length === 0 ? (<CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.sacolaVazia} />) : (
-                <>{(() => { let pn = 0; return cart.map((it, i) => { let tag = null; if (it.recompensaJornadaId) { tag = <span className="ci-tag" style={{ background: "var(--secondary)", color: "var(--secondary-foreground)" }}>Presente da Jornada do Chef</span>; } else if (it.kind === "pizza") { pn++; tag = <span className="ci-tag">Pizza {pn}</span>; } const nm = it.kind === "pizza" ? it.name.replace(/^Pizza /, "") : it.name; const itemEsg = cartItemEsgotado(it.keys, esgotados); return (<div key={i} className="cart-item"><div className="ci-emoji">{it.emoji}</div><div className="ci-body"><div className="ci-name">{tag}{nm}{it.qty > 1 ? ` ×${it.qty}` : ""}{itemEsg && <span style={{ color: "var(--danger-text)", fontWeight: 800, marginLeft: 6 }}>· Esgotado</span>}</div>{it.detail && <div className="ci-detail">{it.detail}</div>}<div className="ci-price">{it.recompensaJornadaId ? <span style={{ color: "var(--success-text)", fontWeight: 800 }}>Grátis</span> : money(it.price * it.qty)}</div>{it.kind === "simple" && !it.recompensaJornadaId && (<div className="qty-pill"><button onClick={() => chQty(i, -1)}>−</button><span>{it.qty}</span><button onClick={() => chQty(i, 1)}>+</button></div>)}</div><button className="ci-remove" onClick={() => rmItem(i)}>{ICONS.remover}</button></div>); }); })()}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 4px 4px", fontWeight: 700, fontSize: 19 }}><span>Subtotal</span><span>{money(cartTotal)}</span></div>{descontoResgate > 0 && (<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 4px 0", fontWeight: 700, fontSize: 14, color: "var(--success-text)" }}><span>Desconto fidelidade</span><span>−{money(descontoResgate)}</span></div>)}</>
+                <>{(() => { let pn = 0; return cart.map((it, i) => { let tag = null; if (it.recompensaJornadaId) { tag = <span className="ci-tag" style={{ background: "var(--secondary)", color: "var(--secondary-foreground)" }}>Presente da Jornada do Chef</span>; } else if (it.kind === "pizza") { pn++; tag = <span className="ci-tag">Pizza {pn}</span>; } const nm = it.kind === "pizza" ? it.name.replace(/^Pizza /, "") : it.name; const itemEsg = cartItemEsgotado(it.keys, esgotados); return (<div key={i} className="cart-item"><div className="ci-emoji">{it.emoji}</div><div className="ci-body"><div className="ci-name">{tag}{nm}{it.qty > 1 ? ` ×${it.qty}` : ""}{itemEsg && <span style={{ color: "var(--danger-text)", fontWeight: 800, marginLeft: 6 }}>· Esgotado</span>}</div>{it.detail && <div className="ci-detail">{it.detail}</div>}<div className="ci-price">{it.recompensaJornadaId ? <span style={{ color: "var(--success-text)", fontWeight: 800 }}>Grátis</span> : money(it.price * it.qty)}</div>{it.kind === "simple" && !it.recompensaJornadaId && (<div className="qty-pill"><button onClick={() => { trackCartQuantityChange(); chQty(i, -1); }}>−</button><span>{it.qty}</span><button onClick={() => { trackCartQuantityChange(); chQty(i, 1); }}>+</button></div>)}</div><button className="ci-remove" onClick={() => rmItem(i)}>{ICONS.remover}</button></div>); }); })()}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 4px 4px", fontWeight: 700, fontSize: 19 }}><span>Subtotal</span><span>{money(cartTotal)}</span></div>{descontoResgate > 0 && (<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 4px 0", fontWeight: 700, fontSize: 14, color: "var(--success-text)" }}><span>Desconto fidelidade</span><span>−{money(descontoResgate)}</span></div>)}</>
               )}
               <button className="btn btn-ghost btn-sm" style={{ marginTop: 4 }} onClick={() => go("sc-start")}>+ Adicionar mais</button>
               {cartEsgotado && <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "color-mix(in srgb, var(--danger) 10%, transparent)", color: "var(--danger)", fontSize: 13, fontWeight: 700 }}>{ICONS.alerta} Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
