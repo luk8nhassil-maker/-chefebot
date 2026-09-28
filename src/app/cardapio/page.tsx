@@ -1505,13 +1505,13 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       .then(async (res) => {
         if (!ativo || !res.ok) return;
         const data = await res.json();
-        const nomePerfil = typeof data?.cliente?.nome === "string" ? data.cliente.nome.trim() : "";
-        const apelidoPerfil = typeof data?.cliente?.apelido === "string" ? data.cliente.apelido.trim() : "";
-        const telefonePerfil = typeof data?.cliente?.telefone === "string" ? data.cliente.telefone.trim() : "";
-        if (nomePerfil) setNome((atual) => atual.trim() ? atual : nomePerfil);
-        if (apelidoPerfil) setApelido((atual) => atual.trim() ? atual : apelidoPerfil);
-        if (telefonePerfil) setTelefone((atual) => atual.trim() ? atual : formatTel(telefonePerfil));
-        if ((nomePerfil || apelidoPerfil) && telefonePerfil) setEditandoIdentidade(false);
+        const nomeCadastro = typeof data?.cliente?.nome === "string" ? data.cliente.nome.trim() : "";
+        const apelidoCadastro = typeof data?.cliente?.apelido === "string" ? data.cliente.apelido.trim() : "";
+        const telefoneCadastro = typeof data?.cliente?.telefone === "string" ? data.cliente.telefone.trim() : "";
+        if (nomeCadastro) setNome((atual) => atual.trim() ? atual : nomeCadastro);
+        if (apelidoCadastro) setApelido((atual) => atual.trim() ? atual : apelidoCadastro);
+        if (telefoneCadastro) setTelefone((atual) => atual.trim() ? atual : formatTel(telefoneCadastro));
+        if ((nomeCadastro || apelidoCadastro) && telefoneCadastro) setEditandoIdentidade(false);
       })
       .catch(() => {});
     return () => { ativo = false; };
