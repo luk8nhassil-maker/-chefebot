@@ -564,7 +564,10 @@ function utcDaysBetween(startMs: number, endMs: number): string[] {
 async function readMembersUnion(keys: string[]): Promise<Set<string>> {
   const result = new Set<string>();
   for (const key of keys) {
-    const members = await aredis.zrange(key, 0, "+inf", { byScore: true });
+    const rawMembers = await aredis.zrange(key, 0, "+inf", { byScore: true });
+    const members = Array.isArray(rawMembers)
+      ? rawMembers.filter((member): member is string => typeof member === "string")
+      : [];
     for (const member of members) result.add(member);
   }
   return result;
@@ -784,7 +787,17 @@ export async function readBehaviorSessionEvents(params: {
   const endMs = Number.isFinite(params.endMs) ? Math.trunc(params.endMs as number) : Date.now();
   if (startMs > endMs) return [];
 
-  const ids = await aredis.zrange(keySession(tenantId, params.sessionId), startMs, endMs, { byScore: true });
-  const records = await Promise.all(ids.map((id) => redis.get<BehaviorEventRecord>(keyEvent(tenantId, id))));
+  const rawIds = await aredis.zrange(
+    keySession(tenantId, params.sessionId),
+    startMs,
+    endMs,
+    { byScore: true },
+  );
+  const ids = Array.isArray(rawIds)
+    ? rawIds.filter((id): id is string => typeof id === "string")
+    : [];
+  const records = await Promise.all(
+    ids.map((id) => redis.get<BehaviorEventRecord>(keyEvent(tenantId, id))),
+  );
   return records.filter((event): event is BehaviorEventRecord => event !== null);
 }
