@@ -68,6 +68,8 @@ jobs:
           src/lib/behaviorAnalyticsRead.test.ts
           src/lib/behaviorInstrumentation.test.ts
           src/app/api/comportamento/route.test.ts
+          src/app/api/dev/comportamento/cliente/route.test.ts
+          src/app/api/dev/comportamento/resumo/route.test.ts
           src/app/api/cardapio-whatsapp-session/route.test.ts
           src/app/api/pedido-app/route.cliente.test.ts
           src/app/cardapio/page.test.ts
@@ -86,6 +88,8 @@ jobs:
           src/app/api/comportamento/route.test.ts
           src/app/api/dev/comportamento/cliente/route.ts
           src/app/api/dev/comportamento/resumo/route.ts
+          src/app/api/dev/comportamento/cliente/route.test.ts
+          src/app/api/dev/comportamento/resumo/route.test.ts
           src/app/api/cardapio-whatsapp-session/route.ts
           src/app/api/cardapio-whatsapp-session/route.test.ts
           src/app/api/pedido-app/route.ts
