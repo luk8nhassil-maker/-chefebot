@@ -1028,9 +1028,10 @@ describe("/cardapio (PublicCardapio) — carrinho preserva pizzaSelection (Fase 
 
 describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores das pizzas", () => {
   test("addSimple desvia o Calzone para pickCalzone antes de qualquer outra regra de lanche", () => {
-    const bloco = fonte.slice(fonte.indexOf("function addSimple("), fonte.indexOf("function addSimple(") + 500);
+    const bloco = fonte.slice(fonte.indexOf("function addSimple("), fonte.indexOf("function addSimple(") + 1000);
     expect(bloco).toContain("if (it.available === false) return;");
-    expect(bloco).toContain("if (isCalzoneName(it.name)) { pickCalzone(); return; }");
+    expect(bloco.indexOf("if (isCalzoneName(it.name)) { pickCalzone(); return; }"))
+      .toBeGreaterThan(bloco.indexOf("if (it.available === false) return;"));
   });
 
   test("pickCalzone abre o mesmo modal de sabores (flavorModalOpen) e zera qualquer sabor anterior", () => {
