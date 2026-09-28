@@ -266,6 +266,27 @@ Métricas principais:
 
 Próximo uso seguro desta fase: observar distribuição dos sinais reais e calibrar thresholds com dados suficientes antes de transformar qualquer classificação em regra comercial.
 
+### Fase 1.5 — calibração observacional
+
+**IMPLEMENTADA NESTA BRANCH, DESLIGADA POR PADRÃO.**
+
+- endpoint admin `/api/admin/cofre/calibracao`;
+- roles permitidas: admin/dev;
+- release gate separado: `COFRE_CHEFE_CALIBRACAO_ATIVA=true`;
+- períodos permitidos: 30, 60 ou 90 dias;
+- usa uma leitura agregada do analytics e o Ranking atual;
+- considera somente participantes ativos do Ranking;
+- não devolve clienteId, telefone ou nome;
+- mede distribuição de intervalos entre pedidos;
+- mede distribuição do gap atual contra a mediana individual;
+- mede ticket elegível;
+- mede último ticket contra a mediana dos pedidos anteriores;
+- informa cobertura observada e quantidade de clientes com base suficiente;
+- nunca transforma p25/p50/p75/p90 em threshold operacional;
+- `ativacaoAutomatica.permitida` permanece sempre `false` nesta fase.
+
+A calibração responde à pergunta "o que os dados mostram?". A decisão "qual regra comercial usar?" continua separada e depende de evidência suficiente + aprovação econômica.
+
 ### Fase 2 — configuração econômica
 
 - cadastrar CMV/custos oficiais;
@@ -292,6 +313,7 @@ Só depois de provar que o benefício gera resultado incremental sustentável.
 - Main não recebe nenhuma alteração nesta etapa.
 - Preview continua baseado em fixture isolada.
 - O read-model real existe no código, mas o release gate server-side está fechado por padrão.
+- A calibração agregada também existe, com release gate próprio fechado por padrão.
 - Nenhum dado real precisa ser escrito para validar a Fase 1.
 - A antiga Jornada do Chef continua fora da arquitetura nova.
 - Fonte de saldo: ledger atual de Estrelas.
