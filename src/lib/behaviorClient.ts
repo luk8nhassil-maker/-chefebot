@@ -1,7 +1,7 @@
 "use client";
 
 import { fetchCliente } from "./clienteSessaoFront";
-import type { BehaviorContext, ClientBehaviorEventType } from "./behaviorAnalytics";
+import type { BehaviorContext, ClientBehaviorEventType } from "./behaviorAnalyticsTypes";
 
 const SESSION_KEY = "cf_behavior_session_v1";
 const QUEUE_MAX = 20;
