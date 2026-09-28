@@ -55,6 +55,10 @@ export type CofreClienteReadModel = {
   };
 };
 
+export function cofreChefReadModelHabilitado(): boolean {
+  return process.env.COFRE_CHEFE_READMODEL_ATIVO === "true";
+}
+
 const ECONOMIA_BLOQUEADA = {
   beneficiosFinanceirosLiberados: false,
   motivo: "regras_economicas_nao_aprovadas",
