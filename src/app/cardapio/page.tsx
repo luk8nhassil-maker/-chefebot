@@ -2305,26 +2305,26 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
 
   useEffect(() => {
     if (!hydrated) return;
-    const base = { source: "cardapio" as const, screen };
-    trackBehavior("screen_view", base);
+    trackBehavior("screen_view", { source: "cardapio", screen });
     if (screen === "sc-delivery") {
+      trackBehavior("checkout_start", {
+        source: "checkout",
+        screen,
+        target: "checkout",
+      });
       trackBehavior("delivery_step_view", {
         source: "checkout",
         screen,
         target: "checkout",
-        cartItems: cartCount,
-        cartDistinctItems: cart.length,
       });
     } else if (screen === "sc-pay") {
       trackBehavior("payment_step_view", {
         source: "checkout",
         screen,
         target: "checkout",
-        cartItems: cartCount,
-        cartDistinctItems: cart.length,
       });
     }
-  }, [screen, hydrated, cartCount, cart.length]);
+  }, [screen, hydrated]);
 
   const cartBehaviorSignature = cart.map((item) => String(item.kind) + ":" + String(item.qty)).join("|");
   useEffect(() => {
