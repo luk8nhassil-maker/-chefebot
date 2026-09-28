@@ -26,14 +26,6 @@ jobs:
   validar:
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    env:
-      VERCEL_ENV: preview
-      UPSTASH_DISABLE_TELEMETRY: "1"
-      KV_REST_API_URL: http://127.0.0.1:9
-      KV_REST_API_TOKEN: cofre-ci-token-nao-real
-      AUTH_SECRET: cofre-ci-auth-secret-nao-real-com-tamanho-suficiente
-      KELLYNE_PASSWORD: cofre-ci-senha-nao-real
-
     steps:
       - name: Checkout do HEAD exato
         uses: actions/checkout@v4
@@ -78,4 +70,11 @@ jobs:
         run: npm test
 
       - name: Build de produção em modo Preview
+        env:
+          VERCEL_ENV: preview
+          UPSTASH_DISABLE_TELEMETRY: "1"
+          KV_REST_API_URL: http://127.0.0.1:9
+          KV_REST_API_TOKEN: cofre-ci-token-nao-real
+          AUTH_SECRET: cofre-ci-auth-secret-nao-real-com-tamanho-suficiente
+          KELLYNE_PASSWORD: cofre-ci-senha-nao-real
         run: npm run build
