@@ -1876,13 +1876,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // Lanches): trava em 1 sabor só, sem meio a meio. Ver pickFlavor abaixo.
   function pickCalzone() {
     if (!calzoneItem || calzoneEsgotada) return;
-    const behaviorProductId = menu.catalog?.calzone.find((produto) => produto.name === calzoneItem.name)?.id;
-    trackBehavior("product_view", {
-      source: "cardapio",
-      screen: "sc-list",
-      categoryId: "lanche",
-      ...(behaviorProductId ? { productId: behaviorProductId } : {}),
-    });
     setMiniPizzaMode(false);
     setCalzoneMode(true);
     setPastelMode(false);
@@ -1891,6 +1884,13 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     setF1(null);
     setF2(null);
     setFlavorModalOpen(true);
+    const behaviorProductId = menu.catalog?.calzone.find((produto) => produto.name === calzoneItem.name)?.id;
+    trackBehavior("product_view", {
+      source: "cardapio",
+      screen: "sc-list",
+      categoryId: "lanche",
+      ...(behaviorProductId ? { productId: behaviorProductId } : {}),
+    });
   }
   // Pastel de Forno / Pastel de Feira — mesmo modal de sabores, trava em 1
   // sabor só (nunca meio a meio), mesma ideia de pickCalzone acima.
