@@ -13,7 +13,7 @@ vi.mock("./redis", () => ({
   },
 }));
 
-import { clienteProximaEtapa, ativarFidelidadeCliente, obterOuCriarCliente, listarClientesCadastrados, registrarFotoPerfilCliente, type Cliente } from "./clientes";
+import { clienteProximaEtapa, ativarFidelidadeCliente, atualizarIdentidadeCliente, obterOuCriarCliente, listarClientesCadastrados, registrarFotoPerfilCliente, type Cliente } from "./clientes";
 
 const TEL = "5599974000691";
 
@@ -59,6 +59,35 @@ describe("ativarFidelidadeCliente", () => {
   test("obterOuCriarCliente NUNCA marca ativacao sozinho", async () => {
     const c = await obterOuCriarCliente(TEL, "Qualquer Nome");
     expect(c.fidelidadeAtivadaEm).toBeUndefined();
+  });
+});
+
+describe("atualizarIdentidadeCliente", () => {
+  test("salva apelido sem apagar nome existente", async () => {
+    await obterOuCriarCliente(TEL, "Maria Silva");
+    const atualizado = await atualizarIdentidadeCliente(TEL, { apelido: "Mah" });
+
+    expect(atualizado.nome).toBe("Maria Silva");
+    expect(atualizado.apelido).toBe("Mah");
+  });
+
+  test("salva nome quando perfil ainda não tem identidade", async () => {
+    await obterOuCriarCliente(TEL);
+    const atualizado = await atualizarIdentidadeCliente(TEL, { nome: "Maria" });
+
+    expect(atualizado.nome).toBe("Maria");
+    expect(atualizado.apelido).toBeUndefined();
+  });
+
+  test("exige pelo menos nome ou apelido útil", async () => {
+    await obterOuCriarCliente(TEL);
+    await expect(atualizarIdentidadeCliente(TEL, { nome: "   ", apelido: "" }))
+      .rejects.toThrow("identidade_invalida");
+  });
+
+  test("não cria perfil fantasma", async () => {
+    await expect(atualizarIdentidadeCliente(TEL, { apelido: "Mah" }))
+      .rejects.toThrow("cliente_nao_encontrado");
   });
 });
 

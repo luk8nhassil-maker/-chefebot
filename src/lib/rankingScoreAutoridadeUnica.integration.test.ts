@@ -114,6 +114,17 @@ function estorno(pedidoId: string, pontos: number) {
     unidade: "estrelas",
   });
 }
+function resgate(pedidoId: string, pontos: number) {
+  return registrarMovimentoPontosIdempotente(CLI, {
+    pedidoId,
+    tipo: "resgatado",
+    pontos,
+    motivo: "resgate no Cofre do Chefe",
+    regraVersao: REGRA_ESTRELAS_V1,
+    unidade: "estrelas",
+  });
+}
+
 
 describe("autoridade única de projeção do score (blocker crítico do #446)", () => {
   test("1. base=10 + carryover=5, novo pedido soma +5 na base -> resultado = 20", async () => {
@@ -179,6 +190,18 @@ describe("autoridade única de projeção do score (blocker crítico do #446)", 
 
     await estorno("pedido-2", 8);
     expect(await scoreAtual()).toBe(20); // 10 base + 10 bônus — só a base do pedido-2 saiu
+  });
+
+  test("6. resgate no Cofre reduz o saldo gastável, mas não apaga score conquistado", async () => {
+    obterBonusMock.mockResolvedValue(4);
+    await credito("pedido-1", 12);
+    expect(await scoreAtual()).toBe(16); // 12 conquistadas + 4 bônus de competição
+
+    await resgate("pedido-cofre-1", 5);
+
+    // O movimento resgatado existe no ledger de fidelidade e reduz o saldo
+    // disponível, mas o Ranking mede conquista da temporada: continua 12+4.
+    expect(await scoreAtual()).toBe(16);
   });
 
   test("7. retry do mesmo crédito (idempotência) nunca altera o score", async () => {

@@ -1,0 +1,242 @@
+name: cofre-chefe-ci
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/cofreChef.ts"
+      - "src/lib/cofreChef.test.ts"
+      - "src/lib/cofreChefReadModel.ts"
+      - "src/lib/cofreChefReadModel.test.ts"
+      - "src/lib/cofreChefCalibracao.ts"
+      - "src/lib/cofreChefCalibracao.test.ts"
+      - "src/lib/temporadas.ts"
+      - "src/lib/temporadas.test.ts"
+      - "src/app/api/cliente/cofre/**"
+      - "src/app/api/admin/cofre/**"
+      - "src/lib/behaviorAnalyticsTypes.ts"
+      - "src/lib/behaviorAnalytics.ts"
+      - "src/lib/behaviorAnalytics.test.ts"
+      - "src/lib/behaviorAnalyticsRead.ts"
+      - "src/lib/behaviorAnalyticsRead.test.ts"
+      - "src/lib/behaviorInstrumentation.test.ts"
+      - "src/lib/behaviorClient.ts"
+      - "src/app/api/comportamento/**"
+      - "src/app/api/admin/comportamento/**"
+      - "src/app/cliente/page.tsx"
+      - "src/app/cliente/pedidos/page.tsx"
+      - "src/app/rastrear/[pedidoId]/page.tsx"
+      - "src/lib/checkoutIdentidade.ts"
+      - "src/lib/checkoutIdentidade.test.ts"
+      - "src/lib/clientes.ts"
+      - "src/lib/clientes.test.ts"
+      - "src/app/api/cliente/perfil/**"
+      - "src/app/cardapio/page.tsx"
+      - "src/app/api/pedido-app/route.ts"
+      - "src/app/api/pedido-app/route.cliente.test.ts"
+      - "src/lib/rankingClientes.ts"
+      - "src/lib/rankingClientes.test.ts"
+      - "src/lib/rankingScoreAutoridadeUnica.integration.test.ts"
+      - "src/app/dev/cofre-chefe/**"
+      - "src/proxy.ts"
+      - "src/proxy.cofre-preview.test.ts"
+      - "docs/COFRE_DO_CHEFE_V1.md"
+      - "docs/BEHAVIOR_ANALYTICS_V1.md"
+      - "scripts/e2e-cofre-chefe-preview.mjs"
+      - ".github/workflows/cofre-chefe-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cofre-chefe-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout do HEAD exato
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados do Cofre, comportamento e checkout
+        run: >-
+          npm test --
+          src/lib/cofreChef.test.ts
+          src/lib/cofreChefReadModel.test.ts
+          src/lib/cofreChefCalibracao.test.ts
+          src/lib/temporadas.test.ts
+          src/app/api/cliente/cofre/route.test.ts
+          src/app/api/admin/cofre/calibracao/route.test.ts
+          src/lib/behaviorAnalytics.test.ts
+          src/lib/behaviorAnalyticsRead.test.ts
+          src/lib/behaviorInstrumentation.test.ts
+          src/app/api/comportamento/route.test.ts
+          src/app/api/admin/comportamento/resumo/route.test.ts
+          src/app/api/admin/comportamento/cliente/route.test.ts
+          src/lib/checkoutIdentidade.test.ts
+          src/lib/clientes.test.ts
+          src/app/api/cliente/perfil/route.test.ts
+          src/app/api/pedido-app/route.cliente.test.ts
+          src/app/cardapio/page.test.ts
+          src/lib/rankingClientes.test.ts
+          src/lib/rankingScoreAutoridadeUnica.integration.test.ts
+          src/proxy.cofre-preview.test.ts
+
+      - name: Lint do patch
+        run: >-
+          npm run lint --
+          src/lib/cofreChef.ts
+          src/lib/cofreChef.test.ts
+          src/lib/cofreChefReadModel.ts
+          src/lib/cofreChefReadModel.test.ts
+          src/lib/cofreChefCalibracao.ts
+          src/lib/cofreChefCalibracao.test.ts
+          src/lib/behaviorAnalyticsTypes.ts
+          src/lib/behaviorAnalytics.ts
+          src/lib/behaviorAnalytics.test.ts
+          src/lib/behaviorAnalyticsRead.ts
+          src/lib/behaviorAnalyticsRead.test.ts
+          src/lib/behaviorInstrumentation.test.ts
+          src/lib/behaviorClient.ts
+          src/app/api/comportamento/route.ts
+          src/app/api/comportamento/route.test.ts
+          src/app/api/admin/comportamento/resumo/route.ts
+          src/app/api/admin/comportamento/resumo/route.test.ts
+          src/app/api/admin/comportamento/cliente/route.ts
+          src/app/api/admin/comportamento/cliente/route.test.ts
+          src/app/cliente/page.tsx
+          src/app/cliente/pedidos/page.tsx
+          src/app/rastrear/[pedidoId]/page.tsx
+          src/lib/checkoutIdentidade.ts
+          src/lib/checkoutIdentidade.test.ts
+          src/lib/clientes.ts
+          src/lib/clientes.test.ts
+          src/lib/temporadas.ts
+          src/lib/temporadas.test.ts
+          src/app/api/cliente/cofre/route.ts
+          src/app/api/cliente/cofre/route.test.ts
+          src/app/api/admin/cofre/calibracao/route.ts
+          src/app/api/admin/cofre/calibracao/route.test.ts
+          src/app/api/cliente/perfil/route.ts
+          src/app/api/cliente/perfil/route.test.ts
+          src/app/api/pedido-app/route.ts
+          src/app/api/pedido-app/route.cliente.test.ts
+          src/app/cardapio/page.tsx
+          src/app/cardapio/page.test.ts
+          src/lib/rankingClientes.ts
+          src/lib/rankingClientes.test.ts
+          src/lib/rankingScoreAutoridadeUnica.integration.test.ts
+          src/app/dev/cofre-chefe/page.tsx
+          src/app/dev/cofre-chefe/CofreChefePreview.tsx
+          src/proxy.ts
+          src/proxy.cofre-preview.test.ts
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Suíte completa
+        run: npm test
+
+      - name: Build de produção em modo Preview
+        env:
+          VERCEL_ENV: preview
+          UPSTASH_DISABLE_TELEMETRY: "1"
+          KV_REST_API_URL: http://127.0.0.1:9
+          KV_REST_API_TOKEN: cofre-ci-token-nao-real
+          AUTH_SECRET: cofre-ci-auth-secret-nao-real-com-tamanho-suficiente
+          KELLYNE_PASSWORD: cofre-ci-senha-nao-real
+        run: npm run build
+
+  preview-hermetico:
+    needs: validar
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      VERCEL_ENV: "preview"
+      CHEFEBOT_E2E: "1"
+      UPSTASH_DISABLE_TELEMETRY: "1"
+      KV_REST_API_URL: "http://127.0.0.1:9"
+      KV_REST_API_TOKEN: "cofre-preview-local-nao-real"
+      AUTH_SECRET: "cofre-preview-auth-secret-nao-real-com-tamanho-suficiente"
+      KELLYNE_PASSWORD: "cofre-preview-senha-nao-real"
+      E2E_BASE_URL: "http://127.0.0.1:3000"
+      PREVIEW_OUTPUT_DIR: "/tmp/cofre-chefe-preview"
+
+    steps:
+      - name: Checkout do HEAD exato
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Registrar HEAD
+        run: echo "PREVIEW_GIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Instalar Playwright isolado
+        run: |
+          mkdir -p /tmp/playwright-node
+          cd /tmp/playwright-node
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0
+          npx playwright install --with-deps chromium
+          echo "PLAYWRIGHT_MODULE_PATH=/tmp/playwright-node/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
+
+      - name: Build isolado
+        run: npm run build
+
+      - name: Iniciar aplicação isolada
+        run: |
+          npm run start -- -p 3000 -H 127.0.0.1 > /tmp/cofre-next.log 2>&1 &
+          echo $! > /tmp/cofre-next.pid
+
+      - name: Aguardar Cofre
+        run: |
+          for i in $(seq 1 60); do
+            if node -e "fetch('http://127.0.0.1:3000/dev/cofre-chefe').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"; then
+              echo "Cofre Preview pronto."
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/cofre-next.log || true
+          exit 1
+
+      - name: Validar desktop e mobile sem rede externa
+        run: node scripts/e2e-cofre-chefe-preview.mjs
+
+      - name: Publicar evidências visuais
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cofre-chefe-preview-${{ github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/cofre-chefe-preview
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Log da aplicação em caso de falha
+        if: failure()
+        run: cat /tmp/cofre-next.log || true
+
+      - name: Encerrar aplicação
+        if: always()
+        run: |
+          if [ -f /tmp/cofre-next.pid ]; then
+            kill "$(cat /tmp/cofre-next.pid)" 2>/dev/null || true
+          fi

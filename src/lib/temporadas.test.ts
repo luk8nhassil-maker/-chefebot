@@ -14,6 +14,7 @@ import {
   criarTemporada,
   obterTemporada,
   obterTemporadaAtiva,
+  obterTemporadaAtivaSomenteLeitura,
   listarTemporadas,
   ativarTemporada,
   encerrarTemporada,
@@ -169,6 +170,53 @@ describe("obterTemporadaAtiva", () => {
     const ativa = await obterTemporadaAtiva(TENANT);
     expect(ativa?.temporadaId).toBe("t1");
     expect(ativa?.estado).toBe("ativa");
+  });
+});
+
+describe("obterTemporadaAtivaSomenteLeitura", () => {
+  test("retorna a ativa sem alterar estado", async () => {
+    await criarTemporada(TENANT, "t-ro", { duracaoDias: 30 });
+    await ativarTemporada(TENANT, "t-ro");
+
+    const ativa = await obterTemporadaAtivaSomenteLeitura(TENANT);
+    expect(ativa?.temporadaId).toBe("t-ro");
+    expect((store.get(`temporada:config:${TENANT}:t-ro`) as { estado?: string })?.estado).toBe("ativa");
+    expect(store.get(`temporada:ativa:${TENANT}`)).toBe("t-ro");
+  });
+
+  test("temporada expirada retorna null sem encerrar nem apagar a chave", async () => {
+    await criarTemporada(TENANT, "t-exp-ro", { duracaoDias: 1 });
+    const r = await ativarTemporada(TENANT, "t-exp-ro");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    const configExpirada = {
+      ...r.config,
+      fimEm: "2026-09-01T00:00:00.000Z",
+    };
+    store.set(`temporada:config:${TENANT}:t-exp-ro`, configExpirada);
+
+    const ativa = await obterTemporadaAtivaSomenteLeitura(
+      TENANT,
+      new Date("2026-09-27T12:00:00.000Z"),
+    );
+
+    expect(ativa).toBeNull();
+    expect(store.get(`temporada:config:${TENANT}:t-exp-ro`)).toEqual(configExpirada);
+    expect(store.get(`temporada:ativa:${TENANT}`)).toBe("t-exp-ro");
+  });
+
+  test("ponteiro órfão ou estado não ativo falham fechado", async () => {
+    store.set(`temporada:ativa:${TENANT}`, "t-inexistente");
+    expect(await obterTemporadaAtivaSomenteLeitura(TENANT)).toBeNull();
+
+    store.set(`temporada:config:${TENANT}:t-inexistente`, {
+      temporadaId: "t-inexistente",
+      tenantId: TENANT,
+      estado: "encerrada",
+      criadaEm: "2026-09-01T00:00:00.000Z",
+    });
+    expect(await obterTemporadaAtivaSomenteLeitura(TENANT)).toBeNull();
   });
 });
 

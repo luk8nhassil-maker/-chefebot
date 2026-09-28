@@ -11,7 +11,10 @@ import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promoca
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 import { temDinheiroNoPagamento, valorDinheiroEsperado, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
 import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { buscarClientePorId, sanitizeTelefoneCliente } from "@/lib/clientes";
+import { atualizarIdentidadeCliente, buscarClientePorId, sanitizeTelefoneCliente } from "@/lib/clientes";
+import { resolverIdentidadeCheckout } from "@/lib/checkoutIdentidade";
+import { registrarEventoServidorComportamento } from "@/lib/behaviorAnalytics";
+import type { BehaviorContext } from "@/lib/behaviorAnalyticsTypes";
 import { calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
 import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice, contarPizzasPagasParaFidelidade } from "@/lib/pedidoAppItens";
 import {
@@ -62,11 +65,15 @@ export const maxDuration = 20;
 
 type PedidoApp = {
   cliente: string;
+  nome?: string;
+  apelido?: string;
   telefone?: string;
   /** Só é honrado quando existir sessão administrativa real no servidor (ver lerSessaoAdministrativa). */
   semTelefonePainel?: boolean;
   whatsappToken?: string;
   usarOutroWhatsapp?: boolean;
+  /** Sessão comportamental aleatória do navegador; não contém PII. */
+  behaviorSessionId?: string;
   itens: ItemApp[];
   tipoEntrega: "delivery" | "retirada" | "dine_in";
   bairro?: string;
@@ -92,6 +99,15 @@ type PedidoApp = {
    * contrário. Nunca contém PII (ver src/survival/clientRequestId.ts). */
   clientRequestId?: string;
 };
+
+function paymentFamilyBehaviorServer(pagamento: string): NonNullable<BehaviorContext["paymentFamily"]> {
+  const normalizado = String(pagamento || "").toLowerCase();
+  if (normalizado.includes("misto")) return "misto";
+  if (normalizado.includes("pix")) return "pix";
+  if (normalizado.includes("dinheiro")) return "dinheiro";
+  if (normalizado.includes("cart")) return "cartao";
+  return "unknown";
+}
 
 type ConfigPizzariaPix = {
   nomePizzaria?: string;
@@ -760,9 +776,19 @@ export async function POST(req: NextRequest) {
     // tenha passado desde a tentativa original.
     // =================================================================
 
-    if (!body.cliente || !body.itens || body.itens.length === 0) {
+    const identidadeCheckout = resolverIdentidadeCheckout({
+      nome: body.nome,
+      apelido: body.apelido,
+      clienteLegado: body.cliente,
+    });
+    if (!identidadeCheckout.exibicao || !body.itens || body.itens.length === 0) {
       return NextResponse.json({ ok: false, error: "Pedido inválido" }, { status: 400 });
     }
+    // Normaliza a identificação uma única vez. Payloads antigos continuam
+    // compatíveis por clienteLegado; a UI nova envia nome/apelido explícitos.
+    body.cliente = identidadeCheckout.exibicao;
+    body.nome = identidadeCheckout.nome || undefined;
+    body.apelido = identidadeCheckout.apelido || undefined;
     // 7ª revisão de segurança, ponto 2: a RESOLUÇÃO do vínculo com o
     // WhatsApp (`validarTokenCardapio`, uma chamada ao Redis com token de
     // 24h) NUNCA pode rodar antes da recuperação de idempotência (FASE 2) —
@@ -1571,6 +1597,8 @@ export async function POST(req: NextRequest) {
         id: pedidoId,
         numero: numeroPedido,
         cliente: body.cliente,
+        ...(body.nome ? { nomeCliente: body.nome } : {}),
+        ...(body.apelido ? { apelidoCliente: body.apelido } : {}),
         telefone: telefonePedido,
         ...(whatsappVinculado ? { whatsappVinculado: true } : {}),
         ...(clienteId ? { clienteId } : {}),
@@ -1864,6 +1892,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Cliente autenticado: persiste Nome/Apelido informados no checkout no
+    // próprio perfil. Best-effort e somente depois de o pedido existir —
+    // nunca bloqueia ou reverte um pedido por falha secundária do cadastro.
+    if (clienteId && (body.nome || body.apelido)) {
+      try {
+        const perfil = await buscarClientePorId(clienteId);
+        if (perfil) {
+          await atualizarIdentidadeCliente(perfil.telefone, {
+            nome: body.nome,
+            apelido: body.apelido,
+          });
+        }
+      } catch (err) {
+        console.error("[ChefeBot] Erro ao atualizar Nome/Apelido do cliente (ignorado):", err);
+      }
+    }
+
     // Dispara notificação push para a Kellyne (mesmo canal do WhatsApp).
     // Testes nunca acionam integração externa real.
     if (process.env.NODE_ENV !== "test") try {
@@ -1906,6 +1951,27 @@ export async function POST(req: NextRequest) {
       await redis
         .eval(LIBERAR_CLAIM_SE_DONO_SCRIPT, [chaveClaimPedido(clientRequestId)], [montarValorClaim(ownerToken, requestFingerprint)])
         .catch((err) => logSurvivalErro("idempotencia_pedido", "liberacao", "eval_falhou", err));
+    }
+
+    if (body.behaviorSessionId) {
+      try {
+        await registrarEventoServidorComportamento({
+          clienteId: clienteIdPontos ?? clienteId ?? null,
+          sessionId: body.behaviorSessionId,
+          type: "order_created",
+          context: {
+            source: "checkout",
+            target: "checkout",
+            pedidoId,
+            deliveryType: body.tipoEntrega,
+            paymentFamily: paymentFamilyBehaviorServer(body.pagamento),
+          },
+        });
+      } catch (err) {
+        // Analytics é sempre secundário: nunca pode mudar a confirmação real
+        // do pedido nem transformar sucesso em erro.
+        console.error("[ChefeBot] Erro ao registrar conversão comportamental (ignorado):", err);
+      }
     }
 
     const resposta: PedidoAppRespostaSucesso = {

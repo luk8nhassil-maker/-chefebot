@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     cliente: {
       nome: cliente.nome ?? null,
+      apelido: cliente.apelido ?? null,
       telefone: cliente.telefone,
       fotoPerfilDisponivel: !!cliente.fotoPerfilPathname,
       fotoPerfilAtualizadaEm: cliente.fotoPerfilAtualizadaEm ?? null,

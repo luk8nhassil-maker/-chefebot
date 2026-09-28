@@ -166,6 +166,25 @@ describe("obterRankingCompleto", () => {
 });
 
 describe("calcularScoreDaTemporada", () => {
+  test("resgatar Estrelas não reduz o score já conquistado na temporada", () => {
+    const movimentos: MovimentoPontos[] = [
+      { movimentoId: "1", clienteId: "cli", pedidoId: "p1", tipo: "confirmado", pontos: 12, motivo: "pedido", createdAt: "2026-09-02T00:00:00.000Z", regraVersao: "estrelas-faixas-v1" },
+      { movimentoId: "2", clienteId: "cli", pedidoId: "p2", tipo: "resgatado", pontos: 5, motivo: "cofre", createdAt: "2026-09-03T00:00:00.000Z", regraVersao: "estrelas-faixas-v1" },
+      { movimentoId: "3", clienteId: "cli", pedidoId: "p3", tipo: "estornado", pontos: 3, motivo: "pedido corrigido", createdAt: "2026-09-04T00:00:00.000Z", regraVersao: "estrelas-faixas-v1" },
+    ];
+
+    const resultado = calcularScoreDaTemporada(
+      movimentos,
+      Date.parse("2026-09-01T00:00:00.000Z"),
+      Date.parse("2026-09-30T00:00:00.000Z"),
+    );
+
+    expect(resultado).toEqual({
+      score: 9,
+      primeiroAtingidoEm: Date.parse("2026-09-02T00:00:00.000Z"),
+    });
+  });
+
   test("considera somente Estrelas dentro da janela e informa o primeiro crédito", () => {
     const movimentos: MovimentoPontos[] = [
       { movimentoId: "1", clienteId: "cli", pedidoId: "p0", tipo: "confirmado", pontos: 99, motivo: "fora", createdAt: "2026-08-31T00:00:00.000Z", regraVersao: "estrelas-faixas-v1" },
