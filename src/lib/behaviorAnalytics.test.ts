@@ -90,6 +90,11 @@ describe("validarEventoClienteComportamento", () => {
         extraLivre: "nao_deve_persistir",
         productId: "pizza_calabresa",
         cartItems: 2,
+        deviceClass: "mobile",
+        viewportClass: "compact",
+        displayMode: "standalone",
+        referrerKind: "whatsapp_link",
+        engagementMs: 12345,
       },
     }, AGORA);
 
@@ -103,9 +108,33 @@ describe("validarEventoClienteComportamento", () => {
         source: "cardapio",
         productId: "pizza_calabresa",
         cartItems: 2,
+        deviceClass: "mobile",
+        viewportClass: "compact",
+        displayMode: "standalone",
+        referrerKind: "whatsapp_link",
+        engagementMs: 12345,
       },
     });
     expect(JSON.stringify(evento)).not.toContain("nao_deve_persistir");
+  });
+
+  test("descarta contexto técnico fora da allowlist ou duração impossível", () => {
+    const evento = validarEventoClienteComportamento({
+      eventId: EVENT_ID,
+      sessionId: SESSION_ID,
+      type: "page_exit",
+      occurredAtMs: AGORA,
+      context: {
+        source: "cardapio",
+        deviceClass: "smart_tv",
+        viewportClass: "gigante",
+        displayMode: "app_secreto",
+        referrerKind: "campanha_x",
+        engagementMs: 99 * 24 * 60 * 60 * 1000,
+      },
+    }, AGORA);
+
+    expect(evento?.context).toEqual({ source: "cardapio" });
   });
 
   test("rejeita tipo e ids fora do contrato", () => {
