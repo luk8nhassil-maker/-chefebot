@@ -1,7 +1,8 @@
 export const dynamic = "force-dynamic";
 
 function prazoRetencao(): string {
-  const dias = Number(process.env.BEHAVIOR_ANALYTICS_RETENTION_DAYS);
+  const configurado = process.env.BEHAVIOR_ANALYTICS_RETENTION_DAYS;
+  const dias = configurado === undefined || configurado.trim() === "" ? 30 : Number(configurado);
   return Number.isInteger(dias) && dias >= 7 && dias <= 730
     ? `Os eventos são mantidos por até ${dias} dias.`
     : "O prazo de armazenamento depende da configuração de privacidade ativa no sistema.";
