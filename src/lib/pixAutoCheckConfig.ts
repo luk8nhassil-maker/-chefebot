@@ -98,6 +98,20 @@ export const PIX_GUARDIAO_FALHAS_CONSECUTIVAS_LIMITE = 3;
 // oficial vindo do Mercado Pago/webhook/confirmação manual).
 export const PIX_GUARDIAO_IDADE_MAXIMA_MS = 45 * 60 * 1000;
 
+// Política comercial de pagamento Pix Mercado Pago. O limite operacional de
+// 45 min do Guardião acima continua apenas como rede de segurança para falhas
+// de infraestrutura; em fluxo normal, aviso e encerramento acontecem antes.
+export const PIX_PAGAMENTO_AVISO_PENDENTE_MS = 6 * 60 * 1000;
+export const PIX_PAGAMENTO_CANCELAMENTO_MS = 13 * 60 * 1000;
+export const PIX_PAGAMENTO_RETRY_INCONCLUSIVO_MS = 15_000;
+
+export function calcularDelayAteProximoMarcoPagamentoPix(idadeMs: number): number | null {
+  const idade = Math.max(0, Number.isFinite(idadeMs) ? idadeMs : 0);
+  if (idade < PIX_PAGAMENTO_AVISO_PENDENTE_MS) return PIX_PAGAMENTO_AVISO_PENDENTE_MS - idade;
+  if (idade < PIX_PAGAMENTO_CANCELAMENTO_MS) return PIX_PAGAMENTO_CANCELAMENTO_MS - idade;
+  return null;
+}
+
 // --- Sentinela Pix (Nível 6.9) ------------------------------------------
 // Camada determinística de COORDENAÇÃO de consultas ao Mercado Pago — nunca
 // decide se um pagamento foi confirmado (isso segue vindo exclusivamente do
