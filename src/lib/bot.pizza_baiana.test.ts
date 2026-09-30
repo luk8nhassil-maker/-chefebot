@@ -65,6 +65,46 @@ describe("regressão: baiana nunca vira banana", () => {
   });
 });
 
+// Redação EXATA reportada em produção (com acento em "família" e a palavra "sabor"),
+// cobrindo o caminho real em cada step de entrada possível do simulador/WhatsApp.
+describe("regressão: redação exata de produção (pizza família sabor calabresa e baiana)", () => {
+  const MSG = "quero uma pizza família sabor calabresa e baiana";
+
+  function semBanana(messages: string[], cart: { name: string }[]) {
+    const noCart = cart.some(i => i.name.toLowerCase().includes("banana"));
+    const noTexto = messages.some(m => m.toLowerCase().includes("vitamina de banana"));
+    return !noCart && !noTexto;
+  }
+
+  it('category → monta Pizza F Calabresa/Baiana, nunca Vitamina de Banana', () => {
+    const res = processMessage(MSG, sessaoCategory());
+    expect(semBanana(res.messages, res.session.cart)).toBe(true);
+    expect(res.messages[0]).toContain("Calabresa/Baiana");
+    expect(res.session.step).toBe("border_escolha");
+  });
+
+  it('add_more → monta Pizza F Calabresa/Baiana, nunca Vitamina de Banana', () => {
+    const res = processMessage(MSG, sessaoAddMore());
+    expect(semBanana(res.messages, res.session.cart)).toBe(true);
+    expect(res.messages[0]).toContain("Calabresa/Baiana");
+    expect(res.session.step).toBe("border_escolha");
+  });
+
+  it('name → monta Pizza F Calabresa/Baiana, nunca Vitamina de Banana', () => {
+    const sess: BotSession = { step: "name", cart: [], deliveryFee: 0 };
+    const res = processMessage(MSG, sess);
+    expect(semBanana(res.messages, res.session.cart)).toBe(true);
+    expect(res.session.step).toBe("border_escolha");
+  });
+
+  it('returning → monta Pizza F Calabresa/Baiana, nunca Vitamina de Banana', () => {
+    const sess = { step: "returning", cart: [], deliveryFee: 0, historico: { nome: "Joao", totalPedidos: 3, ultimoCart: [] } } as unknown as BotSession;
+    const res = processMessage(MSG, sess);
+    expect(semBanana(res.messages, res.session.cart)).toBe(true);
+    expect(res.session.step).toBe("border_escolha");
+  });
+});
+
 describe("regressão: vitamina de banana continua funcionando", () => {
   it('category: "quero uma vitamina de banana" → adiciona Vitamina de Banana', () => {
     const res = processMessage("quero uma vitamina de banana", sessaoCategory());
