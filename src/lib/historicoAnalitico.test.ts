@@ -638,6 +638,22 @@ describe("calcularMetricas", () => {
     expect(m.percentualClientesRecorrentes).toBe(0);
   });
 
+  test("conta pedido e receita sem cliente identificado sem inflar média por cliente", () => {
+    const m = calcularMetricas([
+      makeEvento({ pedidoId: "p-cliente", clienteId: "cid_A", valorElegivelCents: 7000 }),
+      makeEvento({ pedidoId: "p-anonimo", clienteId: undefined, valorElegivelCents: 5000 }),
+    ]);
+    expect(m.pedidosValidos).toBe(2);
+    expect(m.pedidosSemClienteIdentificado).toBe(1);
+    expect(m.pedidosComClienteIdentificado).toBe(1);
+    expect(m.receitaElegivelClientesIdentificadosCents).toBe(7000);
+    expect(m.clientesUnicos).toBe(1);
+    expect(m.receitaElegivelCents).toBe(12000);
+    expect(m.ticketMedioCents).toBe(6000);
+    expect(m.pedidosMediosPorCliente).toBe(1);
+    expect(m.receitaMediaPorClienteCents).toBe(7000);
+  });
+
   test("classifica clientes novos e recorrentes pelo histórico anterior", () => {
     const eventos = [
       makeEvento({ pedidoId: "p1", clienteId: "cid_A" }),
@@ -705,8 +721,8 @@ describe("calcularMetricas", () => {
     expect(m.receitaMediaPorClienteCents).toBe(9000);
     expect(m.serieDiaria).toHaveLength(2);
     expect(m.serieDiaria[1]).toMatchObject({ pedidos: 2, receitaCents: 13000, clientesUnicos: 2 });
-    expect(m.porCanal.whatsapp).toEqual({ pedidos: 2, receitaCents: 11000 });
-    expect(m.porCanal.salao).toEqual({ pedidos: 1, receitaCents: 7000 });
+    expect(m.porCanal.whatsapp).toMatchObject({ pedidos: 2, receitaCents: 11000, pedidoIds: expect.any(Array) });
+    expect(m.porCanal.salao).toMatchObject({ pedidos: 1, receitaCents: 7000, pedidoIds: expect.any(Array) });
   });
 
   test("cohorte por pedidos: categoriza 1/2/3/4/5+", () => {
