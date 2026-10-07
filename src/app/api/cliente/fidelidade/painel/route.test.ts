@@ -132,7 +132,14 @@ const {
 } = vi.hoisted(() => ({
   obterConfigGamificacaoMock: vi.fn(),
   obterBonusMock: vi.fn(async () => 0),
-  obterMovimentosBonusMock: vi.fn(async () => []),
+  obterMovimentosBonusMock: vi.fn(async () => [] as Array<{
+    movimentoId: string;
+    eventoId: string;
+    tipo: string;
+    pontos: number;
+    motivo: string;
+    createdAt: string;
+  }>),
   aplicarCarryoverMock: vi.fn(async () => undefined),
   sincronizarStatusSocialMock: vi.fn(async () => null as { status: string | null; temporadaOrigemId: string; atribuidoEm: string } | null),
   reconciliarTransicaoMock: vi.fn(async () => undefined),
@@ -588,8 +595,9 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       sozinho: false,
     });
     const disputaSerializada = JSON.stringify(body.ranking.participantes.disputa);
-    expect(disputaSerializada).not.toContain("Ana");
-    expect(disputaSerializada).not.toContain("Carlos");
+    expect(disputaSerializada).toContain("Ana");
+    expect(disputaSerializada).toContain("Carlos");
+    expect(disputaSerializada).not.toContain("••••");
   });
 
   test("único participante: alvo sozinho e disputa sem vizinhos", async () => {
@@ -728,6 +736,7 @@ describe("GET /api/cliente/fidelidade/painel", () => {
         missaoSemanal: null,
         missaoIndicacao: null,
         missaoFotoPerfil: null,
+        missaoDivulgacao: null,
         movimentoRecente: null,
         coroaAmeacada: false,
         nivelChef: null,
