@@ -99,12 +99,14 @@ function chaveHistoricoParticipacao(referencia: string): string {
   return `privacidade:ranking:participacao:historico:${referencia}`;
 }
 
-type RegistroParticipacao = {
+export type RegistroParticipacao = {
   ativo: boolean;
   eventoId: string;
   registradoEm: string;
   origem: "area_cliente_autenticada";
-  versao: "ranking-participacao-v1";
+  versao: "ranking-participacao-v1" | "ranking-participacao-v2";
+  aceitaRevelacao30d?: boolean;
+  regraJogoVersao?: "ranking-jogo-secreto-v1";
 };
 
 function participacaoValida(valor: unknown): valor is RegistroParticipacao {
@@ -112,12 +114,23 @@ function participacaoValida(valor: unknown): valor is RegistroParticipacao {
   const item = valor as Partial<RegistroParticipacao>;
   return typeof item.ativo === "boolean" && typeof item.eventoId === "string" &&
     typeof item.registradoEm === "string" && item.origem === "area_cliente_autenticada" &&
-    item.versao === "ranking-participacao-v1";
+    (item.versao === "ranking-participacao-v1" || item.versao === "ranking-participacao-v2");
 }
 
-function registroParticipacao(ativo: boolean, eventoId: string = randomUUID()): RegistroParticipacao {
-  return { ativo, eventoId, registradoEm: new Date().toISOString(),
-    origem: "area_cliente_autenticada", versao: "ranking-participacao-v1" };
+function registroParticipacao(
+  ativo: boolean,
+  eventoId: string = randomUUID(),
+  aceitaRevelacao30d = false,
+): RegistroParticipacao {
+  return {
+    ativo,
+    eventoId,
+    registradoEm: new Date().toISOString(),
+    origem: "area_cliente_autenticada",
+    versao: "ranking-participacao-v2",
+    aceitaRevelacao30d,
+    regraJogoVersao: aceitaRevelacao30d ? "ranking-jogo-secreto-v1" : undefined,
+  };
 }
 
 function finalidadeValida(valor: unknown): valor is FinalidadeConsentimentoRanking {
@@ -273,15 +286,62 @@ export async function obterParticipacaoRanking(clienteId: string): Promise<boole
   return (await obterParticipacaoRankingParaClientes([clienteId])).get(clienteId) ?? false;
 }
 
-export async function registrarParticipacaoRanking(clienteId: string, ativo: boolean): Promise<void> {
+export async function obterRegraJogoSecretoRanking(clienteId: string): Promise<{
+  participa: boolean;
+  aceitaRevelacao30d: boolean;
+  regraJogoVersao: string | null;
+}> {
+  const referencia = exigirReferencia(clienteId);
+  const valor = await redis.get<RegistroParticipacao>(chaveParticipacao(referencia));
+  if (!participacaoValida(valor)) {
+    return { participa: false, aceitaRevelacao30d: false, regraJogoVersao: null };
+  }
+  return {
+    participa: valor.ativo,
+    aceitaRevelacao30d: valor.ativo && valor.aceitaRevelacao30d === true,
+    regraJogoVersao: valor.regraJogoVersao ?? null,
+  };
+}
+
+export async function obterRegrasJogoSecretoParaClientes(
+  clienteIds: string[],
+): Promise<Map<string, { participa: boolean; aceitaRevelacao30d: boolean }>> {
+  const unicos = Array.from(new Set(clienteIds.filter(Boolean)));
+  if (unicos.length === 0) return new Map();
+  const referencias = unicos.map((id) => exigirReferencia(id));
+  const valores = await redis.mget<Array<RegistroParticipacao | null>>(...referencias.map(chaveParticipacao));
+  return new Map(unicos.map((id, index) => {
+    const valor = valores[index];
+    return [id, {
+      participa: participacaoValida(valor) ? valor.ativo : false,
+      aceitaRevelacao30d: participacaoValida(valor) && valor.ativo && valor.aceitaRevelacao30d === true,
+    }];
+  }));
+}
+
+export async function registrarParticipacaoRanking(
+  clienteId: string,
+  ativo: boolean,
+  opcoes: { aceitaRevelacao30d?: boolean } = {},
+): Promise<void> {
   const referencia = exigirReferencia(clienteId);
   const anterior = await redis.get<RegistroParticipacao>(chaveParticipacao(referencia));
-  if (ativo && participacaoValida(anterior) && anterior.ativo) return;
+  const aceitaRevelacao30d = opcoes.aceitaRevelacao30d === true;
+
+  if (
+    ativo &&
+    participacaoValida(anterior) &&
+    anterior.ativo &&
+    anterior.aceitaRevelacao30d === aceitaRevelacao30d
+  ) return;
+
   // Retries/concessões concorrentes da mesma entrada compartilham a época.
   // Sair gera outra época, invalidando concessões atrasadas da entrada antiga.
-  const registro = registroParticipacao(ativo, ativo
-    ? participacaoValida(anterior) ? anterior.eventoId : "primeira-entrada"
-    : randomUUID());
+  const registro = registroParticipacao(
+    ativo,
+    ativo ? (participacaoValida(anterior) ? anterior.eventoId : "primeira-entrada") : randomUUID(),
+    ativo ? aceitaRevelacao30d : false,
+  );
   await redis.multi()
     .set(chaveParticipacao(referencia), registro)
     .lpush(chaveHistoricoParticipacao(referencia), JSON.stringify(registro))

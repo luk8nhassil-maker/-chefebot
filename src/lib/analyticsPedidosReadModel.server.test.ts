@@ -71,6 +71,30 @@ describe("analyticsPedidosReadModel", () => {
     expect(eventos).toEqual([]);
   });
 
+  test("7 dias e 30 dias divergem com pedido legado de 20 dias atrás", async () => {
+    const agora = new Date("2026-10-07T20:00:00-03:00").getTime();
+    mocks.redisGet.mockResolvedValue([
+      { id: "legado-3d", telefone: "99999991234", total: 60, status: "entregue", data: "04/10/2026", horario: "20:00" },
+      { id: "legado-20d", telefone: "99999995678", total: 80, status: "entregue", data: "17/09/2026", horario: "20:00" },
+    ]);
+
+    const sete = await consultarEventosAnaliticosComFallback(
+      "default",
+      agora - 7 * 24 * 60 * 60 * 1000,
+      agora,
+      agora,
+    );
+    const trinta = await consultarEventosAnaliticosComFallback(
+      "default",
+      agora - 30 * 24 * 60 * 60 * 1000,
+      agora,
+      agora,
+    );
+
+    expect(sete.eventos.map((e) => e.pedidoId)).toEqual(["legado-3d"]);
+    expect(trinta.eventos.map((e) => e.pedidoId).sort()).toEqual(["legado-20d", "legado-3d"]);
+  });
+
   test("usa pedidos como caminho rápido e não consulta o índice quando a fonte oficial está disponível", async () => {
     const ms = new Date("2026-10-05T20:00:00-03:00").getTime();
     mocks.redisGet.mockResolvedValue([

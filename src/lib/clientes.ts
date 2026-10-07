@@ -20,6 +20,9 @@ export type Cliente = {
   fotoPerfilAtualizadaEm?: string;
   /** Marco permanente: depois de concluída uma vez, a missão da foto nunca volta a bloquear presentes. */
   fotoPerfilMissaoConcluidaEm?: string;
+  /** Bônus de Ranking por foto é vitalício e concedido no máximo uma vez. */
+  rankingFotoBonusConcedidoEm?: string;
+  rankingFotoBonusTemporadaId?: string;
 };
 
 export type ProximaEtapaCliente = "name" | "points";
@@ -166,6 +169,26 @@ export async function registrarFotoPerfilCliente(
     fotoPerfilAtualizadaEm: agora,
     // Idempotente e permanente: trocar a foto depois não recria a missão.
     fotoPerfilMissaoConcluidaEm: existente.fotoPerfilMissaoConcluidaEm ?? agora,
+    updatedAt: agora,
+  };
+  await redis.set(chaveCliente(tel), atualizado);
+  return atualizado;
+}
+
+
+export async function registrarBonusFotoRankingCliente(
+  telefone: string,
+  temporadaId: string,
+): Promise<Cliente> {
+  const tel = sanitizeTelefoneCliente(telefone);
+  const existente = await buscarClientePorTelefone(tel);
+  if (!existente) throw new Error("cliente_nao_encontrado");
+  if (existente.rankingFotoBonusConcedidoEm) return existente;
+  const agora = new Date().toISOString();
+  const atualizado: Cliente = {
+    ...existente,
+    rankingFotoBonusConcedidoEm: agora,
+    rankingFotoBonusTemporadaId: temporadaId,
     updatedAt: agora,
   };
   await redis.set(chaveCliente(tel), atualizado);

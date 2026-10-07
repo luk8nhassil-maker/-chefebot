@@ -11,8 +11,8 @@ import { classificarOrigemMovimentoPontos, derivarClienteIdPorTelefone, estrelas
 import { ESTRELAS_INDICACAO_PRIMEIRA_COMPRA } from "@/lib/estrelasIndicacao";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
 import { posicaoClienteRanking, obterTopRanking, obterRankingCompleto, reindexarPorFiltro } from "@/lib/rankingClientes";
-import { projetarIdentidadesPublicasRanking } from "@/lib/rankingPrivacidade";
-import { obterParticipacaoRanking } from "@/lib/consentimentoRanking";
+import { codinomeSecretoRanking } from "@/lib/rankingJogoSecreto";
+import { obterParticipacaoRanking, obterParticipacaoRankingParaClientes } from "@/lib/consentimentoRanking";
 import {
   calcularVariacaoPosicao,
   garantirSnapshotDiario,
@@ -109,6 +109,7 @@ export async function GET(req: NextRequest) {
       participaCampanha: boolean;
       nomePublico?: string;
       telefoneMascarado?: string;
+      codinomeSecreto?: string;
     }[];
     // Histórico honesto: comparação contra o snapshot diário anterior, nunca
     // um valor inventado. `null` quando ainda não existe snapshot anterior.
@@ -127,6 +128,7 @@ export async function GET(req: NextRequest) {
         participaCampanha: true;
         nomePublico?: string;
         telefoneMascarado?: string;
+        codinomeSecreto?: string;
         // Selo herdado do Top 10 da temporada ANTERIOR (não da posição atual)
         // — mesma fonte usada para o próprio cliente, agora também exposto
         // para os outros membros do Top 10 na tela de Ranking. `null`/ausente
@@ -162,30 +164,30 @@ export async function GET(req: NextRequest) {
       const listaBase = top.some((e) => e.clienteId === clienteId)
         ? top
         : [...top, { clienteId, score: pos.score, posicao: pos.posicao }];
-      // Uma única projeção cobre o ranking geral exibido e o ranking completo
-      // usado para recalcular a posição entre participantes — evita duas
-      // rodadas de leitura de consentimento para os mesmos clientes.
+      // Na temporada secreta não precisamos carregar perfil, nome ou telefone.
+      // Uma leitura em lote de participação basta para montar toda a disputa.
       const idsRelevantes = Array.from(new Set([
         ...listaBase.map((e) => e.clienteId),
         ...completo.map((e) => e.clienteId),
         clienteId,
       ]));
-      const identidades = await projetarIdentidadesPublicasRanking(idsRelevantes);
+      const participacoes = await obterParticipacaoRankingParaClientes(idsRelevantes);
       const lista = listaBase.map((e) => {
-        const identidade = identidades.get(e.clienteId);
+        const participaCampanha = participacoes.get(e.clienteId) === true;
         return {
           posicao: e.posicao,
           score: e.score,
           eVoce: e.clienteId === clienteId,
-          participaCampanha: identidade?.participaCampanha ?? false,
-          ...(identidade?.nomePublico ? { nomePublico: identidade.nomePublico } : {}),
-          ...(identidade?.telefoneMascarado ? { telefoneMascarado: identidade.telefoneMascarado } : {}),
+          participaCampanha,
+          ...(participaCampanha
+            ? { codinomeSecreto: codinomeSecretoRanking(e.clienteId, temporada.temporadaId) }
+            : {}),
         };
       });
 
       const reindexados = reindexarPorFiltro(
         completo,
-        (id) => identidades.get(id)?.participaCampanha === true,
+        (id) => participacoes.get(id) === true,
       );
       const LIMITE_PARTICIPANTES = 50;
       const topoParticipantes = reindexados.slice(0, LIMITE_PARTICIPANTES);
@@ -210,15 +212,13 @@ export async function GET(req: NextRequest) {
         ),
       );
       const listaParticipantes = listaParticipantesBase.map((e) => {
-        const identidade = identidades.get(e.clienteId);
         const status = statusPorClienteId.get(e.clienteId) ?? null;
         return {
           posicao: e.posicao,
           score: e.score,
           eVoce: e.clienteId === clienteId,
           participaCampanha: true as const,
-          ...(identidade?.nomePublico ? { nomePublico: identidade.nomePublico } : {}),
-          ...(identidade?.telefoneMascarado ? { telefoneMascarado: identidade.telefoneMascarado } : {}),
+          codinomeSecreto: codinomeSecretoRanking(e.clienteId, temporada.temporadaId),
           ...(status ? { statusSocial: status } : {}),
         };
       });
@@ -292,14 +292,25 @@ export async function GET(req: NextRequest) {
             entradaAbaixo: entradaAbaixo ? { posicao: entradaAbaixo.posicao, score: entradaAbaixo.score } : null,
           })
         : null;
+      const identidadesSecretas = new Map(
+        idsRelevantes.map((id) => {
+          const participaCampanha = participacoes.get(id) === true;
+          return [id, {
+            participaCampanha,
+            nomePublico: participaCampanha ? codinomeSecretoRanking(id, temporada.temporadaId) : null,
+            telefoneMascarado: null,
+            fotoPerfilUrl: null,
+          }] as const;
+        }),
+      );
       const disputa = proprioEntreParticipantes
-        ? montarDisputaRelativa({ ordenados: reindexados, clienteId, identidades })
+        ? montarDisputaRelativa({ ordenados: reindexados, clienteId, identidades: identidadesSecretas })
         : null;
 
       ranking = {
         posicao: pos.posicao,
         score: pos.score,
-        participaCampanha: identidades.get(clienteId)?.participaCampanha ?? false,
+        participaCampanha: participacoes.get(clienteId) === true,
         entorno,
         lista,
         variacaoPosicao,
@@ -378,6 +389,12 @@ export async function GET(req: NextRequest) {
   let bonusCompeticao = 0;
   let missaoSemanal: { status: "inativa" | "desbloqueada" | "processando" | "consumida" } | null = null;
   let missaoIndicacao: { concluida: boolean } | null = null;
+  const missaoFotoPerfil = configGamificacao.missaoFotoPerfilAtiva && configGamificacao.missaoFotoPerfilBonus > 0 && temporada && participaRanking
+    ? {
+        concluida: Boolean(cliente.rankingFotoBonusConcedidoEm),
+        bonus: configGamificacao.missaoFotoPerfilBonus,
+      }
+    : null;
   let movimentoRecente: MovimentoRecente | null = null;
   let coroaAmeacada = false;
   if (temporada && participaRanking) {
@@ -463,6 +480,7 @@ export async function GET(req: NextRequest) {
       bonusCompeticao,
       missaoSemanal,
       missaoIndicacao,
+      missaoFotoPerfil,
       movimentoRecente,
       coroaAmeacada,
       nivelChef,

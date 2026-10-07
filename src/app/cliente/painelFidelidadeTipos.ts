@@ -25,6 +25,7 @@ export type PainelFidelidade = {
       participaCampanha: boolean
       nomePublico?: string
       telefoneMascarado?: string
+      codinomeSecreto?: string
     }[]
     variacaoPosicao: VariacaoPosicaoRanking | null
     participantes: {
@@ -38,6 +39,7 @@ export type PainelFidelidade = {
         participaCampanha: true
         nomePublico?: string
         telefoneMascarado?: string
+        codinomeSecreto?: string
         // Selo herdado do Top 10 da temporada ANTERIOR — de QUALQUER membro
         // da lista, não só do próprio cliente (`eVoce`).
         statusSocial?: StatusTemporadaSocial
@@ -72,6 +74,7 @@ export type PainelGamificacao = {
   bonusCompeticao: number
   missaoSemanal: { status: 'inativa' | 'desbloqueada' | 'processando' | 'consumida' } | null
   missaoIndicacao: { concluida: boolean } | null
+  missaoFotoPerfil?: { concluida: boolean; bonus: number } | null
   nivelChef: { nivel: number; nome: string | null; xpAtual: number; xpProximoNivel: number | null } | null
   // Comparação contra a ÚLTIMA VISITA real deste cliente ao painel — conceito
   // separado do histórico diário (`ranking.variacaoPosicao`). `null` na
@@ -88,6 +91,11 @@ export type FinalidadePrivacidadeRanking = 'ranking_primeiro_nome' | 'ranking_te
 
 export type PreferenciasPrivacidadeRanking = {
   participaCampanha: boolean
+  regraJogo?: {
+    versao: 'ranking-jogo-secreto-v1'
+    aceitaRevelacao30d: boolean
+    diasRevelacao: 30
+  }
   finalidades: Array<{
     finalidade: FinalidadePrivacidadeRanking
     texto: string | null
@@ -96,5 +104,25 @@ export type PreferenciasPrivacidadeRanking = {
     motivoIndisponivel: 'texto_nao_aprovado' | 'infraestrutura_nao_configurada' | 'fonte_oficial_indisponivel' | null
     estado: 'concedido' | 'revogado'
     atualizadoEm: string | null
+  }>
+}
+
+
+export type ResultadoRankingRevelado = {
+  temporadaId: string
+  encerradaEm: string
+  revelacaoAte: string | null
+  premioDescricao: string | null
+  participantesTopo: Array<{
+    posicao: number
+    score: number
+    identidade: {
+      participaCampanha: boolean
+      nomePublico: string | null
+      telefoneMascarado: null
+      fotoPerfilUrl: string | null
+      codinomeSecreto: string
+      revelado: boolean
+    }
   }>
 }

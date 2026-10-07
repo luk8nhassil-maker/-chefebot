@@ -138,6 +138,12 @@ vi.mock("./rankingPrivacidade", () => ({
 // premissa já documentada acima: os clientes desta jornada aceitaram Participar.
 vi.mock("@/lib/consentimentoRanking", () => ({
   obterParticipacaoRanking: vi.fn(async () => true),
+  obterParticipacaoRankingParaClientes: vi.fn(async (ids: string[]) =>
+    new Map(ids.map((id) => [id, true])),
+  ),
+  obterRegrasJogoSecretoParaClientes: vi.fn(async (ids: string[]) =>
+    new Map(ids.map((id) => [id, { participa: true, aceitaRevelacao30d: true }])),
+  ),
 }));
 
 import {

@@ -28,7 +28,14 @@ type TemporadaStatus = {
   ultimaEncerradaNome: string | null
 }
 
-type IdentidadeResultado = { participaCampanha: boolean; nomePublico: string | null; telefoneMascarado: string | null }
+type IdentidadeResultado = {
+  participaCampanha: boolean
+  nomePublico: string | null
+  telefoneMascarado: null
+  fotoPerfilUrl: string | null
+  codinomeSecreto: string
+  revelado: boolean
+}
 
 type ResultadoTemporada = {
   encerradaEm: string
@@ -36,6 +43,7 @@ type ResultadoTemporada = {
   premioQuantidadePremiados: number | null
   premioAprovado: boolean
   vencedorDeclarado: boolean
+  revelacaoAte?: string | null
   vencedores: Array<{ posicao: number; score: number; identidade: IdentidadeResultado }>
   participantesTopo: Array<{ posicao: number; score: number; identidade: IdentidadeResultado }>
 }
@@ -491,6 +499,7 @@ export default function FidelidadePage() {
                           <div style={{ marginTop: 10, fontSize: 12, color: 'var(--foreground-secondary)', lineHeight: 1.7 }}>
                             <div>Encerrada em: <strong>{formatarData(resultadoTemporada.encerradaEm)}</strong></div>
                             {resultadoTemporada.premioDescricao && <div>Prêmio: <strong>{resultadoTemporada.premioDescricao}</strong></div>}
+                            {resultadoTemporada.revelacaoAte && <div>Revelação de perfis até: <strong>{formatarData(resultadoTemporada.revelacaoAte)}</strong></div>}
                             {!resultadoTemporada.vencedorDeclarado ? (
                               <div style={{ fontStyle: 'italic', marginTop: 4 }}>
                                 Sem vencedor declarado {resultadoTemporada.premioAprovado ? '(ranking sem participantes)' : '(prêmio não foi aprovado antes do encerramento)'}.
@@ -501,7 +510,9 @@ export default function FidelidadePage() {
                                 <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
                                   {resultadoTemporada.vencedores.map((v) => (
                                     <li key={v.posicao}>
-                                      {v.posicao}º — {v.identidade.participaCampanha ? (v.identidade.nomePublico ?? `Participante ${v.posicao}`) : 'Fora da disputa (revogou depois)'} · {v.score} estrelas
+                                      {v.posicao}º — {v.identidade.participaCampanha
+                                        ? (v.identidade.nomePublico ?? v.identidade.codinomeSecreto)
+                                        : 'Fora da exibição pública (saiu do jogo)'} · {v.score} estrelas
                                     </li>
                                   ))}
                                 </ul>

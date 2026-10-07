@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 const salvarMock = vi.fn();
 const lerMock = vi.fn();
 const registrarMock = vi.fn();
+const bonusFotoRankingMock = vi.fn();
 
 vi.mock("@/lib/clienteAuth", () => ({
   lerSessaoCliente: vi.fn(async (req: NextRequest) =>
@@ -18,6 +19,9 @@ vi.mock("@/lib/clientes", () => ({
     fotoPerfilContentType: "image/webp",
   })),
   registrarFotoPerfilCliente: (...args: unknown[]) => registrarMock(...args),
+}));
+vi.mock("@/lib/rankingMissaoFotoPerfil", () => ({
+  concederBonusMissaoFotoRanking: (...args: unknown[]) => bonusFotoRankingMock(...args),
 }));
 vi.mock("@/lib/perfilFotoStorage", async () => {
   const real = await vi.importActual<typeof import("@/lib/perfilFotoStorage")>("@/lib/perfilFotoStorage");
@@ -42,15 +46,23 @@ beforeEach(() => {
   salvarMock.mockReset();
   lerMock.mockReset();
   registrarMock.mockReset();
+  bonusFotoRankingMock.mockReset();
+  bonusFotoRankingMock.mockResolvedValue({ status: "inativa", pontos: 0, temporadaId: null });
 });
 
 describe("/api/cliente/perfil/foto", () => {
   test("upload válido grava Blob antes de marcar a missão como concluída", async () => {
     salvarMock.mockResolvedValue({ pathname: "perfil/ref/avatar", etag: "e1" });
     registrarMock.mockResolvedValue({
+      clienteId: "cli_a",
+      telefone: "11900000001",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-09-27T12:00:00.000Z",
+      lastLoginAt: "2026-09-27T12:00:00.000Z",
       fotoPerfilAtualizadaEm: "2026-09-27T12:00:00.000Z",
       fotoPerfilMissaoConcluidaEm: "2026-09-27T12:00:00.000Z",
     });
+    bonusFotoRankingMock.mockResolvedValue({ status: "creditado", pontos: 5, temporadaId: "temp_1" });
     const webp = new Uint8Array([82,73,70,70,0,0,0,0,87,69,66,80,1]);
     const form = new FormData();
     form.set("foto", new File([webp], "foto.webp", { type: "image/webp" }));
@@ -59,7 +71,10 @@ describe("/api/cliente/perfil/foto", () => {
     expect(res.status).toBe(200);
     expect(salvarMock).toHaveBeenCalledTimes(1);
     expect(registrarMock).toHaveBeenCalledWith("11900000001", expect.objectContaining({ pathname: "perfil/ref/avatar" }));
-    expect((await res.json()).missaoFotoPerfilConcluida).toBe(true);
+    const body = await res.json();
+    expect(body.missaoFotoPerfilConcluida).toBe(true);
+    expect(body.rankingBonus).toEqual({ status: "creditado", pontos: 5, temporadaId: "temp_1" });
+    expect(bonusFotoRankingMock).toHaveBeenCalledTimes(1);
   });
 
   test("arquivo que mente MIME é rejeitado antes do storage", async () => {

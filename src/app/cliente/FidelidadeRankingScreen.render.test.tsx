@@ -69,6 +69,73 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     expect(screen.getByRole("dialog", { name: "Caçada ao Pódio liberada!" })).toBeTruthy();
   });
 
+  test("missão de foto é a ação contextual e concede CTA único", () => {
+    const onAdicionarFoto = vi.fn();
+    montar({
+      gamificacao: {
+        statusSocial: null,
+        bonusCompeticao: 0,
+        missaoSemanal: null,
+        missaoIndicacao: null,
+        missaoFotoPerfil: { concluida: false, bonus: 5 },
+        nivelChef: null,
+        movimentoRecente: null,
+        coroaAmeacada: false,
+      },
+      onAdicionarFoto,
+    }, true);
+    const dialog = screen.getByRole("dialog", { name: "Adicione uma foto e ganhe +5" });
+    expect(within(dialog).getByText(/Bônus único no Ranking/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Adicionar foto e ganhar +5" }));
+    expect(onAdicionarFoto).toHaveBeenCalledTimes(1);
+  });
+
+  test("temporada ativa usa codinome e nunca oferece revelar nome manualmente", () => {
+    montar({
+      ranking: {
+        ...RANKING_BASE,
+        participantes: {
+          ...RANKING_BASE.participantes,
+          lista: [
+            { posicao: 1, score: 140, eVoce: false, participaCampanha: true, codinomeSecreto: "Chef Fantasma 42" },
+            { posicao: 5, score: 100, eVoce: true, participaCampanha: true, codinomeSecreto: "Mestre Brasa 17" },
+          ],
+        },
+      },
+    });
+    fireEvent.click(screen.getByRole("tab", { name: "Participando" }));
+    expect(screen.getByText("Chef Fantasma 42")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Mostrar meu nome" })).toBeNull();
+    expect(screen.getByText(/cada rival usa um codinome secreto/i)).toBeTruthy();
+  });
+
+  test("resultado anterior revela perfil por 30 dias e mostra prazo", () => {
+    montar({
+      resultadoAnterior: {
+        temporadaId: "temp_anterior",
+        encerradaEm: "2026-10-01T00:00:00.000Z",
+        revelacaoAte: "2026-10-31T00:00:00.000Z",
+        premioDescricao: null,
+        participantesTopo: [{
+          posicao: 1,
+          score: 150,
+          identidade: {
+            participaCampanha: true,
+            nomePublico: "Ana",
+            telefoneMascarado: null,
+            fotoPerfilUrl: "/api/cliente/ranking/resultado-foto?temporadaId=temp_anterior&posicao=1",
+            codinomeSecreto: "Chef Fantasma 42",
+            revelado: true,
+          },
+        }],
+      },
+    });
+    expect(screen.getByRole("region", { name: "Identidades reveladas da temporada anterior" })).toBeTruthy();
+    expect(screen.getByText("Ana")).toBeTruthy();
+    expect(screen.getByText("Perfil revelado")).toBeTruthy();
+    expect(screen.getByText(/31\/10/)).toBeTruthy();
+  });
+
   test("sem situação acionável abre o Ranking direto, sem modal inventado", () => {
     montar({ gamificacao: null }, true);
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -123,7 +190,7 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     const onRevogarTodas = vi.fn();
     montar({ privacidade: { participaCampanha: true, finalidades: [] }, onRevogarTodas });
     fireEvent.click(screen.getByText("Privacidade e participação"));
-    expect(screen.getByText(/Você pode disputar anonimamente/)).toBeTruthy();
+    expect(screen.getByText(/Durante a temporada você aparece por codinome/)).toBeTruthy();
     fireEvent.click(screen.getByText("Sair do Ranking e remover autorizações"));
     expect(onRevogarTodas).toHaveBeenCalledTimes(1);
   });

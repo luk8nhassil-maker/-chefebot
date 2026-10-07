@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId, registrarFotoPerfilCliente } from "@/lib/clientes";
+import { concederBonusMissaoFotoRanking } from "@/lib/rankingMissaoFotoPerfil";
 import {
   ErroFotoPerfilStorage,
   lerFotoPerfilBlob,
@@ -69,11 +70,28 @@ export async function POST(req: NextRequest) {
       pathname: blob.pathname,
       contentType,
     });
+
+    let rankingBonus: Awaited<ReturnType<typeof concederBonusMissaoFotoRanking>> | null = null;
+    let rankingBonusPendente = false;
+    try {
+      rankingBonus = await concederBonusMissaoFotoRanking({
+        tenantId: "default",
+        cliente: atualizado,
+      });
+    } catch {
+      // A foto já foi salva. Uma falha temporária no bônus não apaga a foto
+      // nem declara pontos que não foram confirmados. Um novo upload permite
+      // retentar a concessão enquanto o marco permanente ainda não existir.
+      rankingBonusPendente = true;
+    }
+
     return NextResponse.json({
       ok: true,
       missaoFotoPerfilConcluida: true,
       fotoPerfilAtualizadaEm: atualizado.fotoPerfilAtualizadaEm,
       fotoUrl: `/api/cliente/perfil/foto?v=${encodeURIComponent(atualizado.fotoPerfilAtualizadaEm ?? "")}`,
+      rankingBonus,
+      rankingBonusPendente,
     });
   } catch (erro) {
     if (erro instanceof ErroFotoPerfilStorage) {

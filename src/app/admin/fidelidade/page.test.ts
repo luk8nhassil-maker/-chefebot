@@ -47,9 +47,10 @@ describe("/admin/fidelidade — Prêmio da temporada e resultado de encerramento
     expect(bloco).toContain("prêmio não foi aprovado antes do encerramento");
   });
 
-  test("vencedor que revogou consentimento depois aparece anonimizado no histórico, nunca com o nome antigo", () => {
+  test("resultado final usa nome revelado ou codinome e respeita saída do jogo", () => {
     const bloco = fonte.slice(fonte.indexOf("<strong>Vencedores:</strong>"), fonte.indexOf("</ul>"));
-    expect(bloco).toContain("v.identidade.participaCampanha");
-    expect(bloco).toContain("Fora da disputa (revogou depois)");
+    expect(bloco).toContain("v.identidade.nomePublico ?? v.identidade.codinomeSecreto");
+    expect(bloco).toContain("Fora da exibição pública (saiu do jogo)");
+    expect(fonte).toContain("Revelação de perfis até:");
   });
 });

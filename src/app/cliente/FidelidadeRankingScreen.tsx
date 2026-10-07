@@ -21,6 +21,7 @@ import type {
   FinalidadePrivacidadeRanking,
   PreferenciasPrivacidadeRanking,
   PainelGamificacao,
+  ResultadoRankingRevelado,
 } from './painelFidelidadeTipos'
 
 const NOME_STATUS_SOCIAL: Record<NonNullable<PainelGamificacao['statusSocial']>, string> = {
@@ -37,7 +38,7 @@ const ICONE_STATUS_SOCIAL: Record<NonNullable<PainelGamificacao['statusSocial']>
   elite: '✦',
 }
 
-type MomentoRanking = 'conquista' | 'nivel' | 'coroa' | 'indicacao' | 'semanal' | 'pedido'
+type MomentoRanking = 'conquista' | 'nivel' | 'coroa' | 'indicacao' | 'foto' | 'semanal' | 'pedido'
 function escolherMomentoPrincipal(
   ranking: NonNullable<PainelFidelidade['ranking']>,
   gamificacao: PainelGamificacao | null | undefined,
@@ -45,9 +46,11 @@ function escolherMomentoPrincipal(
   posPedido: FidelidadeRankingScreenProps['posPedido'],
   podeCompartilhar: boolean,
   podeIndicar: boolean,
+  podeAdicionarFoto: boolean,
   podePedir: boolean,
 ): MomentoRanking | null {
   if (posPedido) return 'pedido'
+  if (podeAdicionarFoto && gamificacao?.missaoFotoPerfil && !gamificacao.missaoFotoPerfil.concluida) return 'foto'
   if (gamificacao?.coroaAmeacada && ranking.participantes.alvo?.estado === 'liderando') return 'coroa'
   if (podePedir && gamificacao?.missaoSemanal?.status === 'desbloqueada') return 'semanal'
   if (podeIndicar && gamificacao?.missaoIndicacao && !gamificacao.missaoIndicacao.concluida && indicacao?.ativa && indicacao.compartilhamentoLiberado !== false) return 'indicacao'
@@ -81,6 +84,7 @@ export type FidelidadeRankingScreenProps = {
   // Gamificação V2 — ausente/null quando o admin não configurou nenhuma
   // mecânica (fail-closed): a tela nunca mostra selo, missão ou nível vazio.
   gamificacao?: PainelGamificacao | null
+  resultadoAnterior?: ResultadoRankingRevelado | null
   privacidade: PreferenciasPrivacidadeRanking | null
   privacidadeCarregando: boolean
   privacidadeSalvando: FinalidadePrivacidadeRanking | 'todas' | null
@@ -96,6 +100,8 @@ export type FidelidadeRankingScreenProps = {
   onRevogarTodas: () => void
   onIndicarAmigo?: () => void
   onCompartilharConquista?: () => void
+  onAdicionarFoto?: () => void
+  fotoEnviando?: boolean
   onNovoPedido?: () => void
   onTelemetria?: (tipo: EventoRankingRetencao) => void
   onClose: () => void
@@ -108,6 +114,7 @@ export function FidelidadeRankingScreen({
   temporada,
   indicacao,
   gamificacao = null,
+  resultadoAnterior = null,
   privacidade,
   privacidadeCarregando,
   privacidadeSalvando,
@@ -115,17 +122,18 @@ export function FidelidadeRankingScreen({
   indicando = false,
   compartilhando = false,
   posPedido = null,
-  onAlterarPrivacidade,
   onRevogarTodas,
   onIndicarAmigo,
   onCompartilharConquista,
+  onAdicionarFoto,
+  fotoEnviando = false,
   onNovoPedido,
   onTelemetria,
   onClose,
 }: FidelidadeRankingScreenProps) {
   const [aba, setAba] = useState<'participantes' | 'minha' | 'geral'>('minha')
   const [sheetSubirAberto, setSheetSubirAberto] = useState(false)
-  const [momentoAberto, setMomentoAberto] = useState<MomentoRanking | null>(() => escolherMomentoPrincipal(ranking, gamificacao, indicacao, posPedido, !!onCompartilharConquista && indicacao?.ativa === true && indicacao.compartilhamentoLiberado !== false, !!onIndicarAmigo, !!onNovoPedido))
+  const [momentoAberto, setMomentoAberto] = useState<MomentoRanking | null>(() => escolherMomentoPrincipal(ranking, gamificacao, indicacao, posPedido, !!onCompartilharConquista && indicacao?.ativa === true && indicacao.compartilhamentoLiberado !== false, !!onIndicarAmigo, !!onAdicionarFoto, !!onNovoPedido))
   const podeCriarPortal = useSyncExternalStore(subscribeToDocument, documentDisponivel, documentIndisponivel)
   const momentoDialogRef = useRef<HTMLDivElement>(null)
   const momentoGatilhoRef = useRef<HTMLElement | null>(null)
@@ -144,13 +152,13 @@ export function FidelidadeRankingScreen({
   const participantes = [...ranking.participantes.lista].sort((a, b) => a.posicao - b.posicao)
   const podium = participantes.filter((entrada) => entrada.posicao <= 3)
   const linhas = aba === 'geral' ? listaSemPodio : participantes.filter((entrada) => entrada.posicao > 3)
-  const nomeSeguro = (entrada: { eVoce: boolean; participaCampanha: boolean; posicao: number; nomePublico?: string }) => {
+  const nomeSeguro = (entrada: { eVoce: boolean; participaCampanha: boolean; posicao: number; nomePublico?: string; codinomeSecreto?: string }) => {
     if (entrada.eVoce && !entrada.participaCampanha) return 'Você — fora da disputa'
     if (!entrada.participaCampanha) return 'Fora da disputa'
-    return entrada.eVoce ? 'Você' : entrada.nomePublico || `Participante ${entrada.posicao}`
+    return entrada.eVoce ? 'Você' : entrada.codinomeSecreto || entrada.nomePublico || 'Rival secreto'
   }
-  const avatarSeguro = (entrada: { eVoce: boolean; nomePublico?: string } | undefined) =>
-    entrada?.eVoce ? 'V' : entrada?.nomePublico?.slice(0, 1).toUpperCase() || null
+  const avatarSeguro = (entrada: { eVoce: boolean; nomePublico?: string; codinomeSecreto?: string } | undefined) =>
+    entrada?.eVoce ? 'V' : (entrada?.codinomeSecreto || entrada?.nomePublico)?.slice(0, 1).toUpperCase() || null
   // `linhas` mistura o ranking geral (sem selo) com o de participantes (com
   // selo) conforme a aba — leitura opcional e seletiva, nunca inventa selo
   // para quem não tem um vindo do servidor.
@@ -199,13 +207,20 @@ export function FidelidadeRankingScreen({
     simbolo: posPedido.estado === 'creditado' ? '✦' : '◷',
   })
   if (conquista) momentos.push({ id: 'conquista', eyebrow: 'CONQUISTA RECENTE', titulo: 'Sua posição merece destaque', resumo: podeCompartilharConquista ? 'Veja sua conquista e convide alguém conhecido.' : 'Veja sua conquista no Ranking.', simbolo: '✦' })
+  if (gamificacao?.missaoFotoPerfil) momentos.push({
+    id: 'foto',
+    eyebrow: 'MISSÃO DE PERFIL',
+    titulo: gamificacao.missaoFotoPerfil.concluida ? 'Foto concluída' : `Adicione uma foto e ganhe +${gamificacao.missaoFotoPerfil.bonus}`,
+    resumo: gamificacao.missaoFotoPerfil.concluida ? 'Bônus já recebido.' : 'Bônus único no Ranking. Sua foto só fica pública se você autorizar.',
+    simbolo: '◎',
+  })
   if (gamificacao?.missaoSemanal?.status === 'desbloqueada') momentos.push({ id: 'semanal', eyebrow: 'MISSÃO SEMANAL', titulo: 'Caçada ao Pódio liberada!', resumo: 'Seu próximo pedido vale 2x no Ranking.', simbolo: '↗' })
   if (alvo?.estado === 'liderando') momentos.push({ id: 'coroa', eyebrow: 'NA LIDERANÇA', titulo: gamificacao?.coroaAmeacada ? 'Coroa ameaçada!' : 'Defenda sua coroa', resumo: mensagemMissao ?? 'Acompanhe sua vantagem.', simbolo: '♛' })
   if (gamificacao?.missaoIndicacao) momentos.push({ id: 'indicacao', eyebrow: 'MISSÃO DA TEMPORADA', titulo: 'Indique 1 amigo', resumo: gamificacao.missaoIndicacao.concluida ? '1/1 ✓ Concluída' : '0/1 · Veja como participar', simbolo: '↗' })
   if (gamificacao?.nivelChef) momentos.push({ id: 'nivel', eyebrow: 'SEU NÍVEL', titulo: `Nível ${gamificacao.nivelChef.nivel}${gamificacao.nivelChef.nome ? ` — ${gamificacao.nivelChef.nome}` : ''}`, resumo: gamificacao.nivelChef.xpProximoNivel === null ? 'Nível máximo atingido.' : `${gamificacao.nivelChef.xpAtual} XP / ${gamificacao.nivelChef.xpProximoNivel} XP`, simbolo: '✶' })
   const momentoAtual = momentos.find((item) => item.id === momentoAberto)
   const modalAtivo = !!momentoAtual
-  const focoAtual = momentos.find((item) => item.id === escolherMomentoPrincipal(ranking, gamificacao, indicacao, posPedido, podeCompartilharConquista, !!onIndicarAmigo, !!onNovoPedido))
+  const focoAtual = momentos.find((item) => item.id === escolherMomentoPrincipal(ranking, gamificacao, indicacao, posPedido, podeCompartilharConquista, !!onIndicarAmigo, !!onAdicionarFoto, !!onNovoPedido))
   const outrosMomentos = momentos.filter((item) => item.id !== focoAtual?.id)
 
   // Telemetria da abertura — dispara uma vez por montagem (o usuário abriu a
@@ -266,7 +281,7 @@ export function FidelidadeRankingScreen({
         {participante.eVoce ? 'V' : participante.nomePublico?.slice(0, 1).toUpperCase() || <Star size={15} fill="currentColor" strokeWidth={1.8} aria-hidden="true" />}
       </span>
       <span className="cf-ranking-row-name">
-        {participante.eVoce ? 'Você' : participante.nomePublico || 'Participante'}
+        {participante.eVoce ? 'Você' : participante.nomePublico || 'Rival secreto'}
         {participante.telefoneMascarado && <small>{participante.telefoneMascarado}</small>}
       </span>
       <b>{scoreSeguro(participante.score)}</b>
@@ -400,22 +415,52 @@ export function FidelidadeRankingScreen({
               <b>{scoreSeguro(entrada.score)}</b>
             </div>
           ))}
-          {aba === 'participantes' && <p className="cf-ranking-footnote">Mostrando posições próximas a você.</p>}
+          {aba === 'participantes' && <p className="cf-ranking-footnote">Durante a temporada, cada rival usa um codinome secreto. As identidades elegíveis são reveladas por 30 dias após o encerramento.</p>}
           {aba === 'geral' && <p className="cf-ranking-footnote">Só quem ativou o Ranking participa da disputa.</p>}
+        </section>
+      )}
+
+      {resultadoAnterior && resultadoAnterior.participantesTopo.length > 0 && (
+        <section className="cf-ranking-reveal" aria-label="Identidades reveladas da temporada anterior">
+          <div className="cf-ranking-reveal-head">
+            <span>🎭 IDENTIDADES REVELADAS</span>
+            <strong>Temporada anterior</strong>
+            <small>
+              Perfis visíveis até {resultadoAnterior.revelacaoAte
+                ? new Date(resultadoAnterior.revelacaoAte).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+                : 'o fim da janela oficial'}.
+            </small>
+          </div>
+          <div className="cf-ranking-reveal-list">
+            {resultadoAnterior.participantesTopo.slice(0, 10).map((entrada) => {
+              const identidade = entrada.identidade
+              const nome = identidade.revelado && identidade.nomePublico
+                ? identidade.nomePublico
+                : identidade.codinomeSecreto
+              return (
+                <div key={entrada.posicao} className="cf-ranking-reveal-row">
+                  <strong>#{entrada.posicao}</strong>
+                  <span className="cf-ranking-reveal-avatar">
+                    {identidade.revelado && identidade.fotoPerfilUrl
+                      ? <img src={identidade.fotoPerfilUrl} alt="" />
+                      : nome.slice(0, 1).toUpperCase()}
+                  </span>
+                  <span><b>{nome}</b><small>{identidade.revelado ? 'Perfil revelado' : 'Rival secreto'}</small></span>
+                  <em>{scoreSeguro(entrada.score)}</em>
+                </div>
+              )
+            })}
+          </div>
         </section>
       )}
 
       {aba === 'minha' && <details className="cf-ranking-privacy">
         <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Privacidade e participação</summary>
-        <p>Você pode disputar anonimamente. Seu nome e telefone só aparecem se você permitir abaixo.</p>
-        {privacidadeCarregando && <p>Carregando escolhas…</p>}
-        {!privacidadeCarregando && privacidade?.finalidades.filter((item) => item.disponivel && item.texto && item.textoVersao).map((item) => (
-          <label key={item.finalidade}>
-            <input type="checkbox" checked={item.estado === 'concedido'} disabled={privacidadeSalvando !== null}
-              onChange={(event) => onAlterarPrivacidade(item.finalidade, event.target.checked ? 'concedido' : 'revogado', item.textoVersao)} />
-            <span>{item.texto}</span>
-          </label>
-        ))}
+        <p>Durante a temporada você aparece por codinome. Ao final, a regra aceita na entrada permite revelar seu primeiro nome e sua foto de perfil por 30 dias para manter sua colocação pública.</p>
+        {privacidadeCarregando && <p>Carregando regra do jogo…</p>}
+        {!privacidadeCarregando && privacidade?.regraJogo?.aceitaRevelacao30d && (
+          <p><strong>Regra aceita:</strong> revelação final por 30 dias para manter a colocação pública.</p>
+        )}
         <button type="button" disabled={privacidadeSalvando !== null} onClick={onRevogarTodas}>
           {privacidadeSalvando === 'todas' ? 'Saindo…' : 'Sair do Ranking e remover autorizações'}
         </button>
@@ -509,6 +554,16 @@ export function FidelidadeRankingScreen({
                   {!compartilhamentoLiberado && <p className="cf-ranking-momento-notice">Convites bloqueados. Faça seu primeiro pedido confirmado para liberar o compartilhamento.</p>}
                 </>
               )}
+              {momentoAberto === 'foto' && gamificacao?.missaoFotoPerfil && (
+                <>
+                  <p className="cf-ranking-momento-lead">
+                    {gamificacao.missaoFotoPerfil.concluida
+                      ? `Você já recebeu o bônus desta missão.`
+                      : `Envie uma foto válida e ganhe +${gamificacao.missaoFotoPerfil.bonus} pontos no Ranking.`}
+                  </p>
+                  <p>Bônus único no Ranking: esta missão vale uma vez por cliente. A foto não aparece para outras pessoas automaticamente; isso depende da sua autorização de privacidade.</p>
+                </>
+              )}
               {momentoAberto === 'semanal' && (
                 <>
                   <p className="cf-ranking-momento-lead">Seu próximo pedido vale 2x no Ranking desta temporada.</p>
@@ -531,6 +586,12 @@ export function FidelidadeRankingScreen({
                   if (!compartilhamentoLiberado) onNovoPedido?.()
                   else { emit('indicacao_clicada'); onIndicarAmigo?.() }
                 }}>{compartilhamentoLiberado ? 'Convidar um amigo' : 'Fazer primeiro pedido'}</button>
+              )}
+              {momentoAberto === 'foto' && gamificacao?.missaoFotoPerfil && !gamificacao.missaoFotoPerfil.concluida && onAdicionarFoto && (
+                <button type="button" className="cf-ranking-momento-primary" disabled={fotoEnviando} onClick={() => {
+                  setMomentoAberto(null)
+                  onAdicionarFoto()
+                }}>{fotoEnviando ? 'Preparando foto…' : `Adicionar foto e ganhar +${gamificacao.missaoFotoPerfil.bonus}`}</button>
               )}
               {momentoAberto === 'semanal' && onNovoPedido && <button type="button" className="cf-ranking-momento-primary" onClick={() => { setMomentoAberto(null); onNovoPedido() }}>Fazer pedido</button>}
               {momentoAberto === 'coroa' && gamificacao?.coroaAmeacada && <button type="button" className="cf-ranking-momento-primary" onClick={() => { setMomentoAberto(null); setSheetSubirAberto(true) }}>Ver como subir</button>}
@@ -559,6 +620,7 @@ export function FidelidadeRankingScreen({
         .cf-ranking-tabs { display: grid; grid-template-columns: repeat(3,1fr); gap: 2px; margin: 17px 0 11px; padding: 3px; border-radius: 24px; background: rgba(222,227,234,.75); }.cf-ranking-tabs button { min-height: 39px; border: 0; border-radius: 21px; background: transparent; color: #687488; font: 700 12px inherit; cursor: pointer; }.cf-ranking-tabs button.ativo { color: #1f63d6; background: rgba(255,255,255,.98); box-shadow: 0 3px 10px rgba(48,75,108,.1); }
         .cf-ranking-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; }.cf-ranking-row { display: grid; grid-template-columns: 30px 34px 1fr auto; align-items: center; gap: 7px; min-height: 48px; padding: 6px 11px; border: 1px solid rgba(255,255,255,.85); border-radius: 24px; background: rgba(255,255,255,.84); box-shadow: 0 5px 14px rgba(58,78,101,.05); }.cf-ranking-row.voce { border-color: rgba(88,151,247,.4); background: linear-gradient(90deg, rgba(234,244,255,.98), rgba(248,252,255,.9)); }.cf-ranking-row>strong { font-size: 17px; text-align: center; }.cf-ranking-row-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #e8eef5; color: #61738a; font-size: 12px; font-weight: 800; }.cf-ranking-row.voce .cf-ranking-row-avatar { background: #4f86ed; color: #fff; }.cf-ranking-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }.cf-ranking-row-name small{display:block;margin-top:2px;color:#758296;font-size:10px}.cf-ranking-row>b { color: #ae7109; font-size: 12px; white-space: nowrap; }.cf-ranking-empty,.cf-ranking-footnote { margin: 7px 2px; color: #6d7a8c; font-size: 12px; line-height: 1.45; text-align: center; }
         .cf-ranking-note { display: flex; gap: 12px; align-items: center; margin-top: 17px; padding: 14px 15px; border: 1px solid rgba(226,180,55,.38); border-radius: 18px; background: linear-gradient(110deg, rgba(255,252,239,.96), rgba(255,247,218,.75)); }.cf-ranking-note>span { font-size: 25px; }.cf-ranking-note strong { font-size: 13px; display: block; }.cf-ranking-note p { margin: 4px 0 0; color: #697588; font-size: 11.5px; line-height: 1.35; }
+        .cf-ranking-reveal{margin:16px 0;padding:14px;border:1px solid rgba(111,76,255,.18);border-radius:18px;background:linear-gradient(145deg,rgba(246,243,255,.95),rgba(255,255,255,.98))}.cf-ranking-reveal-head{display:grid;gap:3px;margin-bottom:10px}.cf-ranking-reveal-head>span{font-size:10px;font-weight:900;letter-spacing:.08em;color:#7159c8}.cf-ranking-reveal-head>strong{font-size:15px;color:#293a57}.cf-ranking-reveal-head>small{font-size:10.5px;color:#718199}.cf-ranking-reveal-list{display:grid;gap:7px}.cf-ranking-reveal-row{display:grid;grid-template-columns:28px 36px minmax(0,1fr) auto;align-items:center;gap:8px;padding:7px 8px;border-radius:12px;background:rgba(255,255,255,.82)}.cf-ranking-reveal-row>strong{font-size:11px;color:#718199}.cf-ranking-reveal-avatar{width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:50%;overflow:hidden;background:#e8edff;color:#5268a9;font-weight:900}.cf-ranking-reveal-avatar img{width:100%;height:100%;object-fit:cover}.cf-ranking-reveal-row>span:nth-child(3){display:grid;min-width:0}.cf-ranking-reveal-row b{font-size:12px;color:#30435f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cf-ranking-reveal-row small{font-size:9.5px;color:#8390a3}.cf-ranking-reveal-row em{font-style:normal}
         .cf-ranking-share-locked { display: grid; gap: 3px; margin-top: 10px; padding: 9px 11px; border: 1px solid rgba(180,196,220,.75); border-radius: 12px; background: rgba(247,250,255,.8); color: #52657f; }.cf-ranking-share-locked strong { color: #304d77; font-size: 12px; }.cf-ranking-share-locked small { font-size: 11px; line-height: 1.35; }
         .cf-ranking-selos { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; margin: 0 0 12px; }
         .cf-ranking-selo { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 999px; font-size: 11.5px; font-weight: 800; background: #eef1f5; color: #4a5568; }

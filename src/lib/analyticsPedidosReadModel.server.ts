@@ -37,18 +37,25 @@ export type FonteEventosAnalytics = {
 };
 
 function timestampLegado(pedido: PedidoFallback, agora: number): number | null {
-  const direto = timestampCriacaoPedido(pedido, agora);
-  if (direto !== null) return direto;
-  if (typeof pedido.data !== "string") return null;
-  const m = pedido.data.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (!m) return null;
-  const hm = typeof pedido.horario === "string" ? pedido.horario.trim().match(/^(\d{1,2}):(\d{2})/) : null;
-  const hh = hm ? Number(hm[1]) : 12;
-  const mm = hm ? Number(hm[2]) : 0;
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
-  const iso = `${m[3]}-${m[2]}-${m[1]}T${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}:00-03:00`;
-  const ts = Date.parse(iso);
-  return Number.isFinite(ts) ? ts : null;
+  // Pedidos legados podem ter somente `data + horario`. Se chamarmos
+  // timestampCriacaoPedido primeiro, o fallback de "horario" interpreta esse
+  // pedido como hoje/ontem e comprime todo o histórico em 7 dias. Por isso a
+  // data legada completa vence o fallback de horário solto.
+  if (typeof pedido.data === "string") {
+    const m = pedido.data.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (m) {
+      const hm = typeof pedido.horario === "string" ? pedido.horario.trim().match(/^(\d{1,2}):(\d{2})/) : null;
+      const hh = hm ? Number(hm[1]) : 12;
+      const mm = hm ? Number(hm[2]) : 0;
+      if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+        const iso = `${m[3]}-${m[2]}-${m[1]}T${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}:00-03:00`;
+        const ts = Date.parse(iso);
+        if (Number.isFinite(ts)) return ts;
+      }
+    }
+  }
+
+  return timestampCriacaoPedido(pedido, agora);
 }
 
 function canal(pedido: PedidoFallback): EventoAnalitico["canal"] {

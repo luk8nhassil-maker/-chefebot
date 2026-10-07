@@ -5,6 +5,7 @@ import {
   obterHistoricoConsentimentoRanking,
   obterParticipacaoRanking,
   obterPreferenciasConsentimentoRanking,
+  obterRegraJogoSecretoRanking,
   registrarParticipacaoRanking,
   registrarConsentimentoRanking,
   revogarTodosConsentimentosRanking,
@@ -33,13 +34,19 @@ function statusErroConsentimento(erro: ErroConsentimentoRanking): number {
 }
 
 async function obterEstadoRankingCliente(clienteId: string) {
-  const [finalidades, participaCampanha] = await Promise.all([
+  const [finalidades, participaCampanha, regraJogo] = await Promise.all([
     obterPreferenciasConsentimentoRanking(clienteId),
     obterParticipacaoRanking(clienteId),
+    obterRegraJogoSecretoRanking(clienteId),
   ]);
   return {
     finalidades,
     participaCampanha,
+    regraJogo: {
+      versao: "ranking-jogo-secreto-v1",
+      aceitaRevelacao30d: regraJogo.aceitaRevelacao30d,
+      diasRevelacao: 30,
+    },
   };
 }
 
@@ -47,8 +54,18 @@ async function obterEstadoRankingCliente(clienteId: string) {
 export async function POST(req: NextRequest) {
   const cliente = await clienteAutenticado(req);
   if (!cliente) return respostaJson({ error: "Nao autorizado" }, { status: 401 });
+
+  let body: Record<string, unknown> = {};
   try {
-    await registrarParticipacaoRanking(cliente.clienteId, true);
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {}
+
+  if (body.aceitaRegraRevelacao30d !== true) {
+    return respostaJson({ error: "regra_jogo_nao_aceita" }, { status: 400 });
+  }
+
+  try {
+    await registrarParticipacaoRanking(cliente.clienteId, true, { aceitaRevelacao30d: true });
     return respostaJson({ ok: true, ...await obterEstadoRankingCliente(cliente.clienteId) });
   } catch (erro) {
     if (erro instanceof ErroConsentimentoRanking) {

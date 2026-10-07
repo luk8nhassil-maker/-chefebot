@@ -29,6 +29,7 @@ const LIMITES = {
   missaoSemanalMultiplicador: { min: 2, max: 2 },
   missaoSemanalCooldownDias: { min: 1, max: 90 },
   missaoIndicacaoBonus: { min: 0, max: 100_000 },
+  missaoFotoPerfilBonus: { min: 0, max: 100_000 },
   impulsoPodioBonus: { min: 0, max: 100_000 },
   impulsoPodioCapTemporada: { min: 0, max: 1_000_000 },
   carryoverBonus: { min: 0, max: 100_000 },
@@ -181,6 +182,15 @@ export async function POST(req: NextRequest) {
   if ("missaoIndicacaoBonus" in body) {
     const r = parseNumero("missaoIndicacaoBonus", body.missaoIndicacaoBonus, LIMITES.missaoIndicacaoBonus);
     if (r.ok) novaConfig.missaoIndicacaoBonus = r.valor; else erros.push(r.erro);
+  }
+
+  if ("missaoFotoPerfilAtiva" in body) {
+    const r = parseBooleanoEstrito("missaoFotoPerfilAtiva", body.missaoFotoPerfilAtiva);
+    if (r.ok) novaConfig.missaoFotoPerfilAtiva = r.valor; else erros.push(r.erro);
+  }
+  if ("missaoFotoPerfilBonus" in body) {
+    const r = parseNumero("missaoFotoPerfilBonus", body.missaoFotoPerfilBonus, LIMITES.missaoFotoPerfilBonus);
+    if (r.ok) novaConfig.missaoFotoPerfilBonus = r.valor; else erros.push(r.erro);
   }
 
   if ("impulsoPodioAtivo" in body) {

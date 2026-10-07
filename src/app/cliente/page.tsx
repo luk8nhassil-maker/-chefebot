@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { ChevronRight, Clock3, Gift, Info, List, Phone, MessageCircle, Receipt, ShieldCheck, Sparkles, Pizza, Trophy, Users, Star } from 'lucide-react'
 import { calcularMissaoAtual } from '@/lib/missoes'
 import ClientBottomNav from '@/components/ClientBottomNav'
@@ -21,6 +22,7 @@ import type {
   VariacaoPosicaoRanking,
   FinalidadePrivacidadeRanking,
   PreferenciasPrivacidadeRanking,
+  ResultadoRankingRevelado,
   StatusTemporadaSocial,
 } from './painelFidelidadeTipos'
 import { FidelidadeRankingScreen } from './FidelidadeRankingScreen'
@@ -196,12 +198,12 @@ const PAINEL_PREVIEW: PainelFidelidade = {
       { posicao: 9, eVoce: false },
     ],
     lista: [
-      { posicao: 4, score: 28, eVoce: false, participaCampanha: true, nomePublico: 'Ana', telefoneMascarado: '(11) 98888-**42' },
-      { posicao: 5, score: 26, eVoce: false, participaCampanha: true, nomePublico: 'Carlos', telefoneMascarado: '(21) 97777-**18' },
-      { posicao: 6, score: 24, eVoce: false, participaCampanha: true, nomePublico: 'Marina', telefoneMascarado: '(31) 96666-**07' },
-      { posicao: 7, score: 22, eVoce: false, participaCampanha: true, nomePublico: 'Rafael', telefoneMascarado: '(41) 95555-**63' },
-      { posicao: 8, score: 20, eVoce: true, participaCampanha: true, nomePublico: 'Lucas', telefoneMascarado: '(99) 99999-**91' },
-      { posicao: 9, score: 18, eVoce: false, participaCampanha: true, nomePublico: 'Julia', telefoneMascarado: '(51) 94444-**26' },
+      { posicao: 4, score: 28, eVoce: false, participaCampanha: true, codinomeSecreto: 'Chef Fantasma 42' },
+      { posicao: 5, score: 26, eVoce: false, participaCampanha: true, codinomeSecreto: 'Mestre Brasa 17' },
+      { posicao: 6, score: 24, eVoce: false, participaCampanha: true, codinomeSecreto: 'Ninja Fatia 63' },
+      { posicao: 7, score: 22, eVoce: false, participaCampanha: true, codinomeSecreto: 'Guardião Forno 28' },
+      { posicao: 8, score: 20, eVoce: true, participaCampanha: true, codinomeSecreto: 'Chef Secreto 91' },
+      { posicao: 9, score: 18, eVoce: false, participaCampanha: true, codinomeSecreto: 'Lenda Molho 51' },
       { posicao: 10, score: 16, eVoce: false, participaCampanha: false },
     ],
     variacaoPosicao: { direcao: 'subiu', casas: 2 },
@@ -210,18 +212,18 @@ const PAINEL_PREVIEW: PainelFidelidade = {
       total: 6,
       variacaoPosicao: { direcao: 'manteve', casas: 0 },
       lista: [
-        { posicao: 1, score: 28, eVoce: false, participaCampanha: true, nomePublico: 'Ana', telefoneMascarado: '(11) 98888-**42' },
-        { posicao: 2, score: 26, eVoce: false, participaCampanha: true, nomePublico: 'Carlos', telefoneMascarado: '(21) 97777-**18' },
-        { posicao: 3, score: 24, eVoce: false, participaCampanha: true, nomePublico: 'Marina', telefoneMascarado: '(31) 96666-**07' },
-        { posicao: 4, score: 22, eVoce: false, participaCampanha: true, nomePublico: 'Rafael', telefoneMascarado: '(41) 95555-**63' },
-        { posicao: 5, score: 20, eVoce: true, participaCampanha: true, nomePublico: 'Lucas', telefoneMascarado: '(99) 99999-**91' },
-        { posicao: 6, score: 18, eVoce: false, participaCampanha: true, nomePublico: 'Julia', telefoneMascarado: '(51) 94444-**26' },
+        { posicao: 1, score: 28, eVoce: false, participaCampanha: true, codinomeSecreto: 'Chef Fantasma 42' },
+        { posicao: 2, score: 26, eVoce: false, participaCampanha: true, codinomeSecreto: 'Mestre Brasa 17' },
+        { posicao: 3, score: 24, eVoce: false, participaCampanha: true, codinomeSecreto: 'Ninja Fatia 63' },
+        { posicao: 4, score: 22, eVoce: false, participaCampanha: true, codinomeSecreto: 'Guardião Forno 28' },
+        { posicao: 5, score: 20, eVoce: true, participaCampanha: true, codinomeSecreto: 'Chef Secreto 91' },
+        { posicao: 6, score: 18, eVoce: false, participaCampanha: true, codinomeSecreto: 'Lenda Molho 51' },
       ],
       alvo: { estado: 'alcancar', alvoPosicao: 4, necessario: 3, scoreAlvo: 22 },
       disputa: {
-        acima: { posicao: 4, score: 22, eVoce: false, nomePublico: 'Rafael', telefoneMascarado: '(41) 95555-**63' },
-        voce: { posicao: 5, score: 20, eVoce: true, nomePublico: 'Lucas', telefoneMascarado: '(99) 99999-**91' },
-        abaixo: { posicao: 6, score: 18, eVoce: false, nomePublico: 'Julia', telefoneMascarado: '(51) 94444-**26' },
+        acima: { posicao: 4, score: 22, eVoce: false, nomePublico: 'Guardião Forno 28', telefoneMascarado: null },
+        voce: { posicao: 5, score: 20, eVoce: true, nomePublico: 'Chef Secreto 91', telefoneMascarado: null },
+        abaixo: { posicao: 6, score: 18, eVoce: false, nomePublico: 'Lenda Molho 51', telefoneMascarado: null },
         sozinho: false,
       },
     },
@@ -232,6 +234,7 @@ const PAINEL_PREVIEW: PainelFidelidade = {
     bonusCompeticao: 0,
     missaoSemanal: { status: 'desbloqueada' },
     missaoIndicacao: { concluida: false },
+    missaoFotoPerfil: { concluida: false, bonus: 5 },
     nivelChef: { nivel: 2, nome: 'Cozinheiro', xpAtual: 240, xpProximoNivel: 500 },
     movimentoRecente: null,
     coroaAmeacada: false,
@@ -285,6 +288,7 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
         onRevogarTodas={() => undefined}
         onIndicarAmigo={() => onAviso('Indicação simulada no Preview. Nenhum link real foi criado.')}
         onCompartilharConquista={() => onAviso('Compartilhamento simulado no Preview. Nenhum link real foi criado.')}
+        onAdicionarFoto={() => onAviso('Missão de foto simulada no Preview. Nenhuma foto real foi enviada e nenhum ponto foi creditado.')}
         onNovoPedido={() => onAviso('No Preview, um novo pedido não é criado de verdade.')}
         onTelemetria={() => undefined}
         onClose={() => {
@@ -610,7 +614,7 @@ function FidelidadeMobileScreen({
               aria-label={`${participantesDestaque.length} perfis em destaque e +${participantesRestantes} participantes restantes`}
             >
               {participantesDestaque.map((participante, index) => {
-                const inicialParticipante = participante.nomePublico?.trim().slice(0, 1).toUpperCase() || ''
+                const inicialParticipante = (participante.codinomeSecreto || participante.nomePublico)?.trim().slice(0, 1).toUpperCase() || ''
                 const mostrarFotoDoProprioCliente = participante.eVoce && !!fotoPerfilUrl
                 return (
                   <i key={participante.posicao} className={`cf-preview-ranking-face cf-preview-ranking-face-${index + 1}`} aria-hidden="true">
@@ -741,7 +745,8 @@ function RankingConsentModal({ privacidade, carregando, salvando, erro, onAceita
         </div>
         <div className="cf-ranking-consent-info-card">
           <p className="cf-ranking-consent-lead"><strong>Ative para disputar posições.</strong> Veja quem está acima, quanto falta para subir e as missões disponíveis. Bônus do Ranking não alteram suas Estrelas da fidelidade.</p>
-          <div className="cf-ranking-consent-privacy"><span className="cf-ranking-consent-privacy-icon" aria-hidden="true">✓</span><span className="cf-ranking-consent-privacy-copy"><strong>Você começa anônimo.</strong><span> Nome e telefone só aparecem se você autorizar depois.</span></span></div>
+          <div className="cf-ranking-consent-privacy"><span className="cf-ranking-consent-privacy-icon" aria-hidden="true">🎭</span><span className="cf-ranking-consent-privacy-copy"><strong>Jogo secreto durante a temporada.</strong><span> Você aparece com um codinome. No encerramento, seu primeiro nome e sua foto de perfil (se cadastrada) ficam visíveis no Ranking por 30 dias para manter sua colocação pública.</span></span></div>
+          <div className="cf-ranking-consent-privacy"><span className="cf-ranking-consent-privacy-icon" aria-hidden="true">✓</span><span className="cf-ranking-consent-privacy-copy"><strong>Você continua no controle.</strong><span> Pode sair do Ranking a qualquer momento; ao sair, o perfil deixa de ser revelado e a colocação não é mantida publicamente.</span></span></div>
         </div>
         {carregando && <p>Carregando sua autorização…</p>}
         {!carregando && privacidade === null && (
@@ -755,11 +760,11 @@ function RankingConsentModal({ privacidade, carregando, salvando, erro, onAceita
             disabled={!podeAceitar}
             onClick={onAceitar}
           >
-            {salvando ? 'Ativando…' : <span>Ativar meu Ranking</span>}
+            {salvando ? 'Ativando…' : <span>Aceitar regra e entrar no Ranking</span>}
           </button>
         )}
         <button type="button" className="cf-ranking-consent-secondary" onClick={onRecusar} disabled={salvando !== null}>Talvez depois</button>
-        <small>Você pode mudar essa escolha depois.</small>
+        <small>Ao entrar, você aceita a regra oficial do jogo secreto e da revelação final por 30 dias.</small>
         <style>{`.cf-ranking-consent-info-card{margin:12px 0 10px;padding:11px 12px 10px;border:1px solid #e7eefb;border-radius:14px;background:#f7faff}.cf-ranking-consent-lead{margin:0!important}.cf-ranking-consent-lead strong{color:#2d4262;font-weight:800}.cf-ranking-consent-info-card .cf-ranking-consent-privacy{margin:9px 0 0;padding:9px 0 0;border-top:1px solid #e5edf9;background:transparent}.cf-ranking-consent-people{position:absolute;left:0;bottom:0;display:flex;align-items:center;gap:2px;padding:3px 5px 3px 3px;border-radius:20px;background:rgba(255,255,255,.9);box-shadow:0 4px 12px rgba(47,67,98,.12);animation:cf-ranking-consent-people-float 2.8s ease-in-out infinite}.cf-ranking-consent-person{display:flex;width:23px;height:23px;align-items:center;justify-content:center;border:2px solid #fff;border-radius:50%;background:#f8d8d5;font-size:13px;font-style:normal;line-height:1}.cf-ranking-consent-person+.cf-ranking-consent-person{margin-left:-7px}.cf-ranking-consent-people b{display:flex;width:23px;height:23px;align-items:center;justify-content:center;border-radius:50%;background:#4f86ed;color:#fff;font-size:9px}.person-two{background:#f8e5bd}.person-three{background:#d6e7f7}.person-two{animation:cf-ranking-consent-person-bob 2s ease-in-out .2s infinite}.person-three{animation:cf-ranking-consent-person-bob 2s ease-in-out .45s infinite}@keyframes cf-ranking-consent-people-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}@keyframes cf-ranking-consent-person-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}@media (prefers-reduced-motion:reduce){.cf-ranking-consent-people,.cf-ranking-consent-person{animation:none}}`}</style>
         <style>{`.cf-ranking-consent-modal{padding:30px 22px 24px}.cf-ranking-consent-visual{width:200px;height:122px;margin:0 auto 8px;border-radius:30px;background:radial-gradient(circle at 50% 25%,rgba(255,247,219,.9),rgba(255,255,255,0) 56%),linear-gradient(145deg,#fff6f3,#f6f9ff);box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 10px 24px rgba(62,84,119,.1)}.cf-ranking-consent-emoji{left:78px;top:18px;font-size:45px;filter:drop-shadow(0 7px 6px rgba(205,135,48,.22));animation:cf-ranking-consent-bob-premium 1.8s ease-in-out infinite}.cf-ranking-consent-gift{right:31px;bottom:47px;font-size:29px;filter:drop-shadow(0 5px 5px rgba(211,151,35,.3));animation:cf-ranking-consent-gift-premium 2.1s ease-in-out .2s infinite}.cf-ranking-consent-spark{font-size:22px;text-shadow:0 0 10px rgba(246,185,25,.4)}.cf-ranking-consent-spark-one{left:33px;top:23px}.cf-ranking-consent-spark-two{right:55px;top:12px;font-size:15px}.cf-ranking-consent-people{left:50%;bottom:10px;transform:translateX(-50%);gap:4px;padding:5px 8px 5px 5px;border:1px solid rgba(255,255,255,.95);border-radius:24px;background:rgba(255,255,255,.92);box-shadow:0 7px 18px rgba(47,67,98,.16);animation:cf-ranking-consent-people-premium 2.8s ease-in-out infinite}.cf-ranking-consent-person{width:31px;height:31px;border-width:2px;font-size:18px;box-shadow:0 2px 6px rgba(36,53,79,.12)}.cf-ranking-consent-person+.cf-ranking-consent-person{margin-left:-9px}.cf-ranking-consent-people b{width:31px;height:31px;font-size:11px;box-shadow:0 3px 8px rgba(79,134,237,.25)}.cf-ranking-consent-eyebrow{margin-bottom:9px!important}.cf-ranking-consent-modal h2{font-size:25px}.cf-ranking-consent-info-card{margin-top:16px;padding:14px 14px 12px}.cf-ranking-consent-lead{font-size:13.5px;line-height:1.55}.cf-ranking-consent-privacy{margin-top:11px!important;padding-top:10px!important}@keyframes cf-ranking-consent-bob-premium{0%,100%{transform:translateY(0) rotate(-3deg) scale(1)}50%{transform:translateY(-8px) rotate(3deg) scale(1.06)}}@keyframes cf-ranking-consent-gift-premium{0%,100%{transform:translateY(0) rotate(0) scale(1)}50%{transform:translateY(-7px) rotate(-7deg) scale(1.08)}}@keyframes cf-ranking-consent-people-premium{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-5px)}}@media (prefers-reduced-motion:reduce){.cf-ranking-consent-emoji,.cf-ranking-consent-gift,.cf-ranking-consent-people{animation:none}}`}</style>
         <style>{`.cf-ranking-consent-visual{height:auto;min-height:142px;padding:14px 0 12px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:space-between}.cf-ranking-consent-icon-row{display:flex;align-items:center;justify-content:center;gap:20px;width:100%;height:78px}.cf-ranking-consent-icon-row .cf-ranking-consent-emoji,.cf-ranking-consent-icon-row .cf-ranking-consent-gift,.cf-ranking-consent-icon-row .cf-ranking-consent-spark{position:static}.cf-ranking-consent-icon-row .cf-ranking-consent-emoji{font-size:48px}.cf-ranking-consent-icon-row .cf-ranking-consent-gift{font-size:31px}.cf-ranking-consent-icon-row .cf-ranking-consent-spark-one{font-size:22px}.cf-ranking-consent-icon-row .cf-ranking-consent-spark-two{font-size:16px}.cf-ranking-consent-people{position:static;transform:none;margin:0 auto;animation-name:cf-ranking-consent-people-static-float}@keyframes cf-ranking-consent-people-static-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}`}</style>
@@ -794,6 +799,7 @@ function RankingConsentModal({ privacidade, carregando, salvando, erro, onAceita
 }
 
 export default function ClientePage() {
+  const router = useRouter()
   // Etapas: carregando → (perfil | confirmar | telefone) → otp → (nome) → perfil.
   // "confirmar" é a experiência de número reconhecido pelo link do WhatsApp:
   // mostra só o número mascarado (produzido no servidor) e nunca pede digitação.
@@ -808,6 +814,7 @@ export default function ClientePage() {
   const [fidelidade, setFidelidade] = useState<Fidelidade | null>(null)
   const [jornada, setJornada] = useState<Jornada | null>(null)
   const [painel, setPainel] = useState<PainelFidelidade | null>(null)
+  const [resultadoRankingAnterior, setResultadoRankingAnterior] = useState<ResultadoRankingRevelado | null>(null)
   const [privacidadeRanking, setPrivacidadeRanking] = useState<PreferenciasPrivacidadeRanking | null>(null)
   const [privacidadeCarregando, setPrivacidadeCarregando] = useState(false)
   const [privacidadeSalvando, setPrivacidadeSalvando] = useState<FinalidadePrivacidadeRanking | 'todas' | null>(null)
@@ -849,6 +856,7 @@ export default function ClientePage() {
   const [previewAviso, setPreviewAviso] = useState('')
   const codigoRef = useRef<HTMLInputElement>(null)
   const fotoInputRef = useRef<HTMLInputElement>(null)
+  const fotoOrigemRef = useRef<'presente' | 'ranking'>('presente')
 
   useEffect(() => {
     trackBehavior('app_open', { source: 'cliente', screen: 'cliente' })
@@ -901,7 +909,7 @@ export default function ClientePage() {
       return
     }
     try { sessionStorage.setItem(CF_OPEN_CART_KEY, '1') } catch {}
-    window.location.href = '/pedido'
+    router.push('/pedido')
   }
 
   // ==========================================================================
@@ -980,6 +988,16 @@ export default function ClientePage() {
     return null
   }
 
+  async function carregarResultadoRankingRecente(): Promise<void> {
+    if (modoPreview) return
+    try {
+      const res = await fetchCliente('/api/cliente/ranking/resultado-recente', { cache: 'no-store' }, sessaoMemRef.current)
+      if (!res.ok) return
+      const data = await res.json().catch(() => ({}))
+      setResultadoRankingAnterior(data?.resultado ?? null)
+    } catch {}
+  }
+
   async function carregarPrivacidadeRanking(): Promise<PreferenciasPrivacidadeRanking | null> {
     setPrivacidadeCarregando(true)
     setPrivacidadeErro('')
@@ -1003,10 +1021,14 @@ export default function ClientePage() {
     setRankingConsentModal(true)
     const preferencias = await carregarPrivacidadeRanking()
     const jaParticipa = preferencias?.participaCampanha === true
-    if (jaParticipa) {
+    const regraAceita = preferencias?.regraJogo?.aceitaRevelacao30d === true
+    if (jaParticipa && regraAceita) {
       setRankingConsentModal(false)
       const rankingAtual = painel?.ranking ?? (await carregarPainel())?.ranking
-      if (rankingAtual) setMobilePanel('ranking')
+      if (rankingAtual) {
+        setMobilePanel('ranking')
+        void carregarResultadoRankingRecente()
+      }
       else setPreviewAviso('Você já participa. Sua posição aparece quando houver uma temporada ativa.')
     }
   }
@@ -1029,6 +1051,7 @@ export default function ClientePage() {
       setPrivacidadeRanking({
         finalidades: data.finalidades,
         participaCampanha: data.participaCampanha === true,
+        regraJogo: data.regraJogo,
       })
       await carregarPainel()
       setPrivacidadeSalvando(null)
@@ -1045,13 +1068,20 @@ export default function ClientePage() {
     setPrivacidadeSalvando('todas')
     setPrivacidadeErro('')
     try {
-      const res = await fetchCliente('/api/cliente/privacidade/ranking', { method: 'POST' }, sessaoMemRef.current)
+      const res = await fetchCliente('/api/cliente/privacidade/ranking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aceitaRegraRevelacao30d: true }),
+      }, sessaoMemRef.current)
       const data = await res.json().catch(() => ({}))
       if (!res.ok || data.participaCampanha !== true) throw new Error('ativacao_nao_salva')
-      setPrivacidadeRanking({ finalidades: data.finalidades, participaCampanha: true })
+      setPrivacidadeRanking({ finalidades: data.finalidades, participaCampanha: true, regraJogo: data.regraJogo })
       setRankingConsentModal(false)
       const painelAtual = await carregarPainel()
-      if (painelAtual?.ranking) setMobilePanel('ranking')
+      if (painelAtual?.ranking) {
+        setMobilePanel('ranking')
+        void carregarResultadoRankingRecente()
+      }
       else setPreviewAviso(painelAtual
         ? 'Ranking ativado. Sua posição aparece quando houver uma temporada ativa.'
         : 'Ranking ativado. Não foi possível carregar sua posição agora; tente abrir novamente.')
@@ -1072,6 +1102,7 @@ export default function ClientePage() {
       setPrivacidadeRanking({
         finalidades: data.finalidades,
         participaCampanha: data.participaCampanha === true,
+        regraJogo: data.regraJogo,
       })
       await carregarPainel()
       setMobilePanel(null)
@@ -1201,27 +1232,33 @@ export default function ClientePage() {
     carregarIdentidade()
     carregarFidelidade()
     carregarJornada()
-    carregarPainel()
-    carregarPrivacidadeRanking().then(async (preferencias) => {
-      if (!convitePosPedidoRef.current) return
-      convitePosPedidoRef.current = false
-      if (preferencias?.participaCampanha === true) {
-        const painelAtual = await carregarPainel()
-        if (!painelAtual?.ranking) {
-          setPreviewAviso('Você já participa. Sua posição aparece quando houver uma temporada ativa.')
-          return
+    const painelPromise = carregarPainel()
+
+    // Privacidade do Ranking não bloqueia a home de Fidelidade. Só carregamos
+    // aqui quando o cliente realmente veio do fluxo pós-pedido, que pode abrir
+    // o Ranking automaticamente. No uso normal ela é lida apenas ao tocar no
+    // Ranking — uma requisição a menos em toda abertura da aba Fidelidade.
+    if (convitePosPedidoRef.current) {
+      carregarPrivacidadeRanking().then(async (preferencias) => {
+        convitePosPedidoRef.current = false
+        if (preferencias?.participaCampanha === true) {
+          const painelAtual = await painelPromise
+          if (!painelAtual?.ranking) {
+            setPreviewAviso('Você já participa. Sua posição aparece quando houver uma temporada ativa.')
+            return
+          }
+          setMobilePanel('ranking')
+          // Cliente que já participa chega direto no ranking depois do pedido.
+          // Começa "pendente" — só vira "creditado" quando o extrato confirmado
+          // do servidor mostrar o crédito do pedido EXATO (pedidoPosPedidoRef),
+          // nunca por proximidade de tempo. Sem pedidoId na URL (link antigo em
+          // cache), fica "pendente" indefinidamente — nunca inventa crédito.
+          setPosPedido({ estado: 'pendente', pedidoId: pedidoPosPedidoRef.current })
+        } else {
+          setRankingConsentModal(true)
         }
-        setMobilePanel('ranking')
-        // Cliente que já participa chega direto no ranking depois do pedido.
-        // Começa "pendente" — só vira "creditado" quando o extrato confirmado
-        // do servidor mostrar o crédito do pedido EXATO (pedidoPosPedidoRef),
-        // nunca por proximidade de tempo. Sem pedidoId na URL (link antigo em
-        // cache), fica "pendente" indefinidamente — nunca inventa crédito.
-        setPosPedido({ estado: 'pendente', pedidoId: pedidoPosPedidoRef.current })
-      } else {
-        setRankingConsentModal(true)
-      }
-    })
+      })
+    }
     // Processa indicação capturada antes do login (cf_ref)
     try {
       const ref = sessionStorage.getItem('cf_ref')
@@ -1546,6 +1583,12 @@ export default function ClientePage() {
   const presenteBloqueadoPorFoto = !!fidelidade?.missaoFotoPerfil?.bloqueiaPrimeiroPresente
   const podeResgatar = !!fidelidade && fidelidade.ativo && fidelidade.metaAtingida && fidelidade.recompensas.length > 0 && !presenteBloqueadoPorFoto
 
+  function abrirSeletorFoto(origem: 'presente' | 'ranking') {
+    fotoOrigemRef.current = origem
+    setFotoErro('')
+    fotoInputRef.current?.click()
+  }
+
   async function enviarFotoPerfil(file: File) {
     if (modoPreview) {
       setPreviewAviso('Foto simulada no Preview. Nenhum arquivo foi enviado e nenhum presente real foi liberado.')
@@ -1569,9 +1612,23 @@ export default function ClientePage() {
         }
         throw new Error(mensagens[data.error] || 'Não conseguimos salvar sua foto agora.')
       }
-      await Promise.all([carregarIdentidade(), carregarFidelidade()])
-      setPreviewAviso('Missão concluída: seu presente foi desbloqueado.')
-      setMobilePanel('presentes')
+      const origemFoto = fotoOrigemRef.current
+      await Promise.all([carregarIdentidade(), carregarFidelidade(), carregarPainel()])
+
+      if (origemFoto === 'ranking') {
+        const bonus = data?.rankingBonus
+        if (bonus && (bonus.status === 'creditado' || bonus.status === 'ja_creditado') && Number(bonus.pontos) > 0) {
+          setPreviewAviso(`Missão de foto concluída: +${bonus.pontos} pontos no Ranking.`)
+        } else if (data?.rankingBonusPendente) {
+          setFotoErro('Sua foto foi salva, mas o bônus do Ranking ainda não foi confirmado. Tente novamente mais tarde.')
+        } else {
+          setPreviewAviso('Foto salva. O Ranking foi atualizado com o estado confirmado pelo servidor.')
+        }
+        setMobilePanel('ranking')
+      } else {
+        setPreviewAviso('Missão concluída: seu presente foi desbloqueado.')
+        setMobilePanel('presentes')
+      }
     } catch (erroFoto) {
       setFotoErro(erroFoto instanceof Error ? erroFoto.message : 'Não conseguimos salvar sua foto agora.')
     } finally {
@@ -1847,6 +1904,7 @@ export default function ClientePage() {
                 temporada={painel.temporada}
                 indicacao={painel.indicacao}
                 gamificacao={painel.gamificacao}
+                resultadoAnterior={resultadoRankingAnterior}
                 privacidade={privacidadeRanking}
                 privacidadeCarregando={privacidadeCarregando}
                 privacidadeSalvando={privacidadeSalvando}
@@ -1858,6 +1916,8 @@ export default function ClientePage() {
                 onRevogarTodas={() => void revogarTodasPrivacidadesRanking()}
                 onIndicarAmigo={() => void compartilharIndicacao()}
                 onCompartilharConquista={() => void compartilharConquistaRanking()}
+                onAdicionarFoto={() => abrirSeletorFoto('ranking')}
+                fotoEnviando={fotoEnviando}
                 onNovoPedido={abrirSacola}
                 onTelemetria={telemetriaRanking}
                 onClose={() => { setMobilePanel(null); setPosPedido(null) }}
@@ -1917,7 +1977,7 @@ export default function ClientePage() {
                           <strong>🎁 Seu presente está garantido</strong>
                           <p>Adicione uma foto ao seu perfil para desbloquear. Você faz esta missão só uma vez.</p>
                           {fotoErro && <small role="alert">{fotoErro}</small>}
-                          <button type="button" className="cf-mobile-sheet-primary" disabled={fotoEnviando} onClick={() => fotoInputRef.current?.click()}>
+                          <button type="button" className="cf-mobile-sheet-primary" disabled={fotoEnviando} onClick={() => abrirSeletorFoto('presente')}>
                             {fotoEnviando ? 'Preparando foto…' : 'Adicionar foto e desbloquear'}
                           </button>
                         </div>
@@ -1994,7 +2054,7 @@ export default function ClientePage() {
                       <p style={{ fontSize: 15, margin: '0 0 6px' }}>Adicione uma foto ao perfil para desbloquear este presente.</p>
                       <p style={{ fontSize: 12, opacity: .78, margin: '0 0 14px' }}>Esta missão é feita apenas uma vez.</p>
                       {fotoErro && <p style={{ color: 'var(--danger-border)', fontSize: 13 }}>{fotoErro}</p>}
-                      <button type="button" onClick={() => fotoInputRef.current?.click()} disabled={fotoEnviando} style={{ ...botaoPrimario, opacity: fotoEnviando ? .6 : 1 }}>
+                      <button type="button" onClick={() => abrirSeletorFoto('presente')} disabled={fotoEnviando} style={{ ...botaoPrimario, opacity: fotoEnviando ? .6 : 1 }}>
                         {fotoEnviando ? 'Preparando foto…' : 'Adicionar foto e desbloquear'}
                       </button>
                     </div>
