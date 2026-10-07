@@ -23,6 +23,11 @@ export type ConfigGamificacao = {
   missaoFotoPerfilAtiva: boolean;
   missaoFotoPerfilBonus: number;
 
+  // Missão diária de divulgação — bônus de competição confirmado somente
+  // quando outra pessoa abre o link rastreado daquele expediente.
+  missaoDivulgacaoAtiva: boolean;
+  missaoDivulgacaoBonus: number;
+
   // Impulso do Pódio — bônus limitado e com teto por temporada.
   impulsoPodioAtivo: boolean;
   impulsoPodioBonus: number;
@@ -51,6 +56,8 @@ export const CONFIG_GAMIFICACAO_PADRAO: ConfigGamificacao = {
   missaoIndicacaoBonus: 0,
   missaoFotoPerfilAtiva: false,
   missaoFotoPerfilBonus: 0,
+  missaoDivulgacaoAtiva: false,
+  missaoDivulgacaoBonus: 0,
   impulsoPodioAtivo: false,
   impulsoPodioBonus: 0,
   impulsoPodioCapTemporada: 0,
