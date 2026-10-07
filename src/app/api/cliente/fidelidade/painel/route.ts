@@ -11,9 +11,8 @@ import { classificarOrigemMovimentoPontos, derivarClienteIdPorTelefone, estrelas
 import { ESTRELAS_INDICACAO_PRIMEIRA_COMPRA } from "@/lib/estrelasIndicacao";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
 import { posicaoClienteRanking, obterTopRanking, obterRankingCompleto, reindexarPorFiltro } from "@/lib/rankingClientes";
-import { projetarIdentidadesPublicasRanking } from "@/lib/rankingPrivacidade";
 import { codinomeSecretoRanking } from "@/lib/rankingJogoSecreto";
-import { obterParticipacaoRanking } from "@/lib/consentimentoRanking";
+import { obterParticipacaoRanking, obterParticipacaoRankingParaClientes } from "@/lib/consentimentoRanking";
 import {
   calcularVariacaoPosicao,
   garantirSnapshotDiario,
@@ -165,23 +164,22 @@ export async function GET(req: NextRequest) {
       const listaBase = top.some((e) => e.clienteId === clienteId)
         ? top
         : [...top, { clienteId, score: pos.score, posicao: pos.posicao }];
-      // Uma única projeção cobre o ranking geral exibido e o ranking completo
-      // usado para recalcular a posição entre participantes — evita duas
-      // rodadas de leitura de consentimento para os mesmos clientes.
+      // Na temporada secreta não precisamos carregar perfil, nome ou telefone.
+      // Uma leitura em lote de participação basta para montar toda a disputa.
       const idsRelevantes = Array.from(new Set([
         ...listaBase.map((e) => e.clienteId),
         ...completo.map((e) => e.clienteId),
         clienteId,
       ]));
-      const identidades = await projetarIdentidadesPublicasRanking(idsRelevantes);
+      const participacoes = await obterParticipacaoRankingParaClientes(idsRelevantes);
       const lista = listaBase.map((e) => {
-        const identidade = identidades.get(e.clienteId);
+        const participaCampanha = participacoes.get(e.clienteId) === true;
         return {
           posicao: e.posicao,
           score: e.score,
           eVoce: e.clienteId === clienteId,
-          participaCampanha: identidade?.participaCampanha ?? false,
-          ...(identidade?.participaCampanha
+          participaCampanha,
+          ...(participaCampanha
             ? { codinomeSecreto: codinomeSecretoRanking(e.clienteId, temporada.temporadaId) }
             : {}),
         };
@@ -189,7 +187,7 @@ export async function GET(req: NextRequest) {
 
       const reindexados = reindexarPorFiltro(
         completo,
-        (id) => identidades.get(id)?.participaCampanha === true,
+        (id) => participacoes.get(id) === true,
       );
       const LIMITE_PARTICIPANTES = 50;
       const topoParticipantes = reindexados.slice(0, LIMITE_PARTICIPANTES);
@@ -295,12 +293,15 @@ export async function GET(req: NextRequest) {
           })
         : null;
       const identidadesSecretas = new Map(
-        [...identidades.entries()].map(([id, identidade]) => [
-          id,
-          identidade.participaCampanha
-            ? { ...identidade, nomePublico: codinomeSecretoRanking(id, temporada.temporadaId), telefoneMascarado: null }
-            : identidade,
-        ]),
+        idsRelevantes.map((id) => {
+          const participaCampanha = participacoes.get(id) === true;
+          return [id, {
+            participaCampanha,
+            nomePublico: participaCampanha ? codinomeSecretoRanking(id, temporada.temporadaId) : null,
+            telefoneMascarado: null,
+            fotoPerfilUrl: null,
+          }] as const;
+        }),
       );
       const disputa = proprioEntreParticipantes
         ? montarDisputaRelativa({ ordenados: reindexados, clienteId, identidades: identidadesSecretas })
@@ -309,7 +310,7 @@ export async function GET(req: NextRequest) {
       ranking = {
         posicao: pos.posicao,
         score: pos.score,
-        participaCampanha: identidades.get(clienteId)?.participaCampanha ?? false,
+        participaCampanha: participacoes.get(clienteId) === true,
         entorno,
         lista,
         variacaoPosicao,
