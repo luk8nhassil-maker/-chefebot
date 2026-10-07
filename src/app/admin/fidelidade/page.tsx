@@ -179,9 +179,6 @@ export default function FidelidadePage() {
     let cancelled = false
     const controller = new AbortController()
     const timeout = window.setTimeout(() => controller.abort(), 10000)
-    setAnalyticsCarregado(false)
-    setErroAnalytics(null)
-
     fetch(`/api/admin/analytics/pedidos?periodo=${periodo}`, { cache: 'no-store', signal: controller.signal })
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
       .then(data => { if (!cancelled) setAnalytics(data) })
@@ -618,7 +615,11 @@ export default function FidelidadePage() {
                   {([7, 30, 60, 90] as PeriodoAnalytics[]).map((p) => (
                     <button
                       key={p}
-                      onClick={() => setPeriodo(p)}
+                      onClick={() => {
+                        setAnalyticsCarregado(false)
+                        setErroAnalytics(null)
+                        setPeriodo(p)
+                      }}
                       style={{
                         fontSize: 12,
                         padding: '4px 10px',
