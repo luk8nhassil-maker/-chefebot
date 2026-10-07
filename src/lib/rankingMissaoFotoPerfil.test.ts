@@ -11,6 +11,9 @@ const mocks = vi.hoisted(() => ({
   registrarBonusFotoRankingCliente: vi.fn(),
 }));
 
+vi.mock("./fidelidade", () => ({
+  derivarClienteIdPorTelefone: vi.fn(() => "canon_1"),
+}));
 vi.mock("./rankingGamificacaoConfig", () => ({
   obterConfigGamificacao: mocks.obterConfigGamificacao,
 }));
@@ -60,9 +63,9 @@ describe("concederBonusMissaoFotoRanking", () => {
     expect(mocks.creditarBonusCompeticao).toHaveBeenCalledWith(expect.objectContaining({
       tipo: "missao_foto_perfil",
       pontos: 5,
-      eventoId: "missao_foto_perfil:cli_1",
+      eventoId: "missao_foto_perfil:canon_1",
     }));
-    expect(mocks.sincronizarScoreTemporadaComBonus).toHaveBeenCalledWith("default", "temp_1", "cli_1");
+    expect(mocks.sincronizarScoreTemporadaComBonus).toHaveBeenCalledWith("default", "temp_1", "canon_1");
     expect(mocks.registrarBonusFotoRankingCliente).toHaveBeenCalledWith("5599999999999", "temp_1");
   });
 
