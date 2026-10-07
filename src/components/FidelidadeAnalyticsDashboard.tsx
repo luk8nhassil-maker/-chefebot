@@ -77,7 +77,7 @@ export default function FidelidadeAnalyticsDashboard({ metricas, periodo, cobert
           ['Pedidos por cliente identificado', metricas.pedidosMediosPorCliente.toLocaleString('pt-BR'), `${formatoNumero(metricas.pedidosComClienteIdentificado)} pedidos com cliente identificado ÷ ${formatoNumero(metricas.clientesUnicos)} clientes.`],
           ['Receita elegível média por cliente', reais(metricas.receitaMediaPorClienteCents), `${reais(metricas.receitaElegivelClientesIdentificadosCents)} ÷ ${formatoNumero(metricas.clientesUnicos)} clientes identificados.`],
           ['Pedidos sem cliente identificado', formatoNumero(metricas.pedidosSemClienteIdentificado), 'Pedidos entregues que entram no total de pedidos e receita, mas não permitem contar ou reconhecer o cliente.'],
-          ['Estrelas creditadas', estrelasLabel, typeof metricas.estrelasDistribuidas !== 'number' ? 'Não foi possível ler o extrato de fidelidade.' : `${formatoNumero(metricas.pedidosComEstrelasRegistradas ?? 0)} pedidos tiveram crédito de Estrelas confirmado.`],
+          ['Estrelas creditadas', estrelasLabel, typeof metricas.estrelasDistribuidas !== 'number' ? 'Não foi possível ler o extrato de fidelidade.' : `${formatoNumero(metricas.pedidosComEstrelasRegistradas ?? 0)} pedidos com cliente identificado tiveram crédito de Estrelas confirmado.`],
         ].map(([nome, valor, explicacao]) => <div key={nome} style={card} title={explicacao}>
           <div style={label}>{nome}</div><div style={{ fontSize: 20, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{valor}</div>
           <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.4, color: 'var(--foreground-muted)' }}>{explicacao}</div>
