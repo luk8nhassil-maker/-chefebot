@@ -12,6 +12,8 @@ Fonte da verdade do projeto. Objetivo: evitar reabrir diagnóstico ou trabalho e
 
 ## 2. Fluxos já resolvidos / validados
 
+- **Radar de Vendas 2.1** — Radar 2.0 mergeado via PR #471 e potencial financeiro mergeado via PR #473. O admin vê oportunidades reais de recompra, metas de ticket e potencial adicional calculado; plano Pro libera o módulo e uma indicação só gera desbloqueio permanente quando outra pizzaria vira cliente pagante confirmado. O valor exibido é potencial estimado, não receita garantida. Nenhum cupom ou WhatsApp é disparado automaticamente.
+
 - **Ritmo mensal de compra por cliente** — mergeado na main via PR #470 (commit `0936fa6c`). A Sala Dev usa pedidos oficiais para identificar começo/meio/fim do mês, janela provável, dia/horário forte e confiança. Menos de 3 pedidos = dados insuficientes. Não envia cupom nem WhatsApp automaticamente.
 
 - **Scroll da conversa no Tempo Real (aba "⚡ Tempo real" dentro de `/pedidos`)** — resolvido. Usa `isNearBottomRef`/`prevMsgCountRef` para só rolar automaticamente quando o usuário já estava perto do fim da conversa; não interrompe leitura de mensagens antigas durante o polling.
@@ -36,17 +38,6 @@ Estes itens já foram corrigidos e validados. Só investigar de novo se houver *
 - Fluxo de pedido público (`/cardapio`) quebrado ponta a ponta.
 
 ## 4. Pendências reais
-
-### Radar de Vendas 2.0 — PR #471
-
-**Estado: PR aberto em validação.**
-
-Transforma o ritmo de compra em produto comercial no admin:
-- preview agregado usando dados reais da pizzaria;
-- oportunidades com score, janela, confiança e meta de ticket;
-- acesso pelo plano Pro ou desbloqueio permanente do módulo após uma indicação virar cliente pagante e ser confirmada por Dev;
-- landing pública de indicação e painel Dev de conversões;
-- nenhum cupom ou WhatsApp é enviado automaticamente nesta versão.
 
 ### Ativação da Estrelas V1 — PR em aberto (`claude/ativar-estrelas-v1-gate`)
 
