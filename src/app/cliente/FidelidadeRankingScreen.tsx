@@ -150,13 +150,13 @@ export function FidelidadeRankingScreen({
   const participantes = [...ranking.participantes.lista].sort((a, b) => a.posicao - b.posicao)
   const podium = participantes.filter((entrada) => entrada.posicao <= 3)
   const linhas = aba === 'geral' ? listaSemPodio : participantes.filter((entrada) => entrada.posicao > 3)
-  const nomeSeguro = (entrada: { eVoce: boolean; participaCampanha: boolean; posicao: number; nomePublico?: string }) => {
+  const nomeSeguro = (entrada: { eVoce: boolean; participaCampanha: boolean; posicao: number; nomePublico?: string; codinomeSecreto?: string }) => {
     if (entrada.eVoce && !entrada.participaCampanha) return 'Você — fora da disputa'
     if (!entrada.participaCampanha) return 'Fora da disputa'
-    return entrada.eVoce ? 'Você' : entrada.nomePublico || `Participante ${entrada.posicao}`
+    return entrada.eVoce ? 'Você' : entrada.codinomeSecreto || entrada.nomePublico || 'Rival secreto'
   }
-  const avatarSeguro = (entrada: { eVoce: boolean; nomePublico?: string } | undefined) =>
-    entrada?.eVoce ? 'V' : entrada?.nomePublico?.slice(0, 1).toUpperCase() || null
+  const avatarSeguro = (entrada: { eVoce: boolean; nomePublico?: string; codinomeSecreto?: string } | undefined) =>
+    entrada?.eVoce ? 'V' : (entrada?.codinomeSecreto || entrada?.nomePublico)?.slice(0, 1).toUpperCase() || null
   // `linhas` mistura o ranking geral (sem selo) com o de participantes (com
   // selo) conforme a aba — leitura opcional e seletiva, nunca inventa selo
   // para quem não tem um vindo do servidor.
@@ -283,7 +283,7 @@ export function FidelidadeRankingScreen({
         {participante.eVoce ? 'V' : participante.nomePublico?.slice(0, 1).toUpperCase() || <Star size={15} fill="currentColor" strokeWidth={1.8} aria-hidden="true" />}
       </span>
       <span className="cf-ranking-row-name">
-        {participante.eVoce ? 'Você' : participante.nomePublico || 'Participante'}
+        {participante.eVoce ? 'Você' : participante.nomePublico || 'Rival secreto'}
         {participante.telefoneMascarado && <small>{participante.telefoneMascarado}</small>}
       </span>
       <b>{scoreSeguro(participante.score)}</b>
@@ -433,7 +433,7 @@ export function FidelidadeRankingScreen({
               <b>{scoreSeguro(entrada.score)}</b>
             </div>
           ))}
-          {aba === 'participantes' && <p className="cf-ranking-footnote">Mostrando posições próximas a você. “Participante” aparece quando a pessoa ainda não autorizou exibir o primeiro nome.</p>}
+          {aba === 'participantes' && <p className="cf-ranking-footnote">Durante a temporada, cada rival usa um codinome secreto. As identidades elegíveis são reveladas por 30 dias após o encerramento.</p>}
           {aba === 'geral' && <p className="cf-ranking-footnote">Só quem ativou o Ranking participa da disputa.</p>}
         </section>
       )}
