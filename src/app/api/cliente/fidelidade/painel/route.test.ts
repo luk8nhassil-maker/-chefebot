@@ -71,6 +71,20 @@ vi.mock("@/lib/consentimentoRanking", () => ({
   ),
 }));
 
+vi.mock("@/lib/rankingPrivacidade", () => ({
+  projetarIdentidadesPublicasRanking: vi.fn(async (ids: string[]) =>
+    new Map(ids.map((id) => [
+      id,
+      identidadesPublicas.get(id) ?? {
+        participaCampanha: id === "hashed_11900000001" ? participaRanking : false,
+        nomePublico: null,
+        telefoneMascarado: null,
+        fotoPerfilUrl: null,
+      },
+    ])),
+  ),
+}));
+
 let posicaoAnteriorMock: { geral: number; participantes: number | null } | null = null;
 
 const { registrarFatoMock, marcarLiderancaMock } = vi.hoisted(() => ({
@@ -104,6 +118,7 @@ let configGamificacaoMock: Record<string, unknown> = {
 const {
   obterConfigGamificacaoMock,
   obterBonusMock,
+  obterMovimentosBonusMock,
   aplicarCarryoverMock,
   sincronizarStatusSocialMock,
   reconciliarTransicaoMock,
