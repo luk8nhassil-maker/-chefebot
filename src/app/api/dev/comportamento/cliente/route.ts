@@ -64,14 +64,23 @@ export async function POST(req: NextRequest) {
 
   const endMs = Date.now();
   const startMs = endMs - dias * 24 * 60 * 60 * 1000;
-  const [timeline, eventosCompra] = await Promise.all([\n    consultarTimelineComportamentalCliente({ clienteId, startMs, endMs }),\n    consultarEventosCliente(\n      TENANT_PADRAO_ANALYTICS,\n      clienteId,\n      endMs - RITMO_COMPRA_JANELA_DIAS * MS_POR_DIA,\n      endMs,\n    ),\n  ]);
+  const [timeline, eventosCompra] = await Promise.all([
+    consultarTimelineComportamentalCliente({ clienteId, startMs, endMs }),
+    consultarEventosCliente(
+      TENANT_PADRAO_ANALYTICS,
+      clienteId,
+      endMs - RITMO_COMPRA_JANELA_DIAS * MS_POR_DIA,
+      endMs,
+    ),
+  ]);
 
   return NextResponse.json(
     {
       ok: true,
       periodoDias: dias,
       timeline,
-      summary: resumirTimelineComportamentalCliente(timeline.events),\n      purchaseTiming: calcularRitmoCompraCliente(eventosCompra, RITMO_COMPRA_JANELA_DIAS),
+      summary: resumirTimelineComportamentalCliente(timeline.events),
+      purchaseTiming: calcularRitmoCompraCliente(eventosCompra, RITMO_COMPRA_JANELA_DIAS),
     },
     {
       headers: {
