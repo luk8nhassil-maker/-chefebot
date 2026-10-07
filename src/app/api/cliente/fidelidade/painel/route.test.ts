@@ -524,11 +524,14 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       scoreAlvo: 30,
     });
     expect(body.ranking.participantes.disputa).toEqual({
-      acima: { posicao: 1, score: 30, eVoce: false, nomePublico: "Ana", telefoneMascarado: null },
-      voce: { posicao: 2, score: 20, eVoce: true, nomePublico: "Você", telefoneMascarado: null },
-      abaixo: { posicao: 3, score: 10, eVoce: false, nomePublico: "Carlos", telefoneMascarado: null },
+      acima: { posicao: 1, score: 30, eVoce: false, nomePublico: expect.any(String), telefoneMascarado: null },
+      voce: { posicao: 2, score: 20, eVoce: true, nomePublico: expect.any(String), telefoneMascarado: null },
+      abaixo: { posicao: 3, score: 10, eVoce: false, nomePublico: expect.any(String), telefoneMascarado: null },
       sozinho: false,
     });
+    const disputaSerializada = JSON.stringify(body.ranking.participantes.disputa);
+    expect(disputaSerializada).not.toContain("Ana");
+    expect(disputaSerializada).not.toContain("Carlos");
   });
 
   test("único participante: alvo sozinho e disputa sem vizinhos", async () => {
@@ -543,7 +546,7 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     expect(body.ranking.participantes.alvo).toEqual({ estado: "sozinho" });
     expect(body.ranking.participantes.disputa).toEqual({
       acima: null,
-      voce: { posicao: 1, score: 5, eVoce: true, nomePublico: "Você", telefoneMascarado: null },
+      voce: { posicao: 1, score: 5, eVoce: true, nomePublico: expect.any(String), telefoneMascarado: null },
       abaixo: null,
       sozinho: true,
     });
