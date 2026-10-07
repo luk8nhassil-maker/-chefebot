@@ -69,6 +69,48 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     expect(screen.getByRole("dialog", { name: "Caçada ao Pódio liberada!" })).toBeTruthy();
   });
 
+  test("missão de foto é a ação contextual e concede CTA único", () => {
+    const onAdicionarFoto = vi.fn();
+    montar({
+      gamificacao: {
+        statusSocial: null,
+        bonusCompeticao: 0,
+        missaoSemanal: null,
+        missaoIndicacao: null,
+        missaoFotoPerfil: { concluida: false, bonus: 5 },
+        nivelChef: null,
+        movimentoRecente: null,
+        coroaAmeacada: false,
+      },
+      onAdicionarFoto,
+    }, true);
+    const dialog = screen.getByRole("dialog", { name: "Adicione uma foto e ganhe +5" });
+    expect(within(dialog).getByText(/Bônus único no Ranking/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Adicionar foto e ganhar +5" }));
+    expect(onAdicionarFoto).toHaveBeenCalledTimes(1);
+  });
+
+  test("primeiro nome continua opt-in e fica fácil de autorizar", () => {
+    const onAlterarPrivacidade = vi.fn();
+    montar({
+      privacidade: {
+        participaCampanha: true,
+        finalidades: [{
+          finalidade: "ranking_primeiro_nome",
+          texto: "Mostrar meu primeiro nome no Ranking",
+          textoVersao: "v1",
+          disponivel: true,
+          motivoIndisponivel: null,
+          estado: "revogado",
+          atualizadoEm: null,
+        }],
+      },
+      onAlterarPrivacidade,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar meu nome" }));
+    expect(onAlterarPrivacidade).toHaveBeenCalledWith("ranking_primeiro_nome", "concedido", "v1");
+  });
+
   test("sem situação acionável abre o Ranking direto, sem modal inventado", () => {
     montar({ gamificacao: null }, true);
     expect(screen.queryByRole("dialog")).toBeNull();
