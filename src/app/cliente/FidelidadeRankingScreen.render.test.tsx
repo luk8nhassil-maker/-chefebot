@@ -90,23 +90,46 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     expect(onAdicionarFoto).toHaveBeenCalledTimes(1);
   });
 
-  test("temporada ativa usa codinome e nunca oferece revelar nome manualmente", () => {
+  test("temporada ativa usa nome autorizado e codinome como fallback", () => {
     montar({
       ranking: {
         ...RANKING_BASE,
         participantes: {
           ...RANKING_BASE.participantes,
           lista: [
-            { posicao: 1, score: 140, eVoce: false, participaCampanha: true, codinomeSecreto: "Chef Fantasma 42" },
+            { posicao: 1, score: 140, eVoce: false, participaCampanha: true, nomePublico: "Ana Maria", codinomeSecreto: "Chef Fantasma 42" },
             { posicao: 5, score: 100, eVoce: true, participaCampanha: true, codinomeSecreto: "Mestre Brasa 17" },
           ],
         },
       },
     });
     fireEvent.click(screen.getByRole("tab", { name: "Participando" }));
-    expect(screen.getByText("Chef Fantasma 42")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Mostrar meu nome" })).toBeNull();
-    expect(screen.getByText(/cada rival usa um codinome secreto/i)).toBeTruthy();
+    expect(screen.getByText("Ana Maria")).toBeTruthy();
+    expect(screen.queryByText("Chef Fantasma 42")).toBeNull();
+    expect(screen.getByText(/Quem autoriza o nome aparece pelo nome/i)).toBeTruthy();
+  });
+
+  test("Story do Dia é contextual, não promete ponto antes de outra pessoa abrir", () => {
+    const onCompartilharDivulgacao = vi.fn();
+    montar({
+      gamificacao: {
+        statusSocial: null,
+        bonusCompeticao: 0,
+        missaoSemanal: null,
+        missaoIndicacao: null,
+        missaoFotoPerfil: null,
+        missaoDivulgacao: { concluidaHoje: false, bonus: 3, elegivel: true },
+        nivelChef: null,
+        movimentoRecente: null,
+        coroaAmeacada: false,
+      },
+      onCompartilharDivulgacao,
+    }, true);
+    const dialog = screen.getByRole("dialog", { name: "Compartilhe e busque +3" });
+    expect(within(dialog).getByText(/Quando outra pessoa abrir hoje/)).toBeTruthy();
+    expect(within(dialog).getByText(/Máximo de um bônus por dia/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Compartilhar Story do Dia" }));
+    expect(onCompartilharDivulgacao).toHaveBeenCalledTimes(1);
   });
 
   test("resultado anterior revela perfil por 30 dias e mostra prazo", () => {
