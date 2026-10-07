@@ -16,6 +16,7 @@ import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
 export type TipoBonusCompeticao =
   | "missao_semanal"
   | "missao_indicacao"
+  | "missao_foto_perfil"
   | "impulso_podio"
   | "carryover"
   | "ajuste";
