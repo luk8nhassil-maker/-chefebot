@@ -233,6 +233,7 @@ const PAINEL_PREVIEW: PainelFidelidade = {
     bonusCompeticao: 0,
     missaoSemanal: { status: 'desbloqueada' },
     missaoIndicacao: { concluida: false },
+    missaoFotoPerfil: { concluida: false, bonus: 5 },
     nivelChef: { nivel: 2, nome: 'Cozinheiro', xpAtual: 240, xpProximoNivel: 500 },
     movimentoRecente: null,
     coroaAmeacada: false,
@@ -286,6 +287,7 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
         onRevogarTodas={() => undefined}
         onIndicarAmigo={() => onAviso('Indicação simulada no Preview. Nenhum link real foi criado.')}
         onCompartilharConquista={() => onAviso('Compartilhamento simulado no Preview. Nenhum link real foi criado.')}
+        onAdicionarFoto={() => onAviso('Missão de foto simulada no Preview. Nenhuma foto real foi enviada e nenhum ponto foi creditado.')}
         onNovoPedido={() => onAviso('No Preview, um novo pedido não é criado de verdade.')}
         onTelemetria={() => undefined}
         onClose={() => {
@@ -851,6 +853,7 @@ export default function ClientePage() {
   const [previewAviso, setPreviewAviso] = useState('')
   const codigoRef = useRef<HTMLInputElement>(null)
   const fotoInputRef = useRef<HTMLInputElement>(null)
+  const fotoOrigemRef = useRef<'presente' | 'ranking'>('presente')
 
   useEffect(() => {
     trackBehavior('app_open', { source: 'cliente', screen: 'cliente' })
@@ -1554,6 +1557,12 @@ export default function ClientePage() {
   const presenteBloqueadoPorFoto = !!fidelidade?.missaoFotoPerfil?.bloqueiaPrimeiroPresente
   const podeResgatar = !!fidelidade && fidelidade.ativo && fidelidade.metaAtingida && fidelidade.recompensas.length > 0 && !presenteBloqueadoPorFoto
 
+  function abrirSeletorFoto(origem: 'presente' | 'ranking') {
+    fotoOrigemRef.current = origem
+    setFotoErro('')
+    fotoInputRef.current?.click()
+  }
+
   async function enviarFotoPerfil(file: File) {
     if (modoPreview) {
       setPreviewAviso('Foto simulada no Preview. Nenhum arquivo foi enviado e nenhum presente real foi liberado.')
@@ -1577,9 +1586,23 @@ export default function ClientePage() {
         }
         throw new Error(mensagens[data.error] || 'Não conseguimos salvar sua foto agora.')
       }
-      await Promise.all([carregarIdentidade(), carregarFidelidade()])
-      setPreviewAviso('Missão concluída: seu presente foi desbloqueado.')
-      setMobilePanel('presentes')
+      const origemFoto = fotoOrigemRef.current
+      await Promise.all([carregarIdentidade(), carregarFidelidade(), carregarPainel()])
+
+      if (origemFoto === 'ranking') {
+        const bonus = data?.rankingBonus
+        if (bonus && (bonus.status === 'creditado' || bonus.status === 'ja_creditado') && Number(bonus.pontos) > 0) {
+          setPreviewAviso(`Missão de foto concluída: +${bonus.pontos} pontos no Ranking.`)
+        } else if (data?.rankingBonusPendente) {
+          setFotoErro('Sua foto foi salva, mas o bônus do Ranking ainda não foi confirmado. Tente novamente mais tarde.')
+        } else {
+          setPreviewAviso('Foto salva. O Ranking foi atualizado com o estado confirmado pelo servidor.')
+        }
+        setMobilePanel('ranking')
+      } else {
+        setPreviewAviso('Missão concluída: seu presente foi desbloqueado.')
+        setMobilePanel('presentes')
+      }
     } catch (erroFoto) {
       setFotoErro(erroFoto instanceof Error ? erroFoto.message : 'Não conseguimos salvar sua foto agora.')
     } finally {
@@ -1866,6 +1889,8 @@ export default function ClientePage() {
                 onRevogarTodas={() => void revogarTodasPrivacidadesRanking()}
                 onIndicarAmigo={() => void compartilharIndicacao()}
                 onCompartilharConquista={() => void compartilharConquistaRanking()}
+                onAdicionarFoto={() => abrirSeletorFoto('ranking')}
+                fotoEnviando={fotoEnviando}
                 onNovoPedido={abrirSacola}
                 onTelemetria={telemetriaRanking}
                 onClose={() => { setMobilePanel(null); setPosPedido(null) }}
@@ -1925,7 +1950,7 @@ export default function ClientePage() {
                           <strong>🎁 Seu presente está garantido</strong>
                           <p>Adicione uma foto ao seu perfil para desbloquear. Você faz esta missão só uma vez.</p>
                           {fotoErro && <small role="alert">{fotoErro}</small>}
-                          <button type="button" className="cf-mobile-sheet-primary" disabled={fotoEnviando} onClick={() => fotoInputRef.current?.click()}>
+                          <button type="button" className="cf-mobile-sheet-primary" disabled={fotoEnviando} onClick={() => abrirSeletorFoto('presente')}>
                             {fotoEnviando ? 'Preparando foto…' : 'Adicionar foto e desbloquear'}
                           </button>
                         </div>
@@ -2002,7 +2027,7 @@ export default function ClientePage() {
                       <p style={{ fontSize: 15, margin: '0 0 6px' }}>Adicione uma foto ao perfil para desbloquear este presente.</p>
                       <p style={{ fontSize: 12, opacity: .78, margin: '0 0 14px' }}>Esta missão é feita apenas uma vez.</p>
                       {fotoErro && <p style={{ color: 'var(--danger-border)', fontSize: 13 }}>{fotoErro}</p>}
-                      <button type="button" onClick={() => fotoInputRef.current?.click()} disabled={fotoEnviando} style={{ ...botaoPrimario, opacity: fotoEnviando ? .6 : 1 }}>
+                      <button type="button" onClick={() => abrirSeletorFoto('presente')} disabled={fotoEnviando} style={{ ...botaoPrimario, opacity: fotoEnviando ? .6 : 1 }}>
                         {fotoEnviando ? 'Preparando foto…' : 'Adicionar foto e desbloquear'}
                       </button>
                     </div>
