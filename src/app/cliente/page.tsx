@@ -197,12 +197,12 @@ const PAINEL_PREVIEW: PainelFidelidade = {
       { posicao: 9, eVoce: false },
     ],
     lista: [
-      { posicao: 4, score: 28, eVoce: false, participaCampanha: true, nomePublico: 'Ana', telefoneMascarado: '(11) 98888-**42' },
-      { posicao: 5, score: 26, eVoce: false, participaCampanha: true, nomePublico: 'Carlos', telefoneMascarado: '(21) 97777-**18' },
-      { posicao: 6, score: 24, eVoce: false, participaCampanha: true, nomePublico: 'Marina', telefoneMascarado: '(31) 96666-**07' },
-      { posicao: 7, score: 22, eVoce: false, participaCampanha: true, nomePublico: 'Rafael', telefoneMascarado: '(41) 95555-**63' },
-      { posicao: 8, score: 20, eVoce: true, participaCampanha: true, nomePublico: 'Lucas', telefoneMascarado: '(99) 99999-**91' },
-      { posicao: 9, score: 18, eVoce: false, participaCampanha: true, nomePublico: 'Julia', telefoneMascarado: '(51) 94444-**26' },
+      { posicao: 4, score: 28, eVoce: false, participaCampanha: true, codinomeSecreto: 'Chef Fantasma 42' },
+      { posicao: 5, score: 26, eVoce: false, participaCampanha: true, codinomeSecreto: 'Mestre Brasa 17' },
+      { posicao: 6, score: 24, eVoce: false, participaCampanha: true, codinomeSecreto: 'Ninja Fatia 63' },
+      { posicao: 7, score: 22, eVoce: false, participaCampanha: true, codinomeSecreto: 'Guardião Forno 28' },
+      { posicao: 8, score: 20, eVoce: true, participaCampanha: true, codinomeSecreto: 'Chef Secreto 91' },
+      { posicao: 9, score: 18, eVoce: false, participaCampanha: true, codinomeSecreto: 'Lenda Molho 51' },
       { posicao: 10, score: 16, eVoce: false, participaCampanha: false },
     ],
     variacaoPosicao: { direcao: 'subiu', casas: 2 },
@@ -211,18 +211,18 @@ const PAINEL_PREVIEW: PainelFidelidade = {
       total: 6,
       variacaoPosicao: { direcao: 'manteve', casas: 0 },
       lista: [
-        { posicao: 1, score: 28, eVoce: false, participaCampanha: true, nomePublico: 'Ana', telefoneMascarado: '(11) 98888-**42' },
-        { posicao: 2, score: 26, eVoce: false, participaCampanha: true, nomePublico: 'Carlos', telefoneMascarado: '(21) 97777-**18' },
-        { posicao: 3, score: 24, eVoce: false, participaCampanha: true, nomePublico: 'Marina', telefoneMascarado: '(31) 96666-**07' },
-        { posicao: 4, score: 22, eVoce: false, participaCampanha: true, nomePublico: 'Rafael', telefoneMascarado: '(41) 95555-**63' },
-        { posicao: 5, score: 20, eVoce: true, participaCampanha: true, nomePublico: 'Lucas', telefoneMascarado: '(99) 99999-**91' },
-        { posicao: 6, score: 18, eVoce: false, participaCampanha: true, nomePublico: 'Julia', telefoneMascarado: '(51) 94444-**26' },
+        { posicao: 1, score: 28, eVoce: false, participaCampanha: true, codinomeSecreto: 'Chef Fantasma 42' },
+        { posicao: 2, score: 26, eVoce: false, participaCampanha: true, codinomeSecreto: 'Mestre Brasa 17' },
+        { posicao: 3, score: 24, eVoce: false, participaCampanha: true, codinomeSecreto: 'Ninja Fatia 63' },
+        { posicao: 4, score: 22, eVoce: false, participaCampanha: true, codinomeSecreto: 'Guardião Forno 28' },
+        { posicao: 5, score: 20, eVoce: true, participaCampanha: true, codinomeSecreto: 'Chef Secreto 91' },
+        { posicao: 6, score: 18, eVoce: false, participaCampanha: true, codinomeSecreto: 'Lenda Molho 51' },
       ],
       alvo: { estado: 'alcancar', alvoPosicao: 4, necessario: 3, scoreAlvo: 22 },
       disputa: {
-        acima: { posicao: 4, score: 22, eVoce: false, nomePublico: 'Rafael', telefoneMascarado: '(41) 95555-**63' },
-        voce: { posicao: 5, score: 20, eVoce: true, nomePublico: 'Lucas', telefoneMascarado: '(99) 99999-**91' },
-        abaixo: { posicao: 6, score: 18, eVoce: false, nomePublico: 'Julia', telefoneMascarado: '(51) 94444-**26' },
+        acima: { posicao: 4, score: 22, eVoce: false, codinomeSecreto: 'Guardião Forno 28' },
+        voce: { posicao: 5, score: 20, eVoce: true, codinomeSecreto: 'Chef Secreto 91' },
+        abaixo: { posicao: 6, score: 18, eVoce: false, codinomeSecreto: 'Lenda Molho 51' },
         sozinho: false,
       },
     },
@@ -613,7 +613,7 @@ function FidelidadeMobileScreen({
               aria-label={`${participantesDestaque.length} perfis em destaque e +${participantesRestantes} participantes restantes`}
             >
               {participantesDestaque.map((participante, index) => {
-                const inicialParticipante = participante.nomePublico?.trim().slice(0, 1).toUpperCase() || ''
+                const inicialParticipante = (participante.codinomeSecreto || participante.nomePublico)?.trim().slice(0, 1).toUpperCase() || ''
                 const mostrarFotoDoProprioCliente = participante.eVoce && !!fotoPerfilUrl
                 return (
                   <i key={participante.posicao} className={`cf-preview-ranking-face cf-preview-ranking-face-${index + 1}`} aria-hidden="true">
