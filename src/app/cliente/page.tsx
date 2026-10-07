@@ -1178,7 +1178,7 @@ export default function ClientePage() {
       }
       if (!token) { setCompartilhandoIndicacao(false); return }
       const url = `${window.location.origin}/pedido?ref=${token}`
-      const textoConvite = textoConviteAmigoRanking()
+      const textoConvite = textoConviteAmigoRanking(painel?.temporada?.premio?.descricao)
       if (navigator.share) {
         await navigator.share({ title: 'Convite do Ranking do Chefe', text: textoConvite, url })
       } else {
@@ -1228,7 +1228,7 @@ export default function ClientePage() {
           if (token) { setIndicacaoToken(token); telemetriaRanking('link_indicacao_gerado') }
         }
       }
-      const texto = textoConviteRanking(conquista, posicao)
+      const texto = textoConviteRanking(conquista, posicao, painel?.temporada?.premio?.descricao)
       const url = token ? `${window.location.origin}/pedido?ref=${token}` : undefined
       if (navigator.share) {
         await navigator.share({ title: 'Ranking do Chefe', text: texto, ...(url ? { url } : {}) })
