@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { usuarioAssinatura } from "@/lib/assinaturaApiAuth";
-import { consultarEventosPorPeriodo, TENANT_PADRAO_ANALYTICS } from "@/lib/historicoAnalitico";
+import { TENANT_PADRAO_ANALYTICS } from "@/lib/historicoAnalitico";
+import { consultarEventosAnaliticosComFallback } from "@/lib/analyticsPedidosReadModel.server";
 import { calcularRadarVendas } from "@/lib/radarVendas";
 import { statusAcessoRadarVendas } from "@/lib/radarVendasEntitlement.server";
 
@@ -17,11 +18,16 @@ export async function GET(req: NextRequest) {
 
   const agora = Date.now();
   try {
-    const [eventos, acesso] = await Promise.all([
-      consultarEventosPorPeriodo(TENANT_PADRAO_ANALYTICS, agora - JANELA_DIAS * DIA_MS, agora),
+    const [leitura, acesso] = await Promise.all([
+      consultarEventosAnaliticosComFallback(
+        TENANT_PADRAO_ANALYTICS,
+        agora - JANELA_DIAS * DIA_MS,
+        agora,
+        agora,
+      ),
       statusAcessoRadarVendas(),
     ]);
-    const radar = calcularRadarVendas(eventos, agora, JANELA_DIAS);
+    const radar = calcularRadarVendas(leitura.eventos, agora, JANELA_DIAS);
 
     return NextResponse.json({
       ok: true,
@@ -33,6 +39,7 @@ export async function GET(req: NextRequest) {
         upgradePlanId: "pro",
       },
       summary: radar.resumo,
+      dataSource: leitura.fonte,
       opportunities: acesso.ativo ? radar.oportunidades.slice(0, 50) : [],
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
