@@ -30,7 +30,7 @@ export type CanalPedido = "painel" | "app" | "whatsapp" | "salao" | "desconhecid
 
 export type EventoAnalitico = {
   pedidoId: string;
-  clienteId?: string;
+  clienteId: string;
   tenantId: string;
   criadoEmMs: number;
   expedienteId: string;
@@ -42,6 +42,9 @@ export type EventoAnalitico = {
   regraVersao: string;
   estornadoEmMs?: number;
 };
+
+/** Evento lido para métricas; pedidos manuais sem identificação não são persistidos no índice por cliente. */
+export type EventoAnaliticoLeitura = Omit<EventoAnalitico, "clienteId"> & { clienteId?: string };
 
 export type PedidoParaHistorico = {
   id: string;
@@ -390,7 +393,7 @@ function mediana(valores: number[]): number {
  * Excludes estornados from all revenue/ticket/recurrence metrics.
  */
 export function calcularMetricas(
-  eventos: EventoAnalitico[],
+  eventos: EventoAnaliticoLeitura[],
   clientesComHistoricoAnterior: ReadonlySet<string> = new Set()
 ): MetricasAnaliticas {
   const validos = eventos.filter((ev) => ev.statusAnalitico === "entregue");
@@ -426,7 +429,7 @@ export function calcularMetricas(
     };
   }
 
-  const validosComCliente = validos.filter((ev): ev is EventoAnalitico & { clienteId: string } => Boolean(ev.clienteId));
+  const validosComCliente = validos.filter((ev): ev is EventoAnaliticoLeitura & { clienteId: string } => Boolean(ev.clienteId));
   const receitaPorCliente = new Map<string, number>();
   const pedidosPorCliente = new Map<string, number>();
 
