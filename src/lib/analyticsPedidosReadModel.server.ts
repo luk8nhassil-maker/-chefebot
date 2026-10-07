@@ -59,6 +59,7 @@ function timestampLegado(pedido: PedidoFallback, agora: number): number | null {
 }
 
 function canal(pedido: PedidoFallback): EventoAnalitico["canal"] {
+  if (typeof pedido.origem === "string" && pedido.origem.toLowerCase() === "painel") return "painel";
   if (typeof pedido.origem === "string" && pedido.origem.toLowerCase().includes("whatsapp")) return "whatsapp";
   if (pedido.tipoEntrega === "dine_in") return "salao";
   if (pedido.snapshotOficial) return "app";
@@ -75,7 +76,6 @@ export function eventosAnaliticosDePedidos(
     if (pedido.status !== "entregue" || typeof pedido.id !== "string") continue;
     const clienteId = derivarClienteIdPorTelefone(pedido.telefone)
       ?? (typeof pedido.clienteId === "string" && pedido.clienteId.startsWith("cli_") ? pedido.clienteId : undefined);
-    if (!clienteId) continue;
     const criadoEmMs = timestampLegado(pedido, agora);
     if (criadoEmMs === null) continue;
     const valorElegivelCents = calcularValorElegivelCentsParaHistorico({
@@ -87,10 +87,9 @@ export function eventosAnaliticosDePedidos(
       tipoEntrega: pedido.tipoEntrega,
       snapshotOficial: pedido.snapshotOficial,
     });
-    if (valorElegivelCents <= 0) continue;
     eventos.push({
       pedidoId: pedido.id,
-      clienteId,
+      ...(clienteId ? { clienteId } : {}),
       tenantId,
       criadoEmMs,
       expedienteId: chaveExpedienteOperacional(criadoEmMs),
