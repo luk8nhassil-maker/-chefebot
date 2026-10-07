@@ -122,7 +122,6 @@ export function FidelidadeRankingScreen({
   indicando = false,
   compartilhando = false,
   posPedido = null,
-  onAlterarPrivacidade,
   onRevogarTodas,
   onIndicarAmigo,
   onCompartilharConquista,
@@ -458,14 +457,10 @@ export function FidelidadeRankingScreen({
       {aba === 'minha' && <details className="cf-ranking-privacy">
         <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Privacidade e participação</summary>
         <p>Durante a temporada você aparece por codinome. Ao final, a regra aceita na entrada permite revelar seu primeiro nome e sua foto de perfil por 30 dias para manter sua colocação pública.</p>
-        {privacidadeCarregando && <p>Carregando escolhas…</p>}
-        {!privacidadeCarregando && privacidade?.finalidades.filter((item) => item.disponivel && item.texto && item.textoVersao).map((item) => (
-          <label key={item.finalidade}>
-            <input type="checkbox" checked={item.estado === 'concedido'} disabled={privacidadeSalvando !== null}
-              onChange={(event) => onAlterarPrivacidade(item.finalidade, event.target.checked ? 'concedido' : 'revogado', item.textoVersao)} />
-            <span>{item.texto}</span>
-          </label>
-        ))}
+        {privacidadeCarregando && <p>Carregando regra do jogo…</p>}
+        {!privacidadeCarregando && privacidade?.regraJogo?.aceitaRevelacao30d && (
+          <p><strong>Regra aceita:</strong> revelação final por 30 dias para manter a colocação pública.</p>
+        )}
         <button type="button" disabled={privacidadeSalvando !== null} onClick={onRevogarTodas}>
           {privacidadeSalvando === 'todas' ? 'Saindo…' : 'Sair do Ranking e remover autorizações'}
         </button>
