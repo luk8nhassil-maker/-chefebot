@@ -57,12 +57,18 @@ vi.mock("@/lib/rankingClientes", async () => {
   };
 });
 
-vi.mock("@/lib/rankingPrivacidade", () => ({
-  projetarIdentidadesPublicasRanking: vi.fn(async () => identidadesPublicas),
-}));
-
 vi.mock("@/lib/consentimentoRanking", () => ({
   obterParticipacaoRanking: vi.fn(async () => participaRanking),
+  obterParticipacaoRankingParaClientes: vi.fn(async (ids: string[]) =>
+    new Map(ids.map((id) => [
+      id,
+      identidadesPublicas.has(id)
+        ? identidadesPublicas.get(id)?.participaCampanha === true
+        : id === "hashed_11900000001"
+          ? participaRanking
+          : false,
+    ])),
+  ),
 }));
 
 let posicaoAnteriorMock: { geral: number; participantes: number | null } | null = null;
@@ -297,7 +303,7 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     expect((voce as { posicao: number }).posicao).toBe(3);
   });
 
-  test("identidade opcional vem somente da projecao server-side e nunca inclui clienteId", async () => {
+  test("temporada ativa expõe só codinome secreto e nunca PII do rival", async () => {
     temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
     const clienteId = "hashed_11900000001";
     posicaoPorCliente.set(clienteId, { posicao: 2, score: 150 });
@@ -305,6 +311,7 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       { clienteId: "outro_1", score: 200, posicao: 1 },
       { clienteId, score: 150, posicao: 2 },
     ];
+    rankingCompleto = topRanking;
     identidadesPublicas.set("outro_1", {
       participaCampanha: true,
       nomePublico: "Ana",
@@ -313,15 +320,17 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     });
 
     const body = await (await GET(req("token-cli-a"))).json();
-    expect(body.ranking.lista[0]).toEqual({
+    expect(body.ranking.lista[0]).toMatchObject({
       posicao: 1,
       score: 200,
       eVoce: false,
       participaCampanha: true,
-      nomePublico: "Ana",
-      telefoneMascarado: "(11) 9••••-1234",
+      codinomeSecreto: expect.any(String),
     });
-    expect(JSON.stringify(body)).not.toContain("outro_1");
+    const serializado = JSON.stringify(body.ranking);
+    expect(serializado).not.toContain("Ana");
+    expect(serializado).not.toContain("1234");
+    expect(serializado).not.toContain("outro_1");
   });
 
   test("posição entre participantes é recalculada, nunca herda a posição geral", async () => {
@@ -351,9 +360,10 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     expect(body.ranking.participantes.posicao).toBe(1);
     expect(body.ranking.participantes.total).toBe(2);
     expect(body.ranking.participantes.lista).toEqual([
-      { posicao: 1, score: 100, eVoce: true, participaCampanha: true, nomePublico: "Você", telefoneMascarado: "(11) 9••••-0001" },
-      { posicao: 2, score: 50, eVoce: false, participaCampanha: true, nomePublico: "Bia", telefoneMascarado: "(21) 9••••-0002" },
+      expect.objectContaining({ posicao: 1, score: 100, eVoce: true, participaCampanha: true, codinomeSecreto: expect.any(String) }),
+      expect.objectContaining({ posicao: 2, score: 50, eVoce: false, participaCampanha: true, codinomeSecreto: expect.any(String) }),
     ]);
+    expect(JSON.stringify(body.ranking.participantes.lista)).not.toContain("Bia");
     // Ninguém que não autorizou aparece na lista de participantes.
     expect(JSON.stringify(body.ranking.participantes)).not.toContain("nao_participa");
   });
