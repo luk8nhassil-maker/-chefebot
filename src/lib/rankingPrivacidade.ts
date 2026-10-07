@@ -24,6 +24,11 @@ function primeiroNome(nome: unknown): string | null {
   return normalizado.split(" ")[0]?.slice(0, 30) || null;
 }
 
+function nomeCompleto(nome: unknown): string | null {
+  const normalizado = normalizarNomeCliente(nome);
+  return normalizado ? normalizado.slice(0, 80) : null;
+}
+
 /**
  * DAL de exposicao do ranking. Qualquer falha de configuracao, Redis ou
  * perfil volta ao DTO anonimo; a rota nunca recebe o objeto Cliente inteiro.
@@ -33,7 +38,8 @@ export async function projetarIdentidadePublicaRanking(clienteId: string): Promi
     const [finalidades, participaCampanha] = await Promise.all([
       obterFinalidadesAtivasRanking(clienteId), obterParticipacaoRanking(clienteId),
     ]);
-    const permiteNome = finalidades.has("ranking_primeiro_nome");
+    const permiteNomeCompleto = finalidades.has("ranking_nome_completo");
+    const permiteNome = permiteNomeCompleto || finalidades.has("ranking_primeiro_nome");
     const permiteTelefone = finalidades.has("ranking_telefone_mascarado");
     if (!participaCampanha) return { ...IDENTIDADE_ANONIMA };
     if (!permiteNome && !permiteTelefone) return { ...IDENTIDADE_ANONIMA, participaCampanha: true };
@@ -43,7 +49,7 @@ export async function projetarIdentidadePublicaRanking(clienteId: string): Promi
 
     return {
       participaCampanha,
-      nomePublico: permiteNome ? primeiroNome(cliente.nome) : null,
+      nomePublico: permiteNome ? (permiteNomeCompleto ? nomeCompleto(cliente.nome) : primeiroNome(cliente.nome)) : null,
       telefoneMascarado: permiteTelefone ? mascararTelefoneExibicao(cliente.telefone) || null : null,
       // Bloqueado ate existir fonte oficial/autorizada e adaptador revisado.
       fotoPerfilUrl: null,
@@ -64,7 +70,8 @@ export async function projetarIdentidadesPublicasRanking(
     const participacoes = await obterParticipacaoRankingParaClientes(unicos, finalidadesPorCliente);
     const pares = await Promise.all(unicos.map(async (clienteId) => {
       const finalidades = finalidadesPorCliente.get(clienteId) ?? new Set();
-      const permiteNome = finalidades.has("ranking_primeiro_nome");
+      const permiteNomeCompleto = finalidades.has("ranking_nome_completo");
+      const permiteNome = permiteNomeCompleto || finalidades.has("ranking_primeiro_nome");
       const permiteTelefone = finalidades.has("ranking_telefone_mascarado");
       const participaCampanha = participacoes.get(clienteId) === true;
       if (!participaCampanha) return [clienteId, { ...IDENTIDADE_ANONIMA }] as const;
@@ -74,7 +81,7 @@ export async function projetarIdentidadesPublicasRanking(
         if (!cliente) return [clienteId, { ...IDENTIDADE_ANONIMA }] as const;
         return [clienteId, {
           participaCampanha,
-          nomePublico: permiteNome ? primeiroNome(cliente.nome) : null,
+          nomePublico: permiteNome ? (permiteNomeCompleto ? nomeCompleto(cliente.nome) : primeiroNome(cliente.nome)) : null,
           telefoneMascarado: permiteTelefone ? mascararTelefoneExibicao(cliente.telefone) || null : null,
           fotoPerfilUrl: null,
         }] as const;
