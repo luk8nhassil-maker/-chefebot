@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
 import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
-import { confirmarAberturaConviteDivulgacao } from "@/lib/rankingMissaoDivulgacao";
+import { confirmarAberturaConviteDivulgacao, resolverConviteDivulgacao } from "@/lib/rankingMissaoDivulgacao";
 
 export async function POST(req: NextRequest) {
   let body: Record<string, unknown> = {};
@@ -17,10 +17,16 @@ export async function POST(req: NextRequest) {
 
   let visitanteClienteId: string | null = null;
   try {
-    const sessao = await lerSessaoCliente(req);
-    if (sessao) {
-      const cliente = await buscarClientePorId(sessao.clienteId);
-      if (cliente) visitanteClienteId = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
+    const cookieDono = req.cookies.get("cf_marketing_owner")?.value ?? null;
+    if (cookieDono === token) {
+      const payload = await resolverConviteDivulgacao(token);
+      visitanteClienteId = payload?.clienteId ?? null;
+    } else {
+      const sessao = await lerSessaoCliente(req);
+      if (sessao) {
+        const cliente = await buscarClientePorId(sessao.clienteId);
+        if (cliente) visitanteClienteId = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
+      }
     }
   } catch {}
 
