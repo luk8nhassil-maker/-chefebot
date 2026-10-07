@@ -92,6 +92,11 @@ type AnalyticsData = {
   periodosDias?: PeriodoAnalytics
   totalEventosNoIndice?: number
   totalEventosConsiderados?: number
+  coberturaDados?: {
+    janelaSolicitadaDias: number
+    amplitudeDadosDias: number
+    primeiroDadoIso: string | null
+  }
   fonteDados?: {
     origem?: 'analytics' | 'analytics+pedidos' | 'pedidos'
     eventosIndice?: number
@@ -670,9 +675,17 @@ export default function FidelidadePage() {
                   </div>
                 ) : analytics.metricas ? (
                   <>
-                    <div style={{ fontSize: 11, color: 'var(--foreground-muted)', marginBottom: 10 }}>
-                      Fonte: {analytics.fonteDados?.origem === 'pedidos' ? 'histórico real de pedidos' : analytics.fonteDados?.origem === 'analytics+pedidos' ? 'índice analítico + histórico de pedidos' : 'índice analítico'}
-                      {analytics.historicoAnteriorParcial ? ' · recorrência parcial' : ''}
+                    <div style={{ fontSize: 11, color: 'var(--foreground-muted)', marginBottom: 10, lineHeight: 1.45 }}>
+                      <div>
+                        Fonte: {analytics.fonteDados?.origem === 'pedidos' ? 'histórico real de pedidos' : analytics.fonteDados?.origem === 'analytics+pedidos' ? 'índice analítico + histórico de pedidos' : 'índice analítico'}
+                        {analytics.historicoAnteriorParcial ? ' · recorrência parcial' : ''}
+                      </div>
+                      {analytics.coberturaDados && analytics.coberturaDados.amplitudeDadosDias > 0 && (
+                        <div>
+                          Dados disponíveis: {analytics.coberturaDados.amplitudeDadosDias} dia{analytics.coberturaDados.amplitudeDadosDias === 1 ? '' : 's'} dentro da janela de {analytics.coberturaDados.janelaSolicitadaDias}d
+                          {analytics.coberturaDados.primeiroDadoIso ? ` · desde ${new Date(analytics.coberturaDados.primeiroDadoIso).toLocaleDateString('pt-BR')}` : ''}
+                        </div>
+                      )}
                     </div>
                     <FidelidadeAnalyticsDashboard metricas={analytics.metricas} periodo={periodo} />
                   </>
