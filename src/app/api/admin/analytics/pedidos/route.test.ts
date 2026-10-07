@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   verifyToken: vi.fn(),
   consultarEventosAnaliticosComFallback: vi.fn(),
   consultarClientesComHistoricoAnterior: vi.fn(),
+  consultarEstrelasCreditadasPorPedidos: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({ verifyToken: mocks.verifyToken }));
@@ -17,6 +18,10 @@ vi.mock("@/lib/historicoAnalitico", async (importOriginal) => {
     ...original,
     consultarClientesComHistoricoAnterior: mocks.consultarClientesComHistoricoAnterior,
   };
+});
+vi.mock("@/lib/fidelidade", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/fidelidade")>();
+  return { ...original, consultarEstrelasCreditadasPorPedidos: mocks.consultarEstrelasCreditadasPorPedidos };
 });
 
 import { GET } from "./route";
@@ -56,6 +61,7 @@ beforeEach(() => {
     },
   });
   mocks.consultarClientesComHistoricoAnterior.mockResolvedValue(new Set());
+  mocks.consultarEstrelasCreditadasPorPedidos.mockResolvedValue({ estrelas: 0, pedidosComCredito: 0 });
 });
 
 describe("GET /api/admin/analytics/pedidos", () => {
@@ -95,6 +101,21 @@ describe("GET /api/admin/analytics/pedidos", () => {
     expect(body.cobertura.janelaSolicitadaDias).toBe(30);
     expect(body.cobertura.historicoEncontradoDesdeIso).toBeTruthy();
     expect(body.cobertura.diasHistoricoEncontrado).toBeGreaterThanOrEqual(1);
+  });
+
+  it("inclui todo o histórico disponível e lê estrelas confirmadas do extrato", async () => {
+    mocks.consultarEventosAnaliticosComFallback.mockResolvedValue({
+      eventos: [eventoBase], fallbackTodos: [eventoBase],
+      fonte: { indiceDisponivel: false, fallbackPedidosDisponivel: true, eventosIndice: 0, eventosFallbackAdicionados: 1, origem: "pedidos" },
+    });
+    mocks.consultarEstrelasCreditadasPorPedidos.mockResolvedValue({ estrelas: 5, pedidosComCredito: 1 });
+    const body = await (await GET(makeReq({ periodo: "historico" }))).json();
+    expect(body.periodosDias).toBeNull();
+    expect(body.cobertura.janelaSolicitadaDias).toBeNull();
+    expect(body.metricas.estrelasDistribuidas).toBe(5);
+    expect(body.metricas.pedidosComEstrelasRegistradas).toBe(1);
+    const [, inicioMs] = mocks.consultarEventosAnaliticosComFallback.mock.calls[0];
+    expect(inicioMs).toBe(0);
   });
 
   it("informa quando a janela de 30d só possui parte do histórico coletado", async () => {
