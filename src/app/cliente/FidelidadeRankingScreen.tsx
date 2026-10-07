@@ -549,7 +549,7 @@ export function FidelidadeRankingScreen({
                       ? `Você já recebeu o bônus desta missão.`
                       : `Envie uma foto válida e ganhe +${gamificacao.missaoFotoPerfil.bonus} pontos no Ranking.`}
                   </p>
-                  <p>A missão é única por cliente. A foto não aparece para outras pessoas automaticamente; isso depende da sua autorização de privacidade.</p>
+                  <p>Bônus único no Ranking: esta missão vale uma vez por cliente. A foto não aparece para outras pessoas automaticamente; isso depende da sua autorização de privacidade.</p>
                 </>
               )}
               {momentoAberto === 'semanal' && (
