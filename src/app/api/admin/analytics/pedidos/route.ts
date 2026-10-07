@@ -89,6 +89,13 @@ export async function GET(req: NextRequest) {
 
     const clientesComHistoricoAnterior = new Set([...historicoFallback, ...historicoIndice]);
     const metricas = calcularMetricas(eventos, clientesComHistoricoAnterior);
+    const timestampsValidos = eventos
+      .filter((evento) => evento.statusAnalitico === "entregue" && Number.isFinite(evento.criadoEmMs))
+      .map((evento) => evento.criadoEmMs);
+    const primeiroDadoMs = timestampsValidos.length > 0 ? Math.min(...timestampsValidos) : null;
+    const amplitudeDadosDias = primeiroDadoMs === null
+      ? 0
+      : Math.max(1, Math.min(dias, Math.floor((fimMs - primeiroDadoMs) / 86_400_000) + 1));
 
     return NextResponse.json(
       {
@@ -99,6 +106,11 @@ export async function GET(req: NextRequest) {
         fimIso: new Date(fimMs).toISOString(),
         totalEventosNoIndice: leitura.fonte.eventosIndice,
         totalEventosConsiderados: eventos.length,
+        coberturaDados: {
+          janelaSolicitadaDias: dias,
+          amplitudeDadosDias,
+          primeiroDadoIso: primeiroDadoMs === null ? null : new Date(primeiroDadoMs).toISOString(),
+        },
         fonteDados: leitura.fonte,
         historicoAnteriorParcial,
         metricas,
