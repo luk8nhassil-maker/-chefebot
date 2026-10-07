@@ -27,6 +27,16 @@ export type RitmoCompraCliente = {
 
 const TIME_ZONE = "America/Fortaleza";
 const DIAS_SEMANA = ["domingo", "segunda", "terca", "quarta", "quinta", "sexta", "sabado"] as const;
+const TIMESTAMP_MIN_VALIDO = Date.UTC(2020, 0, 1);
+const TIMESTAMP_MAX_VALIDO = Date.UTC(2100, 0, 1);
+
+function timestampCompra(evento: EventoAnalitico): number {
+  if (/^\d{13}$/.test(evento.pedidoId)) {
+    const candidato = Number(evento.pedidoId);
+    if (candidato >= TIMESTAMP_MIN_VALIDO && candidato < TIMESTAMP_MAX_VALIDO) return candidato;
+  }
+  return evento.criadoEmMs;
+}
 
 type PartesLocais = { diaMes: number; diaSemana: number; hora: number };
 
@@ -95,11 +105,12 @@ export function calcularRitmoCompraCliente(
 ): RitmoCompraCliente {
   const validos = eventos
     .filter((evento) => evento.statusAnalitico === "entregue" && Number.isFinite(evento.criadoEmMs))
-    .sort((a, b) => a.criadoEmMs - b.criadoEmMs);
+    .map((evento) => ({ evento, compraEmMs: timestampCompra(evento) }))
+    .sort((a, b) => a.compraEmMs - b.compraEmMs);
 
   const distribuicaoMes = { inicio: 0, meio: 0, fim: 0 };
   const partes = validos
-    .map((evento) => ({ evento, local: partesLocais(evento.criadoEmMs) }))
+    .map(({ evento, compraEmMs }) => ({ evento, compraEmMs, local: partesLocais(compraEmMs) }))
     .filter((item): item is { evento: EventoAnalitico; compraEmMs: number; local: PartesLocais } => item.local !== null);
 
   for (const item of partes) distribuicaoMes[faseDoDia(item.local.diaMes)] += 1;
@@ -110,8 +121,8 @@ export function calcularRitmoCompraCliente(
     mode: "purchase_timing_read_only",
     janelaAnaliseDias,
     pedidosAnalisados,
-    primeiraCompraEmMs: validos[0]?.criadoEmMs ?? null,
-    ultimaCompraEmMs: validos[validos.length - 1]?.criadoEmMs ?? null,
+    primeiraCompraEmMs: validos[0]?.compraEmMs ?? null,
+    ultimaCompraEmMs: validos[validos.length - 1]?.compraEmMs ?? null,
     faseMes: "insuficiente",
     faseMesLabel: "Dados insuficientes",
     concentracaoPercentual: 0,
