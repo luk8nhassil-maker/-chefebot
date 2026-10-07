@@ -24,11 +24,21 @@ export async function GET(req: NextRequest) {
   try {
     const convite = await obterOuCriarConviteDivulgacao({ tenantId: TENANT_ID, clienteId });
     const url = convite.token ? `${req.nextUrl.origin}/m/${encodeURIComponent(convite.token)}` : null;
-    return NextResponse.json({
+    const resposta = NextResponse.json({
       ...convite.estado,
       url,
       mensagem: url ? mensagemCompartilhamento(convite.premioDescricao) : null,
     }, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
+    if (convite.token) {
+      resposta.cookies.set("cf_marketing_owner", convite.token, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: 72 * 60 * 60,
+      });
+    }
+    return resposta;
   } catch {
     return NextResponse.json({ error: "missao_indisponivel" }, { status: 503 });
   }
