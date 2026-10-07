@@ -10,6 +10,8 @@ type Config = {
   missaoIndicacaoBonus: number
   missaoFotoPerfilAtiva: boolean
   missaoFotoPerfilBonus: number
+  missaoDivulgacaoDiariaAtiva: boolean
+  missaoDivulgacaoDiariaBonus: number
   impulsoPodioAtivo: boolean
   impulsoPodioBonus: number
   impulsoPodioCapTemporada: number
@@ -20,13 +22,14 @@ type Config = {
   ameacaPodioMaxGap: number
 }
 
-type Grupo = 'semanal' | 'indicacao' | 'foto' | 'impulso' | 'carryover' | 'nivel'
+type Grupo = 'semanal' | 'indicacao' | 'foto' | 'divulgacao' | 'impulso' | 'carryover' | 'nivel'
 
 function camposDoGrupo(config: Config, grupo: Grupo): Partial<Config> {
   switch (grupo) {
     case 'semanal': return { missaoSemanalAtiva: config.missaoSemanalAtiva, missaoSemanalMultiplicador: config.missaoSemanalMultiplicador, missaoSemanalCooldownDias: config.missaoSemanalCooldownDias }
     case 'indicacao': return { missaoIndicacaoAtiva: config.missaoIndicacaoAtiva, missaoIndicacaoBonus: config.missaoIndicacaoBonus }
     case 'foto': return { missaoFotoPerfilAtiva: config.missaoFotoPerfilAtiva, missaoFotoPerfilBonus: config.missaoFotoPerfilBonus }
+    case 'divulgacao': return { missaoDivulgacaoDiariaAtiva: config.missaoDivulgacaoDiariaAtiva, missaoDivulgacaoDiariaBonus: config.missaoDivulgacaoDiariaBonus }
     case 'impulso': return { impulsoPodioAtivo: config.impulsoPodioAtivo, impulsoPodioBonus: config.impulsoPodioBonus, impulsoPodioCapTemporada: config.impulsoPodioCapTemporada }
     case 'carryover': return { carryoverAtivo: config.carryoverAtivo, carryoverTabela: config.carryoverTabela }
     case 'nivel': return { nivelChefAtivo: config.nivelChefAtivo, nivelChefLimiares: config.nivelChefLimiares }
@@ -119,6 +122,13 @@ export default function GamificacaoConfigPanel() {
         {numero('missaoFotoPerfilBonus', 'Pontos no Ranking', config.missaoFotoPerfilBonus)}
         <small>Bônus único por cliente. A foto só vira pública se o cliente autorizar essa finalidade no Ranking.</small>
         {botao('foto')}
+      </div>
+      <div style={caixa}>
+        <strong>Embaixador do dia · divulgação orgânica</strong>
+        {alternar('missaoDivulgacaoDiariaAtiva', 'Ativar missão diária de divulgação', config.missaoDivulgacaoDiariaAtiva)}
+        {numero('missaoDivulgacaoDiariaBonus', 'Pontos no Ranking por dia', config.missaoDivulgacaoDiariaBonus)}
+        <small>Credita no máximo 1x por expediente e somente quando o link do cliente traz uma pessoa sem pedido comercial anterior para o funil. Compartilhar sozinho não gera ponto.</small>
+        {botao('divulgacao')}
       </div>
       <div style={caixa}>
         <strong>Impulso do Pódio</strong>
