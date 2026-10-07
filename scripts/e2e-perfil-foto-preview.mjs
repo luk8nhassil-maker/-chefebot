@@ -45,7 +45,41 @@ try {
 
   // 3) Participação explícita libera a experiência.
   await conviteRanking.click();
-  await page.getByRole("dialog", { name: "Entre no Ranking do Chefe" }).waitFor({ state: "visible" });
+  const modalEntrada = page.getByRole("dialog", { name: "Entre no Ranking do Chefe" });
+  await modalEntrada.waitFor({ state: "visible" });
+
+  const geometriaModal = await modalEntrada.evaluate((el) => {
+    const modal = el.getBoundingClientRect();
+    const blocos = Array.from(el.querySelectorAll(".cf-ranking-consent-privacy"));
+    const vazamentos = blocos.map((bloco) => {
+      const rect = bloco.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        scrollWidth: bloco.scrollWidth,
+        clientWidth: bloco.clientWidth,
+      };
+    }).filter((item) =>
+      item.left < modal.left - 1 ||
+      item.right > modal.right + 1 ||
+      item.scrollWidth > item.clientWidth + 1
+    );
+    return {
+      modalLeft: modal.left,
+      modalRight: modal.right,
+      modalScrollWidth: el.scrollWidth,
+      modalClientWidth: el.clientWidth,
+      vazamentos,
+    };
+  });
+
+  if (
+    geometriaModal.modalScrollWidth > geometriaModal.modalClientWidth + 1 ||
+    geometriaModal.vazamentos.length > 0
+  ) {
+    falhar(`Modal de entrada do Ranking vazou horizontalmente: ${JSON.stringify(geometriaModal)}`);
+  }
+
   await page.screenshot({ path: path.join(outDir, "03-convite-participar-ranking.png"), fullPage: true });
 
   await page.getByRole("button", { name: "Aceitar regra e entrar no Ranking" }).click();
