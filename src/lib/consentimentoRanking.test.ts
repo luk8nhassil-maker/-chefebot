@@ -43,6 +43,8 @@ import {
   obterHistoricoConsentimentoRanking,
   obterPreferenciasConsentimentoRanking,
   obterParticipacaoRanking,
+  obterRegraJogoSecretoRanking,
+  obterRegrasJogoSecretoParaClientes,
   registrarParticipacaoRanking,
   registrarConsentimentoRanking,
   revogarTodosConsentimentosRanking,
@@ -75,6 +77,43 @@ describe("consentimento do ranking", () => {
     expect(await obterParticipacaoRanking(CLIENTE_ID)).toBe(true);
     expect((await obterFinalidadesAtivasRanking(CLIENTE_ID)).size).toBe(0);
     expect(JSON.stringify([...store.entries()])).not.toContain(CLIENTE_ID);
+  });
+
+  test("upgrade V2 registra aceite da revelação sem expor clienteId na chave", async () => {
+    process.env.PRIVACY_CONSENT_HMAC_SECRET = SEGREDO;
+    await registrarParticipacaoRanking(CLIENTE_ID, true);
+    expect((await obterRegraJogoSecretoRanking(CLIENTE_ID)).aceitaRevelacao30d).toBe(false);
+
+    await registrarParticipacaoRanking(CLIENTE_ID, true, { aceitaRevelacao30d: true });
+    expect(await obterRegraJogoSecretoRanking(CLIENTE_ID)).toEqual({
+      participa: true,
+      aceitaRevelacao30d: true,
+      regraJogoVersao: "ranking-jogo-secreto-v1",
+    });
+
+    const dump = JSON.stringify([...store.entries()]);
+    expect(dump).not.toContain(CLIENTE_ID);
+    expect(dump).not.toContain("5511999990000");
+    expect(dump).toContain("ranking-jogo-secreto-v1");
+  });
+
+  test("consulta regra do jogo em lote e revogação remove permanência pública", async () => {
+    process.env.PRIVACY_CONSENT_HMAC_SECRET = SEGREDO;
+    const outro = "cli_5511888880000";
+    await registrarParticipacaoRanking(CLIENTE_ID, true, { aceitaRevelacao30d: true });
+    await registrarParticipacaoRanking(outro, true, { aceitaRevelacao30d: false });
+
+    redisMock.mget.mockClear();
+    const regras = await obterRegrasJogoSecretoParaClientes([CLIENTE_ID, outro]);
+    expect(redisMock.mget).toHaveBeenCalledTimes(1);
+    expect(regras.get(CLIENTE_ID)).toEqual({ participa: true, aceitaRevelacao30d: true });
+    expect(regras.get(outro)).toEqual({ participa: true, aceitaRevelacao30d: false });
+
+    await revogarTodosConsentimentosRanking(CLIENTE_ID);
+    expect(await obterRegraJogoSecretoRanking(CLIENTE_ID)).toMatchObject({
+      participa: false,
+      aceitaRevelacao30d: false,
+    });
   });
 
   test("retry da ativação preserva autorização opcional já concedida", async () => {
