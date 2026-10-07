@@ -7,6 +7,7 @@ import {
   calcularValorElegivelCentsParaHistorico,
   consultarEventosPorPeriodo,
   type EventoAnalitico,
+  type EventoAnaliticoLeitura,
   TENANT_PADRAO_ANALYTICS,
 } from "./historicoAnalitico";
 import { timestampCriacaoPedido, chaveExpedienteOperacional } from "./expedienteOperacional";
@@ -70,8 +71,8 @@ export function eventosAnaliticosDePedidos(
   pedidos: PedidoFallback[],
   tenantId = TENANT_PADRAO_ANALYTICS,
   agora = Date.now(),
-): EventoAnalitico[] {
-  const eventos: EventoAnalitico[] = [];
+): EventoAnaliticoLeitura[] {
+  const eventos: EventoAnaliticoLeitura[] = [];
   for (const pedido of pedidos) {
     if (pedido.status !== "entregue" || typeof pedido.id !== "string") continue;
     const clienteId = derivarClienteIdPorTelefone(pedido.telefone)
@@ -107,7 +108,7 @@ export function eventosAnaliticosDePedidos(
 export async function lerEventosFallbackPedidos(
   tenantId = TENANT_PADRAO_ANALYTICS,
   agora = Date.now(),
-): Promise<EventoAnalitico[]> {
+): Promise<EventoAnaliticoLeitura[]> {
   const pedidos = await lerComRetry(
     () => redis.get<PedidoFallback[]>("pedidos"),
     { tentativas: 2, esperaBaseMs: 80 },
@@ -120,7 +121,7 @@ export async function consultarEventosAnaliticosComFallback(
   inicioMs: number,
   fimMs: number,
   agora = Date.now(),
-): Promise<{ eventos: EventoAnalitico[]; fallbackTodos: EventoAnalitico[]; fonte: FonteEventosAnalytics }> {
+): Promise<{ eventos: EventoAnaliticoLeitura[]; fallbackTodos: EventoAnaliticoLeitura[]; fonte: FonteEventosAnalytics }> {
   // Caminho quente do painel: a chave `pedidos` já contém a fonte oficial da
   // operação e é lida em uma única chamada. Não espere o índice analítico
   // evento-a-evento quando essa fonte estiver disponível, porque isso transforma
