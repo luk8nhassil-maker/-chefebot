@@ -71,7 +71,15 @@ export function eventosAnaliticosDePedidos(
     if (!clienteId) continue;
     const criadoEmMs = timestampLegado(pedido, agora);
     if (criadoEmMs === null) continue;
-    const valorElegivelCents = calcularValorElegivelCentsParaHistorico(pedido);
+    const valorElegivelCents = calcularValorElegivelCentsParaHistorico({
+      id: pedido.id,
+      telefone: pedido.telefone,
+      total: pedido.total,
+      taxaEntrega: pedido.taxaEntrega,
+      origem: pedido.origem,
+      tipoEntrega: pedido.tipoEntrega,
+      snapshotOficial: pedido.snapshotOficial,
+    });
     if (valorElegivelCents <= 0) continue;
     eventos.push({
       pedidoId: pedido.id,
