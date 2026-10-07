@@ -126,8 +126,16 @@ export default function RadarVendasPage() {
     }
   }
 
-  if (loading) return <main style={{ padding: 24 }}>Carregando Radar...</main>;
-  if (erro || !data) return <main style={{ padding: 24 }}><p>{erro || "Radar indisponível."}</p></main>;
+  if (loading) return (
+    <PanelShell pedidosCount={0} conversasCount={0} conversasUrgent={false} showGestaoNav>
+      <main style={{ padding: 24 }}>Carregando Radar...</main>
+    </PanelShell>
+  );
+  if (erro || !data) return (
+    <PanelShell pedidosCount={0} conversasCount={0} conversasUrgent={false} showGestaoNav>
+      <main style={{ padding: 24 }}><p>{erro || "Radar indisponível."}</p></main>
+    </PanelShell>
+  );
 
   const ativo = data.access.active;
 
