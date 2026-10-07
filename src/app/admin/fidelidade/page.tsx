@@ -73,6 +73,9 @@ type StatusData = {
 type AnalyticsData = {
   metricas?: {
     pedidosValidos: number
+    pedidosSemClienteIdentificado: number
+    pedidosComClienteIdentificado: number
+    receitaElegivelClientesIdentificadosCents: number
     receitaElegivelCents: number
     ticketMedioCents: number
     clientesUnicos: number
@@ -84,12 +87,13 @@ type AnalyticsData = {
     pedidosMediosPorCliente: number
     receitaMediaPorClienteCents: number
     serieDiaria: Array<{ data: string; pedidos: number; receitaCents: number; clientesUnicos: number }>
-    porCanal: Record<string, { pedidos: number; receitaCents: number }>
+    porCanal: Record<string, { pedidos: number; receitaCents: number; pedidoIds?: string[] }>
     cohortePorPedidos: Record<string, number>
     percentualReceitaRecorrentes: number
-    estrelasDistribuidas: number
+    estrelasDistribuidas: number | null
+    pedidosComEstrelasRegistradas?: number | null
   }
-  periodosDias?: PeriodoAnalytics
+  periodosDias?: PeriodoAnalytics | null
   totalEventosNoIndice?: number
   totalEventosConsiderados?: number
   fonteDados?: {
@@ -99,15 +103,16 @@ type AnalyticsData = {
   }
   historicoAnteriorParcial?: boolean
   cobertura?: {
-    janelaSolicitadaDias: PeriodoAnalytics
+    janelaSolicitadaDias: number | null
     historicoEncontradoDesdeIso: string | null
     diasHistoricoEncontrado: number
     possuiDadosAntesDaJanela: boolean
+    recorrenciaAnteriorDisponivel?: boolean
   }
   error?: string
 }
 
-type PeriodoAnalytics = 7 | 30 | 60 | 90
+type PeriodoAnalytics = 7 | 30 | 60 | 90 | 'historico'
 
 function formatarData(iso: string | null): string {
   if (!iso) return '—'
@@ -629,7 +634,7 @@ export default function FidelidadePage() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
                 <div style={tituloCard}>Analytics de Pedidos</div>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  {([7, 30, 60, 90] as PeriodoAnalytics[]).map((p) => (
+                  {([7, 30, 60, 90, 'historico'] as PeriodoAnalytics[]).map((p) => (
                     <button
                       key={p}
                       onClick={() => {
@@ -648,14 +653,14 @@ export default function FidelidadePage() {
                         fontWeight: periodo === p ? 700 : 400,
                       }}
                     >
-                      {p}d
+                      {p === 'historico' ? 'Tudo' : `${p}d`}
                     </button>
                   ))}
                 </div>
               </div>
 
               <div style={{ color: 'var(--foreground-muted)', fontSize: 12, lineHeight: 1.45, marginBottom: 12 }}>
-                Considera pedidos entregues no período selecionado. Cada cliente é contado uma única vez. O painel usa o índice analítico e completa a leitura com o histórico real de pedidos quando necessário.
+                Conta pedidos entregues e receita elegível. “Tudo” consulta todo o histórico disponível; as outras opções mostram a janela escolhida. Cada cliente é contado uma única vez quando o telefone ou ID permite identificá-lo.
               </div>
 
               {erroAnalytics && (
@@ -672,21 +677,21 @@ export default function FidelidadePage() {
               ) : analytics && !erroAnalytics && (
                 (analytics.totalEventosConsiderados ?? analytics.metricas?.pedidosValidos ?? 0) === 0 ? (
                   <div style={{ fontSize: 13, color: 'var(--foreground-muted)', fontStyle: 'italic', padding: '8px 0' }}>
-                    Nenhum pedido entregue foi encontrado nesta janela de {periodo} dias. Quando houver dados, o painel mostra imediatamente o que estiver disponível.
+                    Nenhum pedido entregue foi encontrado {periodo === 'historico' ? 'no histórico disponível' : `nesta janela de ${periodo} dias`}.
                   </div>
                 ) : analytics.metricas ? (
                   <>
                     <div style={{ fontSize: 11, color: 'var(--foreground-muted)', marginBottom: 10, lineHeight: 1.5 }}>
                       <div>
                         Fonte: {analytics.fonteDados?.origem === 'pedidos' ? 'histórico real de pedidos' : analytics.fonteDados?.origem === 'analytics+pedidos' ? 'índice analítico + histórico de pedidos' : 'índice analítico'}
-                        {analytics.historicoAnteriorParcial ? ' · recorrência parcial' : ''}
+                        {analytics.historicoAnteriorParcial ? ' · histórico anterior insuficiente para classificar novos e recorrentes' : ''}
                       </div>
                       {analytics.cobertura && (
                         <div>
-                          Janela escolhida: <strong>{periodo} dias</strong>
+                          Janela escolhida: <strong>{periodo === 'historico' ? 'todo o histórico disponível até hoje' : `${periodo} dias`}</strong>
                           {analytics.cobertura.historicoEncontradoDesdeIso
                             ? <> · histórico encontrado desde <strong>{formatarData(analytics.cobertura.historicoEncontradoDesdeIso)}</strong>
-                              {!analytics.cobertura.possuiDadosAntesDaJanela && analytics.cobertura.diasHistoricoEncontrado < periodo
+                              {periodo !== 'historico' && !analytics.cobertura.possuiDadosAntesDaJanela && analytics.cobertura.diasHistoricoEncontrado < periodo
                                 ? <> · usando os <strong>{analytics.cobertura.diasHistoricoEncontrado} dias</strong> de dados encontrados até agora</>
                                 : null}
                               </>
@@ -694,7 +699,7 @@ export default function FidelidadePage() {
                         </div>
                       )}
                     </div>
-                    <FidelidadeAnalyticsDashboard metricas={analytics.metricas} periodo={periodo} />
+                    <FidelidadeAnalyticsDashboard metricas={analytics.metricas} periodo={periodo} cobertura={analytics.cobertura} />
                   </>
                 ) : null
               )}

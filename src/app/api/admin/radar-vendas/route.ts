@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { usuarioAssinatura } from "@/lib/assinaturaApiAuth";
-import { TENANT_PADRAO_ANALYTICS } from "@/lib/historicoAnalitico";
+import { TENANT_PADRAO_ANALYTICS, type EventoAnalitico } from "@/lib/historicoAnalitico";
 import { consultarEventosAnaliticosComFallback } from "@/lib/analyticsPedidosReadModel.server";
 import { calcularRadarVendas } from "@/lib/radarVendas";
 import { statusAcessoRadarVendas } from "@/lib/radarVendasEntitlement.server";
@@ -27,7 +27,8 @@ export async function GET(req: NextRequest) {
       ),
       statusAcessoRadarVendas(),
     ]);
-    const radar = calcularRadarVendas(leitura.eventos, agora, JANELA_DIAS);
+    const eventosComCliente = leitura.eventos.filter((evento): evento is EventoAnalitico => Boolean(evento.clienteId));
+    const radar = calcularRadarVendas(eventosComCliente, agora, JANELA_DIAS);
 
     return NextResponse.json({
       ok: true,

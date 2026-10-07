@@ -893,6 +893,7 @@ export async function POST(req: NextRequest) {
     itens: Array.isArray(itens) ? itens.filter(Boolean) : [String(itens)],
     total: Number(total) || 0,
     status: 'novo',
+    origem: 'painel',
     horario: agora,
     endereco: String(endereco || (tipoEntrega === 'pickup' || tipoEntrega === 'retirada' ? 'Retirada na loja' : tipoEntrega === 'dine_in' ? 'Consumo no local' : '')),
     ...(bairro ? { bairro: String(bairro) } : {}),

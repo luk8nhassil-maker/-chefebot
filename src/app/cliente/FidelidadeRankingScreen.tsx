@@ -449,7 +449,7 @@ export function FidelidadeRankingScreen({
             <strong>Temporada anterior</strong>
             <small>
               Perfis visíveis até {resultadoAnterior.revelacaoAte
-                ? new Date(resultadoAnterior.revelacaoAte).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+                ? new Date(resultadoAnterior.revelacaoAte).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'America/Sao_Paulo' })
                 : 'o fim da janela oficial'}.
             </small>
           </div>

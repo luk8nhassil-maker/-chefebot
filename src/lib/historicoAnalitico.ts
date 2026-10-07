@@ -26,7 +26,7 @@ import type { PedidoSnapshotOficial } from "./pedidoSnapshot";
 export const SCHEMA_VERSAO_ATUAL = 1 as const;
 
 export type StatusAnalitico = "entregue" | "estornado";
-export type CanalPedido = "app" | "whatsapp" | "salao" | "desconhecido";
+export type CanalPedido = "painel" | "app" | "whatsapp" | "salao" | "desconhecido";
 
 export type EventoAnalitico = {
   pedidoId: string;
@@ -43,6 +43,9 @@ export type EventoAnalitico = {
   estornadoEmMs?: number;
 };
 
+/** Evento lido para métricas; pedidos manuais sem identificação não são persistidos no índice por cliente. */
+export type EventoAnaliticoLeitura = Omit<EventoAnalitico, "clienteId"> & { clienteId?: string };
+
 export type PedidoParaHistorico = {
   id: string;
   telefone?: string;
@@ -56,6 +59,9 @@ export type PedidoParaHistorico = {
 
 export type MetricasAnaliticas = {
   pedidosValidos: number;
+  pedidosSemClienteIdentificado: number;
+  pedidosComClienteIdentificado: number;
+  receitaElegivelClientesIdentificadosCents: number;
   clientesUnicos: number;
   clientesNovos: number;
   clientesRecorrentes: number;
@@ -76,7 +82,7 @@ export type MetricasAnaliticas = {
     receitaCents: number;
     clientesUnicos: number;
   }>;
-  porCanal: Record<CanalPedido, { pedidos: number; receitaCents: number }>;
+  porCanal: Record<CanalPedido, { pedidos: number; receitaCents: number; pedidoIds: string[] }>;
 };
 
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
@@ -122,6 +128,7 @@ export function chaveEvento(tenantId: string, pedidoId: string): string {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function inferirCanal(pedido: PedidoParaHistorico): CanalPedido {
+  if (pedido.origem?.toLowerCase() === "painel") return "painel";
   if (typeof pedido.origem === "string" && pedido.origem.toLowerCase().includes("whatsapp")) return "whatsapp";
   if (pedido.tipoEntrega === "dine_in") return "salao";
   if (pedido.snapshotOficial) return "app";
@@ -386,7 +393,7 @@ function mediana(valores: number[]): number {
  * Excludes estornados from all revenue/ticket/recurrence metrics.
  */
 export function calcularMetricas(
-  eventos: EventoAnalitico[],
+  eventos: EventoAnaliticoLeitura[],
   clientesComHistoricoAnterior: ReadonlySet<string> = new Set()
 ): MetricasAnaliticas {
   const validos = eventos.filter((ev) => ev.statusAnalitico === "entregue");
@@ -394,6 +401,9 @@ export function calcularMetricas(
   if (validos.length === 0) {
     return {
       pedidosValidos: 0,
+      pedidosSemClienteIdentificado: 0,
+      pedidosComClienteIdentificado: 0,
+      receitaElegivelClientesIdentificadosCents: 0,
       clientesUnicos: 0,
       clientesNovos: 0,
       clientesRecorrentes: 0,
@@ -410,18 +420,20 @@ export function calcularMetricas(
       receitaMediaPorClienteCents: 0,
       serieDiaria: [],
       porCanal: {
-        app: { pedidos: 0, receitaCents: 0 },
-        whatsapp: { pedidos: 0, receitaCents: 0 },
-        salao: { pedidos: 0, receitaCents: 0 },
-        desconhecido: { pedidos: 0, receitaCents: 0 },
+        painel: { pedidos: 0, receitaCents: 0, pedidoIds: [] },
+        app: { pedidos: 0, receitaCents: 0, pedidoIds: [] },
+        whatsapp: { pedidos: 0, receitaCents: 0, pedidoIds: [] },
+        salao: { pedidos: 0, receitaCents: 0, pedidoIds: [] },
+        desconhecido: { pedidos: 0, receitaCents: 0, pedidoIds: [] },
       },
     };
   }
 
+  const validosComCliente = validos.filter((ev): ev is EventoAnaliticoLeitura & { clienteId: string } => Boolean(ev.clienteId));
   const receitaPorCliente = new Map<string, number>();
   const pedidosPorCliente = new Map<string, number>();
 
-  for (const ev of validos) {
+  for (const ev of validosComCliente) {
     receitaPorCliente.set(ev.clienteId, (receitaPorCliente.get(ev.clienteId) ?? 0) + ev.valorElegivelCents);
     pedidosPorCliente.set(ev.clienteId, (pedidosPorCliente.get(ev.clienteId) ?? 0) + 1);
   }
@@ -445,10 +457,11 @@ export function calcularMetricas(
   const clientesComSegundoPedido = [...pedidosPorCliente.values()].filter((count) => count >= 2).length;
   const porDia = new Map<string, { pedidos: number; receitaCents: number; clientes: Set<string> }>();
   const porCanal: MetricasAnaliticas["porCanal"] = {
-    app: { pedidos: 0, receitaCents: 0 },
-    whatsapp: { pedidos: 0, receitaCents: 0 },
-    salao: { pedidos: 0, receitaCents: 0 },
-    desconhecido: { pedidos: 0, receitaCents: 0 },
+    painel: { pedidos: 0, receitaCents: 0, pedidoIds: [] },
+    app: { pedidos: 0, receitaCents: 0, pedidoIds: [] },
+    whatsapp: { pedidos: 0, receitaCents: 0, pedidoIds: [] },
+    salao: { pedidos: 0, receitaCents: 0, pedidoIds: [] },
+    desconhecido: { pedidos: 0, receitaCents: 0, pedidoIds: [] },
   };
 
   for (const ev of validos) {
@@ -456,11 +469,12 @@ export function calcularMetricas(
     const dia = porDia.get(data) ?? { pedidos: 0, receitaCents: 0, clientes: new Set<string>() };
     dia.pedidos += 1;
     dia.receitaCents += ev.valorElegivelCents;
-    dia.clientes.add(ev.clienteId);
+    if (ev.clienteId) dia.clientes.add(ev.clienteId);
     porDia.set(data, dia);
 
     porCanal[ev.canal].pedidos += 1;
     porCanal[ev.canal].receitaCents += ev.valorElegivelCents;
+    if (ev.canal === "painel") porCanal.painel.pedidoIds.push(ev.pedidoId);
   }
 
   const serieDiaria = [...porDia.entries()]
@@ -469,6 +483,9 @@ export function calcularMetricas(
 
   return {
     pedidosValidos: validos.length,
+    pedidosSemClienteIdentificado: validos.length - validosComCliente.length,
+    pedidosComClienteIdentificado: validosComCliente.length,
+    receitaElegivelClientesIdentificadosCents: [...receitaPorCliente.values()].reduce((s, valor) => s + valor, 0),
     clientesUnicos: receitaPorCliente.size,
     clientesNovos,
     clientesRecorrentes,
@@ -484,8 +501,10 @@ export function calcularMetricas(
     clientesComSegundoPedido,
     percentualClientesComSegundoPedido:
       receitaPorCliente.size > 0 ? Math.round((clientesComSegundoPedido / receitaPorCliente.size) * 100) : 0,
-    pedidosMediosPorCliente: receitaPorCliente.size > 0 ? Number((validos.length / receitaPorCliente.size).toFixed(2)) : 0,
-    receitaMediaPorClienteCents: receitaPorCliente.size > 0 ? Math.round(receitaTotal / receitaPorCliente.size) : 0,
+    pedidosMediosPorCliente: receitaPorCliente.size > 0 ? Number((validosComCliente.length / receitaPorCliente.size).toFixed(2)) : 0,
+    receitaMediaPorClienteCents: receitaPorCliente.size > 0
+      ? Math.round([...receitaPorCliente.values()].reduce((s, valor) => s + valor, 0) / receitaPorCliente.size)
+      : 0,
     serieDiaria,
     porCanal,
   };

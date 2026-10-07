@@ -466,6 +466,59 @@ async function obterEstadoPontos(clienteId: string): Promise<EstadoPontosCliente
   };
 }
 
+/**
+ * Conta créditos de Estrelas confirmados no extrato canônico para os pedidos
+ * analisados. Leitura agrupada por MGET; não altera saldo, extrato ou ranking.
+ */
+export async function consultarEstrelasCreditadasPorPedidos(
+  pedidos: Array<{ clienteId: string; pedidoId: string }>,
+): Promise<{ estrelas: number; pedidosComCredito: number }> {
+  const porCliente = new Map<string, Set<string>>();
+  for (const pedido of pedidos) {
+    const ids = porCliente.get(pedido.clienteId) ?? new Set<string>();
+    ids.add(pedido.pedidoId);
+    porCliente.set(pedido.clienteId, ids);
+  }
+
+  const clientes = [...porCliente.keys()];
+  const creditosPorPedido = new Set<string>();
+  let estrelas = 0;
+  const redisMget = redis as typeof redis & {
+    mget<T>(...keys: string[]): Promise<Array<T | null>>;
+  };
+
+  for (let offset = 0; offset < clientes.length; offset += 80) {
+    const lote = clientes.slice(offset, offset + 80);
+    const valores = await redisMget.mget<EstadoPontosCliente | MovimentoPontos[]>(
+      ...lote.map(chaveEstadoPontos),
+      ...lote.map(chaveExtratoPontosLegado),
+    );
+
+    lote.forEach((clienteId, indice) => {
+      const estado = normalizarEstadoPontos(valores[indice] as EstadoPontosCliente | null);
+      const legado = valores[indice + lote.length];
+      const movimentosLegados = Array.isArray(legado) ? legado : [];
+      const extrato = unirExtratosPontos(estado.extrato, movimentosLegados);
+      const pedidosDoCliente = porCliente.get(clienteId)!;
+
+      for (const movimento of extrato) {
+        if (
+          movimento.tipo !== "confirmado" ||
+          movimento.unidade !== "estrelas" ||
+          movimento.regraVersao !== REGRA_ESTRELAS_V1 ||
+          !movimento.pedidoId ||
+          !pedidosDoCliente.has(movimento.pedidoId)
+        ) continue;
+
+        estrelas += Math.max(0, Math.floor(Number(movimento.pontos) || 0));
+        creditosPorPedido.add(movimento.pedidoId);
+      }
+    });
+  }
+
+  return { estrelas, pedidosComCredito: creditosPorPedido.size };
+}
+
 const LOCK_TTL_SEGUNDOS = 5;
 const LOCK_MAX_TENTATIVAS = 50;
 const LOCK_ESPERA_MS = 20;

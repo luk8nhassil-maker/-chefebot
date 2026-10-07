@@ -9,6 +9,9 @@ describe('FidelidadeAnalyticsDashboard', () => {
       periodo={30}
       metricas={{
         pedidosValidos: 4,
+        pedidosSemClienteIdentificado: 0,
+        pedidosComClienteIdentificado: 4,
+        receitaElegivelClientesIdentificadosCents: 20000,
         receitaElegivelCents: 20000,
         ticketMedioCents: 5000,
         clientesUnicos: 3,
@@ -20,17 +23,21 @@ describe('FidelidadeAnalyticsDashboard', () => {
         pedidosMediosPorCliente: 1.33,
         receitaMediaPorClienteCents: 6667,
         estrelasDistribuidas: 12,
+        pedidosComEstrelasRegistradas: 3,
         percentualReceitaRecorrentes: 50,
         cohortePorPedidos: { '1': 2, '2': 1 },
         serieDiaria: [{ data: '2026-09-22', pedidos: 4, receitaCents: 20000, clientesUnicos: 3 }],
-        porCanal: { app: { pedidos: 4, receitaCents: 20000 }, whatsapp: { pedidos: 0, receitaCents: 0 }, salao: { pedidos: 0, receitaCents: 0 }, desconhecido: { pedidos: 0, receitaCents: 0 } },
+        porCanal: { painel: { pedidos: 1, receitaCents: 5000, pedidoIds: ['P-100'] }, app: { pedidos: 3, receitaCents: 15000 }, whatsapp: { pedidos: 0, receitaCents: 0 }, salao: { pedidos: 0, receitaCents: 0 }, desconhecido: { pedidos: 0, receitaCents: 0 } },
       }}
     />);
 
-    expect(screen.getByText('Receita elegível')).toBeInTheDocument();
+    expect(screen.getByText('Receita elegível à fidelidade')).toBeInTheDocument();
     expect(screen.getByText('Retenção observada')).toBeInTheDocument();
-    expect(screen.getByText((_, element) => element?.textContent === '1 clientes fizeram segunda compra no período (33%).')).toBeInTheDocument();
-    expect(screen.getByText('ROI, lucro incremental e custo por cliente ainda não são calculáveis.')).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === '1 de 3 clientes (33%)')).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.children.length === 0 && element.textContent?.includes('lucro incremental e ROI ficam'))).toBeInTheDocument();
     expect(screen.getByLabelText('Gráfico de receita diária')).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.children.length === 0 && element.textContent?.includes('Pedido criado no painel · 1 pedido(s)'))).toBeInTheDocument();
+    expect(screen.getByText('Ver IDs dos pedidos criados no painel (1)')).toBeInTheDocument();
+    expect(screen.getByText('Histórico anterior ainda desconhecido.')).toBeInTheDocument();
   });
 });
