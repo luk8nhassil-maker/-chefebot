@@ -126,6 +126,7 @@ import {
   registrarEventoEntregue,
   TENANT_PADRAO_ANALYTICS,
   type EventoAnalitico,
+  type EventoAnaliticoLeitura,
 } from "./historicoAnalitico";
 
 const AGORA = 1758290400000; // fixed timestamp for determinism
@@ -600,7 +601,7 @@ describe("helpers de período", () => {
 
 // ── calcularMetricas ──────────────────────────────────────────────────────────
 
-const makeEvento = (overrides: Partial<EventoAnalitico> = {}): EventoAnalitico => ({
+const makeEvento = (overrides: Partial<EventoAnaliticoLeitura> = {}): EventoAnaliticoLeitura => ({
   pedidoId: "p1",
   clienteId: "cid_A",
   tenantId: TENANT,
