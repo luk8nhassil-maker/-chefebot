@@ -1,7 +1,18 @@
 {
   "crons": [
-    {"path": "/api/cron", "schedule": "0 3 * * *"},
-    {"path": "/api/cron/pix-pendente", "schedule": "0 5 * * *"},
-    {"path": "/api/cron/ranking-podio", "schedule": "0 21 * * *"}
-  ]
+    {
+      "path": "/api/cron",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/pix-pendente",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/ranking-podio",
+      "schedule": "0 21 * * *"
+    }
+  ],
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "ignoreCommand": "if [ \"$VERCEL_GIT_COMMIT_REF\" != \"main\" ]; then exit 0; else exit 1; fi"
 }
