@@ -38,7 +38,7 @@ const ICONE_STATUS_SOCIAL: Record<NonNullable<PainelGamificacao['statusSocial']>
   elite: '✦',
 }
 
-type MomentoRanking = 'conquista' | 'nivel' | 'coroa' | 'indicacao' | 'foto' | 'semanal' | 'pedido'
+type MomentoRanking = 'conquista' | 'nivel' | 'coroa' | 'indicacao' | 'divulgacao' | 'foto' | 'semanal' | 'pedido'
 function escolherMomentoPrincipal(
   ranking: NonNullable<PainelFidelidade['ranking']>,
   gamificacao: PainelGamificacao | null | undefined,
@@ -53,6 +53,7 @@ function escolherMomentoPrincipal(
   if (podeAdicionarFoto && gamificacao?.missaoFotoPerfil && !gamificacao.missaoFotoPerfil.concluida) return 'foto'
   if (gamificacao?.coroaAmeacada && ranking.participantes.alvo?.estado === 'liderando') return 'coroa'
   if (podePedir && gamificacao?.missaoSemanal?.status === 'desbloqueada') return 'semanal'
+  if (podeIndicar && gamificacao?.missaoDivulgacaoDiaria && !gamificacao.missaoDivulgacaoDiaria.concluidaHoje && indicacao?.ativa && indicacao.compartilhamentoLiberado !== false) return 'divulgacao'
   if (podeIndicar && gamificacao?.missaoIndicacao && !gamificacao.missaoIndicacao.concluida && indicacao?.ativa && indicacao.compartilhamentoLiberado !== false) return 'indicacao'
   if (podeCompartilhar && detectarConquistaRanking({
     posicao: ranking.participantes.posicao ?? ranking.posicao,
@@ -221,6 +222,17 @@ export function FidelidadeRankingScreen({
     titulo: gamificacao.missaoFotoPerfil.concluida ? 'Foto concluída' : `Adicione uma foto e ganhe +${gamificacao.missaoFotoPerfil.bonus}`,
     resumo: gamificacao.missaoFotoPerfil.concluida ? 'Bônus já recebido.' : 'Bônus único no Ranking. Sua foto só fica pública se você autorizar.',
     simbolo: '◎',
+  })
+  if (gamificacao?.missaoDivulgacaoDiaria) momentos.push({
+    id: 'divulgacao',
+    eyebrow: 'EMBAIXADOR DO DIA',
+    titulo: gamificacao.missaoDivulgacaoDiaria.concluidaHoje
+      ? 'Missão de hoje concluída'
+      : `Traga 1 pessoa nova · +${gamificacao.missaoDivulgacaoDiaria.bonus}`,
+    resumo: gamificacao.missaoDivulgacaoDiaria.concluidaHoje
+      ? 'Amanhã você ganha uma nova chance.'
+      : 'Compartilhe seu link no Story ou Status. O ponto só entra quando uma pessoa nova chegar pelo seu link.',
+    simbolo: '📣',
   })
   if (gamificacao?.missaoSemanal?.status === 'desbloqueada') momentos.push({ id: 'semanal', eyebrow: 'MISSÃO SEMANAL', titulo: 'Caçada ao Pódio liberada!', resumo: 'Seu próximo pedido vale 2x no Ranking.', simbolo: '↗' })
   if (alvo?.estado === 'liderando') momentos.push({ id: 'coroa', eyebrow: 'NA LIDERANÇA', titulo: gamificacao?.coroaAmeacada ? 'Coroa ameaçada!' : 'Defenda sua coroa', resumo: mensagemMissao ?? 'Acompanhe sua vantagem.', simbolo: '♛' })
@@ -583,6 +595,18 @@ export function FidelidadeRankingScreen({
                   {!compartilhamentoLiberado && <p className="cf-ranking-momento-notice">Convites bloqueados. Faça seu primeiro pedido confirmado para liberar o compartilhamento.</p>}
                 </>
               )}
+              {momentoAberto === 'divulgacao' && gamificacao?.missaoDivulgacaoDiaria && (
+                <>
+                  <p className="cf-ranking-momento-lead">
+                    {gamificacao.missaoDivulgacaoDiaria.concluidaHoje
+                      ? `+${gamificacao.missaoDivulgacaoDiaria.bonus} no Ranking confirmado hoje.`
+                      : `Traga 1 pessoa nova pelo seu link e ganhe +${gamificacao.missaoDivulgacaoDiaria.bonus} no Ranking hoje.`}
+                  </p>
+                  <p>Compartilhe no Story, Status ou com alguém conhecido. Só compartilhar não gera pontos: a missão conclui quando uma pessoa sem pedido anterior entra pelo seu link.</p>
+                  <p>Se ela fizer a primeira compra elegível, a recompensa normal de indicação continua valendo também.</p>
+                  {!compartilhamentoLiberado && <p className="cf-ranking-momento-notice">Faça seu primeiro pedido confirmado para liberar seu link de divulgação.</p>}
+                </>
+              )}
               {momentoAberto === 'foto' && gamificacao?.missaoFotoPerfil && (
                 <>
                   <p className="cf-ranking-momento-lead">
@@ -615,6 +639,13 @@ export function FidelidadeRankingScreen({
                   if (!compartilhamentoLiberado) onNovoPedido?.()
                   else { emit('indicacao_clicada'); onIndicarAmigo?.() }
                 }}>{compartilhamentoLiberado ? 'Convidar um amigo' : 'Fazer primeiro pedido'}</button>
+              )}
+              {momentoAberto === 'divulgacao' && gamificacao?.missaoDivulgacaoDiaria && !gamificacao.missaoDivulgacaoDiaria.concluidaHoje && (compartilhamentoLiberado ? !!onIndicarAmigo : !!onNovoPedido) && (
+                <button type="button" className="cf-ranking-momento-primary" disabled={indicando} onClick={() => {
+                  setMomentoAberto(null)
+                  if (!compartilhamentoLiberado) onNovoPedido?.()
+                  else { emit('indicacao_clicada'); onIndicarAmigo?.() }
+                }}>{indicando ? 'Preparando…' : compartilhamentoLiberado ? 'Compartilhar para Story / Status' : 'Fazer primeiro pedido'}</button>
               )}
               {momentoAberto === 'foto' && gamificacao?.missaoFotoPerfil && !gamificacao.missaoFotoPerfil.concluida && onAdicionarFoto && (
                 <button type="button" className="cf-ranking-momento-primary" disabled={fotoEnviando} onClick={() => {
