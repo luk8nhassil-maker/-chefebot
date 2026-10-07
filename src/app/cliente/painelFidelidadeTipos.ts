@@ -25,6 +25,7 @@ export type PainelFidelidade = {
       participaCampanha: boolean
       nomePublico?: string
       telefoneMascarado?: string
+      codinomeSecreto?: string
     }[]
     variacaoPosicao: VariacaoPosicaoRanking | null
     participantes: {
@@ -38,6 +39,7 @@ export type PainelFidelidade = {
         participaCampanha: true
         nomePublico?: string
         telefoneMascarado?: string
+      codinomeSecreto?: string
         // Selo herdado do Top 10 da temporada ANTERIOR — de QUALQUER membro
         // da lista, não só do próprio cliente (`eVoce`).
         statusSocial?: StatusTemporadaSocial
