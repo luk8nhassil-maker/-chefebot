@@ -51,6 +51,7 @@ const pedidoConfirmado = [{
 
 beforeEach(() => {
   vi.clearAllMocks();
+  process.env.PRIVACY_CONSENT_HMAC_SECRET = "segredo-de-teste-com-mais-de-trinta-e-dois-caracteres";
   mocks.config.mockResolvedValue({ missaoDivulgacaoAtiva: true, missaoDivulgacaoBonus: 3 });
   mocks.temporadaAtiva.mockResolvedValue({
     temporadaId: "temp_1",
@@ -101,6 +102,20 @@ describe("missão diária de divulgação", () => {
     expect(convite.refToken).toBe("abcdefghijklmnopqrstuvwx");
     expect(convite.premioDescricao).toBe("1 Pizza Família");
     expect(mocks.redisSet).toHaveBeenCalledTimes(2);
+    const chaves = mocks.redisSet.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(chaves).not.toContain("cli_1");
+    expect(chaves).not.toContain("559999");
+  });
+
+  test("sem segredo HMAC não grava chave diária com identificador cru", async () => {
+    delete process.env.PRIVACY_CONSENT_HMAC_SECRET;
+    const convite = await obterOuCriarConviteDivulgacao({ tenantId: "default", clienteId: "cli_1" });
+    expect(convite.estado).toMatchObject({
+      elegivel: false,
+      motivoBloqueio: "infraestrutura_indisponivel",
+    });
+    expect(convite.token).toBeNull();
+    expect(mocks.redisSet).not.toHaveBeenCalled();
   });
 
   test("reutiliza o mesmo token do dia", async () => {
