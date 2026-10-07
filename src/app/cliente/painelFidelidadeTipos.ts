@@ -72,7 +72,7 @@ export type PainelGamificacao = {
   bonusCompeticao: number
   missaoSemanal: { status: 'inativa' | 'desbloqueada' | 'processando' | 'consumida' } | null
   missaoIndicacao: { concluida: boolean } | null
-  missaoFotoPerfil: { concluida: boolean; bonus: number } | null
+  missaoFotoPerfil?: { concluida: boolean; bonus: number } | null
   nivelChef: { nivel: number; nome: string | null; xpAtual: number; xpProximoNivel: number | null } | null
   // Comparação contra a ÚLTIMA VISITA real deste cliente ao painel — conceito
   // separado do histórico diário (`ranking.variacaoPosicao`). `null` na
