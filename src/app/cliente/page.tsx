@@ -22,6 +22,7 @@ import type {
   VariacaoPosicaoRanking,
   FinalidadePrivacidadeRanking,
   PreferenciasPrivacidadeRanking,
+  ResultadoRankingRevelado,
   StatusTemporadaSocial,
 } from './painelFidelidadeTipos'
 import { FidelidadeRankingScreen } from './FidelidadeRankingScreen'
@@ -813,6 +814,7 @@ export default function ClientePage() {
   const [fidelidade, setFidelidade] = useState<Fidelidade | null>(null)
   const [jornada, setJornada] = useState<Jornada | null>(null)
   const [painel, setPainel] = useState<PainelFidelidade | null>(null)
+  const [resultadoRankingAnterior, setResultadoRankingAnterior] = useState<ResultadoRankingRevelado | null>(null)
   const [privacidadeRanking, setPrivacidadeRanking] = useState<PreferenciasPrivacidadeRanking | null>(null)
   const [privacidadeCarregando, setPrivacidadeCarregando] = useState(false)
   const [privacidadeSalvando, setPrivacidadeSalvando] = useState<FinalidadePrivacidadeRanking | 'todas' | null>(null)
@@ -986,6 +988,16 @@ export default function ClientePage() {
     return null
   }
 
+  async function carregarResultadoRankingRecente(): Promise<void> {
+    if (modoPreview) return
+    try {
+      const res = await fetchCliente('/api/cliente/ranking/resultado-recente', { cache: 'no-store' }, sessaoMemRef.current)
+      if (!res.ok) return
+      const data = await res.json().catch(() => ({}))
+      setResultadoRankingAnterior(data?.resultado ?? null)
+    } catch {}
+  }
+
   async function carregarPrivacidadeRanking(): Promise<PreferenciasPrivacidadeRanking | null> {
     setPrivacidadeCarregando(true)
     setPrivacidadeErro('')
@@ -1013,7 +1025,10 @@ export default function ClientePage() {
     if (jaParticipa && regraAceita) {
       setRankingConsentModal(false)
       const rankingAtual = painel?.ranking ?? (await carregarPainel())?.ranking
-      if (rankingAtual) setMobilePanel('ranking')
+      if (rankingAtual) {
+        setMobilePanel('ranking')
+        void carregarResultadoRankingRecente()
+      }
       else setPreviewAviso('Você já participa. Sua posição aparece quando houver uma temporada ativa.')
     }
   }
@@ -1063,7 +1078,10 @@ export default function ClientePage() {
       setPrivacidadeRanking({ finalidades: data.finalidades, participaCampanha: true, regraJogo: data.regraJogo })
       setRankingConsentModal(false)
       const painelAtual = await carregarPainel()
-      if (painelAtual?.ranking) setMobilePanel('ranking')
+      if (painelAtual?.ranking) {
+        setMobilePanel('ranking')
+        void carregarResultadoRankingRecente()
+      }
       else setPreviewAviso(painelAtual
         ? 'Ranking ativado. Sua posição aparece quando houver uma temporada ativa.'
         : 'Ranking ativado. Não foi possível carregar sua posição agora; tente abrir novamente.')
@@ -1084,6 +1102,7 @@ export default function ClientePage() {
       setPrivacidadeRanking({
         finalidades: data.finalidades,
         participaCampanha: data.participaCampanha === true,
+        regraJogo: data.regraJogo,
       })
       await carregarPainel()
       setMobilePanel(null)
