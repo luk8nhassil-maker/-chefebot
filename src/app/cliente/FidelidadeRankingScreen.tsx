@@ -122,6 +122,7 @@ export function FidelidadeRankingScreen({
   indicando = false,
   compartilhando = false,
   posPedido = null,
+  onAlterarPrivacidade,
   onRevogarTodas,
   onIndicarAmigo,
   onCompartilharConquista,
@@ -155,10 +156,10 @@ export function FidelidadeRankingScreen({
   const nomeSeguro = (entrada: { eVoce: boolean; participaCampanha: boolean; posicao: number; nomePublico?: string; codinomeSecreto?: string }) => {
     if (entrada.eVoce && !entrada.participaCampanha) return 'Você — fora da disputa'
     if (!entrada.participaCampanha) return 'Fora da disputa'
-    return entrada.eVoce ? 'Você' : entrada.codinomeSecreto || entrada.nomePublico || 'Rival secreto'
+    return entrada.eVoce ? 'Você' : entrada.nomePublico || entrada.codinomeSecreto || 'Rival secreto'
   }
   const avatarSeguro = (entrada: { eVoce: boolean; nomePublico?: string; codinomeSecreto?: string } | undefined) =>
-    entrada?.eVoce ? 'V' : (entrada?.codinomeSecreto || entrada?.nomePublico)?.slice(0, 1).toUpperCase() || null
+    entrada?.eVoce ? 'V' : (entrada?.nomePublico || entrada?.codinomeSecreto)?.slice(0, 1).toUpperCase() || null
   // `linhas` mistura o ranking geral (sem selo) com o de participantes (com
   // selo) conforme a aba — leitura opcional e seletiva, nunca inventa selo
   // para quem não tem um vindo do servidor.
@@ -190,6 +191,13 @@ export function FidelidadeRankingScreen({
     variacao: ranking.participantes.variacaoPosicao,
   })
   const compartilhamentoLiberado = indicacao?.compartilhamentoLiberado !== false
+  const consentimentoNomeCompleto = privacidade?.finalidades.find((item) =>
+    item.finalidade === 'ranking_nome_completo' && item.disponivel && item.textoVersao
+  ) ?? null
+  const nomeCompletoAtivo = consentimentoNomeCompleto?.estado === 'concedido'
+  const primeiroNomeAtivo = privacidade?.finalidades.some((item) =>
+    item.finalidade === 'ranking_primeiro_nome' && item.estado === 'concedido'
+  ) ?? false
   const podeCompartilharConquista = conquista !== null && indicacao?.ativa === true && !!onCompartilharConquista && compartilhamentoLiberado
   // Progresso absoluto (XP acumulado / XP do próximo nível) — nunca inventa
   // um "início de faixa" que o domínio (calcularNivelChef) não devolve; sem
@@ -456,8 +464,29 @@ export function FidelidadeRankingScreen({
 
       {aba === 'minha' && <details className="cf-ranking-privacy">
         <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Privacidade e participação</summary>
-        <p>Durante a temporada você aparece por codinome. Ao final, a regra aceita na entrada permite revelar seu primeiro nome e sua foto de perfil por 30 dias para manter sua colocação pública.</p>
+        <p>Quem não autoriza nome continua com codinome. Se você autorizar, seu nome substitui o codinome durante a temporada.</p>
         {privacidadeCarregando && <p>Carregando regra do jogo…</p>}
+        {!privacidadeCarregando && consentimentoNomeCompleto && (
+          <div className="cf-ranking-name-choice">
+            <span>
+              <strong>{nomeCompletoAtivo ? 'Nome completo visível' : primeiroNomeAtivo ? 'Primeiro nome visível' : 'Você está com codinome'}</strong>
+              <small>{nomeCompletoAtivo ? 'Seu nome cadastrado aparece para os participantes.' : 'Você pode liberar seu nome completo quando quiser.'}</small>
+            </span>
+            <button
+              type="button"
+              disabled={privacidadeSalvando !== null}
+              onClick={() => onAlterarPrivacidade(
+                'ranking_nome_completo',
+                nomeCompletoAtivo ? 'revogado' : 'concedido',
+                consentimentoNomeCompleto.textoVersao,
+              )}
+            >
+              {privacidadeSalvando === 'ranking_nome_completo'
+                ? 'Salvando…'
+                : nomeCompletoAtivo ? 'Usar codinome' : 'Mostrar nome completo'}
+            </button>
+          </div>
+        )}
         {!privacidadeCarregando && privacidade?.regraJogo?.aceitaRevelacao30d && (
           <p><strong>Regra aceita:</strong> revelação final por 30 dias para manter a colocação pública.</p>
         )}
@@ -620,7 +649,7 @@ export function FidelidadeRankingScreen({
         .cf-ranking-tabs { display: grid; grid-template-columns: repeat(3,1fr); gap: 2px; margin: 17px 0 11px; padding: 3px; border-radius: 24px; background: rgba(222,227,234,.75); }.cf-ranking-tabs button { min-height: 39px; border: 0; border-radius: 21px; background: transparent; color: #687488; font: 700 12px inherit; cursor: pointer; }.cf-ranking-tabs button.ativo { color: #1f63d6; background: rgba(255,255,255,.98); box-shadow: 0 3px 10px rgba(48,75,108,.1); }
         .cf-ranking-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; }.cf-ranking-row { display: grid; grid-template-columns: 30px 34px 1fr auto; align-items: center; gap: 7px; min-height: 48px; padding: 6px 11px; border: 1px solid rgba(255,255,255,.85); border-radius: 24px; background: rgba(255,255,255,.84); box-shadow: 0 5px 14px rgba(58,78,101,.05); }.cf-ranking-row.voce { border-color: rgba(88,151,247,.4); background: linear-gradient(90deg, rgba(234,244,255,.98), rgba(248,252,255,.9)); }.cf-ranking-row>strong { font-size: 17px; text-align: center; }.cf-ranking-row-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #e8eef5; color: #61738a; font-size: 12px; font-weight: 800; }.cf-ranking-row.voce .cf-ranking-row-avatar { background: #4f86ed; color: #fff; }.cf-ranking-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }.cf-ranking-row-name small{display:block;margin-top:2px;color:#758296;font-size:10px}.cf-ranking-row>b { color: #ae7109; font-size: 12px; white-space: nowrap; }.cf-ranking-empty,.cf-ranking-footnote { margin: 7px 2px; color: #6d7a8c; font-size: 12px; line-height: 1.45; text-align: center; }
         .cf-ranking-note { display: flex; gap: 12px; align-items: center; margin-top: 17px; padding: 14px 15px; border: 1px solid rgba(226,180,55,.38); border-radius: 18px; background: linear-gradient(110deg, rgba(255,252,239,.96), rgba(255,247,218,.75)); }.cf-ranking-note>span { font-size: 25px; }.cf-ranking-note strong { font-size: 13px; display: block; }.cf-ranking-note p { margin: 4px 0 0; color: #697588; font-size: 11.5px; line-height: 1.35; }
-        .cf-ranking-reveal{margin:16px 0;padding:14px;border:1px solid rgba(111,76,255,.18);border-radius:18px;background:linear-gradient(145deg,rgba(246,243,255,.95),rgba(255,255,255,.98))}.cf-ranking-reveal-head{display:grid;gap:3px;margin-bottom:10px}.cf-ranking-reveal-head>span{font-size:10px;font-weight:900;letter-spacing:.08em;color:#7159c8}.cf-ranking-reveal-head>strong{font-size:15px;color:#293a57}.cf-ranking-reveal-head>small{font-size:10.5px;color:#718199}.cf-ranking-reveal-list{display:grid;gap:7px}.cf-ranking-reveal-row{display:grid;grid-template-columns:28px 36px minmax(0,1fr) auto;align-items:center;gap:8px;padding:7px 8px;border-radius:12px;background:rgba(255,255,255,.82)}.cf-ranking-reveal-row>strong{font-size:11px;color:#718199}.cf-ranking-reveal-avatar{width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:50%;overflow:hidden;background:#e8edff;color:#5268a9;font-weight:900}.cf-ranking-reveal-avatar img{width:100%;height:100%;object-fit:cover}.cf-ranking-reveal-row>span:nth-child(3){display:grid;min-width:0}.cf-ranking-reveal-row b{font-size:12px;color:#30435f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cf-ranking-reveal-row small{font-size:9.5px;color:#8390a3}.cf-ranking-reveal-row em{font-style:normal}
+        .cf-ranking-reveal{margin:16px 0;padding:14px;border:1px solid rgba(111,76,255,.18);border-radius:18px;background:linear-gradient(145deg,rgba(246,243,255,.95),rgba(255,255,255,.98))}.cf-ranking-reveal-head{display:grid;gap:3px;margin-bottom:10px}.cf-ranking-reveal-head>span{font-size:10px;font-weight:900;letter-spacing:.08em;color:#7159c8}.cf-ranking-reveal-head>strong{font-size:15px;color:#293a57}.cf-ranking-reveal-head>small{font-size:10.5px;color:#718199}.cf-ranking-reveal-list{display:grid;gap:7px}.cf-ranking-reveal-row{display:grid;grid-template-columns:28px 36px minmax(0,1fr) auto;align-items:center;gap:8px;padding:7px 8px;border-radius:12px;background:rgba(255,255,255,.82)}.cf-ranking-reveal-row>strong{font-size:11px;color:#718199}.cf-ranking-reveal-avatar{width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:50%;overflow:hidden;background:#e8edff;color:#5268a9;font-weight:900}.cf-ranking-reveal-avatar img{width:100%;height:100%;object-fit:cover}.cf-ranking-reveal-row>span:nth-child(3){display:grid;min-width:0}.cf-ranking-reveal-row b{font-size:12px;color:#30435f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cf-ranking-reveal-row small{font-size:9.5px;color:#8390a3}.cf-ranking-reveal-row em{font-style:normal}.cf-ranking-name-choice{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:10px 0;padding:10px 11px;border:1px solid #d9e3ef;border-radius:13px;background:#f8fbff}.cf-ranking-name-choice span{display:grid;gap:2px;min-width:0}.cf-ranking-name-choice strong{font-size:12px;color:#304d77}.cf-ranking-name-choice small{font-size:10.5px;color:#718199;line-height:1.3}.cf-ranking-name-choice button{flex:none;border:0;border-radius:999px;padding:8px 10px;background:#4f86ed;color:#fff;font-size:10.5px;font-weight:800;cursor:pointer}.cf-ranking-name-choice button:disabled{opacity:.55;cursor:wait}
         .cf-ranking-share-locked { display: grid; gap: 3px; margin-top: 10px; padding: 9px 11px; border: 1px solid rgba(180,196,220,.75); border-radius: 12px; background: rgba(247,250,255,.8); color: #52657f; }.cf-ranking-share-locked strong { color: #304d77; font-size: 12px; }.cf-ranking-share-locked small { font-size: 11px; line-height: 1.35; }
         .cf-ranking-selos { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; margin: 0 0 12px; }
         .cf-ranking-selo { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 999px; font-size: 11.5px; font-weight: 800; background: #eef1f5; color: #4a5568; }
