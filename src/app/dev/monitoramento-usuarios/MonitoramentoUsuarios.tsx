@@ -24,6 +24,14 @@ type ReadResult = {
     checkoutStarts: number; rankingOpens: number; fidelityOpens: number;
     totalEngagementSeconds: number; medianDaysBetweenSessions: number | null; lastSeenAtMs: number | null;
   };
+  purchaseTiming: {
+    janelaAnaliseDias: number; pedidosAnalisados: number; faseMes: string; faseMesLabel: string;
+    concentracaoPercentual: number; confianca: string; diaCentralProvavel: number | null;
+    janelaProvavel: { inicioDia: number; fimDia: number } | null;
+    diaSemanaMaisForte: { label: string; percentual: number } | null;
+    horarioMaisForte: { inicioHora: number; fimHora: number; percentual: number } | null;
+    distribuicaoMes: { inicio: number; meio: number; fim: number };
+  };
 };
 const labels: Record<string, string> = {
   app_open: "Abriu o app", whatsapp_link_verified: "Link oficial do WhatsApp validado", screen_view: "Abriu uma tela", search_used: "Pesquisou",
@@ -112,6 +120,26 @@ export default function MonitoramentoUsuarios() {
           ["Inícios de checkout", result.summary.checkoutStarts], ["Tempo ativo", Math.round(result.summary.totalEngagementSeconds / 60) + " min"],
           ["Intervalo mediano", result.summary.medianDaysBetweenSessions === null ? "—" : Math.round(result.summary.medianDaysBetweenSessions * 10) / 10 + " dias"], ["Última atividade", result.summary.lastSeenAtMs ? new Date(result.summary.lastSeenAtMs).toLocaleDateString("pt-BR") : "—"],
         ].map(([label,value]) => <div key={String(label)} style={card}><div style={muted}>{label}</div><strong style={{ display: "block", fontSize: 24, marginTop: 6 }}>{value}</strong></div>)}
+      </section>
+      <section style={{ ...card, marginTop: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+          <div>
+            <p style={{ ...muted, margin: "0 0 5px", textTransform: "uppercase", fontWeight: 800, letterSpacing: .7 }}>Ritmo de compra</p>
+            <h2 style={{ fontSize: 20, margin: 0 }}>{result.purchaseTiming.faseMesLabel}</h2>
+          </div>
+          <span style={{ ...muted, border: "1px solid var(--border, rgba(255,255,255,.12))", borderRadius: 999, padding: "6px 10px" }}>Confiança: {result.purchaseTiming.confianca}</span>
+        </div>
+        {result.purchaseTiming.pedidosAnalisados < 3 ?
+          <p style={{ ...muted, lineHeight: 1.6, marginBottom: 0 }}>Ainda não existem pedidos entregues suficientes para identificar um padrão confiável. O sistema só começa a sugerir uma janela a partir de 3 pedidos.</p> : <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginTop: 14 }}>
+            <div><div style={muted}>Pedidos analisados</div><strong style={{ fontSize: 22 }}>{result.purchaseTiming.pedidosAnalisados}</strong></div>
+            <div><div style={muted}>Concentração</div><strong style={{ fontSize: 22 }}>{result.purchaseTiming.concentracaoPercentual}%</strong></div>
+            <div><div style={muted}>Janela provável</div><strong style={{ fontSize: 22 }}>{result.purchaseTiming.janelaProvavel ? `dias ${result.purchaseTiming.janelaProvavel.inicioDia}–${result.purchaseTiming.janelaProvavel.fimDia}` : "—"}</strong></div>
+            <div><div style={muted}>Dia forte</div><strong style={{ fontSize: 22 }}>{result.purchaseTiming.diaSemanaMaisForte ? result.purchaseTiming.diaSemanaMaisForte.label : "—"}</strong></div>
+            <div><div style={muted}>Horário forte</div><strong style={{ fontSize: 22 }}>{result.purchaseTiming.horarioMaisForte ? `${String(result.purchaseTiming.horarioMaisForte.inicioHora).padStart(2,"0")}h–${String(result.purchaseTiming.horarioMaisForte.fimHora).padStart(2,"0")}h` : "—"}</strong></div>
+          </div>
+          <p style={{ ...muted, margin: "14px 0 0", lineHeight: 1.6 }}>Distribuição em {result.purchaseTiming.janelaAnaliseDias} dias: começo {result.purchaseTiming.distribuicaoMes.inicio} · meio {result.purchaseTiming.distribuicaoMes.meio} · fim {result.purchaseTiming.distribuicaoMes.fim}. Isso mostra quando ele costuma comprar; não afirma quando recebe salário.</p>
+        </>}
       </section>
       <section style={{ ...card, marginTop: 16 }}>
         <h2 style={{ fontSize: 17, margin: "0 0 12px" }}>Sinais para investigação</h2>

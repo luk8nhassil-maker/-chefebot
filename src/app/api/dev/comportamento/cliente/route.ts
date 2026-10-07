@@ -7,8 +7,12 @@ import {
 } from "@/lib/behaviorAnalyticsRead";
 import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
 import { sanitizeTelefoneCliente } from "@/lib/clientes";
+import { consultarEventosCliente, TENANT_PADRAO_ANALYTICS } from "@/lib/historicoAnalitico";
+import { calcularRitmoCompraCliente } from "@/lib/purchaseTiming";
 
 const PERIODOS = new Set([7, 30, 60, 90]);
+const RITMO_COMPRA_JANELA_DIAS = 180;
+const MS_POR_DIA = 24 * 60 * 60 * 1000;
 
 async function devAutorizado(req: NextRequest): Promise<boolean> {
   const token = req.cookies.get("auth-token")?.value;
@@ -60,7 +64,15 @@ export async function POST(req: NextRequest) {
 
   const endMs = Date.now();
   const startMs = endMs - dias * 24 * 60 * 60 * 1000;
-  const timeline = await consultarTimelineComportamentalCliente({ clienteId, startMs, endMs });
+  const [timeline, eventosCompra] = await Promise.all([
+    consultarTimelineComportamentalCliente({ clienteId, startMs, endMs }),
+    consultarEventosCliente(
+      TENANT_PADRAO_ANALYTICS,
+      clienteId,
+      endMs - RITMO_COMPRA_JANELA_DIAS * MS_POR_DIA,
+      endMs,
+    ),
+  ]);
 
   return NextResponse.json(
     {
@@ -68,6 +80,7 @@ export async function POST(req: NextRequest) {
       periodoDias: dias,
       timeline,
       summary: resumirTimelineComportamentalCliente(timeline.events),
+      purchaseTiming: calcularRitmoCompraCliente(eventosCompra, RITMO_COMPRA_JANELA_DIAS),
     },
     {
       headers: {
