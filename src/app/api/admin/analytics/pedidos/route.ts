@@ -14,8 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import {
-  consultarEventosPorPeriodo,
-  consultarEventosAntesDe,
+  consultarClientesComHistoricoAnterior,
   calcularMetricas,
   periodo7Dias,
   periodo30Dias,
@@ -23,6 +22,7 @@ import {
   periodo90Dias,
   TENANT_PADRAO_ANALYTICS,
 } from "@/lib/historicoAnalitico";
+import { consultarEventosAnaliticosComFallback } from "@/lib/analyticsPedidosReadModel.server";
 
 async function checkAuthAdmin(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -60,15 +60,34 @@ export async function GET(req: NextRequest) {
   const { inicioMs, fimMs } = resolverPeriodo(dias, agora);
 
   try {
-    const [eventos, eventosAnteriores] = await Promise.all([
-      consultarEventosPorPeriodo(tenantId, inicioMs, fimMs),
-      consultarEventosAntesDe(tenantId, inicioMs),
-    ]);
-    const clientesComHistoricoAnterior = new Set(
-      eventosAnteriores
+    const leitura = await consultarEventosAnaliticosComFallback(tenantId, inicioMs, fimMs, agora);
+    const eventos = leitura.eventos;
+    const clientesAtuais = new Set(
+      eventos
         .filter((evento) => evento.statusAnalitico === "entregue")
-        .map((evento) => evento.clienteId)
+        .map((evento) => evento.clienteId),
     );
+
+    const historicoFallback = new Set(
+      leitura.fallbackTodos
+        .filter((evento) => evento.statusAnalitico === "entregue" && evento.criadoEmMs < inicioMs)
+        .map((evento) => evento.clienteId),
+    );
+
+    const faltantesNoFallback = [...clientesAtuais].filter((clienteId) => !historicoFallback.has(clienteId));
+    let historicoIndice = new Set<string>();
+    let historicoAnteriorParcial = false;
+    if (faltantesNoFallback.length > 0 && leitura.fonte.indiceDisponivel) {
+      try {
+        historicoIndice = await consultarClientesComHistoricoAnterior(tenantId, faltantesNoFallback, inicioMs);
+      } catch {
+        historicoAnteriorParcial = true;
+      }
+    } else if (faltantesNoFallback.length > 0 && !leitura.fonte.fallbackPedidosDisponivel) {
+      historicoAnteriorParcial = true;
+    }
+
+    const clientesComHistoricoAnterior = new Set([...historicoFallback, ...historicoIndice]);
     const metricas = calcularMetricas(eventos, clientesComHistoricoAnterior);
 
     return NextResponse.json(
@@ -78,7 +97,10 @@ export async function GET(req: NextRequest) {
         periodosDias: dias,
         inicioIso: new Date(inicioMs).toISOString(),
         fimIso: new Date(fimMs).toISOString(),
-        totalEventosNoIndice: eventos.length,
+        totalEventosNoIndice: leitura.fonte.eventosIndice,
+        totalEventosConsiderados: eventos.length,
+        fonteDados: leitura.fonte,
+        historicoAnteriorParcial,
         metricas,
       },
       { headers: { "Cache-Control": "no-store, max-age=0" } }

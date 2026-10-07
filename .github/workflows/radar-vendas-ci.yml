@@ -5,10 +5,16 @@ on:
     paths:
       - "src/lib/purchaseTiming*.ts"
       - "src/lib/radarVendas*.ts"
+      - "src/lib/analyticsPedidosReadModel.server*.ts"
+      - "src/lib/historicoAnalitico.ts"
       - "src/app/api/admin/radar-vendas/**"
+      - "src/app/api/admin/analytics/pedidos/**"
       - "src/app/api/chefebot/indicacao/**"
       - "src/app/api/dev/radar-vendas/**"
       - "src/app/admin/radar-vendas/**"
+      - "src/app/admin/fidelidade/**"
+      - "src/components/PanelShell.tsx"
+      - "src/components/PanelShell.test.tsx"
       - "src/app/chefebot/indicacao/**"
       - "src/app/dev/radar-vendas/**"
       - "src/app/admin/page.tsx"
@@ -56,7 +62,12 @@ jobs:
           src/lib/purchaseTiming.test.ts
           src/lib/radarVendas.test.ts
           src/lib/radarVendasEntitlement.server.test.ts
+          src/lib/analyticsPedidosReadModel.server.test.ts
           src/app/api/admin/radar-vendas/route.test.ts
+          src/app/admin/radar-vendas/page.test.ts
+          src/app/api/admin/analytics/pedidos/route.test.ts
+          src/app/admin/fidelidade/page.test.ts
+          src/components/PanelShell.test.tsx
           src/app/api/chefebot/indicacao/route.test.ts
 
       - name: Lint dos arquivos do Radar
@@ -66,14 +77,24 @@ jobs:
           src/lib/radarVendas.test.ts
           src/lib/radarVendasEntitlement.server.ts
           src/lib/radarVendasEntitlement.server.test.ts
+          src/lib/analyticsPedidosReadModel.server.ts
+          src/lib/analyticsPedidosReadModel.server.test.ts
+          src/lib/historicoAnalitico.ts
           src/app/api/admin/radar-vendas/route.ts
           src/app/api/admin/radar-vendas/route.test.ts
+          src/app/api/admin/analytics/pedidos/route.ts
+          src/app/api/admin/analytics/pedidos/route.test.ts
           src/app/api/admin/radar-vendas/indicacao/route.ts
           src/app/api/chefebot/indicacao/route.ts
           src/app/api/chefebot/indicacao/route.test.ts
           src/app/api/dev/radar-vendas/indicacoes/route.ts
           src/app/api/dev/radar-vendas/indicacoes/confirmar/route.ts
           src/app/admin/radar-vendas/page.tsx
+          src/app/admin/radar-vendas/page.test.ts
+          src/app/admin/fidelidade/page.tsx
+          src/app/admin/fidelidade/page.test.ts
+          src/components/PanelShell.tsx
+          src/components/PanelShell.test.tsx
           src/app/chefebot/indicacao/page.tsx
           src/app/dev/radar-vendas/page.tsx
           src/app/admin/page.tsx

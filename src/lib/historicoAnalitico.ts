@@ -286,6 +286,40 @@ export async function consultarEventosAntesDe(
 }
 
 /**
+ * Verifica recorrência somente para os clientes presentes no período atual.
+ * Evita ler todo o histórico antigo e todos os eventos apenas para responder
+ * "este cliente já comprou antes?".
+ */
+export async function consultarClientesComHistoricoAnterior(
+  tenantId: string,
+  clienteIds: Iterable<string>,
+  antesDeMs: number,
+): Promise<Set<string>> {
+  const ids = [...new Set([...clienteIds].filter(Boolean))];
+  const resultado = new Set<string>();
+  if (antesDeMs <= 0 || ids.length === 0) return resultado;
+
+  const BATCH_CLIENTES = 50;
+  for (let i = 0; i < ids.length; i += BATCH_CLIENTES) {
+    const lote = ids.slice(i, i + BATCH_CLIENTES);
+    const respostas = await Promise.all(
+      lote.map((clienteId) =>
+        aredis.zrange(
+          chaveIndiceCliente(tenantId, clienteId),
+          0,
+          antesDeMs - 1,
+          { byScore: true, limit: { offset: 0, count: 1 } },
+        ),
+      ),
+    );
+    respostas.forEach((itens, idx) => {
+      if (itens.length > 0) resultado.add(lote[idx]!);
+    });
+  }
+  return resultado;
+}
+
+/**
  * Confirma, com custo O(1), se o coletor analítico já possuía histórico antes
  * de um instante. Usado por regras semanais que não podem tratar uma semana
  * parcialmente instrumentada como se fosse uma semana completa.

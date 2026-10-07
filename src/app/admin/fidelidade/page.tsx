@@ -83,6 +83,13 @@ type AnalyticsData = {
   }
   periodosDias?: PeriodoAnalytics
   totalEventosNoIndice?: number
+  totalEventosConsiderados?: number
+  fonteDados?: {
+    origem?: 'analytics' | 'analytics+pedidos' | 'pedidos'
+    eventosIndice?: number
+    eventosFallbackAdicionados?: number
+  }
+  historicoAnteriorParcial?: boolean
   error?: string
 }
 
@@ -143,13 +150,18 @@ export default function FidelidadePage() {
   async function carregarAnalytics(p: PeriodoAnalytics) {
     setErroAnalytics(null)
     setAnalyticsCarregado(false)
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 10000)
     try {
-      const r = await fetch(`/api/admin/analytics/pedidos?periodo=${p}`)
+      const r = await fetch(`/api/admin/analytics/pedidos?periodo=${p}`, { cache: 'no-store', signal: controller.signal })
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       setAnalytics(await r.json())
-    } catch {
-      setErroAnalytics('Erro ao carregar analytics.')
+    } catch (erro) {
+      setErroAnalytics(erro instanceof DOMException && erro.name === 'AbortError'
+        ? 'O Analytics demorou demais para responder. Tente novamente.'
+        : 'Erro ao carregar analytics.')
     } finally {
+      window.clearTimeout(timeout)
       setAnalyticsCarregado(true)
     }
   }
@@ -165,11 +177,28 @@ export default function FidelidadePage() {
 
   useEffect(() => {
     let cancelled = false
-    fetch(`/api/admin/analytics/pedidos?periodo=${periodo}`)
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 10000)
+    fetch(`/api/admin/analytics/pedidos?periodo=${periodo}`, { cache: 'no-store', signal: controller.signal })
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
-      .then(data => { if (!cancelled) { setAnalytics(data); setErroAnalytics(null); setAnalyticsCarregado(true) } })
-      .catch(() => { if (!cancelled) { setErroAnalytics('Erro ao carregar analytics.'); setAnalyticsCarregado(true) } })
-    return () => { cancelled = true }
+      .then(data => { if (!cancelled) setAnalytics(data) })
+      .catch((erro) => {
+        if (!cancelled) {
+          setErroAnalytics(erro instanceof DOMException && erro.name === 'AbortError'
+            ? 'O Analytics demorou demais para responder. Tente novamente.'
+            : 'Erro ao carregar analytics.')
+        }
+      })
+      .finally(() => {
+        window.clearTimeout(timeout)
+        if (!cancelled) setAnalyticsCarregado(true)
+      })
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeout)
+      controller.abort()
+    }
   }, [periodo])
 
   async function criarTemporada30d() {
@@ -586,7 +615,11 @@ export default function FidelidadePage() {
                   {([7, 30, 60, 90] as PeriodoAnalytics[]).map((p) => (
                     <button
                       key={p}
-                      onClick={() => setPeriodo(p)}
+                      onClick={() => {
+                        setAnalyticsCarregado(false)
+                        setErroAnalytics(null)
+                        setPeriodo(p)
+                      }}
                       style={{
                         fontSize: 12,
                         padding: '4px 10px',
@@ -605,7 +638,7 @@ export default function FidelidadePage() {
               </div>
 
               <div style={{ color: 'var(--foreground-muted)', fontSize: 12, lineHeight: 1.45, marginBottom: 12 }}>
-                Considera pedidos entregues no período selecionado. Cada cliente é contado uma única vez; novos e recorrentes usam o histórico analítico disponível.
+                Considera pedidos entregues no período selecionado. Cada cliente é contado uma única vez. O painel usa o índice analítico e completa a leitura com o histórico real de pedidos quando necessário.
               </div>
 
               {erroAnalytics && (
@@ -620,11 +653,19 @@ export default function FidelidadePage() {
               {!analyticsCarregado ? (
                 <div style={{ color: 'var(--foreground-muted)', fontSize: 13, padding: '16px 0', textAlign: 'center' }}>Carregando…</div>
               ) : analytics && !erroAnalytics && (
-                (analytics.totalEventosNoIndice ?? analytics.metricas?.pedidosValidos ?? 0) === 0 ? (
+                (analytics.totalEventosConsiderados ?? analytics.metricas?.pedidosValidos ?? 0) === 0 ? (
                   <div style={{ fontSize: 13, color: 'var(--foreground-muted)', fontStyle: 'italic', padding: '8px 0' }}>
                     Histórico insuficiente para o período de {periodo} dias. Os dados aparecerão aqui conforme os pedidos forem registrados.
                   </div>
-                ) : analytics.metricas ? <FidelidadeAnalyticsDashboard metricas={analytics.metricas} periodo={periodo} /> : null
+                ) : analytics.metricas ? (
+                  <>
+                    <div style={{ fontSize: 11, color: 'var(--foreground-muted)', marginBottom: 10 }}>
+                      Fonte: {analytics.fonteDados?.origem === 'pedidos' ? 'histórico real de pedidos' : analytics.fonteDados?.origem === 'analytics+pedidos' ? 'índice analítico + histórico de pedidos' : 'índice analítico'}
+                      {analytics.historicoAnteriorParcial ? ' · recorrência parcial' : ''}
+                    </div>
+                    <FidelidadeAnalyticsDashboard metricas={analytics.metricas} periodo={periodo} />
+                  </>
+                ) : null
               )}
             </div>
 

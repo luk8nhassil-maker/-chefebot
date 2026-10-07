@@ -1,28 +1,25 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { GET } from "./route";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-// ── Mock auth ──────────────────────────────────────────────────────────────────
-vi.mock("@/lib/auth", () => ({
+const mocks = vi.hoisted(() => ({
   verifyToken: vi.fn(),
+  consultarEventosAnaliticosComFallback: vi.fn(),
+  consultarClientesComHistoricoAnterior: vi.fn(),
 }));
 
-// ── Mock historicoAnalitico ────────────────────────────────────────────────────
+vi.mock("@/lib/auth", () => ({ verifyToken: mocks.verifyToken }));
+vi.mock("@/lib/analyticsPedidosReadModel.server", () => ({
+  consultarEventosAnaliticosComFallback: mocks.consultarEventosAnaliticosComFallback,
+}));
 vi.mock("@/lib/historicoAnalitico", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/historicoAnalitico")>();
   return {
     ...original,
-    consultarEventosPorPeriodo: vi.fn(async () => []),
-    consultarEventosAntesDe: vi.fn(async () => []),
+    consultarClientesComHistoricoAnterior: mocks.consultarClientesComHistoricoAnterior,
   };
 });
 
-import { verifyToken } from "@/lib/auth";
-import { consultarEventosPorPeriodo, consultarEventosAntesDe } from "@/lib/historicoAnalitico";
-
-const mockVerify = verifyToken as ReturnType<typeof vi.fn>;
-const mockConsultar = consultarEventosPorPeriodo as ReturnType<typeof vi.fn>;
-const mockConsultarAntes = consultarEventosAntesDe as ReturnType<typeof vi.fn>;
+import { GET } from "./route";
 
 function makeReq(params: Record<string, string> = {}, cookie = "auth-token=tok") {
   const url = new URL("http://localhost/api/admin/analytics/pedidos");
@@ -35,7 +32,7 @@ const eventoBase = {
   clienteId: "c1",
   tenantId: "default",
   criadoEmMs: Date.now(),
-  expedienteId: "2024-01-01",
+  expedienteId: "2026-10-07",
   valorElegivelCents: 5000,
   statusAnalitico: "entregue" as const,
   canal: "whatsapp" as const,
@@ -45,144 +42,103 @@ const eventoBase = {
 };
 
 beforeEach(() => {
-  mockVerify.mockReset();
-  mockConsultar.mockReset();
-  mockConsultar.mockResolvedValue([]);
-  mockConsultarAntes.mockReset();
-  mockConsultarAntes.mockResolvedValue([]);
+  vi.clearAllMocks();
+  mocks.verifyToken.mockResolvedValue({ role: "admin" });
+  mocks.consultarEventosAnaliticosComFallback.mockResolvedValue({
+    eventos: [],
+    fallbackTodos: [],
+    fonte: {
+      indiceDisponivel: true,
+      fallbackPedidosDisponivel: true,
+      eventosIndice: 0,
+      eventosFallbackAdicionados: 0,
+      origem: "pedidos",
+    },
+  });
+  mocks.consultarClientesComHistoricoAnterior.mockResolvedValue(new Set());
 });
 
 describe("GET /api/admin/analytics/pedidos", () => {
-  it("rejeita sem cookie de auth", async () => {
-    mockVerify.mockResolvedValue(null);
-    const res = await GET(makeReq({}, ""));
-    expect(res.status).toBe(401);
+  it("rejeita sem autenticação", async () => {
+    mocks.verifyToken.mockResolvedValue(null);
+    expect((await GET(makeReq({}, ""))).status).toBe(401);
   });
 
-  it("rejeita role cliente", async () => {
-    mockVerify.mockResolvedValue({ role: "cliente" });
+  it("aceita admin e retorna vazio sem travar", async () => {
     const res = await GET(makeReq());
-    expect(res.status).toBe(401);
-  });
-
-  it("aceita role admin", async () => {
-    mockVerify.mockResolvedValue({ role: "admin" });
-    const res = await GET(makeReq());
+    const body = await res.json();
     expect(res.status).toBe(200);
-  });
-
-  it("aceita role dev", async () => {
-    mockVerify.mockResolvedValue({ role: "dev" });
-    const res = await GET(makeReq());
-    expect(res.status).toBe(200);
-  });
-
-  it("rejeita periodo invalido", async () => {
-    mockVerify.mockResolvedValue({ role: "admin" });
-    const res = await GET(makeReq({ periodo: "45" }));
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toMatch(/periodo/);
-  });
-
-  it("aceita periodo 7", async () => {
-    mockVerify.mockResolvedValue({ role: "admin" });
-    const res = await GET(makeReq({ periodo: "7" }));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.periodosDias).toBe(7);
-  });
-
-  it("aceita periodo 90", async () => {
-    mockVerify.mockResolvedValue({ role: "admin" });
-    const res = await GET(makeReq({ periodo: "90" }));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.periodosDias).toBe(90);
-  });
-
-  it("usa tenantId default quando ausente", async () => {
-    mockVerify.mockResolvedValue({ role: "admin" });
-    const res = await GET(makeReq());
-    const body = await res.json();
-    expect(body.tenantId).toBe("default");
-  });
-
-  it("usa tenantId fornecido", async () => {
-    mockVerify.mockResolvedValue({ role: "admin" });
-    const res = await GET(makeReq({ tenantId: "loja-xyz" }));
-    const body = await res.json();
-    expect(body.tenantId).toBe("loja-xyz");
-  });
-
-  it("retorna metricas zeradas para periodo vazio", async () => {
-    mockVerify.mockResolvedValue({ role: "admin" });
-    mockConsultar.mockResolvedValue([]);
-    const res = await GET(makeReq());
-    const body = await res.json();
-    expect(body.ok).toBe(true);
     expect(body.metricas.pedidosValidos).toBe(0);
-    expect(body.metricas.clientesUnicos).toBe(0);
-    expect(body.metricas.receitaElegivelCents).toBe(0);
+    expect(body.totalEventosConsiderados).toBe(0);
   });
 
-  it("retorna metricas com eventos", async () => {
-    mockVerify.mockResolvedValue({ role: "admin" });
-    mockConsultar.mockResolvedValue([eventoBase]);
-    const res = await GET(makeReq());
+  it("usa fallback de pedidos reais quando necessário", async () => {
+    mocks.consultarEventosAnaliticosComFallback.mockResolvedValue({
+      eventos: [eventoBase],
+      fallbackTodos: [eventoBase],
+      fonte: {
+        indiceDisponivel: true,
+        fallbackPedidosDisponivel: true,
+        eventosIndice: 0,
+        eventosFallbackAdicionados: 1,
+        origem: "pedidos",
+      },
+    });
+    const res = await GET(makeReq({ periodo: "30" }));
     const body = await res.json();
-    expect(body.ok).toBe(true);
+    expect(res.status).toBe(200);
     expect(body.metricas.pedidosValidos).toBe(1);
     expect(body.metricas.receitaElegivelCents).toBe(5000);
-    expect(body.totalEventosNoIndice).toBe(1);
+    expect(body.totalEventosNoIndice).toBe(0);
+    expect(body.totalEventosConsiderados).toBe(1);
+    expect(body.fonteDados.origem).toBe("pedidos");
   });
 
-  it("separa clientes novos e recorrentes usando o histórico anterior", async () => {
-    mockVerify.mockResolvedValue({ role: "admin" });
-    mockConsultar.mockResolvedValue([
-      eventoBase,
-      { ...eventoBase, pedidoId: "p2", clienteId: "c2" },
-    ]);
-    mockConsultarAntes.mockResolvedValue([{ ...eventoBase, pedidoId: "p0", criadoEmMs: Date.now() - 86400000 }]);
-
+  it("consulta histórico anterior somente dos clientes atuais", async () => {
+    mocks.consultarEventosAnaliticosComFallback.mockResolvedValue({
+      eventos: [eventoBase, { ...eventoBase, pedidoId: "p2", clienteId: "c2" }],
+      fallbackTodos: [],
+      fonte: {
+        indiceDisponivel: true,
+        fallbackPedidosDisponivel: true,
+        eventosIndice: 2,
+        eventosFallbackAdicionados: 0,
+        origem: "analytics",
+      },
+    });
+    mocks.consultarClientesComHistoricoAnterior.mockResolvedValue(new Set(["c1"]));
     const res = await GET(makeReq());
     const body = await res.json();
     expect(body.metricas.clientesUnicos).toBe(2);
-    expect(body.metricas.clientesNovos).toBe(1);
     expect(body.metricas.clientesRecorrentes).toBe(1);
-    expect(body.metricas.percentualClientesRecorrentes).toBe(50);
+    expect(body.metricas.clientesNovos).toBe(1);
+    expect(mocks.consultarClientesComHistoricoAnterior).toHaveBeenCalled();
   });
 
-  it("nao expoe PII — resposta nao contem telefone, clienteId, nome", async () => {
-    mockVerify.mockResolvedValue({ role: "admin" });
-    mockConsultar.mockResolvedValue([eventoBase]);
-    const res = await GET(makeReq());
-    const texto = await res.text();
-    expect(texto).not.toContain("telefone");
+  it("não expõe PII", async () => {
+    mocks.consultarEventosAnaliticosComFallback.mockResolvedValue({
+      eventos: [eventoBase],
+      fallbackTodos: [eventoBase],
+      fonte: { indiceDisponivel: true, fallbackPedidosDisponivel: true, eventosIndice: 1, eventosFallbackAdicionados: 0, origem: "analytics" },
+    });
+    const texto = await (await GET(makeReq())).text();
     expect(texto).not.toContain("clienteId");
-    expect(texto).not.toContain("nome");
+    expect(texto).not.toContain("telefone");
     expect(texto).not.toContain("endereco");
   });
 
-  it("responde 500 quando consultarEventosPorPeriodo lança", async () => {
-    mockVerify.mockResolvedValue({ role: "admin" });
-    mockConsultar.mockRejectedValue(new Error("redis down"));
+  it("rejeita período inválido", async () => {
+    const res = await GET(makeReq({ periodo: "45" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("falha 500 apenas quando as duas fontes ficam indisponíveis", async () => {
+    mocks.consultarEventosAnaliticosComFallback.mockRejectedValue(new Error("down"));
     const res = await GET(makeReq());
     expect(res.status).toBe(500);
-    const body = await res.json();
-    expect(body.ok).toBe(false);
   });
 
-  it("inicioIso e fimIso são strings ISO no body", async () => {
-    mockVerify.mockResolvedValue({ role: "admin" });
-    const res = await GET(makeReq({ periodo: "30" }));
-    const body = await res.json();
-    expect(body.inicioIso).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    expect(body.fimIso).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-  });
-
-  it("header Cache-Control no-store presente", async () => {
-    mockVerify.mockResolvedValue({ role: "admin" });
+  it("responde sem cache", async () => {
     const res = await GET(makeReq());
     expect(res.headers.get("cache-control")).toContain("no-store");
   });

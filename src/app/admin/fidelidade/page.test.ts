@@ -19,8 +19,10 @@ describe("/admin/fidelidade — Analytics de pedidos", () => {
   });
 
   test("trata período sem pedidos como estado vazio e explica a contagem", () => {
-    expect(fonte).toContain("(analytics.totalEventosNoIndice ?? analytics.metricas?.pedidosValidos ?? 0) === 0");
+    expect(fonte).toContain("(analytics.totalEventosConsiderados ?? analytics.metricas?.pedidosValidos ?? 0) === 0");
     expect(fonte).toContain("Cada cliente é contado uma única vez");
+    expect(fonte).toContain("histórico real de pedidos");
+    expect(fonte).toContain("AbortController");
   });
 });
 

@@ -24,6 +24,22 @@ beforeEach(() => {
   pathnameRef.current = "/pedidos";
 });
 
+describe("PanelShell — navegação de gestão", () => {
+  test("Radar de Vendas aparece para o dono e não nas páginas operacionais", () => {
+    expect(renderToStaticMarkup(<PanelShell>{null}</PanelShell>)).not.toContain("Radar de Vendas");
+    expect(renderToStaticMarkup(<PanelShell showGestaoNav>{null}</PanelShell>)).toContain("Radar de Vendas");
+  });
+
+  test("Radar fica ativo sem marcar Dashboard ao mesmo tempo", () => {
+    pathnameRef.current = "/admin/radar-vendas";
+    const html = renderToStaticMarkup(<PanelShell showGestaoNav>{null}</PanelShell>);
+    const radar = html.slice(html.indexOf("Radar de Vendas") - 500, html.indexOf("Radar de Vendas"));
+    const dashboard = html.slice(html.indexOf("Dashboard") - 500, html.indexOf("Dashboard"));
+    expect(radar).toContain("ps-active");
+    expect(dashboard).not.toContain("ps-active");
+  });
+});
+
 describe("PanelShell — item 'Acesso do salão' na sidebar", () => {
   test("não aparece quando showGestaoNav está desligado (páginas operacionais)", () => {
     const html = renderToStaticMarkup(<PanelShell>{null}</PanelShell>);

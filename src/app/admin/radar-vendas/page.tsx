@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ArrowLeft, LockKeyhole, Share2, UnlockKeyhole } from "lucide-react";
+import PanelShell from "@/components/PanelShell";
 
 type RadarResponse = {
   ok: boolean;
@@ -125,12 +126,21 @@ export default function RadarVendasPage() {
     }
   }
 
-  if (loading) return <main style={{ padding: 24 }}>Carregando Radar...</main>;
-  if (erro || !data) return <main style={{ padding: 24 }}><p>{erro || "Radar indisponível."}</p></main>;
+  if (loading) return (
+    <PanelShell pedidosCount={0} conversasCount={0} conversasUrgent={false} showGestaoNav>
+      <main style={{ padding: 24 }}>Carregando Radar...</main>
+    </PanelShell>
+  );
+  if (erro || !data) return (
+    <PanelShell pedidosCount={0} conversasCount={0} conversasUrgent={false} showGestaoNav>
+      <main style={{ padding: 24 }}><p>{erro || "Radar indisponível."}</p></main>
+    </PanelShell>
+  );
 
   const ativo = data.access.active;
 
   return (
+    <PanelShell pedidosCount={0} conversasCount={0} conversasUrgent={false} showGestaoNav>
     <main style={{ maxWidth: 1180, margin: "0 auto", padding: "28px 18px 64px", color: "var(--foreground)" }}>
       <a href="/admin" style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--foreground-secondary)", textDecoration: "none", fontSize: 13 }}>
         <ArrowLeft size={15} /> Voltar ao painel
@@ -138,7 +148,7 @@ export default function RadarVendasPage() {
 
       <header style={{ margin: "18px 0 22px" }}>
         <p style={{ color: "var(--brand-text)", fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, margin: 0 }}>ChefeBot · Crescimento</p>
-        <h1 style={{ margin: "6px 0 6px", fontSize: 30 }}>Radar de Vendas 2.0</h1>
+        <h1 style={{ margin: "6px 0 6px", fontSize: 30 }}>Radar de Vendas 2.1</h1>
         <p style={{ color: "var(--foreground-secondary)", maxWidth: 760, lineHeight: 1.6, margin: 0 }}>
           Encontra padrões reais de recompra e mostra quando vale aparecer, quando proteger margem e quando usar uma meta de ticket.
         </p>
@@ -231,5 +241,6 @@ export default function RadarVendasPage() {
         </>
       )}
     </main>
+    </PanelShell>
   );
 }
