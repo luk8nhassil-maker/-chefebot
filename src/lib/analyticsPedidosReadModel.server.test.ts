@@ -61,14 +61,29 @@ describe("analyticsPedidosReadModel", () => {
     });
   });
 
-  test("ignora cancelado, pedido sem cliente e pedido sem valor", () => {
+  test("classifica como painel o pedido com origem administrativa oficial", () => {
+    const agora = new Date("2026-10-05T20:00:00-03:00").getTime();
+    const eventos = eventosAnaliticosDePedidos([{
+      id: "pedido-painel-1",
+      telefone: "(99) 99999-1234",
+      total: 70,
+      status: "entregue",
+      origem: "painel",
+    }], "default", agora + 1000);
+    expect(eventos[0]?.canal).toBe("painel");
+  });
+
+  test("ignora cancelados e mantém pedidos entregues sem cliente ou com valor elegível zero", () => {
     const ms = new Date("2026-10-05T20:00:00-03:00").getTime();
     const eventos = eventosAnaliticosDePedidos([
       { id: String(ms), telefone: "99999999999", total: 70, status: "cancelado" },
       { id: String(ms + 1), total: 70, status: "entregue" },
       { id: String(ms + 2), telefone: "99999999999", total: 0, status: "entregue" },
     ], "default", ms + 1000);
-    expect(eventos).toEqual([]);
+    expect(eventos).toHaveLength(2);
+    expect(eventos[0]).toMatchObject({ pedidoId: String(ms + 1), valorElegivelCents: 7000, statusAnalitico: "entregue" });
+    expect(eventos[0].clienteId).toBeUndefined();
+    expect(eventos[1]).toMatchObject({ pedidoId: String(ms + 2), valorElegivelCents: 0, statusAnalitico: "entregue" });
   });
 
   test("7 dias e 30 dias divergem com pedido legado de 20 dias atrás", async () => {
