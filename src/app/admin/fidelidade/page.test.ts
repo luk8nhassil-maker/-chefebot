@@ -23,6 +23,9 @@ describe("/admin/fidelidade — Analytics de pedidos", () => {
     expect(fonte).toContain("Cada cliente é contado uma única vez");
     expect(fonte).toContain("histórico real de pedidos");
     expect(fonte).toContain("AbortController");
+    expect(fonte).toContain("coberturaDados");
+    expect(fonte).toContain("Dados disponíveis:");
+    expect(fonte).toContain("dentro da janela de");
   });
 });
 
