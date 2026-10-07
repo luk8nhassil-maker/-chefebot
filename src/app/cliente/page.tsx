@@ -1904,6 +1904,7 @@ export default function ClientePage() {
                 temporada={painel.temporada}
                 indicacao={painel.indicacao}
                 gamificacao={painel.gamificacao}
+                resultadoAnterior={resultadoRankingAnterior}
                 privacidade={privacidadeRanking}
                 privacidadeCarregando={privacidadeCarregando}
                 privacidadeSalvando={privacidadeSalvando}
