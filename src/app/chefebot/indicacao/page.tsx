@@ -23,7 +23,7 @@ export default function IndicacaoChefeBotPage() {
   const [status, setStatus] = useState<"idle" | "ok" | "erro">("idle");
 
   useEffect(() => {
-    setRef(new URLSearchParams(window.location.search).get("ref") ?? "");
+    queueMicrotask(() => setRef(new URLSearchParams(window.location.search).get("ref") ?? ""));
   }, []);
 
   async function enviar(e: FormEvent) {
