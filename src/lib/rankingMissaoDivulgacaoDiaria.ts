@@ -8,10 +8,7 @@ import {
   obterMovimentosBonusTemporada,
 } from "./rankingBonusTemporada";
 import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporadaSync";
-import {
-  classificarOrigemMovimentoPontos,
-  obterExtratoPontos,
-} from "./fidelidade";
+import { lerEventosFallbackPedidos } from "./analyticsPedidosReadModel.server";
 import { chaveExpedienteOperacional } from "./expedienteOperacional";
 
 const TENANT_PADRAO = "default";
@@ -22,11 +19,14 @@ function eventoDoDia(indicadorId: string, agora = Date.now()): string {
 
 async function indicadoTemPedidoComercialAnterior(indicadoId: string): Promise<boolean> {
   try {
-    const extrato = await obterExtratoPontos(indicadoId);
-    return extrato.some((movimento) =>
-      movimento.tipo === "confirmado" &&
-      Boolean(movimento.pedidoId) &&
-      classificarOrigemMovimentoPontos(movimento.eventoId) === "pedido"
+    // A fonte oficial de aquisição é o histórico real de pedidos entregues,
+    // não apenas o ledger de Fidelidade — assim clientes antigos de antes da
+    // implantação do ledger nunca são tratados como "novos" por engano.
+    const eventos = await lerEventosFallbackPedidos(TENANT_PADRAO);
+    return eventos.some(
+      (evento) =>
+        evento.statusAnalitico === "entregue" &&
+        evento.clienteId === indicadoId,
     );
   } catch {
     // Fail-closed: se não conseguimos provar que a pessoa é nova, não paga
