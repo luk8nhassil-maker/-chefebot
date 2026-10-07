@@ -11,7 +11,13 @@ on:
       - "src/app/cardapio/page.test.ts"
       - "src/app/cliente/page.tsx"
       - "src/app/cliente/page.test.ts"
+      - "src/app/cliente/FidelidadeRankingScreen.tsx"
+      - "src/app/cliente/FidelidadeRankingScreen.render.test.tsx"
+      - "src/app/cliente/painelFidelidadeTipos.ts"
       - "src/app/api/cliente/privacidade/ranking/**"
+      - "src/app/api/cliente/marketing-organico/**"
+      - "src/app/api/marketing-organico/**"
+      - "src/app/m/**"
       - "src/app/dev/ranking-prospeccao/**"
       - "src/lib/rankingClientes.ts"
       - "src/lib/rankingClientes.test.ts"
@@ -24,6 +30,11 @@ on:
       - "src/lib/historicoAnalitico.test.ts"
       - "src/lib/rankingPrivacidade.ts"
       - "src/lib/rankingPrivacidade.test.ts"
+      - "src/lib/rankingMissaoDivulgacao.ts"
+      - "src/lib/rankingMissaoDivulgacao.test.ts"
+      - "src/lib/rankingGamificacaoConfig.ts"
+      - "src/lib/rankingGamificacaoConfig.test.ts"
+      - "src/lib/rankingBonusTemporada.ts"
       - "src/lib/temporadas.ts"
       - "src/lib/temporadas.test.ts"
       - "src/lib/temporadaResultado.ts"
@@ -36,6 +47,10 @@ on:
       - "src/app/api/admin/fidelidade/status/route.test.ts"
       - "src/app/admin/fidelidade/page.tsx"
       - "src/app/admin/fidelidade/page.test.ts"
+      - "src/app/admin/fidelidade/GamificacaoConfigPanel.tsx"
+      - "src/app/admin/fidelidade/GamificacaoConfigPanel.test.tsx"
+      - "src/app/api/admin/ranking/gamificacao/**"
+      - "vercel.json"
       - ".github/workflows/ranking-prospeccao-ci.yml"
   workflow_dispatch:
 
@@ -73,6 +88,13 @@ jobs:
           src/components/RankingInviteModal.test.ts
           src/app/api/cliente/privacidade/ranking/route.test.ts
           src/app/cliente/page.test.ts
+          src/app/cliente/FidelidadeRankingScreen.render.test.tsx
+          src/lib/rankingMissaoDivulgacao.test.ts
+          src/app/api/cliente/marketing-organico/route.test.ts
+          src/app/api/marketing-organico/visita/route.test.ts
+          src/lib/rankingGamificacaoConfig.test.ts
+          src/app/api/admin/ranking/gamificacao/route.test.ts
+          src/app/admin/fidelidade/GamificacaoConfigPanel.test.tsx
           src/app/cardapio/page.test.ts
           src/app/dev/ranking-prospeccao/page.test.ts
           src/lib/rankingClientes.test.ts
@@ -99,6 +121,23 @@ jobs:
           src/app/api/cliente/privacidade/ranking/route.test.ts
           src/app/cliente/page.tsx
           src/app/cliente/page.test.ts
+          src/app/cliente/FidelidadeRankingScreen.tsx
+          src/app/cliente/FidelidadeRankingScreen.render.test.tsx
+          src/app/cliente/painelFidelidadeTipos.ts
+          src/lib/rankingMissaoDivulgacao.ts
+          src/lib/rankingMissaoDivulgacao.test.ts
+          src/app/api/cliente/marketing-organico/route.ts
+          src/app/api/cliente/marketing-organico/route.test.ts
+          src/app/api/marketing-organico/visita/route.ts
+          src/app/api/marketing-organico/visita/route.test.ts
+          src/app/m/[token]/page.tsx
+          src/lib/rankingGamificacaoConfig.ts
+          src/lib/rankingGamificacaoConfig.test.ts
+          src/lib/rankingBonusTemporada.ts
+          src/app/api/admin/ranking/gamificacao/route.ts
+          src/app/api/admin/ranking/gamificacao/route.test.ts
+          src/app/admin/fidelidade/GamificacaoConfigPanel.tsx
+          src/app/admin/fidelidade/GamificacaoConfigPanel.test.tsx
           src/app/cardapio/page.tsx
           src/app/cardapio/page.test.ts
           src/app/dev/ranking-prospeccao/page.tsx

@@ -235,6 +235,7 @@ const PAINEL_PREVIEW: PainelFidelidade = {
     missaoSemanal: { status: 'desbloqueada' },
     missaoIndicacao: { concluida: false },
     missaoFotoPerfil: { concluida: false, bonus: 5 },
+    missaoDivulgacao: { concluidaHoje: false, bonus: 2, elegivel: true },
     nivelChef: { nivel: 2, nome: 'Cozinheiro', xpAtual: 240, xpProximoNivel: 500 },
     movimentoRecente: null,
     coroaAmeacada: false,
@@ -289,6 +290,8 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
         onIndicarAmigo={() => onAviso('Indicação simulada no Preview. Nenhum link real foi criado.')}
         onCompartilharConquista={() => onAviso('Compartilhamento simulado no Preview. Nenhum link real foi criado.')}
         onAdicionarFoto={() => onAviso('Missão de foto simulada no Preview. Nenhuma foto real foi enviada e nenhum ponto foi creditado.')}
+        onCompartilharDivulgacao={() => onAviso('Story do Dia simulado no Preview. Nenhum link real foi criado e nenhum ponto foi creditado.')}
+        compartilhandoDivulgacao={false}
         onNovoPedido={() => onAviso('No Preview, um novo pedido não é criado de verdade.')}
         onTelemetria={() => undefined}
         onClose={() => {
@@ -793,7 +796,63 @@ function RankingConsentModal({ privacidade, carregando, salvando, erro, onAceita
         <style>{`.cf-ranking-consent-privacy{min-height:0!important;margin-top:12px!important;padding:6px 0!important;border:0!important;background:transparent!important;box-shadow:none!important}.cf-ranking-consent-privacy-icon{font-size:14px}.cf-ranking-consent-privacy-copy strong{font-size:11.5px}.cf-ranking-consent-privacy-copy>span{font-size:10.5px}`}</style>
         <style>{`.cf-ranking-consent-visual{margin-bottom:24px!important}.cf-ranking-consent-info-card{margin-bottom:20px!important}.cf-ranking-consent-privacy{margin-top:16px!important;margin-bottom:0!important;padding-top:12px!important;border-top:1px solid rgba(176,196,226,.58)!important;border-radius:0!important}.cf-ranking-consent-primary{margin-top:0!important}`}</style>
         <style>{`.cf-ranking-consent-info-card{margin-bottom:24px!important}.cf-ranking-consent-privacy{position:relative;width:100%!important;margin-left:0!important;margin-right:0!important;justify-content:center!important;align-items:center!important;gap:8px!important;flex-wrap:nowrap;border-top:0!important;padding-top:16px!important;white-space:nowrap;text-align:center}.cf-ranking-consent-privacy::before{content:"";position:absolute;top:0;left:11%;right:11%;height:1px;background:rgba(176,196,226,.58)}.cf-ranking-consent-privacy-icon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 23px;width:23px;height:23px;border:1px solid rgba(79,134,237,.24);border-radius:50%;background:#e9f1ff;color:#3972d7;font-size:13px;font-weight:900;line-height:1;box-shadow:0 2px 5px rgba(67,107,169,.12)}.cf-ranking-consent-privacy-copy{display:inline-flex;align-items:center;white-space:nowrap;line-height:1.2}.cf-ranking-consent-privacy-copy strong{font-size:11.5px;color:#304d77}.cf-ranking-consent-privacy-copy>span{font-size:10.5px;color:#718199}`}</style>
-      </section>
+              <style>{`
+          @media(max-width:560px){
+            .cf-ranking-consent-backdrop{align-items:center!important;padding:8px!important;overflow:auto!important}
+            .cf-ranking-consent-modal{
+              width:min(calc(100vw - 16px),390px)!important;
+              max-height:calc(100dvh - 16px)!important;
+              overflow-y:auto!important;
+              overflow-x:hidden!important;
+              box-sizing:border-box!important;
+              padding:18px 16px 16px!important;
+              border-radius:22px!important;
+              overscroll-behavior:contain;
+            }
+            .cf-ranking-consent-visual{
+              min-height:178px!important;
+              height:auto!important;
+              margin:0 0 12px!important;
+              padding:6px 0 10px!important;
+              overflow:hidden!important;
+              border-radius:24px!important;
+            }
+            .cf-ranking-consent-icon-row{height:112px!important;overflow:hidden!important}
+            .cf-ranking-consent-icon-row .cf-ranking-consent-emoji{width:92px!important;height:92px!important;left:2%!important;top:17px!important}
+            .cf-ranking-consent-icon-row .cf-ranking-consent-gift{width:88px!important;height:88px!important;left:37%!important;top:-34px!important}
+            .cf-ranking-consent-icon-row .cf-ranking-consent-burger{width:86px!important;height:86px!important;right:1%!important;top:13px!important}
+            .cf-ranking-consent-icon-row .cf-ranking-consent-soda{width:75px!important;height:75px!important;right:31%!important;top:61px!important}
+            .cf-ranking-consent-people{bottom:6px!important}
+            .cf-ranking-consent-tour{margin-top:8px!important;padding:5px 8px!important}
+            .cf-ranking-consent-modal h2{font-size:23px!important;line-height:1.12!important;margin-bottom:12px!important}
+            .cf-ranking-consent-info-card{width:100%!important;margin-bottom:14px!important}
+            .cf-ranking-consent-lead{font-size:12.5px!important;line-height:1.45!important;text-align:left!important}
+            .cf-ranking-consent-privacy{
+              width:100%!important;
+              display:flex!important;
+              align-items:flex-start!important;
+              justify-content:flex-start!important;
+              white-space:normal!important;
+              text-align:left!important;
+              gap:8px!important;
+              margin-top:10px!important;
+              padding:10px 0 0!important;
+            }
+            .cf-ranking-consent-privacy::before{left:0!important;right:0!important}
+            .cf-ranking-consent-privacy-copy{
+              min-width:0!important;
+              display:block!important;
+              white-space:normal!important;
+              line-height:1.35!important;
+              overflow-wrap:anywhere!important;
+            }
+            .cf-ranking-consent-privacy-copy strong{display:block!important;font-size:11px!important;line-height:1.3!important}
+            .cf-ranking-consent-privacy-copy>span{display:block!important;margin-top:2px!important;font-size:10px!important;line-height:1.35!important}
+            .cf-ranking-consent-primary,.cf-ranking-consent-secondary{min-height:44px!important}
+            .cf-ranking-consent-modal>small{font-size:9.5px!important;line-height:1.35!important;overflow-wrap:anywhere}
+          }
+        `}</style>
+</section>
     </div>
   )
 }
@@ -822,6 +881,7 @@ export default function ClientePage() {
   const [indicacaoToken, setIndicacaoToken] = useState<string | null>(null)
   const [compartilhandoIndicacao, setCompartilhandoIndicacao] = useState(false)
   const [compartilhandoConquista, setCompartilhandoConquista] = useState(false)
+  const [compartilhandoDivulgacao, setCompartilhandoDivulgacao] = useState(false)
   const [compartilhandoStatus, setCompartilhandoStatus] = useState(false)
   // Feedback pós-pedido para quem já participa: começa "pendente" ao chegar
   // de um pedido concluído e só vira "creditado" com dado confirmado real do
@@ -1156,6 +1216,36 @@ export default function ClientePage() {
         body: JSON.stringify({ tipo }),
       }, sessaoMemRef.current).catch(() => {})
     } catch {}
+  }
+
+  async function compartilharDivulgacaoDiaria() {
+    if (modoPreview) {
+      setPreviewAviso('Story do Dia simulado. Nenhum link real foi criado e nenhum ponto foi creditado.')
+      return
+    }
+    setCompartilhandoDivulgacao(true)
+    try {
+      const res = await fetchCliente('/api/cliente/marketing-organico', { cache: 'no-store' }, sessaoMemRef.current)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data?.url || !data?.mensagem) {
+        if (data?.concluidaHoje) setPreviewAviso('Seu bônus de divulgação de hoje já foi confirmado.')
+        else if (data?.motivoBloqueio === 'sem_pedido_confirmado') setPreviewAviso('Faça seu primeiro pedido confirmado para liberar o Story do Dia.')
+        else setPreviewAviso('Não conseguimos preparar seu link do dia agora.')
+        return
+      }
+
+      const texto = String(data.mensagem)
+      const url = String(data.url)
+      if (navigator.share) {
+        await navigator.share({ title: 'Story do Dia · Chefe da Pizza', text: texto, url })
+      } else {
+        await navigator.clipboard.writeText(`${texto} ${url}`)
+      }
+      setPreviewAviso('Link do dia compartilhado. Seu bônus entra quando outra pessoa abrir esse link hoje.')
+    } catch {}
+    finally {
+      setCompartilhandoDivulgacao(false)
+    }
   }
 
   async function compartilharConquistaRanking() {
@@ -1918,6 +2008,8 @@ export default function ClientePage() {
                 onCompartilharConquista={() => void compartilharConquistaRanking()}
                 onAdicionarFoto={() => abrirSeletorFoto('ranking')}
                 fotoEnviando={fotoEnviando}
+                onCompartilharDivulgacao={() => void compartilharDivulgacaoDiaria()}
+                compartilhandoDivulgacao={compartilhandoDivulgacao}
                 onNovoPedido={abrirSacola}
                 onTelemetria={telemetriaRanking}
                 onClose={() => { setMobilePanel(null); setPosPedido(null) }}

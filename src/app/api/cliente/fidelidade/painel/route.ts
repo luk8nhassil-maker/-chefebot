@@ -12,6 +12,7 @@ import { ESTRELAS_INDICACAO_PRIMEIRA_COMPRA } from "@/lib/estrelasIndicacao";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
 import { posicaoClienteRanking, obterTopRanking, obterRankingCompleto, reindexarPorFiltro } from "@/lib/rankingClientes";
 import { codinomeSecretoRanking } from "@/lib/rankingJogoSecreto";
+import { projetarIdentidadesPublicasRanking } from "@/lib/rankingPrivacidade";
 import { obterParticipacaoRanking, obterParticipacaoRankingParaClientes } from "@/lib/consentimentoRanking";
 import {
   calcularVariacaoPosicao,
@@ -40,7 +41,8 @@ import {
   type StatusTemporada,
 } from "@/lib/rankingGamificacao";
 import { obterConfigGamificacao } from "@/lib/rankingGamificacaoConfig";
-import { obterBonusCompeticaoDaTemporada } from "@/lib/rankingBonusTemporada";
+import { obterBonusCompeticaoDaTemporada, obterMovimentosBonusTemporada } from "@/lib/rankingBonusTemporada";
+import { chaveExpedienteOperacional } from "@/lib/expedienteOperacional";
 import {
   aplicarCarryoverClienteSeNecessario,
   sincronizarStatusSocialCliente,
@@ -164,26 +166,15 @@ export async function GET(req: NextRequest) {
       const listaBase = top.some((e) => e.clienteId === clienteId)
         ? top
         : [...top, { clienteId, score: pos.score, posicao: pos.posicao }];
-      // Na temporada secreta não precisamos carregar perfil, nome ou telefone.
-      // Uma leitura em lote de participação basta para montar toda a disputa.
+      // Participação continua sendo lida em lote. Identidade pública é uma
+      // camada separada: só carrega perfil para quem autorizou nome. Quem não
+      // autorizou continua com codinome e nunca recebe PII na resposta.
       const idsRelevantes = Array.from(new Set([
         ...listaBase.map((e) => e.clienteId),
         ...completo.map((e) => e.clienteId),
         clienteId,
       ]));
       const participacoes = await obterParticipacaoRankingParaClientes(idsRelevantes);
-      const lista = listaBase.map((e) => {
-        const participaCampanha = participacoes.get(e.clienteId) === true;
-        return {
-          posicao: e.posicao,
-          score: e.score,
-          eVoce: e.clienteId === clienteId,
-          participaCampanha,
-          ...(participaCampanha
-            ? { codinomeSecreto: codinomeSecretoRanking(e.clienteId, temporada.temporadaId) }
-            : {}),
-        };
-      });
 
       const reindexados = reindexarPorFiltro(
         completo,
@@ -196,6 +187,32 @@ export async function GET(req: NextRequest) {
         proprioEntreParticipantes && !topoParticipantes.some((e) => e.clienteId === clienteId)
           ? [...topoParticipantes, proprioEntreParticipantes]
           : topoParticipantes;
+      // Perfil/nome só é consultado para quem realmente pode aparecer na tela.
+      // A filtragem de participação ainda usa o ranking completo, mas isso não
+      // força leitura de perfil para centenas de clientes.
+      const idsIdentidadeVisivel = Array.from(new Set([
+        ...listaBase.map((e) => e.clienteId),
+        ...listaParticipantesBase.map((e) => e.clienteId),
+        clienteId,
+      ]));
+      const identidadesPublicas = await projetarIdentidadesPublicasRanking(idsIdentidadeVisivel);
+
+      const lista = listaBase.map((e) => {
+        const participaCampanha = participacoes.get(e.clienteId) === true;
+        const nomePublico = identidadesPublicas.get(e.clienteId)?.nomePublico ?? null;
+        return {
+          posicao: e.posicao,
+          score: e.score,
+          eVoce: e.clienteId === clienteId,
+          participaCampanha,
+          ...(participaCampanha
+            ? {
+                ...(nomePublico ? { nomePublico } : {}),
+                codinomeSecreto: codinomeSecretoRanking(e.clienteId, temporada.temporadaId),
+              }
+            : {}),
+        };
+      });
       // Selo social (Campeão/Prata/Bronze/Elite) de CADA membro do Top 10
       // atual, não só do cliente autenticado — correção de blocker da
       // auditoria do #446 ("UI só colocava selo em quem estava logado").
@@ -213,11 +230,13 @@ export async function GET(req: NextRequest) {
       );
       const listaParticipantes = listaParticipantesBase.map((e) => {
         const status = statusPorClienteId.get(e.clienteId) ?? null;
+        const nomePublico = identidadesPublicas.get(e.clienteId)?.nomePublico ?? null;
         return {
           posicao: e.posicao,
           score: e.score,
           eVoce: e.clienteId === clienteId,
           participaCampanha: true as const,
+          ...(nomePublico ? { nomePublico } : {}),
           codinomeSecreto: codinomeSecretoRanking(e.clienteId, temporada.temporadaId),
           ...(status ? { statusSocial: status } : {}),
         };
@@ -292,19 +311,22 @@ export async function GET(req: NextRequest) {
             entradaAbaixo: entradaAbaixo ? { posicao: entradaAbaixo.posicao, score: entradaAbaixo.score } : null,
           })
         : null;
-      const identidadesSecretas = new Map(
+      const identidadesDisputa = new Map(
         idsRelevantes.map((id) => {
           const participaCampanha = participacoes.get(id) === true;
+          const nomeAutorizado = identidadesPublicas.get(id)?.nomePublico ?? null;
           return [id, {
             participaCampanha,
-            nomePublico: participaCampanha ? codinomeSecretoRanking(id, temporada.temporadaId) : null,
+            nomePublico: participaCampanha
+              ? (nomeAutorizado || codinomeSecretoRanking(id, temporada.temporadaId))
+              : null,
             telefoneMascarado: null,
             fotoPerfilUrl: null,
           }] as const;
         }),
       );
       const disputa = proprioEntreParticipantes
-        ? montarDisputaRelativa({ ordenados: reindexados, clienteId, identidades: identidadesSecretas })
+        ? montarDisputaRelativa({ ordenados: reindexados, clienteId, identidades: identidadesDisputa })
         : null;
 
       ranking = {
@@ -387,6 +409,7 @@ export async function GET(req: NextRequest) {
   // missões da temporada — tudo fail-closed sem config/temporada.
   let statusSocial: "campeao" | "prata" | "bronze" | "elite" | null = null;
   let bonusCompeticao = 0;
+  let missaoDivulgacao: { concluidaHoje: boolean; bonus: number; elegivel: boolean } | null = null;
   let missaoSemanal: { status: "inativa" | "desbloqueada" | "processando" | "consumida" } | null = null;
   let missaoIndicacao: { concluida: boolean } | null = null;
   const missaoFotoPerfil = configGamificacao.missaoFotoPerfilAtiva && configGamificacao.missaoFotoPerfilBonus > 0 && temporada && participaRanking
@@ -401,6 +424,22 @@ export async function GET(req: NextRequest) {
     const statusVigente = await sincronizarStatusSocialCliente(tenantId, temporada, clienteId);
     statusSocial = statusVigente?.status ?? null;
     bonusCompeticao = await obterBonusCompeticaoDaTemporada(tenantId, temporada.temporadaId, clienteId);
+
+    if (configGamificacao.missaoDivulgacaoAtiva && configGamificacao.missaoDivulgacaoBonus > 0) {
+      const expedienteId = chaveExpedienteOperacional();
+      const movimentosBonus = await obterMovimentosBonusTemporada(tenantId, temporada.temporadaId, clienteId);
+      const concluidaHoje = movimentosBonus.some((movimento) =>
+        movimento.tipo === "missao_divulgacao_diaria" &&
+        movimento.eventoId === `missao_divulgacao_diaria:${expedienteId}` &&
+        movimento.pontos > 0
+      );
+      missaoDivulgacao = {
+        concluidaHoje,
+        bonus: configGamificacao.missaoDivulgacaoBonus,
+        elegivel: compartilhamentoLiberado,
+      };
+    }
+
     if (configGamificacao.missaoSemanalAtiva) {
       const ultimoPedidoConfirmadoConhecido = extratoCompleto
         ? calcularUltimoPedidoConfirmadoDosMovimentos(extratoCompleto)
@@ -481,6 +520,7 @@ export async function GET(req: NextRequest) {
       missaoSemanal,
       missaoIndicacao,
       missaoFotoPerfil,
+      missaoDivulgacao,
       movimentoRecente,
       coroaAmeacada,
       nivelChef,

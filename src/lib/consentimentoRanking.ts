@@ -5,6 +5,7 @@ import { redis } from "./redis";
 
 export const FINALIDADES_CONSENTIMENTO_RANKING = [
   "ranking_primeiro_nome",
+  "ranking_nome_completo",
   "ranking_telefone_mascarado",
   "ranking_foto_perfil",
 ] as const;
@@ -54,12 +55,12 @@ export class ErroConsentimentoRanking extends Error {
   }
 }
 
-const ENV_TEXTO: Record<Exclude<FinalidadeConsentimentoRanking, "ranking_foto_perfil">, string> = {
+const ENV_TEXTO: Partial<Record<Exclude<FinalidadeConsentimentoRanking, "ranking_foto_perfil">, string>> = {
   ranking_primeiro_nome: "RANKING_CONSENT_FIRST_NAME_TEXT",
   ranking_telefone_mascarado: "RANKING_CONSENT_MASKED_PHONE_TEXT",
 };
 
-const ENV_VERSAO: Record<Exclude<FinalidadeConsentimentoRanking, "ranking_foto_perfil">, string> = {
+const ENV_VERSAO: Partial<Record<Exclude<FinalidadeConsentimentoRanking, "ranking_foto_perfil">, string>> = {
   ranking_primeiro_nome: "RANKING_CONSENT_FIRST_NAME_TEXT_VERSION",
   ranking_telefone_mascarado: "RANKING_CONSENT_MASKED_PHONE_TEXT_VERSION",
 };
@@ -153,6 +154,17 @@ function registroValido(valor: unknown, finalidade?: FinalidadeConsentimentoRank
 }
 
 export function configuracaoFinalidadeRanking(finalidade: FinalidadeConsentimentoRanking): ConfiguracaoFinalidadeRanking {
+  if (finalidade === "ranking_nome_completo") {
+    const segredoOk = !!segredoConsentimento();
+    return {
+      finalidade,
+      texto: "Mostrar meu nome completo no Ranking",
+      textoVersao: "ranking-nome-completo-v1",
+      disponivel: segredoOk,
+      motivoIndisponivel: segredoOk ? null : "infraestrutura_nao_configurada",
+    };
+  }
+
   if (finalidade === "ranking_foto_perfil") {
     // Nenhum adaptador de fonte oficial/autorizada existe no projeto atual.
     // Mesmo que uma variavel seja criada por engano, esta finalidade segue
@@ -166,8 +178,10 @@ export function configuracaoFinalidadeRanking(finalidade: FinalidadeConsentiment
     };
   }
 
-  const texto = lerEnv(ENV_TEXTO[finalidade]);
-  const textoVersao = lerEnv(ENV_VERSAO[finalidade]);
+  const envTexto = ENV_TEXTO[finalidade];
+  const envVersao = ENV_VERSAO[finalidade];
+  const texto = envTexto ? lerEnv(envTexto) : null;
+  const textoVersao = envVersao ? lerEnv(envVersao) : null;
   if (!segredoConsentimento()) {
     return { finalidade, texto, textoVersao, disponivel: false, motivoIndisponivel: "infraestrutura_nao_configurada" };
   }
@@ -276,7 +290,7 @@ export async function obterParticipacaoRankingParaClientes(
     // Fallback apenas para chave ausente (cliente legado). Registro presente
     // mas corrompido nunca pode reativar alguém que havia saído.
     const ativo = participacaoValida(valor) ? valor.ativo
-      : valor === null ? !!(finalidades.get(id)?.has("ranking_primeiro_nome") || finalidades.get(id)?.has("ranking_telefone_mascarado"))
+      : valor === null ? !!(finalidades.get(id)?.has("ranking_primeiro_nome") || finalidades.get(id)?.has("ranking_nome_completo") || finalidades.get(id)?.has("ranking_telefone_mascarado"))
         : false;
     return [id, ativo];
   }));

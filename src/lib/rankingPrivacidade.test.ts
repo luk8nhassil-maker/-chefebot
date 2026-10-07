@@ -11,9 +11,9 @@ vi.mock("./consentimentoRanking", () => ({
   obterFinalidadesAtivasRankingParaClientes: vi.fn(async (clienteIds: string[]) =>
     new Map(clienteIds.map((clienteId) => [clienteId, new Set(ativas)])),
   ),
-  obterParticipacaoRanking: vi.fn(async () => participacao.ativa ?? (ativas.has("ranking_primeiro_nome") || ativas.has("ranking_telefone_mascarado"))),
+  obterParticipacaoRanking: vi.fn(async () => participacao.ativa ?? (ativas.has("ranking_primeiro_nome") || ativas.has("ranking_nome_completo") || ativas.has("ranking_telefone_mascarado"))),
   obterParticipacaoRankingParaClientes: vi.fn(async (clienteIds: string[]) =>
-    new Map(clienteIds.map((clienteId) => [clienteId, participacao.ativa ?? (ativas.has("ranking_primeiro_nome") || ativas.has("ranking_telefone_mascarado"))])),
+    new Map(clienteIds.map((clienteId) => [clienteId, participacao.ativa ?? (ativas.has("ranking_primeiro_nome") || ativas.has("ranking_nome_completo") || ativas.has("ranking_telefone_mascarado"))])),
   ),
 }));
 
@@ -54,6 +54,16 @@ describe("projecao publica do ranking", () => {
       telefoneMascarado: null,
       fotoPerfilUrl: null,
     });
+  });
+
+  test("nome completo só aparece com consentimento próprio, nunca herdado do primeiro nome", async () => {
+    ativas.add("ranking_primeiro_nome");
+    const primeiro = await projetarIdentidadePublicaRanking("cli_5511998765432");
+    expect(primeiro.nomePublico).toBe("Ana");
+
+    ativas.add("ranking_nome_completo");
+    const completo = await projetarIdentidadePublicaRanking("cli_5511998765432");
+    expect(completo.nomePublico).toBe("Ana Maria");
   });
 
   test("cliente ativa a disputa anonimamente, sem consultar nem expor perfil", async () => {

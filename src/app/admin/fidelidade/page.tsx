@@ -98,6 +98,12 @@ type AnalyticsData = {
     eventosFallbackAdicionados?: number
   }
   historicoAnteriorParcial?: boolean
+  cobertura?: {
+    janelaSolicitadaDias: PeriodoAnalytics
+    historicoEncontradoDesdeIso: string | null
+    diasHistoricoEncontrado: number
+    possuiDadosAntesDaJanela: boolean
+  }
   error?: string
 }
 
@@ -666,13 +672,27 @@ export default function FidelidadePage() {
               ) : analytics && !erroAnalytics && (
                 (analytics.totalEventosConsiderados ?? analytics.metricas?.pedidosValidos ?? 0) === 0 ? (
                   <div style={{ fontSize: 13, color: 'var(--foreground-muted)', fontStyle: 'italic', padding: '8px 0' }}>
-                    Histórico insuficiente para o período de {periodo} dias. Os dados aparecerão aqui conforme os pedidos forem registrados.
+                    Nenhum pedido entregue foi encontrado nesta janela de {periodo} dias. Quando houver dados, o painel mostra imediatamente o que estiver disponível.
                   </div>
                 ) : analytics.metricas ? (
                   <>
-                    <div style={{ fontSize: 11, color: 'var(--foreground-muted)', marginBottom: 10 }}>
-                      Fonte: {analytics.fonteDados?.origem === 'pedidos' ? 'histórico real de pedidos' : analytics.fonteDados?.origem === 'analytics+pedidos' ? 'índice analítico + histórico de pedidos' : 'índice analítico'}
-                      {analytics.historicoAnteriorParcial ? ' · recorrência parcial' : ''}
+                    <div style={{ fontSize: 11, color: 'var(--foreground-muted)', marginBottom: 10, lineHeight: 1.5 }}>
+                      <div>
+                        Fonte: {analytics.fonteDados?.origem === 'pedidos' ? 'histórico real de pedidos' : analytics.fonteDados?.origem === 'analytics+pedidos' ? 'índice analítico + histórico de pedidos' : 'índice analítico'}
+                        {analytics.historicoAnteriorParcial ? ' · recorrência parcial' : ''}
+                      </div>
+                      {analytics.cobertura && (
+                        <div>
+                          Janela escolhida: <strong>{periodo} dias</strong>
+                          {analytics.cobertura.historicoEncontradoDesdeIso
+                            ? <> · histórico encontrado desde <strong>{formatarData(analytics.cobertura.historicoEncontradoDesdeIso)}</strong>
+                              {!analytics.cobertura.possuiDadosAntesDaJanela && analytics.cobertura.diasHistoricoEncontrado < periodo
+                                ? <> · usando os <strong>{analytics.cobertura.diasHistoricoEncontrado} dias</strong> de dados encontrados até agora</>
+                                : null}
+                              </>
+                            : ' · nenhum pedido encontrado nesta fonte'}
+                        </div>
+                      )}
                     </div>
                     <FidelidadeAnalyticsDashboard metricas={analytics.metricas} periodo={periodo} />
                   </>

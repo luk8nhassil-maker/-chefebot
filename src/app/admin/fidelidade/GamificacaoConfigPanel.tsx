@@ -10,6 +10,8 @@ type Config = {
   missaoIndicacaoBonus: number
   missaoFotoPerfilAtiva: boolean
   missaoFotoPerfilBonus: number
+  missaoDivulgacaoAtiva: boolean
+  missaoDivulgacaoBonus: number
   impulsoPodioAtivo: boolean
   impulsoPodioBonus: number
   impulsoPodioCapTemporada: number
@@ -20,13 +22,14 @@ type Config = {
   ameacaPodioMaxGap: number
 }
 
-type Grupo = 'semanal' | 'indicacao' | 'foto' | 'impulso' | 'carryover' | 'nivel'
+type Grupo = 'semanal' | 'indicacao' | 'foto' | 'divulgacao' | 'impulso' | 'carryover' | 'nivel'
 
 function camposDoGrupo(config: Config, grupo: Grupo): Partial<Config> {
   switch (grupo) {
     case 'semanal': return { missaoSemanalAtiva: config.missaoSemanalAtiva, missaoSemanalMultiplicador: config.missaoSemanalMultiplicador, missaoSemanalCooldownDias: config.missaoSemanalCooldownDias }
     case 'indicacao': return { missaoIndicacaoAtiva: config.missaoIndicacaoAtiva, missaoIndicacaoBonus: config.missaoIndicacaoBonus }
     case 'foto': return { missaoFotoPerfilAtiva: config.missaoFotoPerfilAtiva, missaoFotoPerfilBonus: config.missaoFotoPerfilBonus }
+    case 'divulgacao': return { missaoDivulgacaoAtiva: config.missaoDivulgacaoAtiva, missaoDivulgacaoBonus: config.missaoDivulgacaoBonus }
     case 'impulso': return { impulsoPodioAtivo: config.impulsoPodioAtivo, impulsoPodioBonus: config.impulsoPodioBonus, impulsoPodioCapTemporada: config.impulsoPodioCapTemporada }
     case 'carryover': return { carryoverAtivo: config.carryoverAtivo, carryoverTabela: config.carryoverTabela }
     case 'nivel': return { nivelChefAtivo: config.nivelChefAtivo, nivelChefLimiares: config.nivelChefLimiares }
@@ -119,6 +122,13 @@ export default function GamificacaoConfigPanel() {
         {numero('missaoFotoPerfilBonus', 'Pontos no Ranking', config.missaoFotoPerfilBonus)}
         <small>Bônus único por cliente. A foto só vira pública se o cliente autorizar essa finalidade no Ranking.</small>
         {botao('foto')}
+      </div>
+      <div style={caixa}>
+        <strong>Story do Dia · divulgação orgânica</strong>
+        {alternar('missaoDivulgacaoAtiva', 'Ativar missão diária', config.missaoDivulgacaoAtiva)}
+        {numero('missaoDivulgacaoBonus', 'Pontos no Ranking por dia', config.missaoDivulgacaoBonus, 0, 100000)}
+        <small>O bônus só é confirmado quando outra pessoa abre o link rastreado. Máximo de 1 bônus por expediente; não altera as Estrelas da fidelidade e não substitui a indicação normal.</small>
+        {botao('divulgacao')}
       </div>
       <div style={caixa}>
         <strong>Impulso do Pódio</strong>

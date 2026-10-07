@@ -7,6 +7,7 @@ const inicial = {
   missaoSemanalAtiva: false, missaoSemanalMultiplicador: 2, missaoSemanalCooldownDias: 7,
   missaoIndicacaoAtiva: false, missaoIndicacaoBonus: 0,
   missaoFotoPerfilAtiva: false, missaoFotoPerfilBonus: 0,
+  missaoDivulgacaoAtiva: false, missaoDivulgacaoBonus: 0,
   impulsoPodioAtivo: false, impulsoPodioBonus: 0, impulsoPodioCapTemporada: 0,
   carryoverAtivo: false, carryoverTabela: [],
   nivelChefAtivo: false, nivelChefLimiares: [], ameacaPodioMaxGap: 0,
@@ -57,6 +58,22 @@ describe('admin da gamificação', () => {
     })
   })
 
+  test('Story do Dia salva somente ativação e bônus diário', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => inicial })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, config: { ...inicial, missaoDivulgacaoAtiva: true, missaoDivulgacaoBonus: 3 } }) })
+    vi.stubGlobal('fetch', fetch)
+    render(<GamificacaoConfigPanel />)
+    fireEvent.click(await screen.findByLabelText('Ativar missão diária'))
+    fireEvent.change(screen.getByLabelText('Pontos no Ranking por dia'), { target: { value: '3' } })
+    fireEvent.click(screen.getAllByText('Salvar este módulo')[3])
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
+      missaoDivulgacaoAtiva: true,
+      missaoDivulgacaoBonus: 3,
+    })
+  })
+
   test('erro de validação é mostrado e não declara sucesso', async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => inicial })
@@ -64,7 +81,7 @@ describe('admin da gamificação', () => {
     vi.stubGlobal('fetch', fetch)
     render(<GamificacaoConfigPanel />)
     fireEvent.click(await screen.findByLabelText('Ativar carryover'))
-    fireEvent.click(screen.getAllByText('Salvar este módulo')[4])
+    fireEvent.click(screen.getAllByText('Salvar este módulo')[5])
     expect(await screen.findByText('Não foi salvo: tabela incompleta')).toBeTruthy()
     expect(screen.queryByText(/Configuração salva/)).toBeNull()
   })

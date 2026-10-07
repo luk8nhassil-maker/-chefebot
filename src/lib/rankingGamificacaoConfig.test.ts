@@ -25,6 +25,8 @@ describe("obterConfigGamificacao", () => {
     expect(config.missaoSemanalAtiva).toBe(false);
     expect(config.missaoFotoPerfilAtiva).toBe(false);
     expect(config.missaoFotoPerfilBonus).toBe(0);
+    expect(config.missaoDivulgacaoAtiva).toBe(false);
+    expect(config.missaoDivulgacaoBonus).toBe(0);
     expect(config.impulsoPodioAtivo).toBe(false);
     expect(config.carryoverAtivo).toBe(false);
     expect(config.nivelChefAtivo).toBe(false);

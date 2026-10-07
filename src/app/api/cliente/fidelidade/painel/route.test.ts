@@ -71,6 +71,20 @@ vi.mock("@/lib/consentimentoRanking", () => ({
   ),
 }));
 
+vi.mock("@/lib/rankingPrivacidade", () => ({
+  projetarIdentidadesPublicasRanking: vi.fn(async (ids: string[]) =>
+    new Map(ids.map((id) => [
+      id,
+      identidadesPublicas.get(id) ?? {
+        participaCampanha: id === "hashed_11900000001" ? participaRanking : false,
+        nomePublico: null,
+        telefoneMascarado: null,
+        fotoPerfilUrl: null,
+      },
+    ])),
+  ),
+}));
+
 let posicaoAnteriorMock: { geral: number; participantes: number | null } | null = null;
 
 const { registrarFatoMock, marcarLiderancaMock } = vi.hoisted(() => ({
@@ -104,6 +118,7 @@ let configGamificacaoMock: Record<string, unknown> = {
 const {
   obterConfigGamificacaoMock,
   obterBonusMock,
+  obterMovimentosBonusMock,
   aplicarCarryoverMock,
   sincronizarStatusSocialMock,
   reconciliarTransicaoMock,
@@ -117,6 +132,14 @@ const {
 } = vi.hoisted(() => ({
   obterConfigGamificacaoMock: vi.fn(),
   obterBonusMock: vi.fn(async () => 0),
+  obterMovimentosBonusMock: vi.fn(async () => [] as Array<{
+    movimentoId: string;
+    eventoId: string;
+    tipo: string;
+    pontos: number;
+    motivo: string;
+    createdAt: string;
+  }>),
   aplicarCarryoverMock: vi.fn(async () => undefined),
   sincronizarStatusSocialMock: vi.fn(async () => null as { status: string | null; temporadaOrigemId: string; atribuidoEm: string } | null),
   reconciliarTransicaoMock: vi.fn(async () => undefined),
@@ -139,7 +162,10 @@ const {
 }));
 
 vi.mock("@/lib/rankingGamificacaoConfig", () => ({ obterConfigGamificacao: obterConfigGamificacaoMock }));
-vi.mock("@/lib/rankingBonusTemporada", () => ({ obterBonusCompeticaoDaTemporada: obterBonusMock }));
+vi.mock("@/lib/rankingBonusTemporada", () => ({
+  obterBonusCompeticaoDaTemporada: obterBonusMock,
+  obterMovimentosBonusTemporada: obterMovimentosBonusMock,
+}));
 vi.mock("@/lib/rankingTransicaoTemporada", () => ({
   aplicarCarryoverClienteSeNecessario: aplicarCarryoverMock,
   sincronizarStatusSocialCliente: sincronizarStatusSocialMock,
@@ -178,6 +204,8 @@ beforeEach(() => {
     missaoIndicacaoAtiva: false,
     missaoFotoPerfilAtiva: false,
     missaoFotoPerfilBonus: 0,
+    missaoDivulgacaoAtiva: false,
+    missaoDivulgacaoBonus: 0,
     impulsoPodioAtivo: false,
     carryoverAtivo: false,
     nivelChefAtivo: false,
@@ -185,6 +213,7 @@ beforeEach(() => {
   };
   obterConfigGamificacaoMock.mockReset().mockImplementation(async () => configGamificacaoMock);
   obterBonusMock.mockReset().mockResolvedValue(0);
+  obterMovimentosBonusMock.mockReset().mockResolvedValue([]);
   aplicarCarryoverMock.mockReset().mockResolvedValue(undefined);
   reconciliarTransicaoMock.mockReset().mockResolvedValue(undefined);
   sincronizarStatusSocialMock.mockReset().mockResolvedValue(null);
@@ -235,6 +264,41 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     const res = await GET(req("token-cli-a"));
     const body = await res.json();
     expect(body.gamificacao.missaoFotoPerfil).toEqual({ concluida: false, bonus: 6 });
+  });
+
+  test("expõe Story do Dia com limite diário confirmado no ledger", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    configGamificacaoMock.missaoDivulgacaoAtiva = true;
+    configGamificacaoMock.missaoDivulgacaoBonus = 3;
+    vi.mocked(obterExtratoPontos).mockResolvedValueOnce([{
+      movimentoId: "m1",
+      clienteId: "hashed_11900000001",
+      tipo: "confirmado",
+      pontos: 10,
+      motivo: "pedido",
+      pedidoId: "p1",
+      eventoId: "confirmado:p1",
+      createdAt: new Date().toISOString(),
+    }] satisfies MovimentoPontos[]);
+    // Usa o expediente real para produzir o mesmo evento diário do servidor.
+    obterMovimentosBonusMock.mockImplementationOnce(async () => {
+      const { chaveExpedienteOperacional } = await import("@/lib/expedienteOperacional");
+      return [{
+        movimentoId: "b1",
+        eventoId: `missao_divulgacao_diaria:${chaveExpedienteOperacional()}`,
+        tipo: "missao_divulgacao_diaria" as const,
+        pontos: 3,
+        motivo: "Missão diária de divulgação",
+        createdAt: new Date().toISOString(),
+      }];
+    });
+
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.gamificacao.missaoDivulgacao).toEqual({
+      concluidaHoje: true,
+      bonus: 3,
+      elegivel: true,
+    });
   });
 
   test("retorna dados de temporada quando há temporada ativa", async () => {
@@ -303,7 +367,7 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     expect((voce as { posicao: number }).posicao).toBe(3);
   });
 
-  test("temporada ativa expõe só codinome secreto e nunca PII do rival", async () => {
+  test("temporada ativa mostra nome autorizado e nunca expõe telefone do rival", async () => {
     temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
     const clienteId = "hashed_11900000001";
     posicaoPorCliente.set(clienteId, { posicao: 2, score: 150 });
@@ -327,8 +391,8 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       participaCampanha: true,
       codinomeSecreto: expect.any(String),
     });
+    expect(body.ranking.lista[0].nomePublico).toBe("Ana");
     const serializado = JSON.stringify(body.ranking);
-    expect(serializado).not.toContain("Ana");
     expect(serializado).not.toContain("1234");
     expect(serializado).not.toContain("outro_1");
   });
@@ -363,7 +427,8 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       expect.objectContaining({ posicao: 1, score: 100, eVoce: true, participaCampanha: true, codinomeSecreto: expect.any(String) }),
       expect.objectContaining({ posicao: 2, score: 50, eVoce: false, participaCampanha: true, codinomeSecreto: expect.any(String) }),
     ]);
-    expect(JSON.stringify(body.ranking.participantes.lista)).not.toContain("Bia");
+    expect(JSON.stringify(body.ranking.participantes.lista)).toContain("Bia");
+    expect(JSON.stringify(body.ranking.participantes.lista)).not.toContain("0002");
     // Ninguém que não autorizou aparece na lista de participantes.
     expect(JSON.stringify(body.ranking.participantes)).not.toContain("nao_participa");
   });
@@ -530,8 +595,9 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       sozinho: false,
     });
     const disputaSerializada = JSON.stringify(body.ranking.participantes.disputa);
-    expect(disputaSerializada).not.toContain("Ana");
-    expect(disputaSerializada).not.toContain("Carlos");
+    expect(disputaSerializada).toContain("Ana");
+    expect(disputaSerializada).toContain("Carlos");
+    expect(disputaSerializada).not.toContain("••••");
   });
 
   test("único participante: alvo sozinho e disputa sem vizinhos", async () => {
@@ -670,6 +736,7 @@ describe("GET /api/cliente/fidelidade/painel", () => {
         missaoSemanal: null,
         missaoIndicacao: null,
         missaoFotoPerfil: null,
+        missaoDivulgacao: null,
         movimentoRecente: null,
         coroaAmeacada: false,
         nivelChef: null,

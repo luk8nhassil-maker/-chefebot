@@ -573,5 +573,18 @@ describe("/cliente — Preview local cobre os 5 estados do selo social", () => {
     expect(blocoPreview).toContain("Compartilhamento do status simulado no Preview. Nenhum link real foi criado ou enviado.");
     expect(blocoPreview).not.toContain("navigator.share");
     expect(blocoPreview).not.toContain("fetchCliente");
+  });  test("modal do Ranking fica contido em viewport móvel até 560px", () => {
+    expect(fonte).toContain("@media(max-width:560px)");
+    expect(fonte).toContain("max-height:calc(100dvh - 16px)");
+    expect(fonte).toContain("overflow-wrap:anywhere");
+    expect(fonte).toContain("white-space:normal!important");
   });
+
+  test("Story do Dia só declara bônus após abertura de outra pessoa", () => {
+    expect(fonte).toContain("/api/cliente/marketing-organico");
+    expect(fonte).toContain("Seu bônus entra quando outra pessoa abrir esse link hoje.");
+    expect(fonte).not.toContain("Você ganhou pontos por compartilhar");
+  });
+
+
 });

@@ -17,6 +17,7 @@ export type TipoBonusCompeticao =
   | "missao_semanal"
   | "missao_indicacao"
   | "missao_foto_perfil"
+  | "missao_divulgacao_diaria"
   | "impulso_podio"
   | "carryover"
   | "ajuste";
