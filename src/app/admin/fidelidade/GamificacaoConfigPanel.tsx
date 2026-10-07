@@ -8,6 +8,8 @@ type Config = {
   missaoSemanalCooldownDias: number
   missaoIndicacaoAtiva: boolean
   missaoIndicacaoBonus: number
+  missaoFotoPerfilAtiva: boolean
+  missaoFotoPerfilBonus: number
   impulsoPodioAtivo: boolean
   impulsoPodioBonus: number
   impulsoPodioCapTemporada: number
@@ -18,12 +20,13 @@ type Config = {
   ameacaPodioMaxGap: number
 }
 
-type Grupo = 'semanal' | 'indicacao' | 'impulso' | 'carryover' | 'nivel'
+type Grupo = 'semanal' | 'indicacao' | 'foto' | 'impulso' | 'carryover' | 'nivel'
 
 function camposDoGrupo(config: Config, grupo: Grupo): Partial<Config> {
   switch (grupo) {
     case 'semanal': return { missaoSemanalAtiva: config.missaoSemanalAtiva, missaoSemanalMultiplicador: config.missaoSemanalMultiplicador, missaoSemanalCooldownDias: config.missaoSemanalCooldownDias }
     case 'indicacao': return { missaoIndicacaoAtiva: config.missaoIndicacaoAtiva, missaoIndicacaoBonus: config.missaoIndicacaoBonus }
+    case 'foto': return { missaoFotoPerfilAtiva: config.missaoFotoPerfilAtiva, missaoFotoPerfilBonus: config.missaoFotoPerfilBonus }
     case 'impulso': return { impulsoPodioAtivo: config.impulsoPodioAtivo, impulsoPodioBonus: config.impulsoPodioBonus, impulsoPodioCapTemporada: config.impulsoPodioCapTemporada }
     case 'carryover': return { carryoverAtivo: config.carryoverAtivo, carryoverTabela: config.carryoverTabela }
     case 'nivel': return { nivelChefAtivo: config.nivelChefAtivo, nivelChefLimiares: config.nivelChefLimiares }
@@ -109,6 +112,13 @@ export default function GamificacaoConfigPanel() {
         {numero('missaoIndicacaoBonus', 'Bônus aprovado no Ranking', config.missaoIndicacaoBonus)}
         <small>Só após a primeira compra válida; não altera a indicação da fidelidade.</small>
         {botao('indicacao')}
+      </div>
+      <div style={caixa}>
+        <strong>Missão de foto do perfil</strong>
+        {alternar('missaoFotoPerfilAtiva', 'Ativar missão de foto', config.missaoFotoPerfilAtiva)}
+        {numero('missaoFotoPerfilBonus', 'Pontos no Ranking', config.missaoFotoPerfilBonus)}
+        <small>Bônus único por cliente. A foto só vira pública se o cliente autorizar essa finalidade no Ranking.</small>
+        {botao('foto')}
       </div>
       <div style={caixa}>
         <strong>Impulso do Pódio</strong>
