@@ -6,6 +6,7 @@ import { obterParticipacaoRanking } from "./consentimentoRanking";
 import { creditarBonusCompeticao } from "./rankingBonusTemporada";
 import { sincronizarScoreTemporadaComBonus } from "./rankingScoreTemporadaSync";
 import { registrarBonusFotoRankingCliente, type Cliente } from "./clientes";
+import { derivarClienteIdPorTelefone } from "./fidelidade";
 
 export type ResultadoMissaoFotoRanking =
   | { status: "inativa" | "inelegivel" | "ja_concluida"; pontos: 0; temporadaId: string | null }
@@ -16,6 +17,7 @@ export async function concederBonusMissaoFotoRanking(params: {
   cliente: Cliente;
 }): Promise<ResultadoMissaoFotoRanking> {
   const { tenantId, cliente } = params;
+  const clienteId = derivarClienteIdPorTelefone(cliente.telefone) ?? clienteId;
   if (cliente.rankingFotoBonusConcedidoEm) {
     return { status: "ja_concluida", pontos: 0, temporadaId: cliente.rankingFotoBonusTemporadaId ?? null };
   }
@@ -27,17 +29,17 @@ export async function concederBonusMissaoFotoRanking(params: {
 
   const [temporada, participa] = await Promise.all([
     obterTemporadaAtiva(tenantId),
-    obterParticipacaoRanking(cliente.clienteId),
+    obterParticipacaoRanking(clienteId),
   ]);
   if (!temporada || !participa) {
     return { status: "inelegivel", pontos: 0, temporadaId: temporada?.temporadaId ?? null };
   }
 
-  const eventoId = `missao_foto_perfil:${cliente.clienteId}`;
+  const eventoId = `missao_foto_perfil:${clienteId}`;
   const resultado = await creditarBonusCompeticao({
     tenantId,
     temporadaId: temporada.temporadaId,
-    clienteId: cliente.clienteId,
+    clienteId: clienteId,
     eventoId,
     tipo: "missao_foto_perfil",
     pontos: config.missaoFotoPerfilBonus,
@@ -48,7 +50,7 @@ export async function concederBonusMissaoFotoRanking(params: {
     return { status: "inelegivel", pontos: 0, temporadaId: temporada.temporadaId };
   }
 
-  await sincronizarScoreTemporadaComBonus(tenantId, temporada.temporadaId, cliente.clienteId);
+  await sincronizarScoreTemporadaComBonus(tenantId, temporada.temporadaId, clienteId);
   await registrarBonusFotoRankingCliente(cliente.telefone, temporada.temporadaId);
 
   return {
