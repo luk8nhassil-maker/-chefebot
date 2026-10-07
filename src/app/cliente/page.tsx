@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { ChevronRight, Clock3, Gift, Info, List, Phone, MessageCircle, Receipt, ShieldCheck, Sparkles, Pizza, Trophy, Users, Star } from 'lucide-react'
 import { calcularMissaoAtual } from '@/lib/missoes'
 import ClientBottomNav from '@/components/ClientBottomNav'
@@ -794,6 +795,7 @@ function RankingConsentModal({ privacidade, carregando, salvando, erro, onAceita
 }
 
 export default function ClientePage() {
+  const router = useRouter()
   // Etapas: carregando → (perfil | confirmar | telefone) → otp → (nome) → perfil.
   // "confirmar" é a experiência de número reconhecido pelo link do WhatsApp:
   // mostra só o número mascarado (produzido no servidor) e nunca pede digitação.
@@ -901,7 +903,7 @@ export default function ClientePage() {
       return
     }
     try { sessionStorage.setItem(CF_OPEN_CART_KEY, '1') } catch {}
-    window.location.href = '/pedido'
+    router.push('/pedido')
   }
 
   // ==========================================================================
@@ -1201,27 +1203,33 @@ export default function ClientePage() {
     carregarIdentidade()
     carregarFidelidade()
     carregarJornada()
-    carregarPainel()
-    carregarPrivacidadeRanking().then(async (preferencias) => {
-      if (!convitePosPedidoRef.current) return
-      convitePosPedidoRef.current = false
-      if (preferencias?.participaCampanha === true) {
-        const painelAtual = await carregarPainel()
-        if (!painelAtual?.ranking) {
-          setPreviewAviso('Você já participa. Sua posição aparece quando houver uma temporada ativa.')
-          return
+    const painelPromise = carregarPainel()
+
+    // Privacidade do Ranking não bloqueia a home de Fidelidade. Só carregamos
+    // aqui quando o cliente realmente veio do fluxo pós-pedido, que pode abrir
+    // o Ranking automaticamente. No uso normal ela é lida apenas ao tocar no
+    // Ranking — uma requisição a menos em toda abertura da aba Fidelidade.
+    if (convitePosPedidoRef.current) {
+      carregarPrivacidadeRanking().then(async (preferencias) => {
+        convitePosPedidoRef.current = false
+        if (preferencias?.participaCampanha === true) {
+          const painelAtual = await painelPromise
+          if (!painelAtual?.ranking) {
+            setPreviewAviso('Você já participa. Sua posição aparece quando houver uma temporada ativa.')
+            return
+          }
+          setMobilePanel('ranking')
+          // Cliente que já participa chega direto no ranking depois do pedido.
+          // Começa "pendente" — só vira "creditado" quando o extrato confirmado
+          // do servidor mostrar o crédito do pedido EXATO (pedidoPosPedidoRef),
+          // nunca por proximidade de tempo. Sem pedidoId na URL (link antigo em
+          // cache), fica "pendente" indefinidamente — nunca inventa crédito.
+          setPosPedido({ estado: 'pendente', pedidoId: pedidoPosPedidoRef.current })
+        } else {
+          setRankingConsentModal(true)
         }
-        setMobilePanel('ranking')
-        // Cliente que já participa chega direto no ranking depois do pedido.
-        // Começa "pendente" — só vira "creditado" quando o extrato confirmado
-        // do servidor mostrar o crédito do pedido EXATO (pedidoPosPedidoRef),
-        // nunca por proximidade de tempo. Sem pedidoId na URL (link antigo em
-        // cache), fica "pendente" indefinidamente — nunca inventa crédito.
-        setPosPedido({ estado: 'pendente', pedidoId: pedidoPosPedidoRef.current })
-      } else {
-        setRankingConsentModal(true)
-      }
-    })
+      })
+    }
     // Processa indicação capturada antes do login (cf_ref)
     try {
       const ref = sessionStorage.getItem('cf_ref')
