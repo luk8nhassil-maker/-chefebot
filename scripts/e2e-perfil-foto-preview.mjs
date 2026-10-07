@@ -48,7 +48,7 @@ try {
   await page.getByRole("dialog", { name: "Entre no Ranking do Chefe" }).waitFor({ state: "visible" });
   await page.screenshot({ path: path.join(outDir, "03-convite-participar-ranking.png"), fullPage: true });
 
-  await page.getByRole("button", { name: "Ativar meu Ranking" }).click();
+  await page.getByRole("button", { name: "Aceitar regra e entrar no Ranking" }).click();
   await page.locator(".cf-ranking-screen").waitFor({ state: "visible", timeout: 15000 });
   await page.getByText("Ranking do Chefe", { exact: true }).first().waitFor({ state: "visible" });
 
