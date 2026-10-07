@@ -115,40 +115,45 @@ export async function consultarEventosAnaliticosComFallback(
   fimMs: number,
   agora = Date.now(),
 ): Promise<{ eventos: EventoAnalitico[]; fallbackTodos: EventoAnalitico[]; fonte: FonteEventosAnalytics }> {
-  const [indice, fallback] = await Promise.allSettled([
-    consultarEventosPorPeriodo(tenantId, inicioMs, fimMs),
-    lerEventosFallbackPedidos(tenantId, agora),
-  ]);
-
-  if (indice.status === "rejected" && fallback.status === "rejected") {
-    throw new Error("analytics_sources_unavailable");
+  // Caminho quente do painel: a chave `pedidos` já contém a fonte oficial da
+  // operação e é lida em uma única chamada. Não espere o índice analítico
+  // evento-a-evento quando essa fonte estiver disponível, porque isso transforma
+  // uma tela simples em centenas de round-trips remotos.
+  try {
+    const fallbackTodos = await lerEventosFallbackPedidos(tenantId, agora);
+    if (fallbackTodos.length > 0) {
+      const fallbackPeriodo = fallbackTodos.filter(
+        (ev) => ev.criadoEmMs >= inicioMs && ev.criadoEmMs <= fimMs,
+      );
+      return {
+        eventos: fallbackPeriodo,
+        fallbackTodos,
+        fonte: {
+          indiceDisponivel: false,
+          fallbackPedidosDisponivel: true,
+          eventosIndice: 0,
+          eventosFallbackAdicionados: fallbackPeriodo.length,
+          origem: "pedidos",
+        },
+      };
+    }
+  } catch {
+    // Se a fonte operacional falhar, caímos para o índice analítico abaixo.
   }
 
-  const eventosIndice = indice.status === "fulfilled" ? indice.value : [];
-  const fallbackTodos = fallback.status === "fulfilled" ? fallback.value : [];
-  const fallbackPeriodo = fallbackTodos.filter((ev) => ev.criadoEmMs >= inicioMs && ev.criadoEmMs <= fimMs);
-
-  const porPedido = new Map<string, EventoAnalitico>();
-  for (const ev of fallbackPeriodo) porPedido.set(ev.pedidoId, ev);
-  const idsIndice = new Set(eventosIndice.map((ev) => ev.pedidoId));
-  for (const ev of eventosIndice) porPedido.set(ev.pedidoId, ev);
-
-  const extrasFallback = fallbackPeriodo.filter((ev) => !idsIndice.has(ev.pedidoId)).length;
-  const origem: FonteEventosAnalytics["origem"] = extrasFallback > 0
-    ? (eventosIndice.length > 0 ? "analytics+pedidos" : "pedidos")
-    : indice.status === "fulfilled"
-      ? "analytics"
-      : "pedidos";
-
+  // Fallback real: usa o índice analítico apenas quando não foi possível servir
+  // a leitura pelos pedidos oficiais. Assim o painel continua resiliente sem
+  // pagar o custo do N+1 no caminho normal.
+  const eventosIndice = await consultarEventosPorPeriodo(tenantId, inicioMs, fimMs);
   return {
-    eventos: [...porPedido.values()],
-    fallbackTodos,
+    eventos: eventosIndice,
+    fallbackTodos: [],
     fonte: {
-      indiceDisponivel: indice.status === "fulfilled",
-      fallbackPedidosDisponivel: fallback.status === "fulfilled",
+      indiceDisponivel: true,
+      fallbackPedidosDisponivel: false,
       eventosIndice: eventosIndice.length,
-      eventosFallbackAdicionados: extrasFallback,
-      origem,
+      eventosFallbackAdicionados: 0,
+      origem: "analytics",
     },
   };
 }
