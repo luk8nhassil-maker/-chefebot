@@ -100,7 +100,7 @@ export function calcularRitmoCompraCliente(
   const distribuicaoMes = { inicio: 0, meio: 0, fim: 0 };
   const partes = validos
     .map((evento) => ({ evento, local: partesLocais(evento.criadoEmMs) }))
-    .filter((item): item is { evento: EventoAnalitico; local: PartesLocais } => item.local !== null);
+    .filter((item): item is { evento: EventoAnalitico; compraEmMs: number; local: PartesLocais } => item.local !== null);
 
   for (const item of partes) distribuicaoMes[faseDoDia(item.local.diaMes)] += 1;
 
