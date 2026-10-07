@@ -39,7 +39,7 @@ export type PainelFidelidade = {
         participaCampanha: true
         nomePublico?: string
         telefoneMascarado?: string
-      codinomeSecreto?: string
+        codinomeSecreto?: string
         // Selo herdado do Top 10 da temporada ANTERIOR — de QUALQUER membro
         // da lista, não só do próprio cliente (`eVoce`).
         statusSocial?: StatusTemporadaSocial
@@ -104,5 +104,25 @@ export type PreferenciasPrivacidadeRanking = {
     motivoIndisponivel: 'texto_nao_aprovado' | 'infraestrutura_nao_configurada' | 'fonte_oficial_indisponivel' | null
     estado: 'concedido' | 'revogado'
     atualizadoEm: string | null
+  }>
+}
+
+
+export type ResultadoRankingRevelado = {
+  temporadaId: string
+  encerradaEm: string
+  revelacaoAte: string | null
+  premioDescricao: string | null
+  participantesTopo: Array<{
+    posicao: number
+    score: number
+    identidade: {
+      participaCampanha: boolean
+      nomePublico: string | null
+      telefoneMascarado: null
+      fotoPerfilUrl: string | null
+      codinomeSecreto: string
+      revelado: boolean
+    }
   }>
 }
