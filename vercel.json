@@ -1,7 +1,24 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": {
+      "main": true,
+      "codex/*": false,
+      "codex/**": false
+    }
+  },
   "crons": [
-    {"path": "/api/cron", "schedule": "0 3 * * *"},
-    {"path": "/api/cron/pix-pendente", "schedule": "0 5 * * *"},
-    {"path": "/api/cron/ranking-podio", "schedule": "0 21 * * *"}
+    {
+      "path": "/api/cron",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/pix-pendente",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/ranking-podio",
+      "schedule": "0 21 * * *"
+    }
   ]
 }
