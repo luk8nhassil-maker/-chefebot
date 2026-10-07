@@ -122,6 +122,7 @@ export function FidelidadeRankingScreen({
   indicando = false,
   compartilhando = false,
   posPedido = null,
+  onAlterarPrivacidade,
   onRevogarTodas,
   onIndicarAmigo,
   onCompartilharConquista,
@@ -155,10 +156,10 @@ export function FidelidadeRankingScreen({
   const nomeSeguro = (entrada: { eVoce: boolean; participaCampanha: boolean; posicao: number; nomePublico?: string; codinomeSecreto?: string }) => {
     if (entrada.eVoce && !entrada.participaCampanha) return 'Você — fora da disputa'
     if (!entrada.participaCampanha) return 'Fora da disputa'
-    return entrada.eVoce ? 'Você' : entrada.codinomeSecreto || entrada.nomePublico || 'Rival secreto'
+    return entrada.eVoce ? 'Você' : entrada.nomePublico || entrada.codinomeSecreto || 'Rival secreto'
   }
   const avatarSeguro = (entrada: { eVoce: boolean; nomePublico?: string; codinomeSecreto?: string } | undefined) =>
-    entrada?.eVoce ? 'V' : (entrada?.codinomeSecreto || entrada?.nomePublico)?.slice(0, 1).toUpperCase() || null
+    entrada?.eVoce ? 'V' : (entrada?.nomePublico || entrada?.codinomeSecreto)?.slice(0, 1).toUpperCase() || null
   // `linhas` mistura o ranking geral (sem selo) com o de participantes (com
   // selo) conforme a aba — leitura opcional e seletiva, nunca inventa selo
   // para quem não tem um vindo do servidor.
@@ -415,7 +416,7 @@ export function FidelidadeRankingScreen({
               <b>{scoreSeguro(entrada.score)}</b>
             </div>
           ))}
-          {aba === 'participantes' && <p className="cf-ranking-footnote">Durante a temporada, cada rival usa um codinome secreto. As identidades elegíveis são reveladas por 30 dias após o encerramento.</p>}
+          {aba === 'participantes' && <p className="cf-ranking-footnote">Quem autoriza o nome aparece pelo nome. Quem prefere ficar anônimo continua com um codinome do jogo.</p>}
           {aba === 'geral' && <p className="cf-ranking-footnote">Só quem ativou o Ranking participa da disputa.</p>}
         </section>
       )}
@@ -456,10 +457,29 @@ export function FidelidadeRankingScreen({
 
       {aba === 'minha' && <details className="cf-ranking-privacy">
         <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Privacidade e participação</summary>
-        <p>Durante a temporada você aparece por codinome. Ao final, a regra aceita na entrada permite revelar seu primeiro nome e sua foto de perfil por 30 dias para manter sua colocação pública.</p>
+        <p>Você pode escolher aparecer pelo nome durante a temporada. Sem essa autorização, o jogo usa seu codinome.</p>
         {privacidadeCarregando && <p>Carregando regra do jogo…</p>}
+        {!privacidadeCarregando && (() => {
+          const opcaoNomeCompleto = privacidade?.finalidades.find((item) => item.finalidade === 'ranking_nome_completo')
+          if (!opcaoNomeCompleto?.disponivel || !opcaoNomeCompleto.textoVersao) return null
+          return (
+            <label className="cf-ranking-privacy-name-toggle">
+              <input
+                type="checkbox"
+                checked={opcaoNomeCompleto.estado === 'concedido'}
+                disabled={privacidadeSalvando !== null}
+                onChange={(event) => onAlterarPrivacidade(
+                  'ranking_nome_completo',
+                  event.target.checked ? 'concedido' : 'revogado',
+                  opcaoNomeCompleto.textoVersao,
+                )}
+              />
+              <span><strong>Mostrar meu nome completo</strong><small>Se desligar, seu codinome volta a aparecer.</small></span>
+            </label>
+          )
+        })()}
         {!privacidadeCarregando && privacidade?.regraJogo?.aceitaRevelacao30d && (
-          <p><strong>Regra aceita:</strong> revelação final por 30 dias para manter a colocação pública.</p>
+          <p><strong>Regra do jogo:</strong> a revelação final por 30 dias continua valendo para a colocação pública.</p>
         )}
         <button type="button" disabled={privacidadeSalvando !== null} onClick={onRevogarTodas}>
           {privacidadeSalvando === 'todas' ? 'Saindo…' : 'Sair do Ranking e remover autorizações'}
