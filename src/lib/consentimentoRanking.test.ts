@@ -174,6 +174,26 @@ describe("consentimento do ranking", () => {
     });
   });
 
+  test("nome completo exige consentimento explícito da versão nova", async () => {
+    process.env.PRIVACY_CONSENT_HMAC_SECRET = SEGREDO;
+    await registrarParticipacaoRanking(CLIENTE_ID, true, { aceitaRevelacao30d: true });
+
+    expect(configuracaoFinalidadeRanking("ranking_nome_completo")).toMatchObject({
+      disponivel: true,
+      texto: "Mostrar meu nome completo no Ranking durante a temporada.",
+      textoVersao: "ranking-nome-completo-v1",
+    });
+
+    await registrarConsentimentoRanking({
+      clienteId: CLIENTE_ID,
+      finalidade: "ranking_nome_completo",
+      estado: "concedido",
+      textoVersaoInformada: "ranking-nome-completo-v1",
+    });
+
+    expect((await obterFinalidadesAtivasRanking(CLIENTE_ID)).has("ranking_nome_completo")).toBe(true);
+  });
+
   test("grava estado e auditoria na mesma transacao sem telefone ou clienteId", async () => {
     configurarNome();
     const registro = await registrarConsentimentoRanking({
@@ -278,7 +298,7 @@ describe("consentimento do ranking", () => {
       textoVersaoInformada: "dpo-2026-09-v1",
     });
     const revogados = await revogarTodosConsentimentosRanking(CLIENTE_ID);
-    expect(revogados).toHaveLength(3);
+    expect(revogados).toHaveLength(4);
     expect(revogados.every((item) => item.estado === "revogado")).toBe(true);
 
     const pagina1 = await obterHistoricoConsentimentoRanking(CLIENTE_ID, 0, 2);
@@ -286,6 +306,9 @@ describe("consentimento do ranking", () => {
     expect(pagina1.proximoOffset).toBe(2);
     const pagina2 = await obterHistoricoConsentimentoRanking(CLIENTE_ID, 2, 2);
     expect(pagina2.eventos).toHaveLength(2);
-    expect(pagina2.proximoOffset).toBeNull();
+    expect(pagina2.proximoOffset).toBe(4);
+    const pagina3 = await obterHistoricoConsentimentoRanking(CLIENTE_ID, 4, 2);
+    expect(pagina3.eventos).toHaveLength(1);
+    expect(pagina3.proximoOffset).toBeNull();
   });
 });
