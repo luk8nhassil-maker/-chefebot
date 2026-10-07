@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   resumirTimelineComportamentalCliente: vi.fn(),
   derivarClienteIdPorTelefone: vi.fn(),
   sanitizeTelefoneCliente: vi.fn(),
+  consultarEventosCliente: vi.fn(),
+  calcularRitmoCompraCliente: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({ verifyToken: mocks.verifyToken }));
@@ -23,6 +25,13 @@ vi.mock("@/lib/fidelidade", () => ({
 }));
 vi.mock("@/lib/clientes", () => ({
   sanitizeTelefoneCliente: mocks.sanitizeTelefoneCliente,
+}));
+vi.mock("@/lib/historicoAnalitico", () => ({
+  consultarEventosCliente: mocks.consultarEventosCliente,
+  TENANT_PADRAO_ANALYTICS: "default",
+}));
+vi.mock("@/lib/purchaseTiming", () => ({
+  calcularRitmoCompraCliente: mocks.calcularRitmoCompraCliente,
 }));
 
 import { POST } from "./route";
@@ -55,7 +64,25 @@ beforeEach(() => {
       identificado: false,
     }],
   });
-  mocks.consultarEventosCliente.mockResolvedValue([]);\n  mocks.calcularRitmoCompraCliente.mockReturnValue({\n    schemaVersion: 1,\n    mode: "purchase_timing_read_only",\n    janelaAnaliseDias: 180,\n    pedidosAnalisados: 4,\n    primeiraCompraEmMs: 1,\n    ultimaCompraEmMs: 2,\n    faseMes: "inicio",\n    faseMesLabel: "Comeco do mes",\n    concentracaoPercentual: 75,\n    confianca: "media",\n    janelaProvavel: { inicioDia: 3, fimDia: 7 },\n    diaCentralProvavel: 5,\n    diaSemanaMaisForte: { indice: 5, label: "sexta", percentual: 50 },\n    horarioMaisForte: { inicioHora: 18, fimHora: 21, percentual: 50 },\n    distribuicaoMes: { inicio: 3, meio: 1, fim: 0 },\n  });\n  mocks.resumirTimelineComportamentalCliente.mockReturnValue({
+  mocks.consultarEventosCliente.mockResolvedValue([]);
+  mocks.calcularRitmoCompraCliente.mockReturnValue({
+    schemaVersion: 1,
+    mode: "purchase_timing_read_only",
+    janelaAnaliseDias: 180,
+    pedidosAnalisados: 4,
+    primeiraCompraEmMs: 1,
+    ultimaCompraEmMs: 2,
+    faseMes: "inicio",
+    faseMesLabel: "Comeco do mes",
+    concentracaoPercentual: 75,
+    confianca: "media",
+    janelaProvavel: { inicioDia: 3, fimDia: 7 },
+    diaCentralProvavel: 5,
+    diaSemanaMaisForte: { indice: 5, label: "sexta", percentual: 50 },
+    horarioMaisForte: { inicioHora: 18, fimHora: 21, percentual: 50 },
+    distribuicaoMes: { inicio: 3, meio: 1, fim: 0 },
+  });
+  mocks.resumirTimelineComportamentalCliente.mockReturnValue({
     schemaVersion: 1,
     mode: "behavior_customer_summary_read_only",
     sessions: 1,
@@ -94,6 +121,7 @@ describe("POST /api/dev/comportamento/cliente", () => {
     const res = await POST(req({ telefone: "12" }));
     expect(res.status).toBe(400);
     expect(mocks.consultarTimelineComportamentalCliente).not.toHaveBeenCalled();
+    expect(mocks.consultarEventosCliente).not.toHaveBeenCalled();
   });
 
   test("resolve o cliente no servidor e mantém o read model sem dados pessoais", async () => {
@@ -106,13 +134,25 @@ describe("POST /api/dev/comportamento/cliente", () => {
     expect(mocks.consultarTimelineComportamentalCliente).toHaveBeenCalledWith(expect.objectContaining({
       clienteId: "cli_canonico",
     }));
-    expect(mocks.consultarEventosCliente).toHaveBeenCalledWith(\n      "default",\n      "cli_canonico",\n      1_000_000_000 - 180 * 24 * 60 * 60 * 1000,\n      1_000_000_000,\n    );\n    expect(body).not.toHaveProperty("cliente");
+    expect(mocks.consultarEventosCliente).toHaveBeenCalledWith(
+      "default",
+      "cli_canonico",
+      1_000_000_000 - 180 * 24 * 60 * 60 * 1000,
+      1_000_000_000,
+    );
+    expect(body).not.toHaveProperty("cliente");
     expect(body.summary).toEqual(expect.objectContaining({
       sessions: 1,
       sessionsWithoutOrder: 1,
       appOpens: 1,
     }));
-    expect(mocks.resumirTimelineComportamentalCliente).toHaveBeenCalledWith(body.timeline.events);\n    expect(body.purchaseTiming).toEqual(expect.objectContaining({\n      faseMes: "inicio",\n      concentracaoPercentual: 75,\n      pedidosAnalisados: 4,\n    }));\n    expect(mocks.calcularRitmoCompraCliente).toHaveBeenCalledWith([], 180);
+    expect(mocks.resumirTimelineComportamentalCliente).toHaveBeenCalledWith(body.timeline.events);
+    expect(body.purchaseTiming).toEqual(expect.objectContaining({
+      faseMes: "inicio",
+      concentracaoPercentual: 75,
+      pedidosAnalisados: 4,
+    }));
+    expect(mocks.calcularRitmoCompraCliente).toHaveBeenCalledWith([], 180);
     const serializado = JSON.stringify(body);
     expect(serializado).not.toContain("5599999999999");
     expect(serializado).not.toContain("actorHash");
