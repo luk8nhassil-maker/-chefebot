@@ -160,7 +160,7 @@ describe("CASO 3 — criação de um pedido concorrente com mudança de status d
 
     const [resPatch, resPost] = await Promise.all([
       PATCH(authedRequest("PATCH", { id: "3001", status: "em_preparo" })),
-      POST(authedRequest("POST", { cliente: "Bruno Novo", telefone: "5522222222222", itens: ["Pizza M"], total: 40, endereco: "Rua 2" })),
+      POST(authedRequest("POST", { cliente: "Bruno Novo", telefone: "5522222222222", itens: ["Pizza M"], total: 40, endereco: "Rua 2", origem: "site" })),
     ]);
 
     expect(resPatch.status).toBe(200);
@@ -173,6 +173,7 @@ describe("CASO 3 — criação de um pedido concorrente com mudança de status d
 
     expect(pedidoAPersistido?.status).toBe("em_preparo");
     expect(pedidoBPersistido).toBeDefined();
+    expect(pedidoBPersistido?.origem).toBe("painel");
   });
 });
 

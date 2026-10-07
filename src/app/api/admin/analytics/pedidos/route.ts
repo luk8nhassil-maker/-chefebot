@@ -4,7 +4,7 @@
 // Autenticação: somente roles admin/dev (mesmo padrão das demais rotas admin).
 //
 // Parâmetros:
-//   ?tenantId=<id>   (default: "default")
+//   ?tenantId=default (única loja atendida pela fonte operacional `pedidos`)
 //   ?periodo=7|30|60|90|historico (default: 30; histórico consulta todos os registros disponíveis)
 //
 // Resposta: MetricasAnaliticas agregadas + meta (período, pedidos no índice).
@@ -50,6 +50,9 @@ export async function GET(req: NextRequest) {
 
   const params = req.nextUrl.searchParams;
   const tenantId = (params.get("tenantId") ?? TENANT_PADRAO_ANALYTICS).trim() || TENANT_PADRAO_ANALYTICS;
+  if (tenantId !== TENANT_PADRAO_ANALYTICS) {
+    return NextResponse.json({ error: "tenantId indisponivel nesta loja" }, { status: 400 });
+  }
 
   const periodoParam = params.get("periodo") ?? "30";
   const periodo: PeriodoConsulta = periodoParam === "historico"
@@ -106,8 +109,6 @@ export async function GET(req: NextRequest) {
         eventos.flatMap((evento) => evento.statusAnalitico === "entregue" && evento.clienteId
           ? [{ clienteId: evento.clienteId, pedidoId: evento.pedidoId }]
           : []),
-        inicioMs,
-        fimMs,
       );
       metricasComEstrelas = {
         ...metricas,
@@ -119,10 +120,13 @@ export async function GET(req: NextRequest) {
     }
 
     const baseCobertura = leitura.fallbackTodos.length > 0 ? leitura.fallbackTodos : eventos;
-    const timestampsCobertura = baseCobertura
-      .map((evento) => evento.criadoEmMs)
-      .filter((valor) => Number.isFinite(valor) && valor <= fimMs);
-    const primeiroHistoricoMs = timestampsCobertura.length > 0 ? Math.min(...timestampsCobertura) : null;
+    let primeiroHistoricoMs: number | null = null;
+    for (const evento of baseCobertura) {
+      const valor = evento.criadoEmMs;
+      if (Number.isFinite(valor) && valor <= fimMs && (primeiroHistoricoMs === null || valor < primeiroHistoricoMs)) {
+        primeiroHistoricoMs = valor;
+      }
+    }
     const primeiroNaJanelaMs = primeiroHistoricoMs === null ? null : Math.max(primeiroHistoricoMs, inicioMs);
     const diasHistoricoEncontrado = primeiroNaJanelaMs === null
       ? 0

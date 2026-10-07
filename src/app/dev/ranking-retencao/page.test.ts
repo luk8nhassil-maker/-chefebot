@@ -98,7 +98,7 @@ describe("Preview seguro da retenção do ranking (quem já participa)", () => {
     for (const id of idsV3) {
       expect(client).toContain(`id: "${id}"`);
     }
-    const totalCenarios = (client.match(/^\s{2}\{\n\s{4}id: "/gm) ?? []).length;
+    const totalCenarios = (client.match(/^\s{2}\{\r?\n\s{4}id: "/gm) ?? []).length;
     expect(totalCenarios).toBe(42);
   });
 

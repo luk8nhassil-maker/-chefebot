@@ -180,6 +180,12 @@ describe("GET /api/admin/analytics/pedidos", () => {
     expect(res.status).toBe(400);
   });
 
+  it("não mistura pedidos da loja com outro tenant informado na URL", async () => {
+    const res = await GET(makeReq({ tenantId: "outra-loja" }));
+    expect(res.status).toBe(400);
+    expect(mocks.consultarEventosAnaliticosComFallback).not.toHaveBeenCalled();
+  });
+
   it("falha 500 apenas quando as duas fontes ficam indisponíveis", async () => {
     mocks.consultarEventosAnaliticosComFallback.mockRejectedValue(new Error("down"));
     const res = await GET(makeReq());

@@ -472,8 +472,6 @@ async function obterEstadoPontos(clienteId: string): Promise<EstadoPontosCliente
  */
 export async function consultarEstrelasCreditadasPorPedidos(
   pedidos: Array<{ clienteId: string; pedidoId: string }>,
-  inicioMs: number,
-  fimMs: number,
 ): Promise<{ estrelas: number; pedidosComCredito: number }> {
   const porCliente = new Map<string, Set<string>>();
   for (const pedido of pedidos) {
@@ -491,28 +489,25 @@ export async function consultarEstrelasCreditadasPorPedidos(
 
   for (let offset = 0; offset < clientes.length; offset += 80) {
     const lote = clientes.slice(offset, offset + 80);
-    const [estados, legados] = await Promise.all([
-      redisMget.mget<EstadoPontosCliente>(...lote.map(chaveEstadoPontos)),
-      redisMget.mget<MovimentoPontos[]>(...lote.map(chaveExtratoPontosLegado)),
-    ]);
+    const valores = await redisMget.mget<EstadoPontosCliente | MovimentoPontos[]>(
+      ...lote.map(chaveEstadoPontos),
+      ...lote.map(chaveExtratoPontosLegado),
+    );
 
     lote.forEach((clienteId, indice) => {
-      const estado = normalizarEstadoPontos(estados[indice]);
-      const movimentosLegados = Array.isArray(legados[indice]) ? legados[indice]! : [];
+      const estado = normalizarEstadoPontos(valores[indice] as EstadoPontosCliente | null);
+      const legado = valores[indice + lote.length];
+      const movimentosLegados = Array.isArray(legado) ? legado : [];
       const extrato = unirExtratosPontos(estado.extrato, movimentosLegados);
       const pedidosDoCliente = porCliente.get(clienteId)!;
 
       for (const movimento of extrato) {
-        const criadoEmMs = Date.parse(movimento.createdAt);
         if (
           movimento.tipo !== "confirmado" ||
           movimento.unidade !== "estrelas" ||
           movimento.regraVersao !== REGRA_ESTRELAS_V1 ||
           !movimento.pedidoId ||
-          !pedidosDoCliente.has(movimento.pedidoId) ||
-          !Number.isFinite(criadoEmMs) ||
-          criadoEmMs < inicioMs ||
-          criadoEmMs > fimMs
+          !pedidosDoCliente.has(movimento.pedidoId)
         ) continue;
 
         estrelas += Math.max(0, Math.floor(Number(movimento.pontos) || 0));

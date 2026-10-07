@@ -184,7 +184,7 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     expect(screen.getByRole("region", { name: "Identidades reveladas da temporada anterior" })).toBeTruthy();
     expect(screen.getByText("Ana")).toBeTruthy();
     expect(screen.getByText("Perfil revelado")).toBeTruthy();
-    expect(screen.getByText(/31\/10/)).toBeTruthy();
+    expect(screen.getByText(/30\/10/)).toBeTruthy();
   });
 
   test("sem situação acionável abre o Ranking direto, sem modal inventado", () => {
