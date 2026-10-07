@@ -182,7 +182,7 @@ export async function projetarResultadoTemporada(
       identidade: {
         participaCampanha: mantemPosicao,
         nomePublico,
-        telefoneMascarado: null as const,
+        telefoneMascarado: null,
         fotoPerfilUrl,
         codinomeSecreto,
         revelado,
