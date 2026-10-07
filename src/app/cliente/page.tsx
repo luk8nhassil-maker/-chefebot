@@ -235,6 +235,7 @@ const PAINEL_PREVIEW: PainelFidelidade = {
     missaoSemanal: { status: 'desbloqueada' },
     missaoIndicacao: { concluida: false },
     missaoFotoPerfil: { concluida: false, bonus: 5 },
+    missaoDivulgacao: { concluidaHoje: false, bonus: 2, elegivel: true },
     nivelChef: { nivel: 2, nome: 'Cozinheiro', xpAtual: 240, xpProximoNivel: 500 },
     movimentoRecente: null,
     coroaAmeacada: false,
@@ -289,6 +290,8 @@ function PreviewFidelidadeMobile({ aviso, onAviso, onClose }: PreviewFidelidadeM
         onIndicarAmigo={() => onAviso('Indicação simulada no Preview. Nenhum link real foi criado.')}
         onCompartilharConquista={() => onAviso('Compartilhamento simulado no Preview. Nenhum link real foi criado.')}
         onAdicionarFoto={() => onAviso('Missão de foto simulada no Preview. Nenhuma foto real foi enviada e nenhum ponto foi creditado.')}
+        onCompartilharDivulgacao={() => onAviso('Story do Dia simulado no Preview. Nenhum link real foi criado e nenhum ponto foi creditado.')}
+        compartilhandoDivulgacao={false}
         onNovoPedido={() => onAviso('No Preview, um novo pedido não é criado de verdade.')}
         onTelemetria={() => undefined}
         onClose={() => {
@@ -878,6 +881,7 @@ export default function ClientePage() {
   const [indicacaoToken, setIndicacaoToken] = useState<string | null>(null)
   const [compartilhandoIndicacao, setCompartilhandoIndicacao] = useState(false)
   const [compartilhandoConquista, setCompartilhandoConquista] = useState(false)
+  const [compartilhandoDivulgacao, setCompartilhandoDivulgacao] = useState(false)
   const [compartilhandoStatus, setCompartilhandoStatus] = useState(false)
   // Feedback pós-pedido para quem já participa: começa "pendente" ao chegar
   // de um pedido concluído e só vira "creditado" com dado confirmado real do
@@ -1212,6 +1216,36 @@ export default function ClientePage() {
         body: JSON.stringify({ tipo }),
       }, sessaoMemRef.current).catch(() => {})
     } catch {}
+  }
+
+  async function compartilharDivulgacaoDiaria() {
+    if (modoPreview) {
+      setPreviewAviso('Story do Dia simulado. Nenhum link real foi criado e nenhum ponto foi creditado.')
+      return
+    }
+    setCompartilhandoDivulgacao(true)
+    try {
+      const res = await fetchCliente('/api/cliente/marketing-organico', { cache: 'no-store' }, sessaoMemRef.current)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data?.url || !data?.mensagem) {
+        if (data?.concluidaHoje) setPreviewAviso('Seu bônus de divulgação de hoje já foi confirmado.')
+        else if (data?.motivoBloqueio === 'sem_pedido_confirmado') setPreviewAviso('Faça seu primeiro pedido confirmado para liberar o Story do Dia.')
+        else setPreviewAviso('Não conseguimos preparar seu link do dia agora.')
+        return
+      }
+
+      const texto = String(data.mensagem)
+      const url = String(data.url)
+      if (navigator.share) {
+        await navigator.share({ title: 'Story do Dia · Chefe da Pizza', text: texto, url })
+      } else {
+        await navigator.clipboard.writeText(`${texto} ${url}`)
+      }
+      setPreviewAviso('Link do dia compartilhado. Seu bônus entra quando outra pessoa abrir esse link hoje.')
+    } catch {}
+    finally {
+      setCompartilhandoDivulgacao(false)
+    }
   }
 
   async function compartilharConquistaRanking() {
@@ -1974,6 +2008,8 @@ export default function ClientePage() {
                 onCompartilharConquista={() => void compartilharConquistaRanking()}
                 onAdicionarFoto={() => abrirSeletorFoto('ranking')}
                 fotoEnviando={fotoEnviando}
+                onCompartilharDivulgacao={() => void compartilharDivulgacaoDiaria()}
+                compartilhandoDivulgacao={compartilhandoDivulgacao}
                 onNovoPedido={abrirSacola}
                 onTelemetria={telemetriaRanking}
                 onClose={() => { setMobilePanel(null); setPosPedido(null) }}
