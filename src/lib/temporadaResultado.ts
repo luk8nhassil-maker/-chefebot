@@ -23,7 +23,14 @@ import "server-only";
 import { redis } from "./redis";
 import { obterTemporada, type ConfigTemporada } from "./temporadas";
 import { obterRankingCompleto, reindexarPorFiltro, type EntradaRanking } from "./rankingClientes";
-import { projetarIdentidadesPublicasRanking, type IdentidadePublicaRanking } from "./rankingPrivacidade";
+import { buscarClientePorId, normalizarNomeCliente } from "./clientes";
+import { obterRegrasJogoSecretoParaClientes } from "./consentimentoRanking";
+import {
+  codinomeSecretoRanking,
+  fimJanelaRevelacao,
+  janelaRevelacaoAtiva,
+  REGRA_JOGO_SECRETO_VERSAO,
+} from "./rankingJogoSecreto";
 
 const LIMITE_ARQUIVADO = 50;
 
@@ -37,6 +44,8 @@ export type ResultadoTemporada = {
   premioQuantidadePremiados: number | null;
   premioAprovado: boolean;
   vencedorDeclarado: boolean;
+  regraJogoVersao?: typeof REGRA_JOGO_SECRETO_VERSAO;
+  revelacaoAte?: string | null;
   // Top participantes (quem "vale prêmio"), reindexado 1..N só entre quem
   // autorizou — os primeiros `premioQuantidadePremiados` são os vencedores
   // quando vencedorDeclarado === true.
@@ -78,10 +87,13 @@ export async function garantirResultadoTemporada(
   if (existente) return existente;
 
   const completo = await obterRankingCompleto(tenantId, temporadaId);
-  const identidades = await projetarIdentidadesPublicasRanking(completo.map((e) => e.clienteId));
+  const regrasJogo = await obterRegrasJogoSecretoParaClientes(completo.map((e) => e.clienteId));
   const participantes = reindexarPorFiltro(
     completo,
-    (id) => identidades.get(id)?.participaCampanha === true,
+    (id) => {
+      const regra = regrasJogo.get(id);
+      return regra?.participa === true && regra.aceitaRevelacao30d === true;
+    },
   );
 
   const premioAprovado = config.premioAprovado === true;
@@ -98,6 +110,8 @@ export async function garantirResultadoTemporada(
     premioQuantidadePremiados: qtd,
     premioAprovado,
     vencedorDeclarado,
+    regraJogoVersao: REGRA_JOGO_SECRETO_VERSAO,
+    revelacaoAte: fimJanelaRevelacao(config.encerradaEm ?? new Date().toISOString()),
     participantesTopo: participantes.slice(0, LIMITE_ARQUIVADO),
     geralTopo: completo.slice(0, LIMITE_ARQUIVADO),
   };
@@ -110,10 +124,19 @@ export async function garantirResultadoTemporada(
   return (await obterResultadoTemporada(tenantId, temporadaId)) ?? resultado;
 }
 
+export type IdentidadeResultadoRanking = {
+  participaCampanha: boolean;
+  nomePublico: string | null;
+  telefoneMascarado: null;
+  fotoPerfilUrl: string | null;
+  codinomeSecreto: string;
+  revelado: boolean;
+};
+
 export type EntradaResultadoProjetada = {
   posicao: number;
   score: number;
-  identidade: IdentidadePublicaRanking;
+  identidade: IdentidadeResultadoRanking;
 };
 
 export type ResultadoTemporadaProjetado = Omit<ResultadoTemporada, "participantesTopo" | "geralTopo"> & {
@@ -128,19 +151,47 @@ export type ResultadoTemporadaProjetado = Omit<ResultadoTemporada, "participante
  */
 export async function projetarResultadoTemporada(
   resultado: ResultadoTemporada,
+  agora = Date.now(),
 ): Promise<ResultadoTemporadaProjetado> {
   const ids = resultado.participantesTopo.map((e) => e.clienteId);
-  const identidades = await projetarIdentidadesPublicasRanking(ids);
-  const participantesTopo = resultado.participantesTopo.map((e) => ({
-    posicao: e.posicao,
-    score: e.score,
-    identidade: identidades.get(e.clienteId) ?? {
-      participaCampanha: false,
-      nomePublico: null,
-      telefoneMascarado: null,
-      fotoPerfilUrl: null,
-    },
+  const regras = await obterRegrasJogoSecretoParaClientes(ids);
+  const revelar = janelaRevelacaoAtiva(resultado.encerradaEm, agora);
+
+  const participantesTopo = await Promise.all(resultado.participantesTopo.map(async (e) => {
+    const regra = regras.get(e.clienteId);
+    const mantemPosicao = regra?.participa === true && regra.aceitaRevelacao30d === true;
+    const codinomeSecreto = codinomeSecretoRanking(e.clienteId, resultado.temporadaId);
+
+    let nomePublico: string | null = null;
+    let fotoPerfilUrl: string | null = null;
+    let revelado = false;
+
+    if (revelar && mantemPosicao) {
+      const cliente = await buscarClientePorId(e.clienteId).catch(() => null);
+      if (cliente) {
+        const nome = normalizarNomeCliente(cliente.nome);
+        nomePublico = nome ? nome.split(" ")[0]?.slice(0, 30) || null : null;
+        if (cliente.fotoPerfilPathname) {
+          fotoPerfilUrl = `/api/cliente/ranking/resultado-foto?temporadaId=${encodeURIComponent(resultado.temporadaId)}&posicao=${e.posicao}`;
+        }
+        revelado = Boolean(nomePublico || fotoPerfilUrl);
+      }
+    }
+
+    return {
+      posicao: e.posicao,
+      score: e.score,
+      identidade: {
+        participaCampanha: mantemPosicao,
+        nomePublico,
+        telefoneMascarado: null as const,
+        fotoPerfilUrl,
+        codinomeSecreto,
+        revelado,
+      },
+    };
   }));
+
   const vencedores = resultado.vencedorDeclarado && resultado.premioQuantidadePremiados
     ? participantesTopo.slice(0, resultado.premioQuantidadePremiados)
     : [];
@@ -153,6 +204,8 @@ export async function projetarResultadoTemporada(
     premioQuantidadePremiados: resultado.premioQuantidadePremiados,
     premioAprovado: resultado.premioAprovado,
     vencedorDeclarado: resultado.vencedorDeclarado,
+    regraJogoVersao: resultado.regraJogoVersao ?? REGRA_JOGO_SECRETO_VERSAO,
+    revelacaoAte: resultado.revelacaoAte ?? fimJanelaRevelacao(resultado.encerradaEm),
     vencedores,
     participantesTopo,
   };
