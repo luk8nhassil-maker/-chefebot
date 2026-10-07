@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { lerSessao, preferencias, ativas, participacao, ativar, registrar, revogarTodos, historico } = vi.hoisted(() => ({
+const { lerSessao, preferencias, ativas, participacao, regraJogo, ativar, registrar, revogarTodos, historico } = vi.hoisted(() => ({
   lerSessao: vi.fn(),
   preferencias: vi.fn(),
   ativas: vi.fn(),
   participacao: vi.fn(),
+  regraJogo: vi.fn(),
   ativar: vi.fn(),
   registrar: vi.fn(),
   revogarTodos: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock("@/lib/consentimentoRanking", async () => {
     obterPreferenciasConsentimentoRanking: preferencias,
     obterFinalidadesAtivasRanking: ativas,
     obterParticipacaoRanking: participacao,
+    obterRegraJogoSecretoRanking: regraJogo,
     registrarParticipacaoRanking: ativar,
     registrarConsentimentoRanking: registrar,
     revogarTodosConsentimentosRanking: revogarTodos,
@@ -43,7 +45,15 @@ beforeEach(() => {
   preferencias.mockResolvedValue([{ finalidade: "ranking_primeiro_nome", estado: "revogado" }]);
   ativas.mockResolvedValue(new Set());
   participacao.mockImplementation(async () => (await ativas()).size > 0);
-  ativar.mockImplementation(async () => participacao.mockResolvedValue(true));
+  regraJogo.mockResolvedValue({ participa: false, aceitaRevelacao30d: false, regraJogoVersao: null });
+  ativar.mockImplementation(async (_id: string, ativo: boolean, opcoes?: { aceitaRevelacao30d?: boolean }) => {
+    participacao.mockResolvedValue(ativo);
+    regraJogo.mockResolvedValue({
+      participa: ativo,
+      aceitaRevelacao30d: ativo && opcoes?.aceitaRevelacao30d === true,
+      regraJogoVersao: ativo && opcoes?.aceitaRevelacao30d === true ? "ranking-jogo-secreto-v1" : null,
+    });
+  });
   historico.mockResolvedValue({ eventos: [], proximoOffset: null });
   registrar.mockResolvedValue({ estado: "concedido" });
   revogarTodos.mockResolvedValue([]);
@@ -73,15 +83,33 @@ describe("/api/cliente/privacidade/ranking", () => {
 
     preferencias.mockResolvedValueOnce([{ finalidade: "ranking_primeiro_nome", estado: "concedido", textoVersao: "atual" }]);
     ativas.mockResolvedValueOnce(new Set(["ranking_primeiro_nome"]));
+    regraJogo.mockResolvedValueOnce({ participa: true, aceitaRevelacao30d: true, regraJogoVersao: "ranking-jogo-secreto-v1" });
     const ativo = await GET(req());
-    expect(await ativo.json()).toMatchObject({ participaCampanha: true });
+    expect(await ativo.json()).toMatchObject({
+      participaCampanha: true,
+      regraJogo: { versao: "ranking-jogo-secreto-v1", aceitaRevelacao30d: true, diasRevelacao: 30 },
+    });
   });
 
-  test("POST exige sessão e ativa só o cliente autenticado, sem conceder PII", async () => {
-    const res = await POST(req("POST"));
+  test("POST exige aceite explícito da regra de revelação", async () => {
+    const semAceite = await POST(req("POST", {}));
+    expect(semAceite.status).toBe(400);
+    expect(await semAceite.json()).toMatchObject({ error: "regra_jogo_nao_aceita" });
+    expect(ativar).not.toHaveBeenCalled();
+  });
+
+  test("POST ativa só o cliente autenticado com regra V2, sem conceder PII opcional", async () => {
+    const res = await POST(req("POST", { aceitaRegraRevelacao30d: true }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ participaCampanha: true });
-    expect(ativar).toHaveBeenCalledWith("cli_5511999990000", true);
+    expect(await res.json()).toMatchObject({
+      participaCampanha: true,
+      regraJogo: {
+        versao: "ranking-jogo-secreto-v1",
+        aceitaRevelacao30d: true,
+        diasRevelacao: 30,
+      },
+    });
+    expect(ativar).toHaveBeenCalledWith("cli_5511999990000", true, { aceitaRevelacao30d: true });
     expect(registrar).not.toHaveBeenCalled();
   });
 
