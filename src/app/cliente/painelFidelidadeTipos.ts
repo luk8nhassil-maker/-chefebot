@@ -87,7 +87,7 @@ export type PainelGamificacao = {
 
 export type VariacaoPosicaoRanking = { direcao: 'subiu' | 'desceu' | 'manteve'; casas: number }
 
-export type FinalidadePrivacidadeRanking = 'ranking_primeiro_nome' | 'ranking_telefone_mascarado' | 'ranking_foto_perfil'
+export type FinalidadePrivacidadeRanking = 'ranking_primeiro_nome' | 'ranking_nome_completo' | 'ranking_telefone_mascarado' | 'ranking_foto_perfil'
 
 export type PreferenciasPrivacidadeRanking = {
   participaCampanha: boolean
