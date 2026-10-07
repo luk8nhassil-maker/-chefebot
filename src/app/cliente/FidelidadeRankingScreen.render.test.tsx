@@ -259,7 +259,7 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     const onRevogarTodas = vi.fn();
     montar({ privacidade: { participaCampanha: true, finalidades: [] }, onRevogarTodas });
     fireEvent.click(screen.getByText("Privacidade e participação"));
-    expect(screen.getByText(/Durante a temporada você aparece por codinome/)).toBeTruthy();
+    expect(screen.getByText(/Quem não autoriza nome continua com codinome/)).toBeTruthy();
     fireEvent.click(screen.getByText("Sair do Ranking e remover autorizações"));
     expect(onRevogarTodas).toHaveBeenCalledTimes(1);
   });
