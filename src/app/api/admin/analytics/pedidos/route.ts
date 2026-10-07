@@ -90,6 +90,16 @@ export async function GET(req: NextRequest) {
     const clientesComHistoricoAnterior = new Set([...historicoFallback, ...historicoIndice]);
     const metricas = calcularMetricas(eventos, clientesComHistoricoAnterior);
 
+    const baseCobertura = leitura.fallbackTodos.length > 0 ? leitura.fallbackTodos : eventos;
+    const timestampsCobertura = baseCobertura
+      .map((evento) => evento.criadoEmMs)
+      .filter((valor) => Number.isFinite(valor) && valor <= fimMs);
+    const primeiroHistoricoMs = timestampsCobertura.length > 0 ? Math.min(...timestampsCobertura) : null;
+    const primeiroNaJanelaMs = primeiroHistoricoMs === null ? null : Math.max(primeiroHistoricoMs, inicioMs);
+    const diasHistoricoEncontrado = primeiroNaJanelaMs === null
+      ? 0
+      : Math.min(dias, Math.max(1, Math.ceil((fimMs - primeiroNaJanelaMs) / 86400000)));
+
     return NextResponse.json(
       {
         ok: true,
@@ -101,6 +111,12 @@ export async function GET(req: NextRequest) {
         totalEventosConsiderados: eventos.length,
         fonteDados: leitura.fonte,
         historicoAnteriorParcial,
+        cobertura: {
+          janelaSolicitadaDias: dias,
+          historicoEncontradoDesdeIso: primeiroHistoricoMs === null ? null : new Date(primeiroHistoricoMs).toISOString(),
+          diasHistoricoEncontrado,
+          possuiDadosAntesDaJanela: primeiroHistoricoMs !== null && primeiroHistoricoMs < inicioMs,
+        },
         metricas,
       },
       { headers: { "Cache-Control": "no-store, max-age=0" } }
