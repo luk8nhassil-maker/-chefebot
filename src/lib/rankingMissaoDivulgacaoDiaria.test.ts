@@ -9,8 +9,7 @@ const mocks = vi.hoisted(() => ({
   creditar: vi.fn(),
   movimentos: vi.fn(),
   sync: vi.fn(),
-  extrato: vi.fn(),
-  origem: vi.fn(),
+  eventosPedidos: vi.fn(),
 }));
 
 vi.mock("./rankingGamificacaoConfig", () => ({ obterConfigGamificacao: mocks.config }));
@@ -21,9 +20,8 @@ vi.mock("./rankingBonusTemporada", () => ({
   obterMovimentosBonusTemporada: mocks.movimentos,
 }));
 vi.mock("./rankingScoreTemporadaSync", () => ({ sincronizarScoreTemporadaComBonus: mocks.sync }));
-vi.mock("./fidelidade", () => ({
-  obterExtratoPontos: mocks.extrato,
-  classificarOrigemMovimentoPontos: mocks.origem,
+vi.mock("./analyticsPedidosReadModel.server", () => ({
+  lerEventosFallbackPedidos: mocks.eventosPedidos,
 }));
 
 import {
@@ -39,8 +37,7 @@ beforeEach(() => {
   });
   mocks.temporada.mockResolvedValue({ temporadaId: "temp_1" });
   mocks.participa.mockResolvedValue(true);
-  mocks.extrato.mockResolvedValue([]);
-  mocks.origem.mockReturnValue("pedido");
+  mocks.eventosPedidos.mockResolvedValue([]);
   mocks.creditar.mockResolvedValue("creditado");
   mocks.sync.mockResolvedValue(undefined);
   mocks.movimentos.mockResolvedValue([]);
@@ -93,8 +90,8 @@ describe("missão diária de divulgação", () => {
   });
 
   test("cliente com pedido comercial anterior não gera aquisição", async () => {
-    mocks.extrato.mockResolvedValue([
-      { tipo: "confirmado", pedidoId: "ped_1", eventoId: "confirmado:ped_1", pontos: 50 },
+    mocks.eventosPedidos.mockResolvedValue([
+      { pedidoId: "ped_1", clienteId: "cli_antigo", statusAnalitico: "entregue" },
     ]);
     const r = await creditarMissaoDivulgacaoDiaria({
       indicadorId: "cli_indicador",
@@ -105,7 +102,7 @@ describe("missão diária de divulgação", () => {
   });
 
   test("falha ao provar que indicado é novo fica fail-closed", async () => {
-    mocks.extrato.mockRejectedValue(new Error("redis down"));
+    mocks.eventosPedidos.mockRejectedValue(new Error("redis down"));
     const r = await creditarMissaoDivulgacaoDiaria({
       indicadorId: "cli_indicador",
       indicadoId: "cli_incerto",
