@@ -17,7 +17,7 @@ export async function concederBonusMissaoFotoRanking(params: {
   cliente: Cliente;
 }): Promise<ResultadoMissaoFotoRanking> {
   const { tenantId, cliente } = params;
-  const clienteId = derivarClienteIdPorTelefone(cliente.telefone) ?? clienteId;
+  const clienteId = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
   if (cliente.rankingFotoBonusConcedidoEm) {
     return { status: "ja_concluida", pontos: 0, temporadaId: cliente.rankingFotoBonusTemporadaId ?? null };
   }
