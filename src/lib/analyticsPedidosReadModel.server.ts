@@ -126,9 +126,11 @@ export async function consultarEventosAnaliticosComFallback(
   for (const ev of eventosIndice) porPedido.set(ev.pedidoId, ev);
 
   const extrasFallback = fallbackPeriodo.filter((ev) => !idsIndice.has(ev.pedidoId)).length;
-  const origem = eventosIndice.length > 0
-    ? (extrasFallback > 0 ? "analytics+pedidos" : "analytics")
-    : "pedidos";
+  const origem: FonteEventosAnalytics["origem"] = extrasFallback > 0
+    ? (eventosIndice.length > 0 ? "analytics+pedidos" : "pedidos")
+    : indice.status === "fulfilled"
+      ? "analytics"
+      : "pedidos";
 
   return {
     eventos: [...porPedido.values()],
