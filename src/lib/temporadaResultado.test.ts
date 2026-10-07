@@ -12,7 +12,6 @@ const { store, redisMock } = vi.hoisted(() => {
   };
   return { store, redisMock };
 });
-
 vi.mock("./redis", () => ({ redis: redisMock }));
 
 type TemporadaMock = {
@@ -25,15 +24,12 @@ type TemporadaMock = {
   premioQuantidadePremiados?: number;
   premioAprovado?: boolean;
 };
-
 let temporadaMock: TemporadaMock | null = null;
-
 vi.mock("./temporadas", () => ({
   obterTemporada: vi.fn(async () => temporadaMock),
 }));
 
 let rankingCompletoMock: Array<{ clienteId: string; score: number; posicao: number }> = [];
-
 vi.mock("./rankingClientes", async () => {
   const actual = await vi.importActual<typeof import("./rankingClientes")>("./rankingClientes");
   return {
@@ -42,184 +38,186 @@ vi.mock("./rankingClientes", async () => {
   };
 });
 
-let identidadesMock = new Map<string, { participaCampanha: boolean; nomePublico: string | null; telefoneMascarado: string | null; fotoPerfilUrl: null }>();
-
-vi.mock("./rankingPrivacidade", () => ({
-  projetarIdentidadesPublicasRanking: vi.fn(async (ids: string[]) => {
-    const mapa = new Map<string, { participaCampanha: boolean; nomePublico: string | null; telefoneMascarado: string | null; fotoPerfilUrl: null }>();
-    for (const id of ids) {
-      mapa.set(id, identidadesMock.get(id) ?? { participaCampanha: false, nomePublico: null, telefoneMascarado: null, fotoPerfilUrl: null });
-    }
-    return mapa;
-  }),
+let regrasMock = new Map<string, { participa: boolean; aceitaRevelacao30d: boolean }>();
+vi.mock("./consentimentoRanking", () => ({
+  obterRegrasJogoSecretoParaClientes: vi.fn(async (ids: string[]) =>
+    new Map(ids.map((id) => [id, regrasMock.get(id) ?? { participa: false, aceitaRevelacao30d: false }])),
+  ),
 }));
 
-import { garantirResultadoTemporada, obterResultadoTemporada, projetarResultadoTemporada } from "./temporadaResultado";
+let clientesMock = new Map<string, {
+  clienteId: string;
+  telefone: string;
+  nome?: string;
+  fotoPerfilPathname?: string;
+}>();
+vi.mock("./clientes", () => ({
+  buscarClientePorId: vi.fn(async (id: string) => clientesMock.get(id) ?? null),
+  normalizarNomeCliente: (nome: unknown) => typeof nome === "string" ? nome.trim().replace(/\s+/g, " ") : "",
+}));
+
+import {
+  garantirResultadoTemporada,
+  obterResultadoTemporada,
+  projetarResultadoTemporada,
+} from "./temporadaResultado";
 
 const TENANT = "default";
 const TEMPORADA = "t2026-1";
+const ENCERRADA_EM = "2026-10-01T00:00:00.000Z";
+
+function encerrada(overrides: Partial<TemporadaMock> = {}): TemporadaMock {
+  return {
+    temporadaId: TEMPORADA,
+    tenantId: TENANT,
+    estado: "encerrada",
+    criadaEm: "2026-09-01T00:00:00.000Z",
+    encerradaEm: ENCERRADA_EM,
+    ...overrides,
+  };
+}
 
 beforeEach(() => {
   store.clear();
+  vi.clearAllMocks();
   temporadaMock = null;
   rankingCompletoMock = [];
-  identidadesMock = new Map();
-  vi.clearAllMocks();
+  regrasMock = new Map();
+  clientesMock = new Map();
 });
 
-describe("garantirResultadoTemporada", () => {
-  test("retorna null quando a temporada não existe", async () => {
+describe("garantirResultadoTemporada — regra do jogo secreto", () => {
+  test("não arquiva temporada inexistente ou ainda ativa", async () => {
+    expect(await garantirResultadoTemporada(TENANT, TEMPORADA)).toBeNull();
+    temporadaMock = { ...encerrada(), estado: "ativa" };
     expect(await garantirResultadoTemporada(TENANT, TEMPORADA)).toBeNull();
   });
 
-  test("retorna null quando a temporada ainda não está encerrada", async () => {
-    temporadaMock = { temporadaId: TEMPORADA, tenantId: TENANT, estado: "ativa", criadaEm: "2026-01-01T00:00:00.000Z" };
-    expect(await garantirResultadoTemporada(TENANT, TEMPORADA)).toBeNull();
-  });
-
-  test("sem premioAprovado: arquiva o ranking mas nunca declara vencedor", async () => {
-    temporadaMock = {
-      temporadaId: TEMPORADA,
-      tenantId: TENANT,
-      estado: "encerrada",
-      criadaEm: "2026-01-01T00:00:00.000Z",
-      encerradaEm: "2026-09-25T00:00:00.000Z",
-      // premioAprovado ausente — fail-closed.
-      premioQuantidadePremiados: 3,
-    };
+  test("só mantém no resultado público quem aceitou a revelação de 30 dias", async () => {
+    temporadaMock = encerrada();
     rankingCompletoMock = [
       { clienteId: "cli_a", score: 100, posicao: 1 },
-      { clienteId: "cli_b", score: 80, posicao: 2 },
+      { clienteId: "cli_b", score: 90, posicao: 2 },
+      { clienteId: "cli_c", score: 80, posicao: 3 },
     ];
-    identidadesMock.set("cli_a", { participaCampanha: true, nomePublico: "Ana", telefoneMascarado: "(11) 9••••-0001", fotoPerfilUrl: null });
-    identidadesMock.set("cli_b", { participaCampanha: true, nomePublico: "Bia", telefoneMascarado: "(21) 9••••-0002", fotoPerfilUrl: null });
+    regrasMock.set("cli_a", { participa: true, aceitaRevelacao30d: true });
+    regrasMock.set("cli_b", { participa: true, aceitaRevelacao30d: false });
+    regrasMock.set("cli_c", { participa: false, aceitaRevelacao30d: true });
 
     const resultado = await garantirResultadoTemporada(TENANT, TEMPORADA);
-    expect(resultado).not.toBeNull();
-    expect(resultado!.vencedorDeclarado).toBe(false);
-    expect(resultado!.premioAprovado).toBe(false);
-    expect(resultado!.participantesTopo).toHaveLength(2);
+    expect(resultado?.participantesTopo).toEqual([
+      { clienteId: "cli_a", score: 100, posicao: 1 },
+    ]);
+    expect(resultado?.regraJogoVersao).toBe("ranking-jogo-secreto-v1");
+    expect(resultado?.revelacaoAte).toBe("2026-10-31T00:00:00.000Z");
   });
 
-  test("sem premioQuantidadePremiados: arquiva mas não declara vencedor mesmo com premioAprovado", async () => {
-    temporadaMock = {
-      temporadaId: TEMPORADA,
-      tenantId: TENANT,
-      estado: "encerrada",
-      criadaEm: "2026-01-01T00:00:00.000Z",
+  test("prêmio só declara vencedor quando configuração também permite", async () => {
+    temporadaMock = encerrada({
       premioAprovado: true,
-      // premioQuantidadePremiados ausente — fail-closed, não inventa "1".
-    };
-    rankingCompletoMock = [{ clienteId: "cli_a", score: 100, posicao: 1 }];
-    identidadesMock.set("cli_a", { participaCampanha: true, nomePublico: "Ana", telefoneMascarado: null, fotoPerfilUrl: null });
-
-    const resultado = await garantirResultadoTemporada(TENANT, TEMPORADA);
-    expect(resultado!.vencedorDeclarado).toBe(false);
-    expect(resultado!.premioQuantidadePremiados).toBeNull();
-  });
-
-  test("com premioAprovado e quantidade definidos, declara vencedor entre participantes", async () => {
-    temporadaMock = {
-      temporadaId: TEMPORADA,
-      tenantId: TENANT,
-      estado: "encerrada",
-      criadaEm: "2026-01-01T00:00:00.000Z",
-      encerradaEm: "2026-09-25T00:00:00.000Z",
+      premioQuantidadePremiados: 1,
       premioDescricao: "1 Pizza Família",
-      premioQuantidadePremiados: 1,
-      premioAprovado: true,
-    };
-    // 1º geral não participa; entre participantes, cli_b é o 1º colocado.
-    rankingCompletoMock = [
-      { clienteId: "nao_participa", score: 500, posicao: 1 },
-      { clienteId: "cli_b", score: 80, posicao: 2 },
-    ];
-    identidadesMock.set("nao_participa", { participaCampanha: false, nomePublico: null, telefoneMascarado: null, fotoPerfilUrl: null });
-    identidadesMock.set("cli_b", { participaCampanha: true, nomePublico: "Bia", telefoneMascarado: "(21) 9••••-0002", fotoPerfilUrl: null });
+    });
+    rankingCompletoMock = [{ clienteId: "cli_a", score: 100, posicao: 1 }];
+    regrasMock.set("cli_a", { participa: true, aceitaRevelacao30d: true });
 
     const resultado = await garantirResultadoTemporada(TENANT, TEMPORADA);
-    expect(resultado!.vencedorDeclarado).toBe(true);
-    expect(resultado!.participantesTopo[0]).toMatchObject({ clienteId: "cli_b", posicao: 1 });
-
-    const projetado = await projetarResultadoTemporada(resultado!);
-    expect(projetado.vencedores).toHaveLength(1);
-    expect(projetado.vencedores[0].identidade.nomePublico).toBe("Bia");
-    // O não-participante nunca aparece no arquivo de vencedores.
-    expect(JSON.stringify(projetado.vencedores)).not.toContain("nao_participa");
+    expect(resultado?.vencedorDeclarado).toBe(true);
+    expect(resultado?.premioDescricao).toBe("1 Pizza Família");
   });
 
-  test("é idempotente: a segunda chamada não recalcula nem sobrescreve", async () => {
-    temporadaMock = {
-      temporadaId: TEMPORADA,
-      tenantId: TENANT,
-      estado: "encerrada",
-      criadaEm: "2026-01-01T00:00:00.000Z",
-      premioAprovado: true,
-      premioQuantidadePremiados: 1,
-    };
+  test("continua idempotente e nunca recalcula snapshot já gravado", async () => {
+    temporadaMock = encerrada();
     rankingCompletoMock = [{ clienteId: "cli_a", score: 100, posicao: 1 }];
-    identidadesMock.set("cli_a", { participaCampanha: true, nomePublico: "Ana", telefoneMascarado: null, fotoPerfilUrl: null });
+    regrasMock.set("cli_a", { participa: true, aceitaRevelacao30d: true });
 
     const primeiro = await garantirResultadoTemporada(TENANT, TEMPORADA);
-
-    // Muda o "estado do mundo" para provar que a segunda chamada não recalcula.
     rankingCompletoMock = [{ clienteId: "cli_a", score: 999, posicao: 1 }];
     const segundo = await garantirResultadoTemporada(TENANT, TEMPORADA);
 
     expect(segundo).toEqual(primeiro);
-    expect(segundo!.participantesTopo[0].score).toBe(100);
+    expect(segundo?.participantesTopo[0]?.score).toBe(100);
+  });
+});
+
+describe("projetarResultadoTemporada — revelação por 30 dias", () => {
+  test("dentro dos 30 dias revela primeiro nome e foto cadastrada", async () => {
+    temporadaMock = encerrada({ premioAprovado: true, premioQuantidadePremiados: 1 });
+    rankingCompletoMock = [{ clienteId: "cli_a", score: 100, posicao: 1 }];
+    regrasMock.set("cli_a", { participa: true, aceitaRevelacao30d: true });
+    clientesMock.set("cli_a", {
+      clienteId: "cli_a",
+      telefone: "5511999990001",
+      nome: "Ana Souza",
+      fotoPerfilPathname: "perfil/a/avatar",
+    });
+
+    const bruto = await garantirResultadoTemporada(TENANT, TEMPORADA);
+    const projetado = await projetarResultadoTemporada(
+      bruto!,
+      Date.parse("2026-10-10T00:00:00.000Z"),
+    );
+
+    expect(projetado.participantesTopo[0]?.identidade).toMatchObject({
+      nomePublico: "Ana",
+      revelado: true,
+      participaCampanha: true,
+    });
+    expect(projetado.participantesTopo[0]?.identidade.fotoPerfilUrl).toContain(
+      "temporadaId=t2026-1&posicao=1",
+    );
   });
 
-  test("mudar a config da temporada depois de encerrada não altera um resultado já gravado", async () => {
-    temporadaMock = {
-      temporadaId: TEMPORADA,
-      tenantId: TENANT,
-      estado: "encerrada",
-      criadaEm: "2026-01-01T00:00:00.000Z",
-      premioAprovado: true,
-      premioQuantidadePremiados: 1,
-    };
-    rankingCompletoMock = [{ clienteId: "cli_a", score: 100, posicao: 1 }];
-    identidadesMock.set("cli_a", { participaCampanha: true, nomePublico: "Ana", telefoneMascarado: null, fotoPerfilUrl: null });
-    await garantirResultadoTemporada(TENANT, TEMPORADA);
+  test("quem sai durante a janela some e os demais sobem de posição", async () => {
+    temporadaMock = encerrada();
+    rankingCompletoMock = [
+      { clienteId: "cli_a", score: 100, posicao: 1 },
+      { clienteId: "cli_b", score: 90, posicao: 2 },
+    ];
+    regrasMock.set("cli_a", { participa: true, aceitaRevelacao30d: true });
+    regrasMock.set("cli_b", { participa: true, aceitaRevelacao30d: true });
+    const bruto = await garantirResultadoTemporada(TENANT, TEMPORADA);
 
-    // "Admin" tenta mudar a config depois — não deve afetar o já arquivado.
-    temporadaMock = { ...temporadaMock, premioAprovado: false };
-    const resultado = await garantirResultadoTemporada(TENANT, TEMPORADA);
-    expect(resultado!.premioAprovado).toBe(true);
-    expect(resultado!.vencedorDeclarado).toBe(true);
+    regrasMock.set("cli_a", { participa: false, aceitaRevelacao30d: false });
+    clientesMock.set("cli_b", { clienteId: "cli_b", telefone: "5511999990002", nome: "Bia" });
+
+    const projetado = await projetarResultadoTemporada(
+      bruto!,
+      Date.parse("2026-10-10T00:00:00.000Z"),
+    );
+    expect(projetado.participantesTopo).toHaveLength(1);
+    expect(projetado.participantesTopo[0]?.posicao).toBe(1);
+    expect(projetado.participantesTopo[0]?.identidade.nomePublico).toBe("Bia");
+  });
+
+  test("depois de 30 dias volta ao codinome e não expõe nome nem foto", async () => {
+    temporadaMock = encerrada();
+    rankingCompletoMock = [{ clienteId: "cli_a", score: 100, posicao: 1 }];
+    regrasMock.set("cli_a", { participa: true, aceitaRevelacao30d: true });
+    clientesMock.set("cli_a", {
+      clienteId: "cli_a",
+      telefone: "5511999990001",
+      nome: "Ana Souza",
+      fotoPerfilPathname: "perfil/a/avatar",
+    });
+    const bruto = await garantirResultadoTemporada(TENANT, TEMPORADA);
+
+    const projetado = await projetarResultadoTemporada(
+      bruto!,
+      Date.parse("2026-11-05T00:00:00.000Z"),
+    );
+    const identidade = projetado.participantesTopo[0]?.identidade;
+    expect(identidade?.nomePublico).toBeNull();
+    expect(identidade?.fotoPerfilUrl).toBeNull();
+    expect(identidade?.revelado).toBe(false);
+    expect(identidade?.codinomeSecreto).toMatch(/\S+ \S+ \d{2}/);
   });
 });
 
 describe("obterResultadoTemporada", () => {
-  test("retorna null para parâmetros vazios ou sem resultado gravado", async () => {
+  test("retorna null para parâmetros vazios ou resultado inexistente", async () => {
     expect(await obterResultadoTemporada("", TEMPORADA)).toBeNull();
     expect(await obterResultadoTemporada(TENANT, "")).toBeNull();
     expect(await obterResultadoTemporada(TENANT, TEMPORADA)).toBeNull();
-  });
-});
-
-describe("projetarResultadoTemporada", () => {
-  test("identidade reflete o consentimento ATUAL, não o do momento do encerramento", async () => {
-    temporadaMock = {
-      temporadaId: TEMPORADA,
-      tenantId: TENANT,
-      estado: "encerrada",
-      criadaEm: "2026-01-01T00:00:00.000Z",
-      premioAprovado: true,
-      premioQuantidadePremiados: 1,
-    };
-    rankingCompletoMock = [{ clienteId: "cli_a", score: 100, posicao: 1 }];
-    identidadesMock.set("cli_a", { participaCampanha: true, nomePublico: "Ana", telefoneMascarado: "(11) 9••••-0001", fotoPerfilUrl: null });
-    const resultado = await garantirResultadoTemporada(TENANT, TEMPORADA);
-
-    // Depois do encerramento, cli_a revoga o consentimento.
-    identidadesMock.set("cli_a", { participaCampanha: false, nomePublico: null, telefoneMascarado: null, fotoPerfilUrl: null });
-    const projetado = await projetarResultadoTemporada(resultado!);
-    expect(projetado.participantesTopo[0].identidade.participaCampanha).toBe(false);
-    expect(projetado.participantesTopo[0].identidade.nomePublico).toBeNull();
-    // Vencedor não é mais exibível — mas a posição/score do resultado arquivado não muda.
-    expect(projetado.participantesTopo[0].posicao).toBe(1);
-    expect(projetado.participantesTopo[0].score).toBe(100);
   });
 });
