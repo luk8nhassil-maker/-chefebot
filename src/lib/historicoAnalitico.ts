@@ -471,7 +471,7 @@ export function calcularMetricas(
 
     porCanal[ev.canal].pedidos += 1;
     porCanal[ev.canal].receitaCents += ev.valorElegivelCents;
-    porCanal[ev.canal].pedidoIds.push(ev.pedidoId);
+    if (ev.canal === "painel") porCanal.painel.pedidoIds.push(ev.pedidoId);
   }
 
   const serieDiaria = [...porDia.entries()]
