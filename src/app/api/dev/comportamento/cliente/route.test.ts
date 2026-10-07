@@ -55,7 +55,7 @@ beforeEach(() => {
       identificado: false,
     }],
   });
-  mocks.resumirTimelineComportamentalCliente.mockReturnValue({
+  mocks.consultarEventosCliente.mockResolvedValue([]);\n  mocks.calcularRitmoCompraCliente.mockReturnValue({\n    schemaVersion: 1,\n    mode: "purchase_timing_read_only",\n    janelaAnaliseDias: 180,\n    pedidosAnalisados: 4,\n    primeiraCompraEmMs: 1,\n    ultimaCompraEmMs: 2,\n    faseMes: "inicio",\n    faseMesLabel: "Comeco do mes",\n    concentracaoPercentual: 75,\n    confianca: "media",\n    janelaProvavel: { inicioDia: 3, fimDia: 7 },\n    diaCentralProvavel: 5,\n    diaSemanaMaisForte: { indice: 5, label: "sexta", percentual: 50 },\n    horarioMaisForte: { inicioHora: 18, fimHora: 21, percentual: 50 },\n    distribuicaoMes: { inicio: 3, meio: 1, fim: 0 },\n  });\n  mocks.resumirTimelineComportamentalCliente.mockReturnValue({
     schemaVersion: 1,
     mode: "behavior_customer_summary_read_only",
     sessions: 1,
@@ -106,13 +106,13 @@ describe("POST /api/dev/comportamento/cliente", () => {
     expect(mocks.consultarTimelineComportamentalCliente).toHaveBeenCalledWith(expect.objectContaining({
       clienteId: "cli_canonico",
     }));
-    expect(body).not.toHaveProperty("cliente");
+    expect(mocks.consultarEventosCliente).toHaveBeenCalledWith(\n      "default",\n      "cli_canonico",\n      1_000_000_000 - 180 * 24 * 60 * 60 * 1000,\n      1_000_000_000,\n    );\n    expect(body).not.toHaveProperty("cliente");
     expect(body.summary).toEqual(expect.objectContaining({
       sessions: 1,
       sessionsWithoutOrder: 1,
       appOpens: 1,
     }));
-    expect(mocks.resumirTimelineComportamentalCliente).toHaveBeenCalledWith(body.timeline.events);
+    expect(mocks.resumirTimelineComportamentalCliente).toHaveBeenCalledWith(body.timeline.events);\n    expect(body.purchaseTiming).toEqual(expect.objectContaining({\n      faseMes: "inicio",\n      concentracaoPercentual: 75,\n      pedidosAnalisados: 4,\n    }));\n    expect(mocks.calcularRitmoCompraCliente).toHaveBeenCalledWith([], 180);
     const serializado = JSON.stringify(body);
     expect(serializado).not.toContain("5599999999999");
     expect(serializado).not.toContain("actorHash");
