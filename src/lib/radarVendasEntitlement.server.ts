@@ -167,7 +167,8 @@ export async function registrarLeadIndicacaoRadarVendas(input: {
 }
 
 export async function listarLeadsIndicacaoRadarVendas(limite = 100): Promise<RadarVendasReferralLead[]> {
-  const ids = await rredis.zrange(LEAD_INDEX, 0, Math.max(0, limite - 1), { rev: true }).catch(() => []);
+  const idsRaw = await rredis.zrange(LEAD_INDEX, 0, Math.max(0, limite - 1), { rev: true }).catch(() => []);
+  const ids = (Array.isArray(idsRaw) ? idsRaw : []).filter((id): id is string => typeof id === "string");
   const leads = await Promise.all(ids.map((id) => redis.get<RadarVendasReferralLead>(leadKey(id)).catch(() => null)));
   return leads.filter((lead): lead is RadarVendasReferralLead => Boolean(lead));
 }
