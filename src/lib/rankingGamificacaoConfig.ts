@@ -18,6 +18,11 @@ export type ConfigGamificacao = {
   missaoIndicacaoAtiva: boolean;
   missaoIndicacaoBonus: number;
 
+  // Missão de foto — bônus de competição vitalício, concedido uma única vez
+  // quando uma foto válida é salva durante uma temporada ativa.
+  missaoFotoPerfilAtiva: boolean;
+  missaoFotoPerfilBonus: number;
+
   // Impulso do Pódio — bônus limitado e com teto por temporada.
   impulsoPodioAtivo: boolean;
   impulsoPodioBonus: number;
@@ -44,6 +49,8 @@ export const CONFIG_GAMIFICACAO_PADRAO: ConfigGamificacao = {
   missaoSemanalCooldownDias: 7,
   missaoIndicacaoAtiva: false,
   missaoIndicacaoBonus: 0,
+  missaoFotoPerfilAtiva: false,
+  missaoFotoPerfilBonus: 0,
   impulsoPodioAtivo: false,
   impulsoPodioBonus: 0,
   impulsoPodioCapTemporada: 0,
