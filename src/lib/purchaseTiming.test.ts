@@ -71,6 +71,19 @@ describe("calcularRitmoCompraCliente", () => {
     expect(perfil.confianca).toBe("baixa");
   });
 
+  test("prioriza timestamp numerico do pedido sobre horario de entrega", () => {
+    const compra = new Date("2026-04-30T23:50:00-03:00").getTime();
+    const entregue = new Date("2026-05-01T00:35:00-03:00").getTime();
+    const perfil = calcularRitmoCompraCliente([
+      evento("2026-05-01T03:35:00Z", { pedidoId: String(compra), criadoEmMs: entregue }),
+      evento("2026-05-29T22:00:00Z"),
+      evento("2026-06-28T22:00:00Z"),
+    ]);
+    expect(perfil.distribuicaoMes.fim).toBe(3);
+    expect(perfil.faseMes).toBe("fim");
+    expect(perfil.primeiraCompraEmMs).toBe(compra);
+  });
+
   test("ignora evento estornado", () => {
     const perfil = calcularRitmoCompraCliente([
       evento("2026-04-05T22:00:00Z"),
