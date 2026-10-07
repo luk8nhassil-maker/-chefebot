@@ -50,6 +50,7 @@ import {
 } from "@/lib/rankingTransicaoTemporada";
 import { sincronizarMissaoSemanalCliente } from "@/lib/rankingMissaoSemanalEstado";
 import { obterEstadoMissaoIndicacao } from "@/lib/rankingMissaoIndicacaoEstado";
+import { obterEstadoMissaoDivulgacaoDiaria } from "@/lib/rankingMissaoDivulgacaoDiaria";
 import { aplicarImpulsoPodioSeElegivel } from "@/lib/rankingImpulsoPodioEstado";
 import { sincronizarNivelChefCliente } from "@/lib/rankingNivelChefEstado";
 import { sincronizarMovimentoRecente, type MovimentoRecente } from "@/lib/rankingMovimentoRecenteEstado";
@@ -405,6 +406,7 @@ export async function GET(req: NextRequest) {
         bonus: configGamificacao.missaoFotoPerfilBonus,
       }
     : null;
+  let missaoDivulgacaoDiaria: { concluidaHoje: boolean; bonus: number } | null = null;
   let movimentoRecente: MovimentoRecente | null = null;
   let coroaAmeacada = false;
   if (temporada && participaRanking) {
@@ -429,6 +431,16 @@ export async function GET(req: NextRequest) {
     if (configGamificacao.missaoIndicacaoAtiva) {
       const estadoMissaoIndicacao = await obterEstadoMissaoIndicacao(tenantId, temporada.temporadaId, clienteId);
       missaoIndicacao = { concluida: estadoMissaoIndicacao.concluida };
+    }
+    if (configGamificacao.missaoDivulgacaoDiariaAtiva && configGamificacao.missaoDivulgacaoDiariaBonus > 0) {
+      const estadoDivulgacao = await obterEstadoMissaoDivulgacaoDiaria({
+        temporadaId: temporada.temporadaId,
+        indicadorId: clienteId,
+      });
+      missaoDivulgacaoDiaria = {
+        concluidaHoje: estadoDivulgacao.concluidaHoje,
+        bonus: configGamificacao.missaoDivulgacaoDiariaBonus,
+      };
     }
 
     // "Movimento recente" — conceito separado do snapshot diário
@@ -491,6 +503,7 @@ export async function GET(req: NextRequest) {
       missaoSemanal,
       missaoIndicacao,
       missaoFotoPerfil,
+      missaoDivulgacaoDiaria,
       movimentoRecente,
       coroaAmeacada,
       nivelChef,
