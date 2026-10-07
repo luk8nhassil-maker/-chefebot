@@ -26,7 +26,7 @@ export default function RadarVendasDevPage() {
     setLoading(false);
   }
 
-  useEffect(() => { void carregar(); }, []);
+  useEffect(() => { queueMicrotask(() => { void carregar(); }); }, []);
 
   async function confirmar(id: string) {
     if (!window.confirm("Confirme somente se esta pizzaria realmente virou cliente pagante do ChefeBot. Continuar?")) return;
