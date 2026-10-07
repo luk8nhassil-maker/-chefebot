@@ -89,6 +89,11 @@ export type FinalidadePrivacidadeRanking = 'ranking_primeiro_nome' | 'ranking_te
 
 export type PreferenciasPrivacidadeRanking = {
   participaCampanha: boolean
+  regraJogo?: {
+    versao: 'ranking-jogo-secreto-v1'
+    aceitaRevelacao30d: boolean
+    diasRevelacao: 30
+  }
   finalidades: Array<{
     finalidade: FinalidadePrivacidadeRanking
     texto: string | null
