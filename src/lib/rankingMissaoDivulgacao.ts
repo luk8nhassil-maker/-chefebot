@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomBytes } from "crypto";
+import { createHmac, randomBytes } from "crypto";
 import { redis } from "./redis";
 import { chaveExpedienteOperacional } from "./expedienteOperacional";
 import {
@@ -35,15 +35,23 @@ export type EstadoMissaoDivulgacao = {
   concluidaHoje: boolean;
   bonus: number;
   expedienteId: string;
-  motivoBloqueio: "desligada" | "sem_temporada" | "fora_ranking" | "sem_pedido_confirmado" | null;
+  motivoBloqueio: "desligada" | "sem_temporada" | "fora_ranking" | "sem_pedido_confirmado" | "infraestrutura_indisponivel" | null;
 };
 
 function chaveToken(token: string): string {
   return `marketing:divulgacao:token:${token}`;
 }
 
-function chaveTokenDoDia(payload: Pick<TokenDivulgacao, "tenantId" | "temporadaId" | "clienteId" | "expedienteId">): string {
-  return `marketing:divulgacao:dia:${payload.tenantId}:${payload.temporadaId}:${payload.clienteId}:${payload.expedienteId}`;
+function referenciaPrivadaCliente(clienteId: string): string | null {
+  const segredo = process.env.PRIVACY_CONSENT_HMAC_SECRET?.trim() ?? "";
+  if (!clienteId || segredo.length < 32) return null;
+  return createHmac("sha256", segredo).update(clienteId).digest("hex");
+}
+
+function chaveTokenDoDia(payload: Pick<TokenDivulgacao, "tenantId" | "temporadaId" | "clienteId" | "expedienteId">): string | null {
+  const referencia = referenciaPrivadaCliente(payload.clienteId);
+  if (!referencia) return null;
+  return `marketing:divulgacao:dia:${payload.tenantId}:${payload.temporadaId}:${referencia}:${payload.expedienteId}`;
 }
 
 function eventoId(expedienteId: string): string {
@@ -136,6 +144,15 @@ export async function obterOuCriarConviteDivulgacao(params: {
     return { estado, token: null, refToken: null, premioDescricao: null };
   }
 
+  if (!referenciaPrivadaCliente(params.clienteId)) {
+    return {
+      estado: { ...estado, elegivel: false, motivoBloqueio: "infraestrutura_indisponivel" },
+      token: null,
+      refToken: null,
+      premioDescricao: null,
+    };
+  }
+
   const temporada = await obterTemporadaAtiva(params.tenantId);
   if (!temporada) return { estado, token: null, refToken: null, premioDescricao: null };
 
@@ -149,6 +166,14 @@ export async function obterOuCriarConviteDivulgacao(params: {
   };
 
   const chaveDia = chaveTokenDoDia(base);
+  if (!chaveDia) {
+    return {
+      estado: { ...estado, elegivel: false, motivoBloqueio: "infraestrutura_indisponivel" },
+      token: null,
+      refToken: null,
+      premioDescricao: null,
+    };
+  }
   const existente = await redis.get<string>(chaveDia);
   if (existente && FORMATO_TOKEN.test(existente)) {
     const payload = await redis.get<TokenDivulgacao>(chaveToken(existente));
