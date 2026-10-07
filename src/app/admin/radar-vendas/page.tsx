@@ -221,7 +221,7 @@ export default function RadarVendasPage() {
                   <span><strong>Janela:</strong> {o.janelaProvavel ? `dias ${o.janelaProvavel.inicioDia}–${o.janelaProvavel.fimDia}` : "—"}</span>
                   <span><strong>Ticket médio:</strong> {moeda(o.ticketMedioCents)}</span>
                   <span><strong>Meta sugerida:</strong> {moeda(o.metaTicketCents)}</span>
-                  <span><strong>Potencial no ticket:</strong> +{moeda(o.incrementoTicketPotencialCents)}</span>
+                  <span><strong>Potencial no ticket:</strong> {o.acao === "meta_ticket" ? `+${moeda(o.incrementoTicketPotencialCents)}` : "—"}</span>
                   <span><strong>Confiança:</strong> {o.confianca}</span>
                   <span><strong>Pedidos usados:</strong> {o.pedidosAnalisados}</span>
                 </div>
