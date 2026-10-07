@@ -70,7 +70,8 @@ export async function projetarIdentidadesPublicasRanking(
     const participacoes = await obterParticipacaoRankingParaClientes(unicos, finalidadesPorCliente);
     const pares = await Promise.all(unicos.map(async (clienteId) => {
       const finalidades = finalidadesPorCliente.get(clienteId) ?? new Set();
-      const permiteNome = finalidades.has("ranking_primeiro_nome");
+      const permiteNomeCompleto = finalidades.has("ranking_nome_completo");
+      const permiteNome = permiteNomeCompleto || finalidades.has("ranking_primeiro_nome");
       const permiteTelefone = finalidades.has("ranking_telefone_mascarado");
       const participaCampanha = participacoes.get(clienteId) === true;
       if (!participaCampanha) return [clienteId, { ...IDENTIDADE_ANONIMA }] as const;
