@@ -18,7 +18,9 @@ type RadarResponse = {
     altaConfianca: number;
     emJanelaAgora: number;
     oportunidadesAtivas: number;
+    oportunidadesMetaTicket: number;
     ticketMedioBaseCents: number;
+    potencialTicketAdicionalCents: number;
     janelaAnaliseDias: number;
   };
   opportunities: Array<{
@@ -34,6 +36,7 @@ type RadarResponse = {
     pedidosAnalisados: number;
     ticketMedioCents: number;
     metaTicketCents: number;
+    incrementoTicketPotencialCents: number;
     diasDesdeUltimaCompra: number | null;
     acao: string;
     acaoLabel: string;
@@ -148,6 +151,8 @@ export default function RadarVendasPage() {
           ["Confiança alta", data.summary.altaConfianca],
           ["Na janela agora", data.summary.emJanelaAgora],
           ["Oportunidades ativas", data.summary.oportunidadesAtivas],
+          ["Metas de ticket", data.summary.oportunidadesMetaTicket],
+          ["Potencial +ticket", moeda(data.summary.potencialTicketAdicionalCents)],
           ["Ticket base", moeda(data.summary.ticketMedioBaseCents)],
         ].map(([label, value]) => (
           <div key={String(label)} style={card}>
@@ -162,16 +167,20 @@ export default function RadarVendasPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <LockKeyhole size={22} />
             <div>
-              <h2 style={{ margin: 0, fontSize: 19 }}>Os sinais existem. Os detalhes estão bloqueados.</h2>
+              <h2 style={{ margin: 0, fontSize: 19 }}>
+                {data.summary.potencialTicketAdicionalCents > 0
+                  ? `${moeda(data.summary.potencialTicketAdicionalCents)} de potencial adicional nas metas atuais`
+                  : "Os sinais existem. Os detalhes estão bloqueados."}
+              </h2>
               <p style={{ color: "var(--foreground-secondary)", margin: "5px 0 0", lineHeight: 1.5 }}>
-                O preview acima usa dados reais da pizzaria. Ative para ver quais clientes estão na janela, a meta de ticket sugerida e a próxima ação.
+                O preview usa dados reais da pizzaria. O potencial é a diferença entre o ticket médio desses clientes e as metas sugeridas — não é receita garantida. Ative para ver onde agir.
               </p>
             </div>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 12, marginTop: 18 }}>
             <button onClick={ativarNoPro} disabled={ativando} style={{ border: 0, borderRadius: 12, padding: "14px 16px", background: "var(--primary)", color: "var(--foreground)", fontWeight: 800, cursor: "pointer" }}>
-              {ativando ? "Abrindo pagamento..." : "Ativar no plano Pro"}
+              {ativando ? "Abrindo pagamento..." : "Ativar Radar e ver oportunidades"}
             </button>
             <button onClick={compartilharIndicacao} disabled={indicando} style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", background: "var(--surface-secondary)", color: "var(--foreground)", fontWeight: 800, cursor: "pointer", display: "flex", justifyContent: "center", alignItems: "center", gap: 8 }}>
               <Share2 size={17} /> {indicando ? "Gerando convite..." : "Desbloquear indicando uma pizzaria"}
@@ -190,7 +199,7 @@ export default function RadarVendasPage() {
               <strong>Radar ativo · {data.access.source === "indicacao" ? "desbloqueado por indicação" : "plano Pro"}</strong>
             </div>
             <p style={{ color: "var(--foreground-secondary)", margin: "7px 0 0", fontSize: 13 }}>
-              Nesta versão o Radar recomenda a ação. Ele não dispara cupom nem WhatsApp sozinho, para evitar gasto de margem e mensagens fora de hora.
+              Há {moeda(data.summary.potencialTicketAdicionalCents)} de potencial adicional nas metas de ticket atuais. É uma estimativa baseada no histórico, não uma promessa de venda. O Radar ainda não dispara cupom nem WhatsApp sozinho.
             </p>
           </section>
 
@@ -212,6 +221,7 @@ export default function RadarVendasPage() {
                   <span><strong>Janela:</strong> {o.janelaProvavel ? `dias ${o.janelaProvavel.inicioDia}–${o.janelaProvavel.fimDia}` : "—"}</span>
                   <span><strong>Ticket médio:</strong> {moeda(o.ticketMedioCents)}</span>
                   <span><strong>Meta sugerida:</strong> {moeda(o.metaTicketCents)}</span>
+                  <span><strong>Potencial no ticket:</strong> {o.acao === "meta_ticket" ? `+${moeda(o.incrementoTicketPotencialCents)}` : "—"}</span>
                   <span><strong>Confiança:</strong> {o.confianca}</span>
                   <span><strong>Pedidos usados:</strong> {o.pedidosAnalisados}</span>
                 </div>

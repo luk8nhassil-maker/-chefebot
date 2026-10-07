@@ -17,6 +17,7 @@ export type OportunidadeRadarVendas = {
   pedidosAnalisados: number;
   ticketMedioCents: number;
   metaTicketCents: number;
+  incrementoTicketPotencialCents: number;
   ultimaCompraEmMs: number | null;
   diasDesdeUltimaCompra: number | null;
   intervaloMedianoDias: number | null;
@@ -34,7 +35,9 @@ export type ResumoRadarVendas = {
   altaConfianca: number;
   emJanelaAgora: number;
   oportunidadesAtivas: number;
+  oportunidadesMetaTicket: number;
   ticketMedioBaseCents: number;
+  potencialTicketAdicionalCents: number;
 };
 
 export type ResultadoRadarVendas = {
@@ -229,6 +232,7 @@ export function calcularRadarVendas(
       pedidosAnalisados: timing.pedidosAnalisados,
       ticketMedioCents,
       metaTicketCents,
+      incrementoTicketPotencialCents: Math.max(0, metaTicketCents - ticketMedioCents),
       ultimaCompraEmMs,
       diasDesdeUltimaCompra,
       intervaloMedianoDias: intervalo,
@@ -238,6 +242,8 @@ export function calcularRadarVendas(
 
   oportunidades.sort((a, b) => b.score - a.score || b.pedidosAnalisados - a.pedidosAnalisados);
   const clientesComPadrao = oportunidades.filter((o) => o.faseMes !== "distribuido" && o.faseMes !== "insuficiente").length;
+  const oportunidadesAtivas = oportunidades.filter((o) => o.acao !== "aguardar");
+  const oportunidadesMetaTicket = oportunidadesAtivas.filter((o) => o.acao === "meta_ticket");
   const resumo: ResumoRadarVendas = {
     schemaVersion: 2,
     mode: "sales_radar_read_only",
@@ -246,8 +252,13 @@ export function calcularRadarVendas(
     clientesComPadrao,
     altaConfianca: oportunidades.filter((o) => o.confianca === "alta").length,
     emJanelaAgora: oportunidades.filter((o) => o.emJanelaAgora).length,
-    oportunidadesAtivas: oportunidades.filter((o) => o.acao !== "aguardar").length,
+    oportunidadesAtivas: oportunidadesAtivas.length,
+    oportunidadesMetaTicket: oportunidadesMetaTicket.length,
     ticketMedioBaseCents: mediaInteira(validos.map((e) => e.valorElegivelCents)),
+    potencialTicketAdicionalCents: oportunidadesMetaTicket.reduce(
+      (total, oportunidade) => total + oportunidade.incrementoTicketPotencialCents,
+      0,
+    ),
   };
 
   return { resumo, oportunidades };

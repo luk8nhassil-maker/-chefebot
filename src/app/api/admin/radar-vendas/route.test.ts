@@ -43,7 +43,9 @@ beforeEach(() => {
       altaConfianca: 2,
       emJanelaAgora: 1,
       oportunidadesAtivas: 3,
+      oportunidadesMetaTicket: 1,
       ticketMedioBaseCents: 6500,
+      potencialTicketAdicionalCents: 900,
     },
     oportunidades: [{ clienteRef: "•••• 1234", score: 90 }],
   });
@@ -62,6 +64,7 @@ describe("GET /api/admin/radar-vendas", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.summary.clientesComPadrao).toBe(5);
+    expect(body.summary.potencialTicketAdicionalCents).toBe(900);
     expect(body.opportunities).toEqual([]);
     expect(body.access).toMatchObject({ active: false, currentPlanId: "basic", upgradePlanId: "pro" });
   });

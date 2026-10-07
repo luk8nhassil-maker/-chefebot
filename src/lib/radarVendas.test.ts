@@ -46,7 +46,26 @@ describe("calcularRadarVendas", () => {
       acao: "meta_ticket",
     });
     expect(r.oportunidades[0]!.metaTicketCents).toBeGreaterThan(r.oportunidades[0]!.ticketMedioCents);
+    expect(r.oportunidades[0]!.incrementoTicketPotencialCents).toBe(
+      r.oportunidades[0]!.metaTicketCents - r.oportunidades[0]!.ticketMedioCents,
+    );
     expect(r.resumo.altaConfianca).toBe(1);
+    expect(r.resumo.oportunidadesMetaTicket).toBe(1);
+    expect(r.resumo.potencialTicketAdicionalCents).toBe(
+      r.oportunidades[0]!.incrementoTicketPotencialCents,
+    );
+  });
+
+  test("não chama reativação de ganho adicional de ticket", () => {
+    const eventos = [
+      ev("cli_5599994444", "2026-01-05T20:00:00-03:00", 5500),
+      ev("cli_5599994444", "2026-02-05T20:00:00-03:00", 6000),
+      ev("cli_5599994444", "2026-03-05T20:00:00-03:00", 6500),
+    ];
+    const r = calcularRadarVendas(eventos, new Date("2026-06-20T18:00:00-03:00").getTime());
+    expect(r.oportunidades[0]!.acao).toBe("reativar");
+    expect(r.resumo.oportunidadesMetaTicket).toBe(0);
+    expect(r.resumo.potencialTicketAdicionalCents).toBe(0);
   });
 
   test("cliente atrasado no ciclo vira reativação fora da janela", () => {
