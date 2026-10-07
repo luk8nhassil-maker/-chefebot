@@ -69,6 +69,8 @@ describe("analyticsPedidosReadModel", () => {
       total: 70,
       status: "entregue",
       origem: "painel",
+      data: "05/10/2026",
+      horario: "20:00",
     }], "default", agora + 1000);
     expect(eventos[0]?.canal).toBe("painel");
   });
