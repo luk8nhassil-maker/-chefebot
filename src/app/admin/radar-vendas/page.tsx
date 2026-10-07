@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, LockKeyhole, Share2, TrendingUp, UnlockKeyhole } from "lucide-react";
+import { ArrowLeft, LockKeyhole, Share2, UnlockKeyhole } from "lucide-react";
 
 type RadarResponse = {
   ok: boolean;
@@ -75,7 +75,7 @@ export default function RadarVendasPage() {
     }
   }
 
-  useEffect(() => { void carregar(); }, []);
+  useEffect(() => { queueMicrotask(() => { void carregar(); }); }, []);
 
   async function ativarNoPro() {
     setAtivando(true);
