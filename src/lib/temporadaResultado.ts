@@ -11,12 +11,10 @@
 //   resultado é arquivado como "sem vencedor declarado" — nunca inventamos
 //   prêmio, quantidade de premiados ou descrição.
 // - O snapshot guarda só clienteId/score/posicao (nunca nome/telefone
-//   renderizados). Identidade pública é reprojetada em CADA leitura a partir
-//   do consentimento ATUAL — se alguém revogar depois, o resultado
-//   arquivado passa a mostrar essa pessoa anonimizada também, do mesmo jeito
-//   que o ranking ao vivo já funciona. Isso preserva a regra de produto
-//   ("retirar autorização tira da próxima leitura") mesmo em dados
-//   históricos, sem precisar reescrever o snapshot.
+//   renderizados). Para entrar no resultado público final, o cliente precisa
+//   ter aceitado a regra do jogo secreto. Durante os 30 dias de revelação,
+//   sair do Ranking remove a pessoa da classificação pública e os demais são
+//   reindexados; o snapshot interno continua imutável para auditoria.
 
 import "server-only";
 
@@ -145,9 +143,9 @@ export type ResultadoTemporadaProjetado = Omit<ResultadoTemporada, "participante
 };
 
 /**
- * Reprojeta identidades a partir do consentimento ATUAL (nunca do momento do
- * encerramento) — quem revogou depois de ganhar deixa de ser exibido com
- * nome/telefone aqui também, exatamente como no ranking ao vivo.
+ * Projeta o resultado público do jogo secreto. Durante a janela de 30 dias,
+ * só permanece na classificação quem continua no Ranking e mantém a regra
+ * de revelação aceita. Fora da janela, a projeção volta aos codinomes.
  */
 export async function projetarResultadoTemporada(
   resultado: ResultadoTemporada,
@@ -157,7 +155,7 @@ export async function projetarResultadoTemporada(
   const regras = await obterRegrasJogoSecretoParaClientes(ids);
   const revelar = janelaRevelacaoAtiva(resultado.encerradaEm, agora);
 
-  const participantesTopo = await Promise.all(resultado.participantesTopo.map(async (e) => {
+  const projetados = await Promise.all(resultado.participantesTopo.map(async (e) => {
     const regra = regras.get(e.clienteId);
     const mantemPosicao = regra?.participa === true && regra.aceitaRevelacao30d === true;
     const codinomeSecreto = codinomeSecretoRanking(e.clienteId, resultado.temporadaId);
@@ -191,6 +189,11 @@ export async function projetarResultadoTemporada(
       },
     };
   }));
+
+  const participantesTopo = (revelar
+    ? projetados.filter((item) => item.identidade.participaCampanha)
+    : projetados
+  ).map((item, index) => ({ ...item, posicao: index + 1 }));
 
   const vencedores = resultado.vencedorDeclarado && resultado.premioQuantidadePremiados
     ? participantesTopo.slice(0, resultado.premioQuantidadePremiados)
