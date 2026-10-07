@@ -63,6 +63,8 @@ describe("GET /api/admin/ranking/gamificacao", () => {
     expect(body.missaoSemanalAtiva).toBe(false);
     expect(body.missaoFotoPerfilAtiva).toBe(false);
     expect(body.missaoFotoPerfilBonus).toBe(0);
+    expect(body.missaoDivulgacaoAtiva).toBe(false);
+    expect(body.missaoDivulgacaoBonus).toBe(0);
     expect(body.carryoverTabela).toEqual([]);
   });
 
@@ -103,6 +105,22 @@ describe("POST /api/admin/ranking/gamificacao", () => {
   test("missaoFotoPerfilBonus fora do limite é rejeitado", async () => {
     expect((await POST(req(adminToken, { missaoFotoPerfilBonus: -1 }))).status).toBe(400);
     expect((await POST(req(adminToken, { missaoFotoPerfilBonus: 100001 }))).status).toBe(400);
+  });
+
+  test("configura missão diária de divulgação sem alterar a fidelidade", async () => {
+    const res = await POST(req(adminToken, {
+      missaoDivulgacaoAtiva: true,
+      missaoDivulgacaoBonus: 3,
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.config.missaoDivulgacaoAtiva).toBe(true);
+    expect(body.config.missaoDivulgacaoBonus).toBe(3);
+  });
+
+  test("missaoDivulgacaoBonus fora do limite é rejeitado", async () => {
+    expect((await POST(req(adminToken, { missaoDivulgacaoBonus: -1 }))).status).toBe(400);
+    expect((await POST(req(adminToken, { missaoDivulgacaoBonus: 100001 }))).status).toBe(400);
   });
 
   test("campos ausentes preservam o valor já salvo", async () => {
