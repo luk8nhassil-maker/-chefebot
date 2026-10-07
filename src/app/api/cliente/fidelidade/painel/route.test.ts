@@ -656,6 +656,7 @@ describe("GET /api/cliente/fidelidade/painel", () => {
         bonusCompeticao: 0,
         missaoSemanal: null,
         missaoIndicacao: null,
+        missaoFotoPerfil: null,
         movimentoRecente: null,
         coroaAmeacada: false,
         nivelChef: null,
