@@ -221,9 +221,9 @@ const PAINEL_PREVIEW: PainelFidelidade = {
       ],
       alvo: { estado: 'alcancar', alvoPosicao: 4, necessario: 3, scoreAlvo: 22 },
       disputa: {
-        acima: { posicao: 4, score: 22, eVoce: false, codinomeSecreto: 'Guardião Forno 28' },
-        voce: { posicao: 5, score: 20, eVoce: true, codinomeSecreto: 'Chef Secreto 91' },
-        abaixo: { posicao: 6, score: 18, eVoce: false, codinomeSecreto: 'Lenda Molho 51' },
+        acima: { posicao: 4, score: 22, eVoce: false, nomePublico: 'Guardião Forno 28' },
+        voce: { posicao: 5, score: 20, eVoce: true, nomePublico: 'Chef Secreto 91' },
+        abaixo: { posicao: 6, score: 18, eVoce: false, nomePublico: 'Lenda Molho 51' },
         sozinho: false,
       },
     },
