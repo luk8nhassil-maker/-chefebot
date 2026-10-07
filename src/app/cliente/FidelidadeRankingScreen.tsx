@@ -37,7 +37,7 @@ const ICONE_STATUS_SOCIAL: Record<NonNullable<PainelGamificacao['statusSocial']>
   elite: '✦',
 }
 
-type MomentoRanking = 'conquista' | 'nivel' | 'coroa' | 'indicacao' | 'semanal' | 'pedido'
+type MomentoRanking = 'conquista' | 'nivel' | 'coroa' | 'indicacao' | 'foto' | 'semanal' | 'pedido'
 function escolherMomentoPrincipal(
   ranking: NonNullable<PainelFidelidade['ranking']>,
   gamificacao: PainelGamificacao | null | undefined,
@@ -45,9 +45,11 @@ function escolherMomentoPrincipal(
   posPedido: FidelidadeRankingScreenProps['posPedido'],
   podeCompartilhar: boolean,
   podeIndicar: boolean,
+  podeAdicionarFoto: boolean,
   podePedir: boolean,
 ): MomentoRanking | null {
   if (posPedido) return 'pedido'
+  if (podeAdicionarFoto && gamificacao?.missaoFotoPerfil && !gamificacao.missaoFotoPerfil.concluida) return 'foto'
   if (gamificacao?.coroaAmeacada && ranking.participantes.alvo?.estado === 'liderando') return 'coroa'
   if (podePedir && gamificacao?.missaoSemanal?.status === 'desbloqueada') return 'semanal'
   if (podeIndicar && gamificacao?.missaoIndicacao && !gamificacao.missaoIndicacao.concluida && indicacao?.ativa && indicacao.compartilhamentoLiberado !== false) return 'indicacao'
@@ -96,6 +98,8 @@ export type FidelidadeRankingScreenProps = {
   onRevogarTodas: () => void
   onIndicarAmigo?: () => void
   onCompartilharConquista?: () => void
+  onAdicionarFoto?: () => void
+  fotoEnviando?: boolean
   onNovoPedido?: () => void
   onTelemetria?: (tipo: EventoRankingRetencao) => void
   onClose: () => void
@@ -119,13 +123,15 @@ export function FidelidadeRankingScreen({
   onRevogarTodas,
   onIndicarAmigo,
   onCompartilharConquista,
+  onAdicionarFoto,
+  fotoEnviando = false,
   onNovoPedido,
   onTelemetria,
   onClose,
 }: FidelidadeRankingScreenProps) {
   const [aba, setAba] = useState<'participantes' | 'minha' | 'geral'>('minha')
   const [sheetSubirAberto, setSheetSubirAberto] = useState(false)
-  const [momentoAberto, setMomentoAberto] = useState<MomentoRanking | null>(() => escolherMomentoPrincipal(ranking, gamificacao, indicacao, posPedido, !!onCompartilharConquista && indicacao?.ativa === true && indicacao.compartilhamentoLiberado !== false, !!onIndicarAmigo, !!onNovoPedido))
+  const [momentoAberto, setMomentoAberto] = useState<MomentoRanking | null>(() => escolherMomentoPrincipal(ranking, gamificacao, indicacao, posPedido, !!onCompartilharConquista && indicacao?.ativa === true && indicacao.compartilhamentoLiberado !== false, !!onIndicarAmigo, !!onAdicionarFoto, !!onNovoPedido))
   const podeCriarPortal = useSyncExternalStore(subscribeToDocument, documentDisponivel, documentIndisponivel)
   const momentoDialogRef = useRef<HTMLDivElement>(null)
   const momentoGatilhoRef = useRef<HTMLElement | null>(null)
@@ -199,13 +205,20 @@ export function FidelidadeRankingScreen({
     simbolo: posPedido.estado === 'creditado' ? '✦' : '◷',
   })
   if (conquista) momentos.push({ id: 'conquista', eyebrow: 'CONQUISTA RECENTE', titulo: 'Sua posição merece destaque', resumo: podeCompartilharConquista ? 'Veja sua conquista e convide alguém conhecido.' : 'Veja sua conquista no Ranking.', simbolo: '✦' })
+  if (gamificacao?.missaoFotoPerfil) momentos.push({
+    id: 'foto',
+    eyebrow: 'MISSÃO DE PERFIL',
+    titulo: gamificacao.missaoFotoPerfil.concluida ? 'Foto concluída' : `Adicione uma foto e ganhe +${gamificacao.missaoFotoPerfil.bonus}`,
+    resumo: gamificacao.missaoFotoPerfil.concluida ? 'Bônus já recebido.' : 'Bônus único no Ranking. Sua foto só fica pública se você autorizar.',
+    simbolo: '◎',
+  })
   if (gamificacao?.missaoSemanal?.status === 'desbloqueada') momentos.push({ id: 'semanal', eyebrow: 'MISSÃO SEMANAL', titulo: 'Caçada ao Pódio liberada!', resumo: 'Seu próximo pedido vale 2x no Ranking.', simbolo: '↗' })
   if (alvo?.estado === 'liderando') momentos.push({ id: 'coroa', eyebrow: 'NA LIDERANÇA', titulo: gamificacao?.coroaAmeacada ? 'Coroa ameaçada!' : 'Defenda sua coroa', resumo: mensagemMissao ?? 'Acompanhe sua vantagem.', simbolo: '♛' })
   if (gamificacao?.missaoIndicacao) momentos.push({ id: 'indicacao', eyebrow: 'MISSÃO DA TEMPORADA', titulo: 'Indique 1 amigo', resumo: gamificacao.missaoIndicacao.concluida ? '1/1 ✓ Concluída' : '0/1 · Veja como participar', simbolo: '↗' })
   if (gamificacao?.nivelChef) momentos.push({ id: 'nivel', eyebrow: 'SEU NÍVEL', titulo: `Nível ${gamificacao.nivelChef.nivel}${gamificacao.nivelChef.nome ? ` — ${gamificacao.nivelChef.nome}` : ''}`, resumo: gamificacao.nivelChef.xpProximoNivel === null ? 'Nível máximo atingido.' : `${gamificacao.nivelChef.xpAtual} XP / ${gamificacao.nivelChef.xpProximoNivel} XP`, simbolo: '✶' })
   const momentoAtual = momentos.find((item) => item.id === momentoAberto)
   const modalAtivo = !!momentoAtual
-  const focoAtual = momentos.find((item) => item.id === escolherMomentoPrincipal(ranking, gamificacao, indicacao, posPedido, podeCompartilharConquista, !!onIndicarAmigo, !!onNovoPedido))
+  const focoAtual = momentos.find((item) => item.id === escolherMomentoPrincipal(ranking, gamificacao, indicacao, posPedido, podeCompartilharConquista, !!onIndicarAmigo, !!onAdicionarFoto, !!onNovoPedido))
   const outrosMomentos = momentos.filter((item) => item.id !== focoAtual?.id)
 
   // Telemetria da abertura — dispara uma vez por montagem (o usuário abriu a
@@ -400,7 +413,7 @@ export function FidelidadeRankingScreen({
               <b>{scoreSeguro(entrada.score)}</b>
             </div>
           ))}
-          {aba === 'participantes' && <p className="cf-ranking-footnote">Mostrando posições próximas a você.</p>}
+          {aba === 'participantes' && <p className="cf-ranking-footnote">Mostrando posições próximas a você. “Participante” aparece quando a pessoa ainda não autorizou exibir o primeiro nome.</p>}
           {aba === 'geral' && <p className="cf-ranking-footnote">Só quem ativou o Ranking participa da disputa.</p>}
         </section>
       )}
@@ -509,6 +522,16 @@ export function FidelidadeRankingScreen({
                   {!compartilhamentoLiberado && <p className="cf-ranking-momento-notice">Convites bloqueados. Faça seu primeiro pedido confirmado para liberar o compartilhamento.</p>}
                 </>
               )}
+              {momentoAberto === 'foto' && gamificacao?.missaoFotoPerfil && (
+                <>
+                  <p className="cf-ranking-momento-lead">
+                    {gamificacao.missaoFotoPerfil.concluida
+                      ? `Você já recebeu o bônus desta missão.`
+                      : `Envie uma foto válida e ganhe +${gamificacao.missaoFotoPerfil.bonus} pontos no Ranking.`}
+                  </p>
+                  <p>A missão é única por cliente. A foto não aparece para outras pessoas automaticamente; isso depende da sua autorização de privacidade.</p>
+                </>
+              )}
               {momentoAberto === 'semanal' && (
                 <>
                   <p className="cf-ranking-momento-lead">Seu próximo pedido vale 2x no Ranking desta temporada.</p>
@@ -531,6 +554,12 @@ export function FidelidadeRankingScreen({
                   if (!compartilhamentoLiberado) onNovoPedido?.()
                   else { emit('indicacao_clicada'); onIndicarAmigo?.() }
                 }}>{compartilhamentoLiberado ? 'Convidar um amigo' : 'Fazer primeiro pedido'}</button>
+              )}
+              {momentoAberto === 'foto' && gamificacao?.missaoFotoPerfil && !gamificacao.missaoFotoPerfil.concluida && onAdicionarFoto && (
+                <button type="button" className="cf-ranking-momento-primary" disabled={fotoEnviando} onClick={() => {
+                  setMomentoAberto(null)
+                  onAdicionarFoto()
+                }}>{fotoEnviando ? 'Preparando foto…' : `Adicionar foto e ganhar +${gamificacao.missaoFotoPerfil.bonus}`}</button>
               )}
               {momentoAberto === 'semanal' && onNovoPedido && <button type="button" className="cf-ranking-momento-primary" onClick={() => { setMomentoAberto(null); onNovoPedido() }}>Fazer pedido</button>}
               {momentoAberto === 'coroa' && gamificacao?.coroaAmeacada && <button type="button" className="cf-ranking-momento-primary" onClick={() => { setMomentoAberto(null); setSheetSubirAberto(true) }}>Ver como subir</button>}
