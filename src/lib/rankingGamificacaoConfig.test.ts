@@ -23,6 +23,8 @@ describe("obterConfigGamificacao", () => {
     const config = await obterConfigGamificacao();
     expect(config).toEqual(CONFIG_GAMIFICACAO_PADRAO);
     expect(config.missaoSemanalAtiva).toBe(false);
+    expect(config.missaoFotoPerfilAtiva).toBe(false);
+    expect(config.missaoFotoPerfilBonus).toBe(0);
     expect(config.impulsoPodioAtivo).toBe(false);
     expect(config.carryoverAtivo).toBe(false);
     expect(config.nivelChefAtivo).toBe(false);
@@ -39,6 +41,8 @@ describe("obterConfigGamificacao", () => {
     expect(config.missaoSemanalAtiva).toBe(true);
     expect(config.nivelChefLimiares).toEqual([]);
     expect(config.carryoverTabela).toEqual([]);
+    expect(config.missaoFotoPerfilAtiva).toBe(false);
+    expect(config.missaoFotoPerfilBonus).toBe(0);
   });
 
   test("retorna exatamente o que foi salvo quando completo", async () => {
