@@ -21,6 +21,7 @@ import type {
   FinalidadePrivacidadeRanking,
   PreferenciasPrivacidadeRanking,
   PainelGamificacao,
+  ResultadoRankingRevelado,
 } from './painelFidelidadeTipos'
 
 const NOME_STATUS_SOCIAL: Record<NonNullable<PainelGamificacao['statusSocial']>, string> = {
@@ -83,6 +84,7 @@ export type FidelidadeRankingScreenProps = {
   // Gamificação V2 — ausente/null quando o admin não configurou nenhuma
   // mecânica (fail-closed): a tela nunca mostra selo, missão ou nível vazio.
   gamificacao?: PainelGamificacao | null
+  resultadoAnterior?: ResultadoRankingRevelado | null
   privacidade: PreferenciasPrivacidadeRanking | null
   privacidadeCarregando: boolean
   privacidadeSalvando: FinalidadePrivacidadeRanking | 'todas' | null
@@ -112,6 +114,7 @@ export function FidelidadeRankingScreen({
   temporada,
   indicacao,
   gamificacao = null,
+  resultadoAnterior = null,
   privacidade,
   privacidadeCarregando,
   privacidadeSalvando,
@@ -188,10 +191,6 @@ export function FidelidadeRankingScreen({
     variacao: ranking.participantes.variacaoPosicao,
   })
   const compartilhamentoLiberado = indicacao?.compartilhamentoLiberado !== false
-  const consentimentoNome = privacidade?.finalidades.find((item) =>
-    item.finalidade === 'ranking_primeiro_nome' && item.disponivel && item.textoVersao
-  ) ?? null
-  const podeLiberarNome = !!consentimentoNome && consentimentoNome.estado !== 'concedido'
   const podeCompartilharConquista = conquista !== null && indicacao?.ativa === true && !!onCompartilharConquista && compartilhamentoLiberado
   // Progresso absoluto (XP acumulado / XP do próximo nível) — nunca inventa
   // um "início de faixa" que o domínio (calcularNivelChef) não devolve; sem
@@ -344,22 +343,6 @@ export function FidelidadeRankingScreen({
             </div>
           </section>
 
-          {podeLiberarNome && consentimentoNome && (
-            <section className="cf-ranking-name-optin" aria-label="Identidade no Ranking">
-              <span>
-                <strong>Quer aparecer pelo seu primeiro nome?</strong>
-                <small>É opcional. Sem autorização, você continua como “Participante”.</small>
-              </span>
-              <button
-                type="button"
-                disabled={privacidadeSalvando !== null}
-                onClick={() => onAlterarPrivacidade('ranking_primeiro_nome', 'concedido', consentimentoNome.textoVersao)}
-              >
-                {privacidadeSalvando === 'ranking_primeiro_nome' ? 'Salvando…' : 'Mostrar meu nome'}
-              </button>
-            </section>
-          )}
-
           {gamificacao?.movimentoRecente && gamificacao.movimentoRecente.variacao.direcao !== 'manteve' && (
             <p className="cf-ranking-movimento-recente">
               {gamificacao.movimentoRecente.variacao.direcao === 'subiu' ? '▲' : '▼'} {gamificacao.movimentoRecente.variacao.casas} desde sua última visita
@@ -438,9 +421,43 @@ export function FidelidadeRankingScreen({
         </section>
       )}
 
+      {resultadoAnterior && resultadoAnterior.participantesTopo.length > 0 && (
+        <section className="cf-ranking-reveal" aria-label="Identidades reveladas da temporada anterior">
+          <div className="cf-ranking-reveal-head">
+            <span>🎭 IDENTIDADES REVELADAS</span>
+            <strong>Temporada anterior</strong>
+            <small>
+              Perfis visíveis até {resultadoAnterior.revelacaoAte
+                ? new Date(resultadoAnterior.revelacaoAte).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+                : 'o fim da janela oficial'}.
+            </small>
+          </div>
+          <div className="cf-ranking-reveal-list">
+            {resultadoAnterior.participantesTopo.slice(0, 10).map((entrada) => {
+              const identidade = entrada.identidade
+              const nome = identidade.revelado && identidade.nomePublico
+                ? identidade.nomePublico
+                : identidade.codinomeSecreto
+              return (
+                <div key={entrada.posicao} className="cf-ranking-reveal-row">
+                  <strong>#{entrada.posicao}</strong>
+                  <span className="cf-ranking-reveal-avatar">
+                    {identidade.revelado && identidade.fotoPerfilUrl
+                      ? <img src={identidade.fotoPerfilUrl} alt="" />
+                      : nome.slice(0, 1).toUpperCase()}
+                  </span>
+                  <span><b>{nome}</b><small>{identidade.revelado ? 'Perfil revelado' : 'Rival secreto'}</small></span>
+                  <em>{scoreSeguro(entrada.score)}</em>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
       {aba === 'minha' && <details className="cf-ranking-privacy">
         <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Privacidade e participação</summary>
-        <p>Você pode disputar anonimamente. Seu nome e telefone só aparecem se você permitir abaixo.</p>
+        <p>Durante a temporada você aparece por codinome. Ao final, a regra aceita na entrada permite revelar seu primeiro nome e sua foto de perfil por 30 dias para manter sua colocação pública.</p>
         {privacidadeCarregando && <p>Carregando escolhas…</p>}
         {!privacidadeCarregando && privacidade?.finalidades.filter((item) => item.disponivel && item.texto && item.textoVersao).map((item) => (
           <label key={item.finalidade}>
@@ -608,7 +625,7 @@ export function FidelidadeRankingScreen({
         .cf-ranking-tabs { display: grid; grid-template-columns: repeat(3,1fr); gap: 2px; margin: 17px 0 11px; padding: 3px; border-radius: 24px; background: rgba(222,227,234,.75); }.cf-ranking-tabs button { min-height: 39px; border: 0; border-radius: 21px; background: transparent; color: #687488; font: 700 12px inherit; cursor: pointer; }.cf-ranking-tabs button.ativo { color: #1f63d6; background: rgba(255,255,255,.98); box-shadow: 0 3px 10px rgba(48,75,108,.1); }
         .cf-ranking-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; }.cf-ranking-row { display: grid; grid-template-columns: 30px 34px 1fr auto; align-items: center; gap: 7px; min-height: 48px; padding: 6px 11px; border: 1px solid rgba(255,255,255,.85); border-radius: 24px; background: rgba(255,255,255,.84); box-shadow: 0 5px 14px rgba(58,78,101,.05); }.cf-ranking-row.voce { border-color: rgba(88,151,247,.4); background: linear-gradient(90deg, rgba(234,244,255,.98), rgba(248,252,255,.9)); }.cf-ranking-row>strong { font-size: 17px; text-align: center; }.cf-ranking-row-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #e8eef5; color: #61738a; font-size: 12px; font-weight: 800; }.cf-ranking-row.voce .cf-ranking-row-avatar { background: #4f86ed; color: #fff; }.cf-ranking-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }.cf-ranking-row-name small{display:block;margin-top:2px;color:#758296;font-size:10px}.cf-ranking-row>b { color: #ae7109; font-size: 12px; white-space: nowrap; }.cf-ranking-empty,.cf-ranking-footnote { margin: 7px 2px; color: #6d7a8c; font-size: 12px; line-height: 1.45; text-align: center; }
         .cf-ranking-note { display: flex; gap: 12px; align-items: center; margin-top: 17px; padding: 14px 15px; border: 1px solid rgba(226,180,55,.38); border-radius: 18px; background: linear-gradient(110deg, rgba(255,252,239,.96), rgba(255,247,218,.75)); }.cf-ranking-note>span { font-size: 25px; }.cf-ranking-note strong { font-size: 13px; display: block; }.cf-ranking-note p { margin: 4px 0 0; color: #697588; font-size: 11.5px; line-height: 1.35; }
-        .cf-ranking-name-optin{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0;padding:12px 13px;border:1px solid rgba(79,134,237,.2);border-radius:16px;background:rgba(239,246,255,.78)}.cf-ranking-name-optin span{display:grid;gap:3px}.cf-ranking-name-optin strong{font-size:12.5px;color:#304d77}.cf-ranking-name-optin small{font-size:10.5px;color:#718199;line-height:1.35}.cf-ranking-name-optin button{border:0;border-radius:999px;padding:8px 11px;background:#4f86ed;color:#fff;font-size:10.5px;font-weight:800;white-space:nowrap;cursor:pointer}.cf-ranking-name-optin button:disabled{opacity:.55;cursor:wait}
+        .cf-ranking-reveal{margin:16px 0;padding:14px;border:1px solid rgba(111,76,255,.18);border-radius:18px;background:linear-gradient(145deg,rgba(246,243,255,.95),rgba(255,255,255,.98))}.cf-ranking-reveal-head{display:grid;gap:3px;margin-bottom:10px}.cf-ranking-reveal-head>span{font-size:10px;font-weight:900;letter-spacing:.08em;color:#7159c8}.cf-ranking-reveal-head>strong{font-size:15px;color:#293a57}.cf-ranking-reveal-head>small{font-size:10.5px;color:#718199}.cf-ranking-reveal-list{display:grid;gap:7px}.cf-ranking-reveal-row{display:grid;grid-template-columns:28px 36px minmax(0,1fr) auto;align-items:center;gap:8px;padding:7px 8px;border-radius:12px;background:rgba(255,255,255,.82)}.cf-ranking-reveal-row>strong{font-size:11px;color:#718199}.cf-ranking-reveal-avatar{width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:50%;overflow:hidden;background:#e8edff;color:#5268a9;font-weight:900}.cf-ranking-reveal-avatar img{width:100%;height:100%;object-fit:cover}.cf-ranking-reveal-row>span:nth-child(3){display:grid;min-width:0}.cf-ranking-reveal-row b{font-size:12px;color:#30435f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cf-ranking-reveal-row small{font-size:9.5px;color:#8390a3}.cf-ranking-reveal-row em{font-style:normal}
         .cf-ranking-share-locked { display: grid; gap: 3px; margin-top: 10px; padding: 9px 11px; border: 1px solid rgba(180,196,220,.75); border-radius: 12px; background: rgba(247,250,255,.8); color: #52657f; }.cf-ranking-share-locked strong { color: #304d77; font-size: 12px; }.cf-ranking-share-locked small { font-size: 11px; line-height: 1.35; }
         .cf-ranking-selos { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; margin: 0 0 12px; }
         .cf-ranking-selo { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 999px; font-size: 11.5px; font-weight: 800; background: #eef1f5; color: #4a5568; }
