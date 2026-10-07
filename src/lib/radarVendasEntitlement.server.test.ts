@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => {
         return index >= 0 ? 0 : 1;
       }),
       zrange: vi.fn(async (key: string, start: number, stop: number, opts?: { rev?: boolean }) => {
-        let list = [...(zsets.get(key) ?? [])];
+        const list = [...(zsets.get(key) ?? [])];
         if (opts?.rev) list.reverse();
         const end = stop < 0 ? undefined : stop + 1;
         return list.slice(start, end).map((x) => x.member);
