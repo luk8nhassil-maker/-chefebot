@@ -258,17 +258,7 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       eventoId: "confirmado:p1",
       createdAt: new Date().toISOString(),
     }] satisfies MovimentoPontos[]);
-    obterMovimentosBonusMock.mockResolvedValueOnce([{
-      movimentoId: "b1",
-      eventoId: expect.stringContaining("missao_divulgacao_diaria:"),
-      tipo: "missao_divulgacao_diaria",
-      pontos: 3,
-      motivo: "Missão diária de divulgação",
-      createdAt: new Date().toISOString(),
-    }]);
-
-    // Usa o expediente real na expectativa do código: o mock acima é
-    // substituído abaixo por evento coerente com a data retornada em runtime.
+    // Usa o expediente real para produzir o mesmo evento diário do servidor.
     obterMovimentosBonusMock.mockImplementationOnce(async () => {
       const { chaveExpedienteOperacional } = await import("@/lib/expedienteOperacional");
       return [{
