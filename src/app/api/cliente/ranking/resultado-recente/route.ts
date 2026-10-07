@@ -55,7 +55,18 @@ export async function GET(req: NextRequest) {
         premioDescricao: resultado.premioDescricao,
         participantesTopo: resultado.participantesTopo
           .filter((item) => item.identidade.participaCampanha)
-          .slice(0, 20),
+          .slice(0, 20)
+          .map((item) => ({
+            posicao: item.posicao,
+            score: item.score,
+            identidade: {
+              participaCampanha: item.identidade.participaCampanha,
+              nomePublico: item.identidade.nomePublico,
+              fotoPerfilUrl: item.identidade.fotoPerfilUrl,
+              codinomeSecreto: item.identidade.codinomeSecreto,
+              revelado: item.identidade.revelado,
+            },
+          })),
       },
     });
   } catch {
