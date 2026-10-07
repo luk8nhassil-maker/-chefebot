@@ -41,7 +41,8 @@ import {
   type StatusTemporada,
 } from "@/lib/rankingGamificacao";
 import { obterConfigGamificacao } from "@/lib/rankingGamificacaoConfig";
-import { obterBonusCompeticaoDaTemporada } from "@/lib/rankingBonusTemporada";
+import { obterBonusCompeticaoDaTemporada, obterMovimentosBonusTemporada } from "@/lib/rankingBonusTemporada";
+import { chaveExpedienteOperacional } from "@/lib/expedienteOperacional";
 import {
   aplicarCarryoverClienteSeNecessario,
   sincronizarStatusSocialCliente,
@@ -402,6 +403,7 @@ export async function GET(req: NextRequest) {
   // missões da temporada — tudo fail-closed sem config/temporada.
   let statusSocial: "campeao" | "prata" | "bronze" | "elite" | null = null;
   let bonusCompeticao = 0;
+  let missaoDivulgacao: { concluidaHoje: boolean; bonus: number; elegivel: boolean } | null = null;
   let missaoSemanal: { status: "inativa" | "desbloqueada" | "processando" | "consumida" } | null = null;
   let missaoIndicacao: { concluida: boolean } | null = null;
   const missaoFotoPerfil = configGamificacao.missaoFotoPerfilAtiva && configGamificacao.missaoFotoPerfilBonus > 0 && temporada && participaRanking
@@ -416,6 +418,22 @@ export async function GET(req: NextRequest) {
     const statusVigente = await sincronizarStatusSocialCliente(tenantId, temporada, clienteId);
     statusSocial = statusVigente?.status ?? null;
     bonusCompeticao = await obterBonusCompeticaoDaTemporada(tenantId, temporada.temporadaId, clienteId);
+
+    if (configGamificacao.missaoDivulgacaoAtiva && configGamificacao.missaoDivulgacaoBonus > 0) {
+      const expedienteId = chaveExpedienteOperacional();
+      const movimentosBonus = await obterMovimentosBonusTemporada(tenantId, temporada.temporadaId, clienteId);
+      const concluidaHoje = movimentosBonus.some((movimento) =>
+        movimento.tipo === "missao_divulgacao_diaria" &&
+        movimento.eventoId === `missao_divulgacao_diaria:${expedienteId}` &&
+        movimento.pontos > 0
+      );
+      missaoDivulgacao = {
+        concluidaHoje,
+        bonus: configGamificacao.missaoDivulgacaoBonus,
+        elegivel: compartilhamentoLiberado,
+      };
+    }
+
     if (configGamificacao.missaoSemanalAtiva) {
       const ultimoPedidoConfirmadoConhecido = extratoCompleto
         ? calcularUltimoPedidoConfirmadoDosMovimentos(extratoCompleto)
@@ -496,6 +514,7 @@ export async function GET(req: NextRequest) {
       missaoSemanal,
       missaoIndicacao,
       missaoFotoPerfil,
+      missaoDivulgacao,
       movimentoRecente,
       coroaAmeacada,
       nivelChef,
