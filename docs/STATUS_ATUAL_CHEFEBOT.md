@@ -12,6 +12,8 @@ Fonte da verdade do projeto. Objetivo: evitar reabrir diagnóstico ou trabalho e
 
 ## 2. Fluxos já resolvidos / validados
 
+- **Ritmo mensal de compra por cliente** — mergeado na main via PR #470 (commit `0936fa6c`). A Sala Dev usa pedidos oficiais para identificar começo/meio/fim do mês, janela provável, dia/horário forte e confiança. Menos de 3 pedidos = dados insuficientes. Não envia cupom nem WhatsApp automaticamente.
+
 - **Scroll da conversa no Tempo Real (aba "⚡ Tempo real" dentro de `/pedidos`)** — resolvido. Usa `isNearBottomRef`/`prevMsgCountRef` para só rolar automaticamente quando o usuário já estava perto do fim da conversa; não interrompe leitura de mensagens antigas durante o polling.
   - **Nota importante:** essa correção existe **só na aba Tempo Real dentro de `/pedidos`** (`src/app/pedidos/page.tsx`). A rota separada `/conversas` (`src/app/conversas/page.tsx`), acessível pelo item "Conversas" da sidebar, é uma implementação diferente e **ainda não tem essa correção** — ver seção 4.
 - **Histórico permanente da conversa** — resolvido. O histórico de mensagens permanece acessível mesmo depois que a conversa sai da lista de "recentes" (finalizada ou após a janela de 30 min), sem fechar sozinho.
@@ -34,6 +36,17 @@ Estes itens já foram corrigidos e validados. Só investigar de novo se houver *
 - Fluxo de pedido público (`/cardapio`) quebrado ponta a ponta.
 
 ## 4. Pendências reais
+
+### Radar de Vendas 2.0 — PR #471
+
+**Estado: PR aberto em validação.**
+
+Transforma o ritmo de compra em produto comercial no admin:
+- preview agregado usando dados reais da pizzaria;
+- oportunidades com score, janela, confiança e meta de ticket;
+- acesso pelo plano Pro ou desbloqueio permanente do módulo após uma indicação virar cliente pagante e ser confirmada por Dev;
+- landing pública de indicação e painel Dev de conversões;
+- nenhum cupom ou WhatsApp é enviado automaticamente nesta versão.
 
 ### Ativação da Estrelas V1 — PR em aberto (`claude/ativar-estrelas-v1-gate`)
 

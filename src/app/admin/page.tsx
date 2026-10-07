@@ -886,6 +886,24 @@ export default function AdminPage() {
               </div>
             )}
 
+            {/* Radar de Vendas 2.0 */}
+            <button
+              type="button"
+              onClick={() => router.push('/admin/radar-vendas')}
+              style={{ ...card, marginBottom: 16, width: '100%', textAlign: 'left', cursor: 'pointer', border: '1px solid color-mix(in srgb, var(--primary) 38%, var(--border))', background: 'color-mix(in srgb, var(--primary) 6%, var(--surface))' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'color-mix(in srgb, var(--primary) 14%, transparent)' }}>
+                  <TrendingUp size={20} aria-hidden="true" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <p style={{ color: 'var(--foreground)', fontSize: 14, fontWeight: 800, margin: 0 }}>Radar de Vendas 2.0</p>
+                  <p style={{ color: 'var(--foreground-secondary)', fontSize: 11.5, margin: '3px 0 0', lineHeight: 1.45 }}>Descubra quando clientes tendem a voltar e onde existe chance de aumentar o ticket sem dar desconto à toa.</p>
+                </div>
+                <span style={{ color: 'var(--brand-text)', fontSize: 12, fontWeight: 800 }}>Abrir →</span>
+              </div>
+            </button>
+
             {/* Gráfico de vendas por hora */}
             {graficoPico.length > 0 && (
               <div style={{ ...card, marginBottom: 16 }}>
