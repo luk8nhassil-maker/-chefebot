@@ -33,10 +33,10 @@ describe('FidelidadeAnalyticsDashboard', () => {
 
     expect(screen.getByText('Receita elegível à fidelidade')).toBeInTheDocument();
     expect(screen.getByText('Retenção observada')).toBeInTheDocument();
-    expect(screen.getByText((_, element) => element?.textContent?.includes('1 de 3 clientes (33%)') ?? false)).toBeInTheDocument();
-    expect(screen.getByText((_, element) => element?.textContent?.includes('Até esses dados existirem') ?? false)).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === '1 de 3 clientes (33%)')).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === 'Até esses dados existirem, registre também a data e o custo real do prêmio. Sem isso o ROI fica indisponível.')).toBeInTheDocument();
     expect(screen.getByLabelText('Gráfico de receita diária')).toBeInTheDocument();
-    expect(screen.getByText((_, element) => element?.textContent?.includes('Pedido criado no painel · 1 pedido(s)') ?? false)).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === 'Pedido criado no painel · 1 pedido(s) · R$ 50,00 · 25% da receita elegível')).toBeInTheDocument();
     expect(screen.getByText('Ver IDs dos pedidos criados no painel (1)')).toBeInTheDocument();
     expect(screen.getByText('Histórico anterior ainda desconhecido.')).toBeInTheDocument();
   });
