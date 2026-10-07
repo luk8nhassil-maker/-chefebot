@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Home, ShoppingCart, Receipt, Star, User } from "lucide-react";
 import type { ClientBottomNavTab } from "@/lib/pedidoAtivoCliente";
 
@@ -69,10 +70,10 @@ export default function ClientBottomNav({
               <span className="cbn-label">Início</span>
             </button>
           ) : (
-            <a className={`cbn-item ${active === "inicio" ? "active" : ""}`} href={inicioHref}>
+            <Link prefetch className={`cbn-item ${active === "inicio" ? "active" : ""}`} href={inicioHref}>
               <span className="cbn-icon-circle"><span className="cbn-icon"><Home size={20} aria-hidden="true" /></span></span>
               <span className="cbn-label">Início</span>
-            </a>
+            </Link>
           )}
 
           {onSacolaClick ? (
@@ -86,7 +87,7 @@ export default function ClientBottomNav({
               <span className="cbn-label">Sacola</span>
             </button>
           ) : (
-            <a className={`cbn-item ${active === "sacola" ? "active" : ""}`} href={sacolaHref}>
+            <Link prefetch className={`cbn-item ${active === "sacola" ? "active" : ""}`} href={sacolaHref}>
               <span className="cbn-icon-circle">
                 <span className="cbn-icon-wrap">
                   <span className="cbn-icon"><ShoppingCart size={20} aria-hidden="true" /></span>
@@ -94,7 +95,7 @@ export default function ClientBottomNav({
                 </span>
               </span>
               <span className="cbn-label">Sacola</span>
-            </a>
+            </Link>
           )}
 
           {onPedidoClick ? <button
@@ -122,7 +123,7 @@ export default function ClientBottomNav({
               </span>
             </span>
             <span className="cbn-label">Pedido</span>
-          </a>}
+          </Link>}
 
           {onPontosClick ? <button type="button" className={`cbn-item ${active === "pontos" ? "active" : ""}`} onClick={onPontosClick}>
             <span className="cbn-icon-circle"><span className="cbn-icon">{loyaltyIcon === "star" ? <Star size={20} aria-hidden="true" /> : <User size={20} aria-hidden="true" />}</span></span>
@@ -130,7 +131,7 @@ export default function ClientBottomNav({
           </button> : <a className={`cbn-item ${active === "pontos" ? "active" : ""}`} href="/cliente">
             <span className="cbn-icon-circle"><span className="cbn-icon">{loyaltyIcon === "star" ? <Star size={20} aria-hidden="true" /> : <User size={20} aria-hidden="true" />}</span></span>
             <span className="cbn-label">{loyaltyLabel}</span>
-          </a>}
+          </Link>}
         </div>
       </nav>
       <style>{`
