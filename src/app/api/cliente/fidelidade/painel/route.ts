@@ -12,6 +12,7 @@ import { ESTRELAS_INDICACAO_PRIMEIRA_COMPRA } from "@/lib/estrelasIndicacao";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
 import { posicaoClienteRanking, obterTopRanking, obterRankingCompleto, reindexarPorFiltro } from "@/lib/rankingClientes";
 import { projetarIdentidadesPublicasRanking } from "@/lib/rankingPrivacidade";
+import { codinomeSecretoRanking } from "@/lib/rankingJogoSecreto";
 import { obterParticipacaoRanking } from "@/lib/consentimentoRanking";
 import {
   calcularVariacaoPosicao,
@@ -109,6 +110,7 @@ export async function GET(req: NextRequest) {
       participaCampanha: boolean;
       nomePublico?: string;
       telefoneMascarado?: string;
+      codinomeSecreto?: string;
     }[];
     // Histórico honesto: comparação contra o snapshot diário anterior, nunca
     // um valor inventado. `null` quando ainda não existe snapshot anterior.
@@ -127,6 +129,7 @@ export async function GET(req: NextRequest) {
         participaCampanha: true;
         nomePublico?: string;
         telefoneMascarado?: string;
+        codinomeSecreto?: string;
         // Selo herdado do Top 10 da temporada ANTERIOR (não da posição atual)
         // — mesma fonte usada para o próprio cliente, agora também exposto
         // para os outros membros do Top 10 na tela de Ranking. `null`/ausente
@@ -178,8 +181,9 @@ export async function GET(req: NextRequest) {
           score: e.score,
           eVoce: e.clienteId === clienteId,
           participaCampanha: identidade?.participaCampanha ?? false,
-          ...(identidade?.nomePublico ? { nomePublico: identidade.nomePublico } : {}),
-          ...(identidade?.telefoneMascarado ? { telefoneMascarado: identidade.telefoneMascarado } : {}),
+          ...(identidade?.participaCampanha
+            ? { codinomeSecreto: codinomeSecretoRanking(e.clienteId, temporada.temporadaId) }
+            : {}),
         };
       });
 
@@ -210,15 +214,13 @@ export async function GET(req: NextRequest) {
         ),
       );
       const listaParticipantes = listaParticipantesBase.map((e) => {
-        const identidade = identidades.get(e.clienteId);
         const status = statusPorClienteId.get(e.clienteId) ?? null;
         return {
           posicao: e.posicao,
           score: e.score,
           eVoce: e.clienteId === clienteId,
           participaCampanha: true as const,
-          ...(identidade?.nomePublico ? { nomePublico: identidade.nomePublico } : {}),
-          ...(identidade?.telefoneMascarado ? { telefoneMascarado: identidade.telefoneMascarado } : {}),
+          codinomeSecreto: codinomeSecretoRanking(e.clienteId, temporada.temporadaId),
           ...(status ? { statusSocial: status } : {}),
         };
       });
@@ -292,8 +294,16 @@ export async function GET(req: NextRequest) {
             entradaAbaixo: entradaAbaixo ? { posicao: entradaAbaixo.posicao, score: entradaAbaixo.score } : null,
           })
         : null;
+      const identidadesSecretas = new Map(
+        [...identidades.entries()].map(([id, identidade]) => [
+          id,
+          identidade.participaCampanha
+            ? { ...identidade, nomePublico: codinomeSecretoRanking(id, temporada.temporadaId), telefoneMascarado: null }
+            : identidade,
+        ]),
+      );
       const disputa = proprioEntreParticipantes
-        ? montarDisputaRelativa({ ordenados: reindexados, clienteId, identidades })
+        ? montarDisputaRelativa({ ordenados: reindexados, clienteId, identidades: identidadesSecretas })
         : null;
 
       ranking = {
