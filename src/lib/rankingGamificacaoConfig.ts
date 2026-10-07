@@ -23,6 +23,11 @@ export type ConfigGamificacao = {
   missaoFotoPerfilAtiva: boolean;
   missaoFotoPerfilBonus: number;
 
+  // Embaixador do dia — bônus diário quando o link individual traz uma
+  // pessoa sem pedido comercial anterior para dentro do funil.
+  missaoDivulgacaoDiariaAtiva: boolean;
+  missaoDivulgacaoDiariaBonus: number;
+
   // Impulso do Pódio — bônus limitado e com teto por temporada.
   impulsoPodioAtivo: boolean;
   impulsoPodioBonus: number;
@@ -51,6 +56,8 @@ export const CONFIG_GAMIFICACAO_PADRAO: ConfigGamificacao = {
   missaoIndicacaoBonus: 0,
   missaoFotoPerfilAtiva: false,
   missaoFotoPerfilBonus: 0,
+  missaoDivulgacaoDiariaAtiva: false,
+  missaoDivulgacaoDiariaBonus: 0,
   impulsoPodioAtivo: false,
   impulsoPodioBonus: 0,
   impulsoPodioCapTemporada: 0,
