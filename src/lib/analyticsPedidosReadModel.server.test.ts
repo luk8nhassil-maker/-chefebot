@@ -71,7 +71,28 @@ describe("analyticsPedidosReadModel", () => {
     expect(eventos).toEqual([]);
   });
 
-  test("mescla índice e pedidos sem duplicar o mesmo pedido", async () => {
+  test("usa pedidos como caminho rápido e não consulta o índice quando a fonte oficial está disponível", async () => {
+    const ms = new Date("2026-10-05T20:00:00-03:00").getTime();
+    mocks.redisGet.mockResolvedValue([
+      { id: String(ms), telefone: "99999991234", total: 65, status: "entregue", origem: "whatsapp" },
+      { id: String(ms + 1000), telefone: "99999995678", total: 80, status: "entregue" },
+    ]);
+
+    const leitura = await consultarEventosAnaliticosComFallback(
+      "default",
+      ms - 1000,
+      ms + 5000,
+      ms + 5000,
+    );
+
+    expect(leitura.eventos).toHaveLength(2);
+    expect(leitura.fonte.origem).toBe("pedidos");
+    expect(leitura.fonte.eventosIndice).toBe(0);
+    expect(leitura.fonte.eventosFallbackAdicionados).toBe(2);
+    expect(mocks.consultarEventosPorPeriodo).not.toHaveBeenCalled();
+  });
+
+  test("cai para o índice quando a chave de pedidos está vazia", async () => {
     const ms = new Date("2026-10-05T20:00:00-03:00").getTime();
     const indexado = {
       pedidoId: String(ms),
@@ -86,35 +107,22 @@ describe("analyticsPedidosReadModel", () => {
       schemaVersao: 1 as const,
       regraVersao: "estrelas-faixas-v1",
     };
+    mocks.redisGet.mockResolvedValue([]);
     mocks.consultarEventosPorPeriodo.mockResolvedValue([indexado]);
-    mocks.redisGet.mockResolvedValue([
-      { id: String(ms), telefone: "99999991234", total: 65, status: "entregue", origem: "whatsapp" },
-      { id: String(ms + 1000), telefone: "99999995678", total: 80, status: "entregue" },
-    ]);
 
-    const leitura = await consultarEventosAnaliticosComFallback(
-      "default",
-      ms - 1000,
-      ms + 5000,
-      ms + 5000,
-    );
-
-    expect(leitura.eventos).toHaveLength(2);
-    expect(leitura.fonte.origem).toBe("analytics+pedidos");
-    expect(leitura.fonte.eventosIndice).toBe(1);
-    expect(leitura.fonte.eventosFallbackAdicionados).toBe(1);
-    expect(leitura.eventos.find((e) => e.pedidoId === String(ms))?.estrelasGeradas).toBe(5);
+    const leitura = await consultarEventosAnaliticosComFallback("default", ms - 1000, ms + 1000, ms + 1000);
+    expect(leitura.eventos).toEqual([indexado]);
+    expect(leitura.fonte.origem).toBe("analytics");
+    expect(leitura.fonte.indiceDisponivel).toBe(true);
   });
 
-  test("continua funcionando só com pedidos quando índice falha", async () => {
+  test("cai para o índice quando a leitura de pedidos falha", async () => {
     const ms = new Date("2026-10-05T20:00:00-03:00").getTime();
-    mocks.consultarEventosPorPeriodo.mockRejectedValue(new Error("indice down"));
-    mocks.redisGet.mockResolvedValue([
-      { id: String(ms), telefone: "99999991234", total: 65, status: "entregue" },
-    ]);
+    mocks.redisGet.mockRejectedValue(new Error("pedidos down"));
+    mocks.consultarEventosPorPeriodo.mockResolvedValue([]);
     const leitura = await consultarEventosAnaliticosComFallback("default", ms - 1000, ms + 1000, ms + 1000);
-    expect(leitura.eventos).toHaveLength(1);
-    expect(leitura.fonte.origem).toBe("pedidos");
-    expect(leitura.fonte.indiceDisponivel).toBe(false);
+    expect(leitura.fonte.origem).toBe("analytics");
+    expect(leitura.fonte.fallbackPedidosDisponivel).toBe(false);
+    expect(mocks.consultarEventosPorPeriodo).toHaveBeenCalledTimes(1);
   });
 });
