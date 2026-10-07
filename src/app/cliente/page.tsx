@@ -744,7 +744,8 @@ function RankingConsentModal({ privacidade, carregando, salvando, erro, onAceita
         </div>
         <div className="cf-ranking-consent-info-card">
           <p className="cf-ranking-consent-lead"><strong>Ative para disputar posições.</strong> Veja quem está acima, quanto falta para subir e as missões disponíveis. Bônus do Ranking não alteram suas Estrelas da fidelidade.</p>
-          <div className="cf-ranking-consent-privacy"><span className="cf-ranking-consent-privacy-icon" aria-hidden="true">✓</span><span className="cf-ranking-consent-privacy-copy"><strong>Você começa anônimo.</strong><span> Nome e telefone só aparecem se você autorizar depois.</span></span></div>
+          <div className="cf-ranking-consent-privacy"><span className="cf-ranking-consent-privacy-icon" aria-hidden="true">🎭</span><span className="cf-ranking-consent-privacy-copy"><strong>Jogo secreto durante a temporada.</strong><span> Você aparece com um codinome. No encerramento, seu primeiro nome e sua foto de perfil (se cadastrada) ficam visíveis no Ranking por 30 dias para manter sua colocação pública.</span></span></div>
+          <div className="cf-ranking-consent-privacy"><span className="cf-ranking-consent-privacy-icon" aria-hidden="true">✓</span><span className="cf-ranking-consent-privacy-copy"><strong>Você continua no controle.</strong><span> Pode sair do Ranking a qualquer momento; ao sair, o perfil deixa de ser revelado e a colocação não é mantida publicamente.</span></span></div>
         </div>
         {carregando && <p>Carregando sua autorização…</p>}
         {!carregando && privacidade === null && (
@@ -758,11 +759,11 @@ function RankingConsentModal({ privacidade, carregando, salvando, erro, onAceita
             disabled={!podeAceitar}
             onClick={onAceitar}
           >
-            {salvando ? 'Ativando…' : <span>Ativar meu Ranking</span>}
+            {salvando ? 'Ativando…' : <span>Aceitar regra e entrar no Ranking</span>}
           </button>
         )}
         <button type="button" className="cf-ranking-consent-secondary" onClick={onRecusar} disabled={salvando !== null}>Talvez depois</button>
-        <small>Você pode mudar essa escolha depois.</small>
+        <small>Ao entrar, você aceita a regra oficial do jogo secreto e da revelação final por 30 dias.</small>
         <style>{`.cf-ranking-consent-info-card{margin:12px 0 10px;padding:11px 12px 10px;border:1px solid #e7eefb;border-radius:14px;background:#f7faff}.cf-ranking-consent-lead{margin:0!important}.cf-ranking-consent-lead strong{color:#2d4262;font-weight:800}.cf-ranking-consent-info-card .cf-ranking-consent-privacy{margin:9px 0 0;padding:9px 0 0;border-top:1px solid #e5edf9;background:transparent}.cf-ranking-consent-people{position:absolute;left:0;bottom:0;display:flex;align-items:center;gap:2px;padding:3px 5px 3px 3px;border-radius:20px;background:rgba(255,255,255,.9);box-shadow:0 4px 12px rgba(47,67,98,.12);animation:cf-ranking-consent-people-float 2.8s ease-in-out infinite}.cf-ranking-consent-person{display:flex;width:23px;height:23px;align-items:center;justify-content:center;border:2px solid #fff;border-radius:50%;background:#f8d8d5;font-size:13px;font-style:normal;line-height:1}.cf-ranking-consent-person+.cf-ranking-consent-person{margin-left:-7px}.cf-ranking-consent-people b{display:flex;width:23px;height:23px;align-items:center;justify-content:center;border-radius:50%;background:#4f86ed;color:#fff;font-size:9px}.person-two{background:#f8e5bd}.person-three{background:#d6e7f7}.person-two{animation:cf-ranking-consent-person-bob 2s ease-in-out .2s infinite}.person-three{animation:cf-ranking-consent-person-bob 2s ease-in-out .45s infinite}@keyframes cf-ranking-consent-people-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}@keyframes cf-ranking-consent-person-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}@media (prefers-reduced-motion:reduce){.cf-ranking-consent-people,.cf-ranking-consent-person{animation:none}}`}</style>
         <style>{`.cf-ranking-consent-modal{padding:30px 22px 24px}.cf-ranking-consent-visual{width:200px;height:122px;margin:0 auto 8px;border-radius:30px;background:radial-gradient(circle at 50% 25%,rgba(255,247,219,.9),rgba(255,255,255,0) 56%),linear-gradient(145deg,#fff6f3,#f6f9ff);box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 10px 24px rgba(62,84,119,.1)}.cf-ranking-consent-emoji{left:78px;top:18px;font-size:45px;filter:drop-shadow(0 7px 6px rgba(205,135,48,.22));animation:cf-ranking-consent-bob-premium 1.8s ease-in-out infinite}.cf-ranking-consent-gift{right:31px;bottom:47px;font-size:29px;filter:drop-shadow(0 5px 5px rgba(211,151,35,.3));animation:cf-ranking-consent-gift-premium 2.1s ease-in-out .2s infinite}.cf-ranking-consent-spark{font-size:22px;text-shadow:0 0 10px rgba(246,185,25,.4)}.cf-ranking-consent-spark-one{left:33px;top:23px}.cf-ranking-consent-spark-two{right:55px;top:12px;font-size:15px}.cf-ranking-consent-people{left:50%;bottom:10px;transform:translateX(-50%);gap:4px;padding:5px 8px 5px 5px;border:1px solid rgba(255,255,255,.95);border-radius:24px;background:rgba(255,255,255,.92);box-shadow:0 7px 18px rgba(47,67,98,.16);animation:cf-ranking-consent-people-premium 2.8s ease-in-out infinite}.cf-ranking-consent-person{width:31px;height:31px;border-width:2px;font-size:18px;box-shadow:0 2px 6px rgba(36,53,79,.12)}.cf-ranking-consent-person+.cf-ranking-consent-person{margin-left:-9px}.cf-ranking-consent-people b{width:31px;height:31px;font-size:11px;box-shadow:0 3px 8px rgba(79,134,237,.25)}.cf-ranking-consent-eyebrow{margin-bottom:9px!important}.cf-ranking-consent-modal h2{font-size:25px}.cf-ranking-consent-info-card{margin-top:16px;padding:14px 14px 12px}.cf-ranking-consent-lead{font-size:13.5px;line-height:1.55}.cf-ranking-consent-privacy{margin-top:11px!important;padding-top:10px!important}@keyframes cf-ranking-consent-bob-premium{0%,100%{transform:translateY(0) rotate(-3deg) scale(1)}50%{transform:translateY(-8px) rotate(3deg) scale(1.06)}}@keyframes cf-ranking-consent-gift-premium{0%,100%{transform:translateY(0) rotate(0) scale(1)}50%{transform:translateY(-7px) rotate(-7deg) scale(1.08)}}@keyframes cf-ranking-consent-people-premium{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(-5px)}}@media (prefers-reduced-motion:reduce){.cf-ranking-consent-emoji,.cf-ranking-consent-gift,.cf-ranking-consent-people{animation:none}}`}</style>
         <style>{`.cf-ranking-consent-visual{height:auto;min-height:142px;padding:14px 0 12px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:space-between}.cf-ranking-consent-icon-row{display:flex;align-items:center;justify-content:center;gap:20px;width:100%;height:78px}.cf-ranking-consent-icon-row .cf-ranking-consent-emoji,.cf-ranking-consent-icon-row .cf-ranking-consent-gift,.cf-ranking-consent-icon-row .cf-ranking-consent-spark{position:static}.cf-ranking-consent-icon-row .cf-ranking-consent-emoji{font-size:48px}.cf-ranking-consent-icon-row .cf-ranking-consent-gift{font-size:31px}.cf-ranking-consent-icon-row .cf-ranking-consent-spark-one{font-size:22px}.cf-ranking-consent-icon-row .cf-ranking-consent-spark-two{font-size:16px}.cf-ranking-consent-people{position:static;transform:none;margin:0 auto;animation-name:cf-ranking-consent-people-static-float}@keyframes cf-ranking-consent-people-static-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}`}</style>
@@ -1008,7 +1009,8 @@ export default function ClientePage() {
     setRankingConsentModal(true)
     const preferencias = await carregarPrivacidadeRanking()
     const jaParticipa = preferencias?.participaCampanha === true
-    if (jaParticipa) {
+    const regraAceita = preferencias?.regraJogo?.aceitaRevelacao30d === true
+    if (jaParticipa && regraAceita) {
       setRankingConsentModal(false)
       const rankingAtual = painel?.ranking ?? (await carregarPainel())?.ranking
       if (rankingAtual) setMobilePanel('ranking')
@@ -1034,6 +1036,7 @@ export default function ClientePage() {
       setPrivacidadeRanking({
         finalidades: data.finalidades,
         participaCampanha: data.participaCampanha === true,
+        regraJogo: data.regraJogo,
       })
       await carregarPainel()
       setPrivacidadeSalvando(null)
@@ -1050,10 +1053,14 @@ export default function ClientePage() {
     setPrivacidadeSalvando('todas')
     setPrivacidadeErro('')
     try {
-      const res = await fetchCliente('/api/cliente/privacidade/ranking', { method: 'POST' }, sessaoMemRef.current)
+      const res = await fetchCliente('/api/cliente/privacidade/ranking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aceitaRegraRevelacao30d: true }),
+      }, sessaoMemRef.current)
       const data = await res.json().catch(() => ({}))
       if (!res.ok || data.participaCampanha !== true) throw new Error('ativacao_nao_salva')
-      setPrivacidadeRanking({ finalidades: data.finalidades, participaCampanha: true })
+      setPrivacidadeRanking({ finalidades: data.finalidades, participaCampanha: true, regraJogo: data.regraJogo })
       setRankingConsentModal(false)
       const painelAtual = await carregarPainel()
       if (painelAtual?.ranking) setMobilePanel('ranking')
