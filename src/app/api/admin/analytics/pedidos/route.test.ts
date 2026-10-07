@@ -92,6 +92,33 @@ describe("GET /api/admin/analytics/pedidos", () => {
     expect(body.totalEventosNoIndice).toBe(0);
     expect(body.totalEventosConsiderados).toBe(1);
     expect(body.fonteDados.origem).toBe("pedidos");
+    expect(body.cobertura.janelaSolicitadaDias).toBe(30);
+    expect(body.cobertura.historicoEncontradoDesdeIso).toBeTruthy();
+    expect(body.cobertura.diasHistoricoEncontrado).toBeGreaterThanOrEqual(1);
+  });
+
+  it("informa quando a janela de 30d só possui parte do histórico coletado", async () => {
+    const agora = Date.now();
+    const antigo = { ...eventoBase, pedidoId: "p-antigo", criadoEmMs: agora - 12 * 86400000 };
+    const recente = { ...eventoBase, pedidoId: "p-recente", criadoEmMs: agora - 2 * 86400000 };
+    mocks.consultarEventosAnaliticosComFallback.mockResolvedValue({
+      eventos: [antigo, recente],
+      fallbackTodos: [antigo, recente],
+      fonte: {
+        indiceDisponivel: false,
+        fallbackPedidosDisponivel: true,
+        eventosIndice: 0,
+        eventosFallbackAdicionados: 2,
+        origem: "pedidos",
+      },
+    });
+
+    const body = await (await GET(makeReq({ periodo: "30" }))).json();
+    expect(body.cobertura.janelaSolicitadaDias).toBe(30);
+    expect(body.cobertura.diasHistoricoEncontrado).toBeGreaterThanOrEqual(11);
+    expect(body.cobertura.diasHistoricoEncontrado).toBeLessThan(30);
+    expect(body.cobertura.possuiDadosAntesDaJanela).toBe(false);
+    expect(body.metricas.pedidosValidos).toBe(2);
   });
 
   it("consulta histórico anterior somente dos clientes atuais", async () => {
