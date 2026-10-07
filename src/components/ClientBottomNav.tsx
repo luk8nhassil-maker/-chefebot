@@ -111,7 +111,8 @@ export default function ClientBottomNav({
               </span>
             </span>
             <span className="cbn-label">Pedido</span>
-          </button> : <a
+          </button> : <Link
+            prefetch
             className={`cbn-item ${active === "pedido" ? "active" : ""}`}
             href="/cliente/pedidos"
             aria-label={pixPendente ? "Pedido — pagamento Pix pendente" : undefined}
@@ -128,7 +129,7 @@ export default function ClientBottomNav({
           {onPontosClick ? <button type="button" className={`cbn-item ${active === "pontos" ? "active" : ""}`} onClick={onPontosClick}>
             <span className="cbn-icon-circle"><span className="cbn-icon">{loyaltyIcon === "star" ? <Star size={20} aria-hidden="true" /> : <User size={20} aria-hidden="true" />}</span></span>
             <span className="cbn-label">{loyaltyLabel}</span>
-          </button> : <a className={`cbn-item ${active === "pontos" ? "active" : ""}`} href="/cliente">
+          </button> : <Link prefetch className={`cbn-item ${active === "pontos" ? "active" : ""}`} href="/cliente">
             <span className="cbn-icon-circle"><span className="cbn-icon">{loyaltyIcon === "star" ? <Star size={20} aria-hidden="true" /> : <User size={20} aria-hidden="true" />}</span></span>
             <span className="cbn-label">{loyaltyLabel}</span>
           </Link>}
