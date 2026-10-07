@@ -12,6 +12,8 @@ Fonte da verdade do projeto. Objetivo: evitar reabrir diagnóstico ou trabalho e
 
 ## 2. Fluxos já resolvidos / validados
 
+- **Analytics do dono + Radar resiliente** — mergeado via PR #474 (commit `e4d3521e`). O Analytics de pedidos não fica mais preso em carregamento: consulta recorrência sem varrer todo o histórico, usa fallback somente leitura do histórico real de `pedidos` quando o índice analítico estiver incompleto e aborta no cliente após 10s com erro recuperável. O Radar usa a mesma fonte resiliente, aparece na navegação de Gestão e permanece dentro do shell do painel. Nenhum fallback escreve em pedidos, fidelidade, Pix ou WhatsApp.
+
 - **Radar de Vendas 2.1** — Radar 2.0 mergeado via PR #471 e potencial financeiro mergeado via PR #473. O admin vê oportunidades reais de recompra, metas de ticket e potencial adicional calculado; plano Pro libera o módulo e uma indicação só gera desbloqueio permanente quando outra pizzaria vira cliente pagante confirmado. O valor exibido é potencial estimado, não receita garantida. Nenhum cupom ou WhatsApp é disparado automaticamente.
 
 - **Ritmo mensal de compra por cliente** — mergeado na main via PR #470 (commit `0936fa6c`). A Sala Dev usa pedidos oficiais para identificar começo/meio/fim do mês, janela provável, dia/horário forte e confiança. Menos de 3 pedidos = dados insuficientes. Não envia cupom nem WhatsApp automaticamente.
