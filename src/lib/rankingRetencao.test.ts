@@ -9,6 +9,7 @@ import {
   montarDisputaRelativa,
   necessarioParaUltrapassar,
   textoConquistaRanking,
+  textoConviteAmigoRanking,
   textoConviteRanking,
 } from "./rankingRetencao";
 
@@ -222,11 +223,18 @@ describe("detectarConquistaRanking / textoConquistaRanking", () => {
     expect(textoConquistaRanking(null, 12)).toBe("Estou em #12 no Ranking do Chefe ⭐");
   });
 
-  test("convite é amigável e não promete pontos ou prêmio", () => {
+  test("convite sem prêmio configurado não inventa pizza grátis", () => {
     const texto = textoConviteRanking({ tipo: "top10" }, 5);
     expect(texto).toContain("Entrei no Top 10");
-    expect(texto).toContain("queria te convidar para conhecer também.");
-    expect(texto).not.toMatch(/\+?\d+ Estrelas|desconto|prêmio/i);
+    expect(texto).toContain("Peça pelo meu link e entre no Ranking também.");
+    expect(texto).toContain("disputa");
+    expect(texto).not.toMatch(/pizza grátis|\+?\d+ Estrelas|desconto/i);
+  });
+
+  test("convite divulga exatamente o prêmio real configurado", () => {
+    const texto = textoConviteAmigoRanking("1 Pizza Família grátis");
+    expect(texto).toContain("Prêmio desta temporada: 1 Pizza Família grátis.");
+    expect(texto).not.toContain("R$");
   });
 });
 
