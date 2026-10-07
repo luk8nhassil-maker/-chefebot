@@ -10,6 +10,7 @@ import {
   TENANT_PADRAO_ANALYTICS,
 } from "./historicoAnalitico";
 import { timestampCriacaoPedido, chaveExpedienteOperacional } from "./expedienteOperacional";
+import type { PedidoSnapshotOficial } from "./pedidoSnapshot";
 
 type PedidoFallback = {
   id?: string;
@@ -24,10 +25,7 @@ type PedidoFallback = {
   horario?: string;
   data?: string;
   pix?: { criadoEm?: string; confirmadoEm?: string } | null;
-  snapshotOficial?: {
-    subtotalCents?: number;
-    descontoFidelidadeCents?: number;
-  };
+  snapshotOficial?: PedidoSnapshotOficial;
 };
 
 export type FonteEventosAnalytics = {
