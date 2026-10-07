@@ -61,6 +61,8 @@ describe("GET /api/admin/ranking/gamificacao", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.missaoSemanalAtiva).toBe(false);
+    expect(body.missaoFotoPerfilAtiva).toBe(false);
+    expect(body.missaoFotoPerfilBonus).toBe(0);
     expect(body.carryoverTabela).toEqual([]);
   });
 
@@ -85,6 +87,22 @@ describe("POST /api/admin/ranking/gamificacao", () => {
     expect(body.config.missaoSemanalAtiva).toBe(true);
     expect(body.config.missaoSemanalMultiplicador).toBe(2);
     expect(body.config.missaoSemanalCooldownDias).toBe(5);
+  });
+
+  test("configura missão de foto com bônus do Ranking", async () => {
+    const res = await POST(req(adminToken, {
+      missaoFotoPerfilAtiva: true,
+      missaoFotoPerfilBonus: 8,
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.config.missaoFotoPerfilAtiva).toBe(true);
+    expect(body.config.missaoFotoPerfilBonus).toBe(8);
+  });
+
+  test("missaoFotoPerfilBonus fora do limite é rejeitado", async () => {
+    expect((await POST(req(adminToken, { missaoFotoPerfilBonus: -1 }))).status).toBe(400);
+    expect((await POST(req(adminToken, { missaoFotoPerfilBonus: 100001 }))).status).toBe(400);
   });
 
   test("campos ausentes preservam o valor já salvo", async () => {
