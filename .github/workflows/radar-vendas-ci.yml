@@ -1,0 +1,91 @@
+name: radar-vendas-ci
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/purchaseTiming*.ts"
+      - "src/lib/radarVendas*.ts"
+      - "src/app/api/admin/radar-vendas/**"
+      - "src/app/api/chefebot/indicacao/**"
+      - "src/app/api/dev/radar-vendas/**"
+      - "src/app/admin/radar-vendas/**"
+      - "src/app/chefebot/indicacao/**"
+      - "src/app/dev/radar-vendas/**"
+      - "src/app/admin/page.tsx"
+      - "src/app/dev/page.tsx"
+      - ".github/workflows/radar-vendas-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: radar-vendas-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      VERCEL_ENV: preview
+      UPSTASH_DISABLE_TELEMETRY: "1"
+      KV_REST_API_URL: "http://127.0.0.1:9"
+      KV_REST_API_TOKEN: "radar-ci-token-nao-real"
+      AUTH_SECRET: "radar-ci-auth-secret-nao-real-com-tamanho-suficiente"
+      KELLYNE_PASSWORD: "radar-ci-senha-nao-real"
+    steps:
+      - name: Checkout do commit exato
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Configurar Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados do Radar
+        run: >-
+          npm test --
+          src/lib/purchaseTiming.test.ts
+          src/lib/radarVendas.test.ts
+          src/lib/radarVendasEntitlement.server.test.ts
+          src/app/api/admin/radar-vendas/route.test.ts
+          src/app/api/chefebot/indicacao/route.test.ts
+
+      - name: Lint dos arquivos do Radar
+        run: >-
+          npm run lint --
+          src/lib/radarVendas.ts
+          src/lib/radarVendas.test.ts
+          src/lib/radarVendasEntitlement.server.ts
+          src/lib/radarVendasEntitlement.server.test.ts
+          src/app/api/admin/radar-vendas/route.ts
+          src/app/api/admin/radar-vendas/route.test.ts
+          src/app/api/admin/radar-vendas/indicacao/route.ts
+          src/app/api/chefebot/indicacao/route.ts
+          src/app/api/chefebot/indicacao/route.test.ts
+          src/app/api/dev/radar-vendas/indicacoes/route.ts
+          src/app/api/dev/radar-vendas/indicacoes/confirmar/route.ts
+          src/app/admin/radar-vendas/page.tsx
+          src/app/chefebot/indicacao/page.tsx
+          src/app/dev/radar-vendas/page.tsx
+          src/app/admin/page.tsx
+          src/app/dev/page.tsx
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Suíte completa
+        env:
+          VERCEL_ENV: production
+        run: npm test
+
+      - name: Build
+        run: npm run build
