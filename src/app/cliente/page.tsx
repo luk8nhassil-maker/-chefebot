@@ -793,6 +793,52 @@ function RankingConsentModal({ privacidade, carregando, salvando, erro, onAceita
         <style>{`.cf-ranking-consent-privacy{min-height:0!important;margin-top:12px!important;padding:6px 0!important;border:0!important;background:transparent!important;box-shadow:none!important}.cf-ranking-consent-privacy-icon{font-size:14px}.cf-ranking-consent-privacy-copy strong{font-size:11.5px}.cf-ranking-consent-privacy-copy>span{font-size:10.5px}`}</style>
         <style>{`.cf-ranking-consent-visual{margin-bottom:24px!important}.cf-ranking-consent-info-card{margin-bottom:20px!important}.cf-ranking-consent-privacy{margin-top:16px!important;margin-bottom:0!important;padding-top:12px!important;border-top:1px solid rgba(176,196,226,.58)!important;border-radius:0!important}.cf-ranking-consent-primary{margin-top:0!important}`}</style>
         <style>{`.cf-ranking-consent-info-card{margin-bottom:24px!important}.cf-ranking-consent-privacy{position:relative;width:100%!important;margin-left:0!important;margin-right:0!important;justify-content:center!important;align-items:center!important;gap:8px!important;flex-wrap:nowrap;border-top:0!important;padding-top:16px!important;white-space:nowrap;text-align:center}.cf-ranking-consent-privacy::before{content:"";position:absolute;top:0;left:11%;right:11%;height:1px;background:rgba(176,196,226,.58)}.cf-ranking-consent-privacy-icon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 23px;width:23px;height:23px;border:1px solid rgba(79,134,237,.24);border-radius:50%;background:#e9f1ff;color:#3972d7;font-size:13px;font-weight:900;line-height:1;box-shadow:0 2px 5px rgba(67,107,169,.12)}.cf-ranking-consent-privacy-copy{display:inline-flex;align-items:center;white-space:nowrap;line-height:1.2}.cf-ranking-consent-privacy-copy strong{font-size:11.5px;color:#304d77}.cf-ranking-consent-privacy-copy>span{font-size:10.5px;color:#718199}`}</style>
+        <style>{`
+          .cf-ranking-consent-modal{
+            max-height:calc(100dvh - 20px)!important;
+            overflow-y:auto!important;
+            overscroll-behavior:contain;
+            box-sizing:border-box;
+          }
+          .cf-ranking-consent-info-card,
+          .cf-ranking-consent-privacy,
+          .cf-ranking-consent-privacy-copy{min-width:0!important;max-width:100%!important}
+          .cf-ranking-consent-privacy{
+            display:grid!important;
+            grid-template-columns:23px minmax(0,1fr)!important;
+            align-items:start!important;
+            justify-content:stretch!important;
+            gap:9px!important;
+            white-space:normal!important;
+            text-align:left!important;
+          }
+          .cf-ranking-consent-privacy-copy{
+            display:block!important;
+            white-space:normal!important;
+            line-height:1.35!important;
+            overflow-wrap:anywhere!important;
+            word-break:normal!important;
+          }
+          .cf-ranking-consent-privacy-copy strong,
+          .cf-ranking-consent-privacy-copy>span{
+            display:block!important;
+            white-space:normal!important;
+            max-width:100%!important;
+          }
+          .cf-ranking-consent-privacy-copy>span{margin-top:3px!important}
+          @media(max-width:420px){
+            .cf-ranking-consent-backdrop{align-items:flex-start!important;overflow-y:auto!important}
+            .cf-ranking-consent-modal{padding:22px 18px 20px!important}
+            .cf-ranking-consent-visual{min-height:220px!important;margin-bottom:18px!important}
+            .cf-ranking-consent-icon-row{height:145px!important}
+            .cf-ranking-consent-icon-row .cf-ranking-consent-emoji{width:112px!important;height:112px!important}
+            .cf-ranking-consent-icon-row .cf-ranking-consent-gift{width:108px!important;height:108px!important}
+            .cf-ranking-consent-icon-row .cf-ranking-consent-burger{width:104px!important;height:104px!important}
+            .cf-ranking-consent-icon-row .cf-ranking-consent-soda{width:98px!important;height:98px!important}
+            .cf-ranking-consent-modal h2{font-size:24px!important}
+            .cf-ranking-consent-lead{font-size:13px!important}
+          }
+        `}</style>
       </section>
     </div>
   )
@@ -1132,7 +1178,7 @@ export default function ClientePage() {
       }
       if (!token) { setCompartilhandoIndicacao(false); return }
       const url = `${window.location.origin}/pedido?ref=${token}`
-      const textoConvite = textoConviteAmigoRanking()
+      const textoConvite = textoConviteAmigoRanking(painel?.temporada?.premio?.descricao)
       if (navigator.share) {
         await navigator.share({ title: 'Convite do Ranking do Chefe', text: textoConvite, url })
       } else {
@@ -1182,7 +1228,7 @@ export default function ClientePage() {
           if (token) { setIndicacaoToken(token); telemetriaRanking('link_indicacao_gerado') }
         }
       }
-      const texto = textoConviteRanking(conquista, posicao)
+      const texto = textoConviteRanking(conquista, posicao, painel?.temporada?.premio?.descricao)
       const url = token ? `${window.location.origin}/pedido?ref=${token}` : undefined
       if (navigator.share) {
         await navigator.share({ title: 'Ranking do Chefe', text: texto, ...(url ? { url } : {}) })

@@ -90,23 +90,92 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     expect(onAdicionarFoto).toHaveBeenCalledTimes(1);
   });
 
-  test("temporada ativa usa codinome e nunca oferece revelar nome manualmente", () => {
+  test("nome autorizado vence codinome; quem não autorizou continua fantasia", () => {
     montar({
       ranking: {
         ...RANKING_BASE,
         participantes: {
           ...RANKING_BASE.participantes,
           lista: [
-            { posicao: 1, score: 140, eVoce: false, participaCampanha: true, codinomeSecreto: "Chef Fantasma 42" },
-            { posicao: 5, score: 100, eVoce: true, participaCampanha: true, codinomeSecreto: "Mestre Brasa 17" },
+            { posicao: 1, score: 140, eVoce: false, participaCampanha: true, nomePublico: "Ana Maria", codinomeSecreto: "Chef Fantasma 42" },
+            { posicao: 2, score: 120, eVoce: false, participaCampanha: true, codinomeSecreto: "Mestre Brasa 17" },
+            { posicao: 5, score: 100, eVoce: true, participaCampanha: true, codinomeSecreto: "Chef Secreto 91" },
           ],
         },
       },
     });
     fireEvent.click(screen.getByRole("tab", { name: "Participando" }));
-    expect(screen.getByText("Chef Fantasma 42")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Mostrar meu nome" })).toBeNull();
-    expect(screen.getByText(/cada rival usa um codinome secreto/i)).toBeTruthy();
+    expect(screen.getByText("Ana Maria")).toBeTruthy();
+    expect(screen.getByText("Mestre Brasa 17")).toBeTruthy();
+    expect(screen.queryByText("Chef Fantasma 42")).toBeNull();
+  });
+
+  test("cliente pode liberar nome completo explicitamente ou voltar ao codinome", () => {
+    const onAlterarPrivacidade = vi.fn();
+    montar({
+      privacidade: {
+        participaCampanha: true,
+        regraJogo: { versao: "ranking-jogo-secreto-v1", aceitaRevelacao30d: true, diasRevelacao: 30 },
+        finalidades: [{
+          finalidade: "ranking_nome_completo",
+          texto: "Mostrar meu nome completo no Ranking durante a temporada.",
+          textoVersao: "ranking-nome-completo-v1",
+          disponivel: true,
+          motivoIndisponivel: null,
+          estado: "revogado",
+          atualizadoEm: null,
+        }],
+      },
+      onAlterarPrivacidade,
+    });
+    fireEvent.click(screen.getByText("Privacidade e participação"));
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar nome completo" }));
+    expect(onAlterarPrivacidade).toHaveBeenCalledWith(
+      "ranking_nome_completo",
+      "concedido",
+      "ranking-nome-completo-v1",
+    );
+  });
+
+  test("Embaixador do dia vira a ação contextual e só paga por pessoa nova", () => {
+    const onIndicarAmigo = vi.fn();
+    montar({
+      indicacao: { ativa: true, estrelasPrimeiraCompra: 6, compartilhamentoLiberado: true },
+      gamificacao: {
+        statusSocial: null,
+        bonusCompeticao: 0,
+        missaoSemanal: null,
+        missaoIndicacao: null,
+        missaoFotoPerfil: null,
+        missaoDivulgacaoDiaria: { concluidaHoje: false, bonus: 3 },
+        nivelChef: null,
+        movimentoRecente: null,
+        coroaAmeacada: false,
+      },
+      onIndicarAmigo,
+    }, true);
+    const dialog = screen.getByRole("dialog", { name: "Traga 1 pessoa nova · +3" });
+    expect(within(dialog).getByText(/Só compartilhar não gera pontos/)).toBeTruthy();
+    expect(within(dialog).getByText(/primeira compra elegível/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Compartilhar para Story / Status" }));
+    expect(onIndicarAmigo).toHaveBeenCalledTimes(1);
+  });
+
+  test("Embaixador do dia concluído não interrompe o cliente de novo", () => {
+    montar({
+      gamificacao: {
+        statusSocial: null,
+        bonusCompeticao: 3,
+        missaoSemanal: null,
+        missaoIndicacao: null,
+        missaoFotoPerfil: null,
+        missaoDivulgacaoDiaria: { concluidaHoje: true, bonus: 3 },
+        nivelChef: null,
+        movimentoRecente: null,
+        coroaAmeacada: false,
+      },
+    }, true);
+    expect(screen.queryByRole("dialog", { name: /Embaixador|Missão de hoje/ })).toBeNull();
   });
 
   test("resultado anterior revela perfil por 30 dias e mostra prazo", () => {
@@ -190,7 +259,7 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     const onRevogarTodas = vi.fn();
     montar({ privacidade: { participaCampanha: true, finalidades: [] }, onRevogarTodas });
     fireEvent.click(screen.getByText("Privacidade e participação"));
-    expect(screen.getByText(/Durante a temporada você aparece por codinome/)).toBeTruthy();
+    expect(screen.getByText(/Quem não autoriza nome continua com codinome/)).toBeTruthy();
     fireEvent.click(screen.getByText("Sair do Ranking e remover autorizações"));
     expect(onRevogarTodas).toHaveBeenCalledTimes(1);
   });

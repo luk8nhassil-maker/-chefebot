@@ -59,14 +59,18 @@ vi.mock("@/lib/rankingClientes", async () => {
 
 vi.mock("@/lib/consentimentoRanking", () => ({
   obterParticipacaoRanking: vi.fn(async () => participaRanking),
-  obterParticipacaoRankingParaClientes: vi.fn(async (ids: string[]) =>
+}));
+
+vi.mock("@/lib/rankingPrivacidade", () => ({
+  projetarIdentidadesPublicasRanking: vi.fn(async (ids: string[]) =>
     new Map(ids.map((id) => [
       id,
-      identidadesPublicas.has(id)
-        ? identidadesPublicas.get(id)?.participaCampanha === true
-        : id === "hashed_11900000001"
-          ? participaRanking
-          : false,
+      identidadesPublicas.get(id) ?? {
+        participaCampanha: id === "hashed_11900000001" ? participaRanking : false,
+        nomePublico: null,
+        telefoneMascarado: null,
+        fotoPerfilUrl: null,
+      },
     ])),
   ),
 }));
@@ -109,6 +113,7 @@ const {
   reconciliarTransicaoMock,
   sincronizarMissaoSemanalMock,
   obterEstadoMissaoIndicacaoMock,
+  obterEstadoMissaoDivulgacaoMock,
   aplicarImpulsoPodioMock,
   sincronizarNivelChefMock,
   obterStatusSocialVigenteMock,
@@ -131,6 +136,7 @@ const {
     concluidaEm: null as string | null,
     pedidoId: null as string | null,
   })),
+  obterEstadoMissaoDivulgacaoMock: vi.fn(async () => ({ concluidaHoje: false })),
   aplicarImpulsoPodioMock: vi.fn(async () => undefined),
   sincronizarNivelChefMock: vi.fn(async () => undefined),
   obterStatusSocialVigenteMock: vi.fn(async (_tenantId: string, _clienteId: string) => null as { status: string | null; temporadaOrigemId: string; atribuidoEm: string } | null),
@@ -148,6 +154,7 @@ vi.mock("@/lib/rankingTransicaoTemporada", () => ({
 }));
 vi.mock("@/lib/rankingMissaoSemanalEstado", () => ({ sincronizarMissaoSemanalCliente: sincronizarMissaoSemanalMock }));
 vi.mock("@/lib/rankingMissaoIndicacaoEstado", () => ({ obterEstadoMissaoIndicacao: obterEstadoMissaoIndicacaoMock }));
+vi.mock("@/lib/rankingMissaoDivulgacaoDiaria", () => ({ obterEstadoMissaoDivulgacaoDiaria: obterEstadoMissaoDivulgacaoMock }));
 vi.mock("@/lib/rankingImpulsoPodioEstado", () => ({ aplicarImpulsoPodioSeElegivel: aplicarImpulsoPodioMock }));
 vi.mock("@/lib/rankingNivelChefEstado", () => ({ sincronizarNivelChefCliente: sincronizarNivelChefMock }));
 vi.mock("@/lib/rankingMovimentoRecenteEstado", () => ({ sincronizarMovimentoRecente: sincronizarMovimentoRecenteMock }));
@@ -178,6 +185,8 @@ beforeEach(() => {
     missaoIndicacaoAtiva: false,
     missaoFotoPerfilAtiva: false,
     missaoFotoPerfilBonus: 0,
+    missaoDivulgacaoDiariaAtiva: false,
+    missaoDivulgacaoDiariaBonus: 0,
     impulsoPodioAtivo: false,
     carryoverAtivo: false,
     nivelChefAtivo: false,
@@ -190,6 +199,7 @@ beforeEach(() => {
   sincronizarStatusSocialMock.mockReset().mockResolvedValue(null);
   sincronizarMissaoSemanalMock.mockReset().mockResolvedValue({ status: "inativa", desbloqueadaEm: null, consumidaEm: null, consumidaPedidoId: null });
   obterEstadoMissaoIndicacaoMock.mockReset().mockResolvedValue({ concluida: false, concluidaEm: null, pedidoId: null });
+  obterEstadoMissaoDivulgacaoMock.mockReset().mockResolvedValue({ concluidaHoje: false });
   aplicarImpulsoPodioMock.mockReset().mockResolvedValue(undefined);
   sincronizarNivelChefMock.mockReset().mockResolvedValue(undefined);
   obterStatusSocialVigenteMock.mockReset().mockResolvedValue(null);
@@ -226,6 +236,19 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     // Fechar a visualização não pode parar a manutenção global da temporada.
     expect(reconciliarTransicaoMock).toHaveBeenCalled();
     expect(aplicarCarryoverMock).toHaveBeenCalled();
+  });
+
+  test("expõe Embaixador do dia somente quando configurado e em temporada ativa", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    configGamificacaoMock.missaoDivulgacaoDiariaAtiva = true;
+    configGamificacaoMock.missaoDivulgacaoDiariaBonus = 3;
+    obterEstadoMissaoDivulgacaoMock.mockResolvedValue({ concluidaHoje: true });
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.gamificacao.missaoDivulgacaoDiaria).toEqual({ concluidaHoje: true, bonus: 3 });
+    expect(obterEstadoMissaoDivulgacaoMock).toHaveBeenCalledWith({
+      temporadaId: "temp_1",
+      indicadorId: "hashed_11900000001",
+    });
   });
 
   test("expõe missão de foto apenas quando ativa, com temporada e participação", async () => {
@@ -303,7 +326,7 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     expect((voce as { posicao: number }).posicao).toBe(3);
   });
 
-  test("temporada ativa expõe só codinome secreto e nunca PII do rival", async () => {
+  test("nome autorizado aparece, mas telefone continua omitido", async () => {
     temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
     const clienteId = "hashed_11900000001";
     posicaoPorCliente.set(clienteId, { posicao: 2, score: 150 });
@@ -314,7 +337,7 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     rankingCompleto = topRanking;
     identidadesPublicas.set("outro_1", {
       participaCampanha: true,
-      nomePublico: "Ana",
+      nomePublico: "Ana Maria",
       telefoneMascarado: "(11) 9••••-1234",
       fotoPerfilUrl: null,
     });
@@ -325,12 +348,35 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       score: 200,
       eVoce: false,
       participaCampanha: true,
-      codinomeSecreto: expect.any(String),
+      nomePublico: "Ana Maria",
     });
     const serializado = JSON.stringify(body.ranking);
-    expect(serializado).not.toContain("Ana");
+    expect(serializado).toContain("Ana Maria");
     expect(serializado).not.toContain("1234");
     expect(serializado).not.toContain("outro_1");
+  });
+
+  test("sem autorização de nome o rival recebe codinome estável", async () => {
+    temporadaAtiva = { temporadaId: "temp_1", nome: null, fimEm: null, estado: "ativa" };
+    const clienteId = "hashed_11900000001";
+    posicaoPorCliente.set(clienteId, { posicao: 2, score: 150 });
+    topRanking = [
+      { clienteId: "outro_1", score: 200, posicao: 1 },
+      { clienteId, score: 150, posicao: 2 },
+    ];
+    rankingCompleto = topRanking;
+    identidadesPublicas.set("outro_1", {
+      participaCampanha: true,
+      nomePublico: null,
+      telefoneMascarado: null,
+      fotoPerfilUrl: null,
+    });
+    const body = await (await GET(req("token-cli-a"))).json();
+    expect(body.ranking.lista[0]).toMatchObject({
+      participaCampanha: true,
+      codinomeSecreto: expect.any(String),
+    });
+    expect(body.ranking.lista[0]).not.toHaveProperty("nomePublico");
   });
 
   test("posição entre participantes é recalculada, nunca herda a posição geral", async () => {
@@ -360,10 +406,10 @@ describe("GET /api/cliente/fidelidade/painel", () => {
     expect(body.ranking.participantes.posicao).toBe(1);
     expect(body.ranking.participantes.total).toBe(2);
     expect(body.ranking.participantes.lista).toEqual([
-      expect.objectContaining({ posicao: 1, score: 100, eVoce: true, participaCampanha: true, codinomeSecreto: expect.any(String) }),
-      expect.objectContaining({ posicao: 2, score: 50, eVoce: false, participaCampanha: true, codinomeSecreto: expect.any(String) }),
+      expect.objectContaining({ posicao: 1, score: 100, eVoce: true, participaCampanha: true, nomePublico: "Você" }),
+      expect.objectContaining({ posicao: 2, score: 50, eVoce: false, participaCampanha: true, nomePublico: "Bia" }),
     ]);
-    expect(JSON.stringify(body.ranking.participantes.lista)).not.toContain("Bia");
+    expect(JSON.stringify(body.ranking.participantes.lista)).not.toContain("9••••");
     // Ninguém que não autorizou aparece na lista de participantes.
     expect(JSON.stringify(body.ranking.participantes)).not.toContain("nao_participa");
   });
@@ -524,14 +570,11 @@ describe("GET /api/cliente/fidelidade/painel", () => {
       scoreAlvo: 30,
     });
     expect(body.ranking.participantes.disputa).toEqual({
-      acima: { posicao: 1, score: 30, eVoce: false, nomePublico: expect.any(String), telefoneMascarado: null },
-      voce: { posicao: 2, score: 20, eVoce: true, nomePublico: expect.any(String), telefoneMascarado: null },
-      abaixo: { posicao: 3, score: 10, eVoce: false, nomePublico: expect.any(String), telefoneMascarado: null },
+      acima: { posicao: 1, score: 30, eVoce: false, nomePublico: "Ana", telefoneMascarado: null },
+      voce: { posicao: 2, score: 20, eVoce: true, nomePublico: "Você", telefoneMascarado: null },
+      abaixo: { posicao: 3, score: 10, eVoce: false, nomePublico: "Carlos", telefoneMascarado: null },
       sozinho: false,
     });
-    const disputaSerializada = JSON.stringify(body.ranking.participantes.disputa);
-    expect(disputaSerializada).not.toContain("Ana");
-    expect(disputaSerializada).not.toContain("Carlos");
   });
 
   test("único participante: alvo sozinho e disputa sem vizinhos", async () => {
@@ -670,6 +713,7 @@ describe("GET /api/cliente/fidelidade/painel", () => {
         missaoSemanal: null,
         missaoIndicacao: null,
         missaoFotoPerfil: null,
+        missaoDivulgacaoDiaria: null,
         movimentoRecente: null,
         coroaAmeacada: false,
         nivelChef: null,

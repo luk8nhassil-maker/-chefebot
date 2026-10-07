@@ -12,7 +12,8 @@ import { ESTRELAS_INDICACAO_PRIMEIRA_COMPRA } from "@/lib/estrelasIndicacao";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
 import { posicaoClienteRanking, obterTopRanking, obterRankingCompleto, reindexarPorFiltro } from "@/lib/rankingClientes";
 import { codinomeSecretoRanking } from "@/lib/rankingJogoSecreto";
-import { obterParticipacaoRanking, obterParticipacaoRankingParaClientes } from "@/lib/consentimentoRanking";
+import { projetarIdentidadesPublicasRanking } from "@/lib/rankingPrivacidade";
+import { obterParticipacaoRanking } from "@/lib/consentimentoRanking";
 import {
   calcularVariacaoPosicao,
   garantirSnapshotDiario,
@@ -49,6 +50,7 @@ import {
 } from "@/lib/rankingTransicaoTemporada";
 import { sincronizarMissaoSemanalCliente } from "@/lib/rankingMissaoSemanalEstado";
 import { obterEstadoMissaoIndicacao } from "@/lib/rankingMissaoIndicacaoEstado";
+import { obterEstadoMissaoDivulgacaoDiaria } from "@/lib/rankingMissaoDivulgacaoDiaria";
 import { aplicarImpulsoPodioSeElegivel } from "@/lib/rankingImpulsoPodioEstado";
 import { sincronizarNivelChefCliente } from "@/lib/rankingNivelChefEstado";
 import { sincronizarMovimentoRecente, type MovimentoRecente } from "@/lib/rankingMovimentoRecenteEstado";
@@ -164,30 +166,34 @@ export async function GET(req: NextRequest) {
       const listaBase = top.some((e) => e.clienteId === clienteId)
         ? top
         : [...top, { clienteId, score: pos.score, posicao: pos.posicao }];
-      // Na temporada secreta não precisamos carregar perfil, nome ou telefone.
-      // Uma leitura em lote de participação basta para montar toda a disputa.
+      // Identidade híbrida do jogo: quem autorizou nome aparece pelo nome;
+      // quem não autorizou continua com codinome estável. Telefone nunca é
+      // exposto nesta rota.
       const idsRelevantes = Array.from(new Set([
         ...listaBase.map((e) => e.clienteId),
         ...completo.map((e) => e.clienteId),
         clienteId,
       ]));
-      const participacoes = await obterParticipacaoRankingParaClientes(idsRelevantes);
+      const identidades = await projetarIdentidadesPublicasRanking(idsRelevantes);
       const lista = listaBase.map((e) => {
-        const participaCampanha = participacoes.get(e.clienteId) === true;
+        const identidade = identidades.get(e.clienteId);
+        const participaCampanha = identidade?.participaCampanha === true;
         return {
           posicao: e.posicao,
           score: e.score,
           eVoce: e.clienteId === clienteId,
           participaCampanha,
-          ...(participaCampanha
-            ? { codinomeSecreto: codinomeSecretoRanking(e.clienteId, temporada.temporadaId) }
-            : {}),
+          ...(participaCampanha && identidade?.nomePublico
+            ? { nomePublico: identidade.nomePublico }
+            : participaCampanha
+              ? { codinomeSecreto: codinomeSecretoRanking(e.clienteId, temporada.temporadaId) }
+              : {}),
         };
       });
 
       const reindexados = reindexarPorFiltro(
         completo,
-        (id) => participacoes.get(id) === true,
+        (id) => identidades.get(id)?.participaCampanha === true,
       );
       const LIMITE_PARTICIPANTES = 50;
       const topoParticipantes = reindexados.slice(0, LIMITE_PARTICIPANTES);
@@ -218,7 +224,9 @@ export async function GET(req: NextRequest) {
           score: e.score,
           eVoce: e.clienteId === clienteId,
           participaCampanha: true as const,
-          codinomeSecreto: codinomeSecretoRanking(e.clienteId, temporada.temporadaId),
+          ...(identidades.get(e.clienteId)?.nomePublico
+            ? { nomePublico: identidades.get(e.clienteId)!.nomePublico! }
+            : { codinomeSecreto: codinomeSecretoRanking(e.clienteId, temporada.temporadaId) }),
           ...(status ? { statusSocial: status } : {}),
         };
       });
@@ -292,25 +300,28 @@ export async function GET(req: NextRequest) {
             entradaAbaixo: entradaAbaixo ? { posicao: entradaAbaixo.posicao, score: entradaAbaixo.score } : null,
           })
         : null;
-      const identidadesSecretas = new Map(
+      const identidadesDaDisputa = new Map(
         idsRelevantes.map((id) => {
-          const participaCampanha = participacoes.get(id) === true;
+          const identidade = identidades.get(id);
+          const participaCampanha = identidade?.participaCampanha === true;
           return [id, {
             participaCampanha,
-            nomePublico: participaCampanha ? codinomeSecretoRanking(id, temporada.temporadaId) : null,
+            nomePublico: participaCampanha
+              ? (identidade?.nomePublico ?? codinomeSecretoRanking(id, temporada.temporadaId))
+              : null,
             telefoneMascarado: null,
             fotoPerfilUrl: null,
           }] as const;
         }),
       );
       const disputa = proprioEntreParticipantes
-        ? montarDisputaRelativa({ ordenados: reindexados, clienteId, identidades: identidadesSecretas })
+        ? montarDisputaRelativa({ ordenados: reindexados, clienteId, identidades: identidadesDaDisputa })
         : null;
 
       ranking = {
         posicao: pos.posicao,
         score: pos.score,
-        participaCampanha: participacoes.get(clienteId) === true,
+        participaCampanha: identidades.get(clienteId)?.participaCampanha === true,
         entorno,
         lista,
         variacaoPosicao,
@@ -395,6 +406,7 @@ export async function GET(req: NextRequest) {
         bonus: configGamificacao.missaoFotoPerfilBonus,
       }
     : null;
+  let missaoDivulgacaoDiaria: { concluidaHoje: boolean; bonus: number } | null = null;
   let movimentoRecente: MovimentoRecente | null = null;
   let coroaAmeacada = false;
   if (temporada && participaRanking) {
@@ -419,6 +431,16 @@ export async function GET(req: NextRequest) {
     if (configGamificacao.missaoIndicacaoAtiva) {
       const estadoMissaoIndicacao = await obterEstadoMissaoIndicacao(tenantId, temporada.temporadaId, clienteId);
       missaoIndicacao = { concluida: estadoMissaoIndicacao.concluida };
+    }
+    if (configGamificacao.missaoDivulgacaoDiariaAtiva && configGamificacao.missaoDivulgacaoDiariaBonus > 0) {
+      const estadoDivulgacao = await obterEstadoMissaoDivulgacaoDiaria({
+        temporadaId: temporada.temporadaId,
+        indicadorId: clienteId,
+      });
+      missaoDivulgacaoDiaria = {
+        concluidaHoje: estadoDivulgacao.concluidaHoje,
+        bonus: configGamificacao.missaoDivulgacaoDiariaBonus,
+      };
     }
 
     // "Movimento recente" — conceito separado do snapshot diário
@@ -481,6 +503,7 @@ export async function GET(req: NextRequest) {
       missaoSemanal,
       missaoIndicacao,
       missaoFotoPerfil,
+      missaoDivulgacaoDiaria,
       movimentoRecente,
       coroaAmeacada,
       nivelChef,

@@ -5,6 +5,7 @@ import { redis } from "./redis";
 
 export const FINALIDADES_CONSENTIMENTO_RANKING = [
   "ranking_primeiro_nome",
+  "ranking_nome_completo",
   "ranking_telefone_mascarado",
   "ranking_foto_perfil",
 ] as const;
@@ -54,12 +55,12 @@ export class ErroConsentimentoRanking extends Error {
   }
 }
 
-const ENV_TEXTO: Record<Exclude<FinalidadeConsentimentoRanking, "ranking_foto_perfil">, string> = {
+const ENV_TEXTO: Record<Exclude<FinalidadeConsentimentoRanking, "ranking_foto_perfil" | "ranking_nome_completo">, string> = {
   ranking_primeiro_nome: "RANKING_CONSENT_FIRST_NAME_TEXT",
   ranking_telefone_mascarado: "RANKING_CONSENT_MASKED_PHONE_TEXT",
 };
 
-const ENV_VERSAO: Record<Exclude<FinalidadeConsentimentoRanking, "ranking_foto_perfil">, string> = {
+const ENV_VERSAO: Record<Exclude<FinalidadeConsentimentoRanking, "ranking_foto_perfil" | "ranking_nome_completo">, string> = {
   ranking_primeiro_nome: "RANKING_CONSENT_FIRST_NAME_TEXT_VERSION",
   ranking_telefone_mascarado: "RANKING_CONSENT_MASKED_PHONE_TEXT_VERSION",
 };
@@ -163,6 +164,25 @@ export function configuracaoFinalidadeRanking(finalidade: FinalidadeConsentiment
       textoVersao: null,
       disponivel: false,
       motivoIndisponivel: "fonte_oficial_indisponivel",
+    };
+  }
+
+  if (finalidade === "ranking_nome_completo") {
+    if (!segredoConsentimento()) {
+      return {
+        finalidade,
+        texto: "Mostrar meu nome completo no Ranking durante a temporada.",
+        textoVersao: "ranking-nome-completo-v1",
+        disponivel: false,
+        motivoIndisponivel: "infraestrutura_nao_configurada",
+      };
+    }
+    return {
+      finalidade,
+      texto: "Mostrar meu nome completo no Ranking durante a temporada.",
+      textoVersao: "ranking-nome-completo-v1",
+      disponivel: true,
+      motivoIndisponivel: null,
     };
   }
 
@@ -276,7 +296,7 @@ export async function obterParticipacaoRankingParaClientes(
     // Fallback apenas para chave ausente (cliente legado). Registro presente
     // mas corrompido nunca pode reativar alguém que havia saído.
     const ativo = participacaoValida(valor) ? valor.ativo
-      : valor === null ? !!(finalidades.get(id)?.has("ranking_primeiro_nome") || finalidades.get(id)?.has("ranking_telefone_mascarado"))
+      : valor === null ? !!(finalidades.get(id)?.has("ranking_primeiro_nome") || finalidades.get(id)?.has("ranking_nome_completo") || finalidades.get(id)?.has("ranking_telefone_mascarado"))
         : false;
     return [id, ativo];
   }));

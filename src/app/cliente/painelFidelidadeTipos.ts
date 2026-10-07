@@ -75,6 +75,7 @@ export type PainelGamificacao = {
   missaoSemanal: { status: 'inativa' | 'desbloqueada' | 'processando' | 'consumida' } | null
   missaoIndicacao: { concluida: boolean } | null
   missaoFotoPerfil?: { concluida: boolean; bonus: number } | null
+  missaoDivulgacaoDiaria?: { concluidaHoje: boolean; bonus: number } | null
   nivelChef: { nivel: number; nome: string | null; xpAtual: number; xpProximoNivel: number | null } | null
   // Comparação contra a ÚLTIMA VISITA real deste cliente ao painel — conceito
   // separado do histórico diário (`ranking.variacaoPosicao`). `null` na
@@ -87,7 +88,7 @@ export type PainelGamificacao = {
 
 export type VariacaoPosicaoRanking = { direcao: 'subiu' | 'desceu' | 'manteve'; casas: number }
 
-export type FinalidadePrivacidadeRanking = 'ranking_primeiro_nome' | 'ranking_telefone_mascarado' | 'ranking_foto_perfil'
+export type FinalidadePrivacidadeRanking = 'ranking_primeiro_nome' | 'ranking_nome_completo' | 'ranking_telefone_mascarado' | 'ranking_foto_perfil'
 
 export type PreferenciasPrivacidadeRanking = {
   participaCampanha: boolean

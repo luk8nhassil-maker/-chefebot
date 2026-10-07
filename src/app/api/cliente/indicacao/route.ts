@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
 import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
+import { creditarMissaoDivulgacaoDiaria } from "@/lib/rankingMissaoDivulgacaoDiaria";
 import {
   obterOuCriarTokenIndicacao,
   resolverTokenIndicacao,
@@ -51,5 +52,20 @@ export async function POST(req: NextRequest) {
   if (resultado === "self_referral") {
     return NextResponse.json({ error: "Indicacao propria nao permitida" }, { status: 400 });
   }
-  return NextResponse.json({ ok: true, status: resultado });
+
+  let missaoDivulgacao = null;
+  if (resultado === "registrado") {
+    try {
+      missaoDivulgacao = await creditarMissaoDivulgacaoDiaria({
+        indicadorId,
+        indicadoId,
+      });
+    } catch {
+      // A candidatura é a fonte principal e já foi salva. Falha no bônus
+      // nunca desfaz a indicação nem declara ponto não confirmado.
+      missaoDivulgacao = { status: "indisponivel", pontos: 0 };
+    }
+  }
+
+  return NextResponse.json({ ok: true, status: resultado, missaoDivulgacao });
 }

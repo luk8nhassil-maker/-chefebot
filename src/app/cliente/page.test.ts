@@ -430,7 +430,7 @@ describe("/cliente — Correções PR #427: textos comerciais, estados vazios, P
   });
 
   test("texto compartilhado via share API não promete benefícios", () => {
-    expect(fonte).toContain("textoConviteAmigoRanking()");
+    expect(fonte).toContain("textoConviteAmigoRanking(painel?.temporada?.premio?.descricao)");
     expect(fonte).not.toContain("ganhe desconto");
   });
 
