@@ -378,6 +378,12 @@ export async function GET(req: NextRequest) {
   let bonusCompeticao = 0;
   let missaoSemanal: { status: "inativa" | "desbloqueada" | "processando" | "consumida" } | null = null;
   let missaoIndicacao: { concluida: boolean } | null = null;
+  const missaoFotoPerfil = configGamificacao.missaoFotoPerfilAtiva && configGamificacao.missaoFotoPerfilBonus > 0 && temporada && participaRanking
+    ? {
+        concluida: Boolean(cliente.rankingFotoBonusConcedidoEm),
+        bonus: configGamificacao.missaoFotoPerfilBonus,
+      }
+    : null;
   let movimentoRecente: MovimentoRecente | null = null;
   let coroaAmeacada = false;
   if (temporada && participaRanking) {
@@ -463,6 +469,7 @@ export async function GET(req: NextRequest) {
       bonusCompeticao,
       missaoSemanal,
       missaoIndicacao,
+      missaoFotoPerfil,
       movimentoRecente,
       coroaAmeacada,
       nivelChef,
