@@ -174,27 +174,7 @@ export async function GET(req: NextRequest) {
         ...completo.map((e) => e.clienteId),
         clienteId,
       ]));
-      const [participacoes, identidadesPublicas] = await Promise.all([
-        obterParticipacaoRankingParaClientes(idsRelevantes),
-        projetarIdentidadesPublicasRanking(idsRelevantes),
-      ]);
-      const lista = listaBase.map((e) => {
-        const participaCampanha = participacoes.get(e.clienteId) === true;
-        return {
-          posicao: e.posicao,
-          score: e.score,
-          eVoce: e.clienteId === clienteId,
-          participaCampanha,
-          ...(participaCampanha
-            ? {
-                ...(identidadesPublicas.get(e.clienteId)?.nomePublico
-                  ? { nomePublico: identidadesPublicas.get(e.clienteId)!.nomePublico as string }
-                  : {}),
-                codinomeSecreto: codinomeSecretoRanking(e.clienteId, temporada.temporadaId),
-              }
-            : {}),
-        };
-      });
+      const participacoes = await obterParticipacaoRankingParaClientes(idsRelevantes);
 
       const reindexados = reindexarPorFiltro(
         completo,
@@ -207,6 +187,32 @@ export async function GET(req: NextRequest) {
         proprioEntreParticipantes && !topoParticipantes.some((e) => e.clienteId === clienteId)
           ? [...topoParticipantes, proprioEntreParticipantes]
           : topoParticipantes;
+      // Perfil/nome só é consultado para quem realmente pode aparecer na tela.
+      // A filtragem de participação ainda usa o ranking completo, mas isso não
+      // força leitura de perfil para centenas de clientes.
+      const idsIdentidadeVisivel = Array.from(new Set([
+        ...listaBase.map((e) => e.clienteId),
+        ...listaParticipantesBase.map((e) => e.clienteId),
+        clienteId,
+      ]));
+      const identidadesPublicas = await projetarIdentidadesPublicasRanking(idsIdentidadeVisivel);
+
+      const lista = listaBase.map((e) => {
+        const participaCampanha = participacoes.get(e.clienteId) === true;
+        const nomePublico = identidadesPublicas.get(e.clienteId)?.nomePublico ?? null;
+        return {
+          posicao: e.posicao,
+          score: e.score,
+          eVoce: e.clienteId === clienteId,
+          participaCampanha,
+          ...(participaCampanha
+            ? {
+                ...(nomePublico ? { nomePublico } : {}),
+                codinomeSecreto: codinomeSecretoRanking(e.clienteId, temporada.temporadaId),
+              }
+            : {}),
+        };
+      });
       // Selo social (Campeão/Prata/Bronze/Elite) de CADA membro do Top 10
       // atual, não só do cliente autenticado — correção de blocker da
       // auditoria do #446 ("UI só colocava selo em quem estava logado").
