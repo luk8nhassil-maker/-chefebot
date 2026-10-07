@@ -132,6 +132,34 @@ describe("FidelidadeRankingScreen — Gamificação V2", () => {
     expect(onCompartilharDivulgacao).toHaveBeenCalledTimes(1);
   });
 
+  test("nome completo só é exibido quando a finalidade explícita está concedida", () => {
+    const onAlterarPrivacidade = vi.fn();
+    montar({
+      privacidade: {
+        participaCampanha: true,
+        regraJogo: { versao: "ranking-jogo-secreto-v1", aceitaRevelacao30d: true, diasRevelacao: 30 },
+        finalidades: [{
+          finalidade: "ranking_nome_completo",
+          texto: "Mostrar meu nome completo no Ranking",
+          textoVersao: "ranking-nome-completo-v1",
+          disponivel: true,
+          motivoIndisponivel: null,
+          estado: "revogado",
+          atualizadoEm: null,
+        }],
+      },
+      onAlterarPrivacidade,
+    });
+    fireEvent.click(screen.getByText("Privacidade e participação"));
+    const checkbox = screen.getByLabelText(/Mostrar meu nome completo/);
+    fireEvent.click(checkbox);
+    expect(onAlterarPrivacidade).toHaveBeenCalledWith(
+      "ranking_nome_completo",
+      "concedido",
+      "ranking-nome-completo-v1",
+    );
+  });
+
   test("resultado anterior revela perfil por 30 dias e mostra prazo", () => {
     montar({
       resultadoAnterior: {
