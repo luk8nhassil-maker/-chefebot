@@ -51,7 +51,7 @@ const {
         key: string,
         min: number | string,
         max: number | string,
-        opts?: { byScore?: boolean; rev?: boolean; limit?: { offset: number; count: number } }
+        opts?: { byScore?: boolean; rev?: boolean; offset?: number; count?: number }
       ) => {
         const ss = sortedSets.get(key) ?? [];
         let result: Array<{ score: number; member: string }>;
@@ -68,8 +68,8 @@ const {
 
         if (opts?.rev) result = [...result].reverse();
 
-        if (opts?.limit) {
-          result = result.slice(opts.limit.offset, opts.limit.offset + opts.limit.count);
+        if (opts?.offset !== undefined && opts?.count !== undefined) {
+          result = result.slice(opts.offset, opts.offset + opts.count);
         }
 
         return result.map((e) => e.member);
@@ -181,7 +181,7 @@ describe("existeHistoricoAnaliticoAntesDe", () => {
       chaveIndiceGlobal(TENANT),
       0,
       AGORA - 1,
-      { byScore: true, limit: { offset: 0, count: 1 } },
+      { byScore: true, offset: 0, count: 1 },
     );
   });
 });

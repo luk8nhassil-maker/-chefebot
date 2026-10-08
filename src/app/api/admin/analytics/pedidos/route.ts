@@ -25,9 +25,7 @@ import {
   existeHistoricoAnaliticoAntesDe,
   TENANT_PADRAO_ANALYTICS,
 } from "@/lib/historicoAnalitico";
-import {
-  consultarEventosAnaliticosComFallback,
-} from "@/lib/analyticsPedidosReadModel.server";
+import { consultarEventosAnaliticosComFallback } from "@/lib/analyticsPedidosReadModel.server";
 import { consultarEstrelasCreditadasPorPedidos } from "@/lib/fidelidade";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
 
@@ -110,9 +108,9 @@ export async function GET(req: NextRequest) {
     let historicoAnteriorParcial = false;
     if (faltantesNoFallback.length > 0 && leitura.fonte.indiceDisponivel) {
       try {
-        // Quando a campanha começou antes do primeiro evento indexado, não
-        // faça uma consulta Redis por cliente. Uma única checagem global evita
-        // centenas de round-trips em lojas sem histórico anterior.
+        // Se a campanha começou antes do primeiro evento indexado, evite uma
+        // consulta Redis por cliente. Uma checagem global poupa centenas de
+        // round-trips em lojas sem histórico anterior.
         const existeHistoricoAnterior = await existeHistoricoAnaliticoAntesDe(tenantId, inicioMs);
         if (existeHistoricoAnterior) {
           historicoIndice = await consultarClientesComHistoricoAnterior(tenantId, faltantesNoFallback, inicioMs);
@@ -133,11 +131,8 @@ export async function GET(req: NextRequest) {
     const pedidosParaExtrato = eventos.flatMap((evento) => evento.statusAnalitico === "entregue" && evento.clienteId
       ? [{ clienteId: evento.clienteId, pedidoId: evento.pedidoId }]
       : []);
-    // O extrato de fidelidade guarda o histórico inteiro de cada cliente. Em
-    // janelas grandes, ler centenas de extratos completos deixa a tela lenta
-    // e aumenta o consumo do Redis. As métricas de pedidos continuam exatas;
-    // neste caso específico deixamos Estrelas como indisponível, em vez de
-    // bloquear o Analytics ou transformar uma falha de leitura em zero.
+    // O extrato guarda o histórico inteiro de cada cliente. Em janelas
+    // grandes, não deixe essa leitura pesada bloquear as métricas de pedidos.
     if (pedidosParaExtrato.length <= 400) {
       try {
         const estrelas = await consultarEstrelasCreditadasPorPedidos(pedidosParaExtrato);
