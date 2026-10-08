@@ -118,6 +118,31 @@ type AnalyticsData = {
 
 type PeriodoAnalytics = 7 | 30 | 60 | 90 | 'historico'
 
+type AutopilotFase = {
+  id: string
+  titulo: string
+  peso: number
+  estado: 'concluida' | 'em_andamento' | 'bloqueada'
+  detalhe: string
+  desbloqueios: string[]
+}
+
+type AutopilotPlano = {
+  estado: 'bloqueado' | 'observando' | 'pronto'
+  percentual: number
+  fases: AutopilotFase[]
+  podeExecutar: boolean
+  acao: string
+  motivo: string
+  limiteSeguroSemanalCents: number
+  gastoEstimadoCents: number
+}
+
+type AutopilotData = {
+  ok: boolean
+  plano: AutopilotPlano
+}
+
 function formatarData(iso: string | null): string {
   if (!iso) return '—'
   try {
@@ -144,6 +169,9 @@ export default function FidelidadePage() {
   const [erroStatus, setErroStatus] = useState<string | null>(null)
   const [erroAnalytics, setErroAnalytics] = useState<string | null>(null)
   const [analyticsCarregado, setAnalyticsCarregado] = useState(false)
+  const [autopilot, setAutopilot] = useState<AutopilotData | null>(null)
+  const [loadingAutopilot, setLoadingAutopilot] = useState(true)
+  const [erroAutopilot, setErroAutopilot] = useState<string | null>(null)
   const [acaoEmCurso, setAcaoEmCurso] = useState(false)
   const [mensagemAcao, setMensagemAcao] = useState<string | null>(null)
   // Prêmio da temporada é opcional e nunca tem valor padrão — em branco, a
@@ -189,6 +217,27 @@ export default function FidelidadePage() {
     }
   }
 
+  async function carregarAutopilot() {
+    setLoadingAutopilot(true)
+    setErroAutopilot(null)
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 10000)
+    try {
+      const r = await fetch('/api/admin/ranking/autopilot/simulacao', { cache: 'no-store', signal: controller.signal })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const data = await r.json() as AutopilotData
+      if (!data.ok || !data.plano) throw new Error('plano_indisponivel')
+      setAutopilot(data)
+    } catch (erro) {
+      setErroAutopilot(erro instanceof DOMException && erro.name === 'AbortError'
+        ? 'A leitura do robô demorou demais. Tente novamente.'
+        : 'Não foi possível ler o estado do robô.')
+    } finally {
+      window.clearTimeout(timeout)
+      setLoadingAutopilot(false)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
     fetch('/api/admin/fidelidade/status')
@@ -196,6 +245,11 @@ export default function FidelidadePage() {
       .then(data => { if (!cancelled) { setStatus(data); setLoadingStatus(false) } })
       .catch(() => { if (!cancelled) { setErroStatus('Erro ao carregar status de fidelidade.'); setLoadingStatus(false) } })
     return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void carregarAutopilot() }, 0)
+    return () => window.clearTimeout(timer)
   }, [])
 
   useEffect(() => {
@@ -355,6 +409,13 @@ export default function FidelidadePage() {
     marginBottom: 12,
   }
 
+  const faseAtualAutopilot = autopilot?.plano.fases.find((fase) => fase.estado !== 'concluida') ?? null
+  const statusAutopilot = autopilot?.plano.estado === 'pronto'
+    ? { label: 'Pronto para agir', cor: 'var(--success, #059669)', fundo: 'var(--success-soft, #d1fae5)' }
+    : autopilot?.plano.estado === 'observando'
+      ? { label: 'Observando com segurança', cor: 'var(--attention, #9a6700)', fundo: 'var(--attention-soft, #fff7d6)' }
+      : { label: 'Aguardando dados', cor: 'var(--foreground-muted)', fundo: 'var(--surface)' }
+
   return (
     <PanelShell pedidosCount={0} conversasCount={0} conversasUrgent={false} showGestaoNav>
       <div style={{ padding: '20px 20px 40px', maxWidth: 900 }}>
@@ -388,6 +449,50 @@ export default function FidelidadePage() {
               Tentar novamente
             </button>
           </div>
+        )}
+
+        {loadingAutopilot ? (
+          <div style={{ ...cardEstilo, marginBottom: 16, color: 'var(--foreground-muted)', fontSize: 13 }}>
+            Lendo o estado do robô…
+          </div>
+        ) : erroAutopilot ? (
+          <div style={{ ...cardEstilo, marginBottom: 16, color: 'var(--danger, #dc2626)', fontSize: 13 }}>
+            {erroAutopilot}
+            <button type="button" onClick={() => void carregarAutopilot()} style={{ marginLeft: 10, textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: 13 }}>
+              Tentar novamente
+            </button>
+          </div>
+        ) : autopilot && (
+          <section aria-labelledby="autopilot-prontidao" style={{ ...cardEstilo, marginBottom: 16 }}>
+            <style>{`\n              .cf-autopilot-track { height: 10px; overflow: hidden; border-radius: 999px; background: var(--border, #e5e7eb); }\n              .cf-autopilot-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #f2c000, #26a269); transition: width .7s ease; transform-origin: left center; }\n              .cf-autopilot-fases { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; margin-top: 14px; }\n              .cf-autopilot-fase { min-width: 0; color: var(--foreground-muted); font-size: 10px; line-height: 1.2; text-align: center; }\n              .cf-autopilot-fase-dot { display: grid; place-items: center; width: 22px; height: 22px; margin: 0 auto 5px; border: 2px solid var(--border, #d1d5db); border-radius: 50%; color: var(--foreground-muted); font-size: 10px; font-weight: 800; background: var(--surface); }\n              .cf-autopilot-fase.concluida { color: var(--success, #059669); }\n              .cf-autopilot-fase.concluida .cf-autopilot-fase-dot { border-color: var(--success, #059669); background: var(--success-soft, #d1fae5); color: var(--success, #059669); }\n              .cf-autopilot-fase.em_andamento { color: var(--attention, #9a6700); }\n              .cf-autopilot-fase.em_andamento .cf-autopilot-fase-dot { border-color: var(--attention, #d6a700); background: var(--attention-soft, #fff7d6); }\n              .cf-autopilot-fase.bloqueada .cf-autopilot-fase-dot { border-color: var(--danger, #dc2626); color: var(--danger, #dc2626); }\n              @media (max-width: 620px) { .cf-autopilot-fases { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 12px; } }\n              @media (prefers-reduced-motion: reduce) { .cf-autopilot-fill { transition: none; } }\n            `}</style>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14 }}>
+              <div>
+                <div id="autopilot-prontidao" style={tituloCard}>Prontidão do robô</div>
+                <div style={{ fontSize: 19, fontWeight: 800, marginBottom: 4 }}>O robô está {statusAutopilot.label.toLowerCase()}</div>
+                <div style={{ color: 'var(--foreground-secondary)', fontSize: 12, lineHeight: 1.45 }}>
+                  O percentual é calculado pelos dados reais. Você não precisa preencher as fases.
+                </div>
+              </div>
+              <div style={{ flex: 'none', padding: '5px 10px', borderRadius: 999, background: statusAutopilot.fundo, color: statusAutopilot.cor, fontWeight: 800, fontSize: 18 }}>
+                {autopilot.plano.percentual}%
+              </div>
+            </div>
+            <div className="cf-autopilot-track" role="progressbar" aria-label="Prontidão do robô" aria-valuemin={0} aria-valuemax={100} aria-valuenow={autopilot.plano.percentual} style={{ marginTop: 16 }}>
+              <div key={autopilot.plano.percentual} className="cf-autopilot-fill" style={{ width: `${Math.max(0, Math.min(100, autopilot.plano.percentual))}%` }} />
+            </div>
+            <div className="cf-autopilot-fases">
+              {autopilot.plano.fases.map((fase, index) => (
+                <div key={fase.id} className={`cf-autopilot-fase ${fase.estado}`} title={fase.detalhe}>
+                  <span className="cf-autopilot-fase-dot">{fase.estado === 'concluida' ? '✓' : index + 1}</span>
+                  <span>{fase.titulo}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 14, padding: '9px 11px', borderRadius: 8, background: 'var(--background-secondary, #f8fafc)', color: 'var(--foreground-secondary)', fontSize: 12, lineHeight: 1.45 }}>
+              <strong>{faseAtualAutopilot ? `Próximo ponto: ${faseAtualAutopilot.titulo}.` : 'Todas as fases estão prontas.'}</strong>{' '}
+              {faseAtualAutopilot?.detalhe ?? autopilot.plano.motivo}
+            </div>
+          </section>
         )}
 
         {loadingStatus ? (

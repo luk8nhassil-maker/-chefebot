@@ -54,3 +54,13 @@ describe("/admin/fidelidade — Prêmio da temporada e resultado de encerramento
     expect(fonte).toContain("Revelação de perfis até:");
   });
 });
+
+describe("/admin/fidelidade — prontidão do robô", () => {
+  test("mostra o progresso calculado pelo servidor e explica o próximo bloqueio", () => {
+    expect(fonte).toContain("/api/admin/ranking/autopilot/simulacao");
+    expect(fonte).toContain("Prontidão do robô");
+    expect(fonte).toContain("aria-label=\"Prontidão do robô\"");
+    expect(fonte).toContain("faseAtualAutopilot?.detalhe");
+    expect(fonte).toContain("prefers-reduced-motion");
+  });
+});

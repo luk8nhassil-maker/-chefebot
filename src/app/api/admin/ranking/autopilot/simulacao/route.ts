@@ -27,6 +27,8 @@ export async function GET(req: NextRequest) {
       modo: 'simulacao',
       executado: false,
       decisao: simulacao.decisao,
+      plano: simulacao.plano,
+      sinaisControle: simulacao.sinaisControle,
       entrada: simulacao.entrada,
       fonte: simulacao.fonte,
       janelas: {
