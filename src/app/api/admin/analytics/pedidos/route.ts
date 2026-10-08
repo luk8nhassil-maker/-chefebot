@@ -22,9 +22,12 @@ import {
   periodo90Dias,
   inicioDiaAnalytics,
   periodoDesdeInicioCampanha,
+  existeHistoricoAnaliticoAntesDe,
   TENANT_PADRAO_ANALYTICS,
 } from "@/lib/historicoAnalitico";
-import { consultarEventosAnaliticosComFallback } from "@/lib/analyticsPedidosReadModel.server";
+import {
+  consultarEventosAnaliticosComFallback,
+} from "@/lib/analyticsPedidosReadModel.server";
 import { consultarEstrelasCreditadasPorPedidos } from "@/lib/fidelidade";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
 
@@ -107,7 +110,13 @@ export async function GET(req: NextRequest) {
     let historicoAnteriorParcial = false;
     if (faltantesNoFallback.length > 0 && leitura.fonte.indiceDisponivel) {
       try {
-        historicoIndice = await consultarClientesComHistoricoAnterior(tenantId, faltantesNoFallback, inicioMs);
+        // Quando a campanha começou antes do primeiro evento indexado, não
+        // faça uma consulta Redis por cliente. Uma única checagem global evita
+        // centenas de round-trips em lojas sem histórico anterior.
+        const existeHistoricoAnterior = await existeHistoricoAnaliticoAntesDe(tenantId, inicioMs);
+        if (existeHistoricoAnterior) {
+          historicoIndice = await consultarClientesComHistoricoAnterior(tenantId, faltantesNoFallback, inicioMs);
+        }
       } catch {
         historicoAnteriorParcial = true;
       }
