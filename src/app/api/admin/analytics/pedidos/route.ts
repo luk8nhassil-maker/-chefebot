@@ -69,7 +69,9 @@ export async function GET(req: NextRequest) {
     : resolverPeriodo(periodo, agora);
 
   try {
-    const leitura = await consultarEventosAnaliticosComFallback(tenantId, inicioMs, fimMs, agora);
+    const leitura = await consultarEventosAnaliticosComFallback(tenantId, inicioMs, fimMs, agora, {
+      incluirIndiceCompleto: periodo === "historico",
+    });
     const eventos = leitura.eventos;
     const clientesAtuais = new Set(
       eventos
@@ -119,7 +121,11 @@ export async function GET(req: NextRequest) {
       // Se a leitura do extrato falhar, não transforme falta de acesso em zero.
     }
 
-    const baseCobertura = leitura.fallbackTodos.length > 0 ? leitura.fallbackTodos : eventos;
+    const baseCobertura = periodo === "historico"
+      ? eventos
+      : leitura.fallbackTodos.length > 0
+        ? leitura.fallbackTodos
+        : eventos;
     let primeiroHistoricoMs: number | null = null;
     for (const evento of baseCobertura) {
       const valor = evento.criadoEmMs;

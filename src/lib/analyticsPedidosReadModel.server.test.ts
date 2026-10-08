@@ -166,4 +166,40 @@ describe("analyticsPedidosReadModel", () => {
     expect(leitura.fonte.fallbackPedidosDisponivel).toBe(false);
     expect(mocks.consultarEventosPorPeriodo).toHaveBeenCalledTimes(1);
   });
+
+  test("modo histórico reúne índice permanente e pedidos atuais", async () => {
+    const antigoMs = new Date("2026-09-20T20:00:00-03:00").getTime();
+    const atualMs = new Date("2026-10-05T20:00:00-03:00").getTime();
+    const indexado = {
+      pedidoId: "pedido-antigo",
+      clienteId: "cli_99999991234",
+      tenantId: "default",
+      criadoEmMs: antigoMs,
+      expedienteId: "2026-09-20",
+      valorElegivelCents: 6500,
+      statusAnalitico: "entregue" as const,
+      canal: "app" as const,
+      estrelasGeradas: 5,
+      schemaVersao: 1 as const,
+      regraVersao: "estrelas-faixas-v1",
+    };
+    mocks.redisGet.mockResolvedValue([
+      { id: "pedido-atual", telefone: "99999995678", total: 80, status: "entregue", data: "05/10/2026", horario: "20:00" },
+    ]);
+    mocks.consultarEventosPorPeriodo.mockResolvedValue([indexado]);
+
+    const leitura = await consultarEventosAnaliticosComFallback(
+      "default",
+      0,
+      atualMs + 1000,
+      atualMs + 1000,
+      { incluirIndiceCompleto: true },
+    );
+
+    expect(leitura.eventos.map((ev) => ev.pedidoId).sort()).toEqual(["pedido-antigo", "pedido-atual"]);
+    expect(leitura.fonte.origem).toBe("analytics+pedidos");
+    expect(leitura.fonte.eventosIndice).toBe(1);
+    expect(leitura.fonte.eventosFallbackAdicionados).toBe(1);
+    expect(mocks.consultarEventosPorPeriodo).toHaveBeenCalledTimes(1);
+  });
 });
