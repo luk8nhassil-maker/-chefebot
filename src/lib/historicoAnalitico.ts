@@ -237,6 +237,25 @@ async function lerTodosEventosDaChave(
   inicioMs: number,
   fimMs: number
 ): Promise<EventoAnalitico[]> {
+  // O histórico completo começa no início da linha do tempo. Nesse caso,
+  // leia o índice inteiro de uma vez: pedir páginas com offset faz o Redis
+  // repetir trabalho para cada página e pode estourar o tempo da função.
+  if (inicioMs === 0) {
+    const ids = await aredis.zrange(indiceKey, 0, Number.MAX_SAFE_INTEGER) as string[];
+    const todos: EventoAnalitico[] = [];
+    for (let i = 0; i < ids.length; i += BATCH_GET) {
+      const chaves = ids.slice(i, i + BATCH_GET).map((id) => chaveEvento(tenantId, id));
+      const mget = (aredis as Partial<RedisAnalitico>).mget;
+      const resultados = typeof mget === "function"
+        ? await mget<EventoAnalitico>(...chaves)
+        : await Promise.all(chaves.map((chave) => redis.get<EventoAnalitico>(chave)));
+      for (const ev of resultados) {
+        if (ev !== null && ev.criadoEmMs <= fimMs) todos.push(ev);
+      }
+    }
+    return todos;
+  }
+
   const todos: EventoAnalitico[] = [];
   let offset = 0;
 
