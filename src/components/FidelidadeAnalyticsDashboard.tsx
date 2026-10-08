@@ -28,6 +28,8 @@ type Cobertura = {
   diasHistoricoEncontrado: number
   possuiDadosAntesDaJanela: boolean
   recorrenciaAnteriorDisponivel?: boolean
+  ancoradaNoInicioCampanha?: boolean
+  diasCorridosDisponiveis?: number
 }
 
 type Props = { metricas: Metricas; periodo: number | 'historico'; cobertura?: Cobertura }
@@ -55,11 +57,18 @@ export default function FidelidadeAnalyticsDashboard({ metricas, periodo, cobert
     .sort(([a], [b]) => Number(a.replace('+', '')) - Number(b.replace('+', '')))
   const canais = Object.entries(metricas.porCanal ?? {})
   const historicoAnteriorDisponivel = cobertura?.recorrenciaAnteriorDisponivel ?? cobertura?.possuiDadosAntesDaJanela ?? false
+  const diasCampanhaDisponiveis = typeof periodo === 'number'
+    ? (cobertura?.diasCorridosDisponiveis ?? periodo)
+    : 0
   const periodoLabel = periodo === 'historico'
     ? 'todo o histórico disponível'
-    : cobertura && !cobertura.possuiDadosAntesDaJanela && cobertura.diasHistoricoEncontrado < periodo
-      ? `os ${cobertura.diasHistoricoEncontrado} dias com dados encontrados dentro da janela de ${periodo} dias`
-      : `os últimos ${periodo} dias`
+    : cobertura?.ancoradaNoInicioCampanha
+      ? diasCampanhaDisponiveis < periodo
+        ? `os primeiros ${periodo} dias da campanha (${diasCampanhaDisponiveis} já disponíveis)`
+        : `os primeiros ${periodo} dias da campanha`
+      : cobertura && !cobertura.possuiDadosAntesDaJanela && cobertura.diasHistoricoEncontrado < periodo
+        ? `os ${cobertura.diasHistoricoEncontrado} dias com dados encontrados dentro da janela de ${periodo} dias`
+        : `os últimos ${periodo} dias`
   const formatoNumero = (valor: number) => valor.toLocaleString('pt-BR')
   const estrelasLabel = typeof metricas.estrelasDistribuidas === 'number' ? formatoNumero(metricas.estrelasDistribuidas) : 'Indisponível'
   const diasComPedidos = serie.length

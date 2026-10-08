@@ -108,6 +108,10 @@ type AnalyticsData = {
     diasHistoricoEncontrado: number
     possuiDadosAntesDaJanela: boolean
     recorrenciaAnteriorDisponivel?: boolean
+    ancoradaNoInicioCampanha?: boolean
+    janelaInicioIso?: string
+    janelaFimIso?: string
+    diasCorridosDisponiveis?: number
   }
   error?: string
 }
@@ -688,7 +692,17 @@ export default function FidelidadePage() {
                       </div>
                       {analytics.cobertura && (
                         <div>
-                          Janela escolhida: <strong>{periodo === 'historico' ? 'todo o histórico disponível até hoje' : `${periodo} dias`}</strong>
+                          Janela escolhida: <strong>{periodo === 'historico'
+                            ? 'todo o histórico disponível até hoje'
+                            : analytics.cobertura.ancoradaNoInicioCampanha
+                              ? `primeiros ${periodo} dias da campanha`
+                              : `${periodo} dias`}</strong>
+                          {periodo !== 'historico' && analytics.cobertura.ancoradaNoInicioCampanha && typeof analytics.cobertura.diasCorridosDisponiveis === 'number' && analytics.cobertura.diasCorridosDisponiveis < periodo
+                            ? <> · <strong>{analytics.cobertura.diasCorridosDisponiveis} dias</strong> já disponíveis</>
+                            : null}
+                          {analytics.cobertura.janelaInicioIso && analytics.cobertura.janelaFimIso
+                            ? <> · de <strong>{formatarData(analytics.cobertura.janelaInicioIso)}</strong> até <strong>{formatarData(analytics.cobertura.janelaFimIso)}</strong></>
+                            : null}
                           {analytics.cobertura.historicoEncontradoDesdeIso
                             ? <> · histórico encontrado desde <strong>{formatarData(analytics.cobertura.historicoEncontradoDesdeIso)}</strong>
                               {periodo !== 'historico' && !analytics.cobertura.possuiDadosAntesDaJanela && analytics.cobertura.diasHistoricoEncontrado < periodo

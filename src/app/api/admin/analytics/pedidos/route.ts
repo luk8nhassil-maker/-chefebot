@@ -20,10 +20,13 @@ import {
   periodo30Dias,
   periodo60Dias,
   periodo90Dias,
+  inicioDiaAnalytics,
+  periodoDesdeInicioCampanha,
   TENANT_PADRAO_ANALYTICS,
 } from "@/lib/historicoAnalitico";
 import { consultarEventosAnaliticosComFallback } from "@/lib/analyticsPedidosReadModel.server";
 import { consultarEstrelasCreditadasPorPedidos } from "@/lib/fidelidade";
+import { obterTemporadaAtiva } from "@/lib/temporadas";
 
 async function checkAuthAdmin(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -64,13 +67,25 @@ export async function GET(req: NextRequest) {
   const dias = periodo === "historico" ? null : periodo;
 
   const agora = Date.now();
+  let periodoCampanha: { inicioMs: number; fimMs: number; diasCorridosDisponiveis: number } | null = null;
+  if (periodo !== "historico") {
+    const temporada = await obterTemporadaAtiva(tenantId).catch(() => null);
+    const ativadaMs = temporada?.ativadaEm ? Date.parse(temporada.ativadaEm) : NaN;
+    const inicioCampanhaMs = Number.isFinite(ativadaMs) ? inicioDiaAnalytics(ativadaMs) : null;
+    if (inicioCampanhaMs !== null) {
+      periodoCampanha = periodoDesdeInicioCampanha(inicioCampanhaMs, periodo, agora);
+    }
+  }
   const { inicioMs, fimMs } = periodo === "historico"
     ? { inicioMs: 0, fimMs: agora }
-    : resolverPeriodo(periodo, agora);
+    : periodoCampanha ?? resolverPeriodo(periodo, agora);
 
   try {
     const leitura = await consultarEventosAnaliticosComFallback(tenantId, inicioMs, fimMs, agora, {
-      incluirIndiceCompleto: periodo === "historico",
+      // Todos os filtros precisam enxergar o índice permanente. A lista
+      // operacional pode conter apenas os dias mais recentes e não pode
+      // esconder pedidos antigos dentro da janela da campanha.
+      incluirIndiceCompleto: true,
     });
     const eventos = leitura.eventos;
     const clientesAtuais = new Set(
@@ -158,6 +173,10 @@ export async function GET(req: NextRequest) {
           diasHistoricoEncontrado,
           possuiDadosAntesDaJanela,
           recorrenciaAnteriorDisponivel,
+          ancoradaNoInicioCampanha: periodoCampanha !== null,
+          janelaInicioIso: new Date(inicioMs).toISOString(),
+          janelaFimIso: new Date(fimMs).toISOString(),
+          diasCorridosDisponiveis: periodoCampanha?.diasCorridosDisponiveis ?? dias,
         },
         metricas: metricasComEstrelas,
       },

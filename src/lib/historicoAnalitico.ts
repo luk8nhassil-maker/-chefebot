@@ -86,6 +86,7 @@ export type MetricasAnaliticas = {
 };
 
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
+export const FUSO_ANALYTICS = "America/Sao_Paulo";
 // Page size for ZRANGEBYSCORE pagination — each page = 1 ZRANGE + N GETs.
 // 500 balances Redis round-trips vs command budget on Upstash Free plan.
 const PAGINA_ZRANGE = 500;
@@ -93,6 +94,70 @@ const PAGINA_ZRANGE = 500;
 const BATCH_GET = 200;
 
 export const TENANT_PADRAO_ANALYTICS = "default";
+
+function partesDataNoFuso(ms: number, fuso: string): { ano: number; mes: number; dia: number; hora: number; minuto: number; segundo: number } | null {
+  if (!Number.isFinite(ms)) return null;
+  try {
+    const partes = new Intl.DateTimeFormat("en-CA", {
+      timeZone: fuso,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date(ms));
+    const pegar = (tipo: string) => Number(partes.find((p) => p.type === tipo)?.value);
+    const resultado = {
+      ano: pegar("year"),
+      mes: pegar("month"),
+      dia: pegar("day"),
+      hora: pegar("hour") % 24,
+      minuto: pegar("minute"),
+      segundo: pegar("second"),
+    };
+    return Object.values(resultado).every(Number.isFinite) ? resultado : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Início do dia civil no fuso da pizzaria, sem depender do fuso do servidor. */
+export function inicioDiaAnalytics(ms: number, fuso: string = FUSO_ANALYTICS): number | null {
+  const data = partesDataNoFuso(ms, fuso);
+  if (!data) return null;
+  // Usa o meio-dia UTC para descobrir o deslocamento daquela data sem cair
+  // na véspera; isso também mantém a função correta se o fuso mudar no futuro.
+  const meioDiaUtc = Date.UTC(data.ano, data.mes - 1, data.dia, 12);
+  const partesMeioDia = partesDataNoFuso(meioDiaUtc, fuso);
+  if (!partesMeioDia) return null;
+  const horaLocalComoUtc = Date.UTC(
+    data.ano,
+    data.mes - 1,
+    data.dia,
+    partesMeioDia.hora,
+    partesMeioDia.minuto,
+    partesMeioDia.segundo,
+  );
+  const deslocamento = horaLocalComoUtc - meioDiaUtc;
+  return Date.UTC(data.ano, data.mes - 1, data.dia) - deslocamento;
+}
+
+/** Janela dos primeiros N dias da campanha, limitada ao instante atual. */
+export function periodoDesdeInicioCampanha(
+  inicioCampanhaMs: number,
+  dias: number,
+  agora: number = Date.now(),
+): { inicioMs: number; fimMs: number; diasCorridosDisponiveis: number } {
+  const inicioMs = inicioCampanhaMs;
+  const fimLimiteMs = inicioMs + Math.max(1, dias) * MS_POR_DIA - 1;
+  const fimMs = Math.min(agora, fimLimiteMs);
+  const diasCorridosDisponiveis = fimMs < inicioMs
+    ? 0
+    : Math.min(Math.max(1, dias), Math.floor((fimMs - inicioMs) / MS_POR_DIA) + 1);
+  return { inicioMs, fimMs, diasCorridosDisponiveis };
+}
 
 // ── Typed Redis cast (Upstash SDK supports these ops natively) ───────────────
 
