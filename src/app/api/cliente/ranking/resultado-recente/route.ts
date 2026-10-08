@@ -9,6 +9,7 @@ import {
   projetarResultadoTemporada,
 } from "@/lib/temporadaResultado";
 import { janelaRevelacaoAtiva } from "@/lib/rankingJogoSecreto";
+import { obterResgatePremio } from "@/lib/temporadaPremioResgate";
 
 export const dynamic = "force-dynamic";
 const TENANT_ID = "default";
@@ -47,12 +48,33 @@ export async function GET(req: NextRequest) {
     }
 
     const resultado = await projetarResultadoTemporada(bruto);
+    const participantesArquivados = Array.isArray(bruto.participantesTopo) ? bruto.participantesTopo : [];
+    const vencedor = participantesArquivados.find((item) => item.clienteId === viewerId) ?? null;
+    const quantidadePremiados = bruto.premioQuantidadePremiados ?? null;
+    const souVencedor = Boolean(
+      bruto.vencedorDeclarado &&
+      vencedor &&
+      quantidadePremiados !== null &&
+      vencedor.posicao <= quantidadePremiados,
+    );
+    const resgate = souVencedor
+      ? await obterResgatePremio(TENANT_ID, resultado.temporadaId, viewerId).catch(() => null)
+      : null;
     return resposta({
       resultado: {
         temporadaId: resultado.temporadaId,
         encerradaEm: resultado.encerradaEm,
         revelacaoAte: resultado.revelacaoAte,
         premioDescricao: resultado.premioDescricao,
+        premio: {
+          descricao: resultado.premioDescricao,
+          quantidadePremiados,
+          posicao: vencedor?.posicao ?? null,
+          souVencedor,
+          podeResgatar: souVencedor && !resgate,
+          status: resgate?.status ?? null,
+          codigoPublico: resgate?.codigoPublico ?? null,
+        },
         participantesTopo: resultado.participantesTopo
           .filter((item) => item.identidade.participaCampanha)
           .slice(0, 20)

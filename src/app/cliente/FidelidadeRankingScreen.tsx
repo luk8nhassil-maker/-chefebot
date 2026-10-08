@@ -87,6 +87,8 @@ export type FidelidadeRankingScreenProps = {
   // mecânica (fail-closed): a tela nunca mostra selo, missão ou nível vazio.
   gamificacao?: PainelGamificacao | null
   resultadoAnterior?: ResultadoRankingRevelado | null
+  onResgatarPremio?: () => void
+  premioResgatando?: boolean
   privacidade: PreferenciasPrivacidadeRanking | null
   privacidadeCarregando: boolean
   privacidadeSalvando: FinalidadePrivacidadeRanking | 'todas' | null
@@ -119,6 +121,8 @@ export function FidelidadeRankingScreen({
   indicacao,
   gamificacao = null,
   resultadoAnterior = null,
+  onResgatarPremio,
+  premioResgatando = false,
   privacidade,
   privacidadeCarregando,
   privacidadeSalvando,
@@ -476,6 +480,25 @@ export function FidelidadeRankingScreen({
         </section>
       )}
 
+      {resultadoAnterior?.premio?.souVencedor && (
+        <section className="cf-ranking-premio-resgate" aria-label="Prêmio da temporada encerrada">
+          <div>
+            <span className="cf-ranking-premio-kicker">🏆 VOCÊ VENCEU</span>
+            <strong>{resultadoAnterior.premio.descricao || resultadoAnterior.premioDescricao || 'Prêmio da temporada'}</strong>
+            {resultadoAnterior.premio.status === 'solicitado' && resultadoAnterior.premio.codigoPublico ? (
+              <small>Resgate solicitado. Apresente o código <b>{resultadoAnterior.premio.codigoPublico}</b> à pizzaria.</small>
+            ) : (
+              <small>Solicite seu prêmio para receber um código de retirada.</small>
+            )}
+          </div>
+          {resultadoAnterior.premio.status !== 'solicitado' && resultadoAnterior.premio.podeResgatar && onResgatarPremio && (
+            <button type="button" className="cf-ranking-premio-button" onClick={onResgatarPremio} disabled={premioResgatando}>
+              {premioResgatando ? 'Solicitando…' : 'Resgatar prêmio'}
+            </button>
+          )}
+        </section>
+      )}
+
       {aba === 'minha' && <details className="cf-ranking-privacy">
         <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Privacidade e participação</summary>
         <p>Você pode escolher aparecer pelo nome durante a temporada. Sem essa autorização, o jogo usa seu codinome.</p>
@@ -685,6 +708,7 @@ export function FidelidadeRankingScreen({
         .cf-ranking-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }.cf-ranking-row { display: grid; grid-template-columns: 30px 34px 1fr auto; align-items: center; gap: 8px; min-height: 50px; padding: 7px 12px; border: 1px solid #e4e7ec; border-radius: 14px; background: #fff; box-shadow: 0 3px 10px rgba(16,24,40,.04); }.cf-ranking-row.voce { border-color: #9fc2f7; background: #f3f8ff; }.cf-ranking-row>strong { font-size: 17px; text-align: center; }.cf-ranking-row-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #eef2f6; color: #61738a; font-size: 12px; font-weight: 800; }.cf-ranking-row.voce .cf-ranking-row-avatar { background: #4f86ed; color: #fff; }.cf-ranking-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }.cf-ranking-row-name small{display:block;margin-top:2px;color:#758296;font-size:10px}.cf-ranking-row>b { color: #8a5c00; font-size: 12px; white-space: nowrap; }.cf-ranking-empty,.cf-ranking-footnote { margin: 8px 2px; color: #667085; font-size: 12px; line-height: 1.5; text-align: center; }
         .cf-ranking-note { display: flex; gap: 12px; align-items: center; margin-top: 17px; padding: 14px 15px; border: 1px solid rgba(226,180,55,.38); border-radius: 18px; background: linear-gradient(110deg, rgba(255,252,239,.96), rgba(255,247,218,.75)); }.cf-ranking-note>span { font-size: 25px; }.cf-ranking-note strong { font-size: 13px; display: block; }.cf-ranking-note p { margin: 4px 0 0; color: #697588; font-size: 11.5px; line-height: 1.35; }
         .cf-ranking-reveal{margin:16px 0;padding:14px;border:1px solid rgba(111,76,255,.18);border-radius:18px;background:linear-gradient(145deg,rgba(246,243,255,.95),rgba(255,255,255,.98))}.cf-ranking-reveal-head{display:grid;gap:3px;margin-bottom:10px}.cf-ranking-reveal-head>span{font-size:10px;font-weight:900;letter-spacing:.08em;color:#7159c8}.cf-ranking-reveal-head>strong{font-size:15px;color:#293a57}.cf-ranking-reveal-head>small{font-size:10.5px;color:#718199}.cf-ranking-reveal-list{display:grid;gap:7px}.cf-ranking-reveal-row{display:grid;grid-template-columns:28px 36px minmax(0,1fr) auto;align-items:center;gap:8px;padding:7px 8px;border-radius:12px;background:rgba(255,255,255,.82)}.cf-ranking-reveal-row>strong{font-size:11px;color:#718199}.cf-ranking-reveal-avatar{width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:50%;overflow:hidden;background:#e8edff;color:#5268a9;font-weight:900}.cf-ranking-reveal-avatar img{width:100%;height:100%;object-fit:cover}.cf-ranking-reveal-row>span:nth-child(3){display:grid;min-width:0}.cf-ranking-reveal-row b{font-size:12px;color:#30435f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cf-ranking-reveal-row small{font-size:9.5px;color:#8390a3}.cf-ranking-reveal-row em{font-style:normal}
+        .cf-ranking-premio-resgate{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:16px 0;padding:16px;border:1px solid #ead796;border-radius:18px;background:linear-gradient(145deg,#fffaf0,#fff)}.cf-ranking-premio-resgate>div{display:grid;gap:4px;min-width:0}.cf-ranking-premio-kicker{font-size:10px;font-weight:900;letter-spacing:.08em;color:#9a7200}.cf-ranking-premio-resgate strong{font-size:16px;color:#293a57}.cf-ranking-premio-resgate small{font-size:11px;line-height:1.4;color:#718199}.cf-ranking-premio-button{flex:0 0 auto;border:0;border-radius:10px;padding:11px 14px;background:#f5c400;color:#3b3000;font-weight:800;cursor:pointer}.cf-ranking-premio-button:disabled{opacity:.6;cursor:wait}
         .cf-ranking-share-locked { display: grid; gap: 3px; margin-top: 10px; padding: 9px 11px; border: 1px solid rgba(180,196,220,.75); border-radius: 12px; background: rgba(247,250,255,.8); color: #52657f; }.cf-ranking-share-locked strong { color: #304d77; font-size: 12px; }.cf-ranking-share-locked small { font-size: 11px; line-height: 1.35; }
         .cf-ranking-selos { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; margin: 0 0 12px; }
         .cf-ranking-selo { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 999px; font-size: 11.5px; font-weight: 800; background: #eef1f5; color: #4a5568; }

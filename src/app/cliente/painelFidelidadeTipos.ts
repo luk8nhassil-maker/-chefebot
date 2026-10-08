@@ -114,6 +114,15 @@ export type ResultadoRankingRevelado = {
   encerradaEm: string
   revelacaoAte: string | null
   premioDescricao: string | null
+  premio?: {
+    descricao: string | null
+    quantidadePremiados: number | null
+    posicao: number | null
+    souVencedor: boolean
+    podeResgatar: boolean
+    status: 'solicitado' | null
+    codigoPublico: string | null
+  }
   participantesTopo: Array<{
     posicao: number
     score: number

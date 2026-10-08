@@ -889,6 +889,7 @@ export default function ClientePage() {
   const [posPedido, setPosPedido] = useState<{ estado: 'pendente' | 'creditado'; estrelasGanhas?: number; pedidoId: string | null } | null>(null)
   const [resgatando, setResgatando] = useState(false)
   const [resgateErro, setResgateErro] = useState('')
+  const [resgatandoPremioTemporada, setResgatandoPremioTemporada] = useState(false)
   const [fotoEnviando, setFotoEnviando] = useState(false)
   const [fotoErro, setFotoErro] = useState('')
   const [mobilePanel, setMobilePanel] = useState<'presentes' | 'extrato' | 'ranking' | null>(null)
@@ -1770,6 +1771,44 @@ export default function ClientePage() {
     }
   }
 
+  async function resgatarPremioTemporada() {
+    const temporadaId = resultadoRankingAnterior?.temporadaId
+    if (!temporadaId || resultadoRankingAnterior?.premio?.souVencedor !== true) return
+    if (resultadoRankingAnterior.premio.status === 'solicitado') return
+    setResgatandoPremioTemporada(true)
+    try {
+      const res = await fetchCliente('/api/cliente/fidelidade/premio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ temporadaId }),
+      }, sessaoMemRef.current)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.ok || !data.resgate) {
+        const mensagens: Record<string, string> = {
+          resultado_indisponivel: 'O resultado ainda não está disponível. Tente novamente em instantes.',
+          premio_nao_aprovado: 'Este prêmio ainda não foi liberado pela pizzaria.',
+          nao_elegivel: 'Este prêmio não está vinculado à sua colocação.',
+        }
+        setPreviewAviso(mensagens[data.codigo] ?? 'Não foi possível solicitar o prêmio agora.')
+        return
+      }
+      setResultadoRankingAnterior((atual) => atual ? {
+        ...atual,
+        premio: atual.premio ? {
+          ...atual.premio,
+          status: 'solicitado',
+          podeResgatar: false,
+          codigoPublico: data.resgate.codigoPublico ?? atual.premio.codigoPublico,
+        } : atual.premio,
+      } : atual)
+      setPreviewAviso(`Resgate solicitado. Código: ${data.resgate.codigoPublico}`)
+    } catch {
+      setPreviewAviso('Erro de conexão. Tente novamente.')
+    } finally {
+      setResgatandoPremioTemporada(false)
+    }
+  }
+
   const inputStyle: React.CSSProperties = {
     width: '100%',
     boxSizing: 'border-box',
@@ -1995,6 +2034,8 @@ export default function ClientePage() {
                 indicacao={painel.indicacao}
                 gamificacao={painel.gamificacao}
                 resultadoAnterior={resultadoRankingAnterior}
+                onResgatarPremio={resgatarPremioTemporada}
+                premioResgatando={resgatandoPremioTemporada}
                 privacidade={privacidadeRanking}
                 privacidadeCarregando={privacidadeCarregando}
                 privacidadeSalvando={privacidadeSalvando}
