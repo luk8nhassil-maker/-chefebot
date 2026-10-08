@@ -52,6 +52,14 @@ function montar(props: Partial<FidelidadeRankingScreenProps> = {}, manterModal =
 }
 
 describe("FidelidadeRankingScreen — Gamificação V2", () => {
+  test("mostra o progresso horizontal sem exigir preenchimento manual", () => {
+    montar();
+    const barra = screen.getByRole("progressbar", { name: "Progresso da temporada" });
+    expect(barra).toHaveAttribute("aria-valuenow", "25");
+    expect(screen.getByText("Próxima etapa: 1º pedido")).toBeTruthy();
+    expect(screen.getByText("O sistema atualiza sozinho quando os dados confirmam cada etapa. Você não precisa preencher nada.")).toBeTruthy();
+  });
+
   test("ao abrir o Ranking escolhe uma missão real, sem lista nem ação automática", () => {
     const onNovoPedido = vi.fn();
     montar({

@@ -52,6 +52,20 @@ O Top 10 automático só pode ser liberado quando a temporada anterior tiver um
 snapshot completo. Enquanto houver buraco ou dado incompleto, o carryover fica
 bloqueado.
 
+## Barra horizontal de progresso
+
+A tela do Ranking mostra as fases automaticamente, na horizontal: Participar,
+1º pedido, Top 10 e Pódio. Cada fase só fica concluída quando o servidor tem o
+dado que prova o passo. O cliente não preenche nada e a barra não cria bônus;
+ela apenas explica o estado real da temporada.
+
+## Regra permanente de publicação em lote
+
+Antes de publicar qualquer melhoria, revisar todas as mudanças pendentes e
+juntar o que estiver pronto em um único lançamento coerente. Não fazer deploy
+de produto, tela ou ajuste isolado quando houver outras partes relacionadas
+aguardando; isso reduz gasto de build/preview e evita versões pela metade.
+
 ## Estado atual desta arquitetura
 
 O motor de decisão, a trilha de progresso e o executor já estão separados do

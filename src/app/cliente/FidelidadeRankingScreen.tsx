@@ -210,6 +210,20 @@ export function FidelidadeRankingScreen({
       ? Math.max(0, Math.min(100, Math.round((gamificacao.nivelChef.xpAtual / gamificacao.nivelChef.xpProximoNivel) * 100)))
       : 100
     : 0
+  // Fases simples e comprováveis pelo painel: a barra não inventa progresso.
+  // O primeiro pedido só é considerado quando a API libera o compartilhamento
+  // (sinal server-side de que existe pedido confirmado elegível).
+  const posicaoParticipante = typeof ranking.participantes.posicao === 'number' ? ranking.participantes.posicao : null
+  const primeiroPedidoConfirmado = indicacao?.compartilhamentoLiberado === true
+  const fasesTemporada = [
+    { id: 'participar', label: 'Participar', concluida: posicaoParticipante !== null },
+    { id: 'pedido', label: '1º pedido', concluida: primeiroPedidoConfirmado },
+    { id: 'top10', label: 'Top 10', concluida: primeiroPedidoConfirmado && posicaoParticipante !== null && posicaoParticipante <= 10 },
+    { id: 'podio', label: 'Pódio', concluida: primeiroPedidoConfirmado && posicaoParticipante !== null && posicaoParticipante <= 3 },
+  ]
+  const fasesConcluidas = fasesTemporada.filter((fase) => fase.concluida).length
+  const progressoTemporadaPercent = Math.round((fasesConcluidas / fasesTemporada.length) * 100)
+  const proximaFase = fasesTemporada.find((fase) => !fase.concluida)
   const momentos: { id: MomentoRanking; eyebrow: string; titulo: string; resumo: string; simbolo: string }[] = []
   if (posPedido) momentos.push({
     id: 'pedido', eyebrow: 'SEU PEDIDO',
@@ -350,6 +364,28 @@ export function FidelidadeRankingScreen({
           <button key={id} type="button" role="tab" aria-selected={aba === id} className={aba === id ? 'ativo' : ''} onClick={() => setAba(id)}>{label}</button>
         ))}
       </div>
+
+      <section className="cf-ranking-fases" aria-label="Progresso automático da temporada">
+        <div className="cf-ranking-fases-head">
+          <div>
+            <small>SEU PROGRESSO</small>
+            <strong>{proximaFase ? `Próxima etapa: ${proximaFase.label}` : 'Todas as etapas concluídas'}</strong>
+          </div>
+          <span>{progressoTemporadaPercent}%</span>
+        </div>
+        <div className="cf-ranking-fases-track" role="progressbar" aria-label="Progresso da temporada" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressoTemporadaPercent}>
+          {fasesTemporada.map((fase, index) => (
+            <div key={fase.id} className="cf-ranking-fase-wrap">
+              <div className={`cf-ranking-fase ${fase.concluida ? 'concluida' : index === fasesConcluidas ? 'atual' : ''}`}>
+                <span className="cf-ranking-fase-dot" aria-hidden="true">{fase.concluida ? '✓' : index + 1}</span>
+                <span>{fase.label}</span>
+              </div>
+              {index < fasesTemporada.length - 1 && <span className={`cf-ranking-fase-line ${fase.concluida ? 'concluida' : ''}`} aria-hidden="true" />}
+            </div>
+          ))}
+        </div>
+        <p>O sistema atualiza sozinho quando os dados confirmam cada etapa. Você não precisa preencher nada.</p>
+      </section>
 
       {aba === 'minha' ? (
         <section className="cf-ranking-personal" aria-label="Minha posição">
@@ -717,6 +753,24 @@ export function FidelidadeRankingScreen({
         .cf-ranking-selo-bronze { background: linear-gradient(110deg, #f3ded0, #e6b58b); color: #7b4322; }
         .cf-ranking-selo-elite { background: linear-gradient(110deg, #e7f0ff, #d5e6ff); color: #2a548f; }
         .cf-ranking-selo-mini { display: inline-flex; align-items: center; justify-content: center; font-size: 12px; margin-left: 2px; vertical-align: middle; }
+        .cf-ranking-fases { margin: 0 0 16px; padding: 14px 15px 12px; border: 1px solid #d9e3ef; border-radius: 18px; background: linear-gradient(145deg, #fff, #f8fbff); }
+        .cf-ranking-fases-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        .cf-ranking-fases-head>div { display: grid; gap: 3px; min-width: 0; }
+        .cf-ranking-fases-head small { color: #52719a; font-size: 10px; font-weight: 850; letter-spacing: .08em; }
+        .cf-ranking-fases-head strong { color: #1d3452; font-size: 13px; line-height: 1.25; }
+        .cf-ranking-fases-head>span { flex: none; color: #2b67bd; font-size: 18px; font-weight: 850; }
+        .cf-ranking-fases-track { display: flex; align-items: flex-start; margin-top: 14px; }
+        .cf-ranking-fase-wrap { display: flex; align-items: flex-start; flex: 1; min-width: 0; }
+        .cf-ranking-fase { display: grid; justify-items: center; gap: 5px; min-width: 46px; color: #8190a4; font-size: 10px; font-weight: 700; text-align: center; }
+        .cf-ranking-fase span:last-child { max-width: 70px; line-height: 1.15; }
+        .cf-ranking-fase-dot { display: grid; place-items: center; width: 25px; height: 25px; border: 2px solid #d7e0eb; border-radius: 50%; background: #fff; color: #8290a2; font-size: 11px; font-weight: 850; }
+        .cf-ranking-fase.concluida { color: #2868bd; }
+        .cf-ranking-fase.concluida .cf-ranking-fase-dot { border-color: #4e8de4; background: #4e8de4; color: #fff; }
+        .cf-ranking-fase.atual { color: #7b5a00; }
+        .cf-ranking-fase.atual .cf-ranking-fase-dot { border-color: #f2c000; background: #fff9da; color: #9b7300; box-shadow: 0 0 0 4px rgba(242,192,0,.12); }
+        .cf-ranking-fase-line { flex: 1; height: 3px; margin: 11px 5px 0; border-radius: 99px; background: #e3e9f1; }
+        .cf-ranking-fase-line.concluida { background: #7da9e8; }
+        .cf-ranking-fases>p { margin: 11px 0 0; color: #748399; font-size: 10.5px; line-height: 1.35; }
         .cf-ranking-missao { border-color: rgba(88,151,247,.4); background: linear-gradient(110deg, rgba(234,244,255,.98), rgba(248,252,255,.9)); }
         .cf-ranking-note small { display: block; margin-top: 4px; color: #8a95a6; font-size: 10.5px; line-height: 1.35; }
         .cf-ranking-coroa { border-color: rgba(245,189,32,.5); background: linear-gradient(110deg, rgba(255,248,225,.98), rgba(255,255,255,.9)); }
@@ -804,6 +858,12 @@ export function FidelidadeRankingScreen({
         @media (prefers-reduced-motion: reduce) { .cf-ranking-momento-backdrop, .cf-ranking-momento-dialog, .cf-ranking-momento-emblem, .cf-ranking-momento-detail .cf-ranking-nivel-fill { animation: none !important; }.cf-ranking-momento-teaser { transition: none; } }
         @media (prefers-reduced-motion: reduce) { .cf-ranking-screen * { transition: none !important; } }
         @media (max-width: 420px) {
+          .cf-ranking-fases { padding: 12px 10px 11px; }
+          .cf-ranking-fases-head strong { font-size: 12px; }
+          .cf-ranking-fases-head>span { font-size: 16px; }
+          .cf-ranking-fase { min-width: 38px; font-size: 9px; }
+          .cf-ranking-fase-dot { width: 22px; height: 22px; font-size: 10px; }
+          .cf-ranking-fase-line { margin-left: 3px; margin-right: 3px; }
           .cf-ranking-current { grid-template-columns: minmax(100px, .75fr) 1fr; gap: 8px; padding: 14px 12px; border-radius: 17px; }
           .cf-ranking-current>div>strong { font-size: 32px; }
           .cf-ranking-current .cf-ranking-current-goal strong { font-size: 13px; }
