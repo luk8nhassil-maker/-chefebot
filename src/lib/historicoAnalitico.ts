@@ -171,7 +171,7 @@ type RedisAnalitico = typeof redis & {
     key: string,
     min: number | string,
     max: number | string,
-    opts?: { byScore?: boolean; count?: number; rev?: boolean; offset?: number; limit?: { offset: number; count: number } }
+    opts?: { byScore?: boolean; count?: number; rev?: boolean; offset?: number }
   ) => Promise<string[]>;
 };
 
@@ -327,8 +327,9 @@ async function lerTodosEventosDaChave(
   while (true) {
     const pagina = await aredis.zrange(indiceKey, inicioMs, fimMs, {
       byScore: true,
-      limit: { offset, count: PAGINA_ZRANGE },
-    });
+      offset,
+      count: PAGINA_ZRANGE,
+    }) as string[];
 
     if (pagina.length === 0) break;
 
@@ -404,7 +405,7 @@ export async function consultarClientesComHistoricoAnterior(
           chaveIndiceCliente(tenantId, clienteId),
           0,
           antesDeMs - 1,
-          { byScore: true, limit: { offset: 0, count: 1 } },
+          { byScore: true, offset: 0, count: 1 },
         ),
       ),
     );
@@ -431,7 +432,7 @@ export async function existeHistoricoAnaliticoAntesDe(
     chaveIndiceGlobal(tenantId),
     0,
     antesDeMs - 1,
-    { byScore: true, limit: { offset: 0, count: 1 } },
+    { byScore: true, offset: 0, count: 1 },
   );
   return primeiro.length > 0;
 }
