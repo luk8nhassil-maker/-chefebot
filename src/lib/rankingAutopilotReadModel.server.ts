@@ -11,7 +11,9 @@ import { montarPlanoAutopilot, type PlanoAutopilot, type SinaisControleAutopilot
 import { obterTemporadaAtiva } from './temporadas'
 
 const MS_DIA = 24 * 60 * 60 * 1000
-const JANELA_DIAS = 30
+const DIAS_BASELINE_CAMPANHA = 7
+const DIAS_JANELA_ATUAL = 7
+const DIAS_JANELA_FALLBACK = 30
 
 type CoberturaAutopilot = {
   diasObservadosAtual: number
@@ -19,6 +21,13 @@ type CoberturaAutopilot = {
   eventosAtual: number
   eventosAnterior: number
   dadosConfiaveis: boolean
+  capacidadePedidosDia?: number
+}
+
+export type JanelasAutopilot = {
+  atual: { inicioMs: number; fimMs: number }
+  anterior: { inicioMs: number; fimMs: number }
+  ancoradaNoInicioCampanha: boolean
 }
 
 export type ResultadoSimulacaoAutopilot = {
@@ -32,6 +41,34 @@ export type ResultadoSimulacaoAutopilot = {
   janelaAnterior: { inicioMs: number; fimMs: number }
   metricasAtual: MetricasAnaliticas
   metricasAnterior: MetricasAnaliticas
+}
+
+/**
+ * O robô compara os últimos 7 dias com os primeiros 7 dias da campanha.
+ * Assim ele consegue aprender mesmo quando não existe histórico anterior à
+ * campanha. Sem uma data de início válida, cai para uma janela conservadora
+ * e mantém a leitura como não confiável.
+ */
+export function calcularJanelasAutopilot(agora: number, ativadaEm?: string): JanelasAutopilot {
+  const inicioCampanha = ativadaEm ? Date.parse(ativadaEm) : Number.NaN
+  if (!Number.isFinite(inicioCampanha)) {
+    const fimAtual = agora
+    const inicioAtual = agora - DIAS_JANELA_FALLBACK * MS_DIA
+    const inicioAnterior = inicioAtual - DIAS_JANELA_FALLBACK * MS_DIA
+    return {
+      atual: { inicioMs: inicioAtual, fimMs: fimAtual },
+      anterior: { inicioMs: inicioAnterior, fimMs: inicioAtual - 1 },
+      ancoradaNoInicioCampanha: false,
+    }
+  }
+
+  const fimBaseline = inicioCampanha + DIAS_BASELINE_CAMPANHA * MS_DIA - 1
+  const inicioAtual = Math.max(inicioCampanha + DIAS_BASELINE_CAMPANHA * MS_DIA, agora - DIAS_JANELA_ATUAL * MS_DIA)
+  return {
+    atual: { inicioMs: inicioAtual, fimMs: agora },
+    anterior: { inicioMs: inicioCampanha, fimMs: Math.min(fimBaseline, agora) },
+    ancoradaNoInicioCampanha: agora >= inicioCampanha + (DIAS_BASELINE_CAMPANHA * 2) * MS_DIA,
+  }
 }
 
 function mediana(valores: number[]): number {
@@ -75,10 +112,18 @@ export function montarEntradaAutopilot(
     margemContribuicaoSemanalCents: undefined,
     orcamentoSemanalConfiguradoCents: undefined,
     custoEstimadoMissaoCents: undefined,
-    capacidadePedidosDia: 0,
+    capacidadePedidosDia: cobertura.capacidadePedidosDia ?? 0,
     dadosConfiaveis: cobertura.dadosConfiaveis,
     temporadaComTop10Completo,
   }
+}
+
+/** Usa o maior pico observado como teto conservador, sem inventar capacidade. */
+export function calcularCapacidadePedidosDia(atual: MetricasAnaliticas, anterior: MetricasAnaliticas): number {
+  const picos = [...atual.serieDiaria, ...anterior.serieDiaria]
+    .map((dia) => dia.pedidos)
+    .filter((pedidos) => Number.isFinite(pedidos) && pedidos > 0)
+  return picos.length > 0 ? Math.max(...picos) : 0
 }
 
 function limitarDiasObservados(eventos: Array<{ criadoEmMs: number }>, inicioMs: number, fimMs: number): number {
@@ -88,7 +133,7 @@ function limitarDiasObservados(eventos: Array<{ criadoEmMs: number }>, inicioMs:
   }, null)
   if (primeiro === null) return 0
   const primeiroNaJanela = Math.max(inicioMs, primeiro)
-  return Math.min(JANELA_DIAS, Math.max(1, Math.floor((fimMs - primeiroNaJanela) / MS_DIA) + 1))
+  return Math.min(DIAS_JANELA_FALLBACK, Math.max(1, Math.floor((fimMs - primeiroNaJanela) / MS_DIA) + 1))
 }
 
 /**
@@ -99,23 +144,22 @@ export async function consultarSimulacaoAutopilot(
   tenantId = TENANT_PADRAO_ANALYTICS,
   agora = Date.now(),
 ): Promise<ResultadoSimulacaoAutopilot> {
-  const inicioAtual = agora - JANELA_DIAS * MS_DIA
-  const fimAtual = agora
-  const inicioAnterior = inicioAtual - JANELA_DIAS * MS_DIA
-  const fimAnterior = inicioAtual - 1
-  // Uma leitura da temporada acompanha a leitura analítica. O robô não pode
-  // liberar uma missão fora de uma temporada ativa, mas também não precisa
-  // consultar o banco em cada pedido: isso acontece só na simulação/cron.
-  const [leitura, temporada] = await Promise.all([
-    consultarEventosAnaliticosComFallback(
-      tenantId,
-      inicioAnterior,
-      fimAtual,
-      agora,
-      { incluirIndiceCompleto: true },
-    ),
-    obterTemporadaAtiva(tenantId),
-  ])
+  // A data da temporada define o início da leitura. Buscamos esse marco antes
+  // do histórico para não perder os primeiros 7 dias de campanhas antigas.
+  const temporada = await obterTemporadaAtiva(tenantId)
+  const janelas = calcularJanelasAutopilot(agora, temporada?.ativadaEm)
+  const leitura = await consultarEventosAnaliticosComFallback(
+    tenantId,
+    janelas.anterior.inicioMs,
+    agora,
+    agora,
+    { incluirIndiceCompleto: true },
+  )
+
+  const inicioAtual = janelas.atual.inicioMs
+  const fimAtual = janelas.atual.fimMs
+  const inicioAnterior = janelas.anterior.inicioMs
+  const fimAnterior = janelas.anterior.fimMs
 
   const eventosAtual = leitura.eventos.filter((evento) => evento.criadoEmMs >= inicioAtual && evento.criadoEmMs <= fimAtual)
   const eventosAnterior = leitura.eventos.filter((evento) => evento.criadoEmMs >= inicioAnterior && evento.criadoEmMs <= fimAnterior)
@@ -127,9 +171,13 @@ export async function consultarSimulacaoAutopilot(
     diasComPedidoAtual: diasComPedido(metricasAtual),
     eventosAtual: eventosAtual.length,
     eventosAnterior: eventosAnterior.length,
-    // Para comparar semana atual com anterior, ambas precisam existir no índice
-    // ou no fallback. Sem base, a decisão não deve liberar bônus.
-    dadosConfiaveis: leitura.fonte.indiceDisponivel && eventosAtual.length > 0 && eventosAnterior.length > 0,
+    // Para comparar a semana atual com os primeiros 7 dias da campanha, ambas
+    // precisam existir no índice ou no fallback. Sem base, a decisão para.
+    dadosConfiaveis: leitura.fonte.indiceDisponivel
+      && janelas.ancoradaNoInicioCampanha
+      && eventosAtual.length > 0
+      && eventosAnterior.length > 0,
+    capacidadePedidosDia: calcularCapacidadePedidosDia(metricasAtual, metricasAnterior),
   }
   const entrada = montarEntradaAutopilot(metricasAtual, metricasAnterior, cobertura)
   const decisao = simularDecisaoAutopilot(entrada)
