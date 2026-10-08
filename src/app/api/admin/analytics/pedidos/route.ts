@@ -146,11 +146,18 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    const eventosNaJanela = eventos.filter((evento) => evento.criadoEmMs >= inicioMs && evento.criadoEmMs <= fimMs);
+    const fallbackNaJanela = leitura.fallbackTodos.filter(
+      (evento) => evento.criadoEmMs >= inicioMs && evento.criadoEmMs <= fimMs,
+    );
+    // A lista operacional pode ter somente os dias recentes. Só a use para
+    // descrever a cobertura quando ela realmente possui dados desta janela;
+    // caso contrário, o índice permanente é a fonte correta da mensagem.
     const baseCobertura = periodo === "historico"
       ? eventos
-      : leitura.fallbackTodos.length > 0
-        ? leitura.fallbackTodos
-        : eventos;
+      : fallbackNaJanela.length > 0
+        ? fallbackNaJanela
+        : eventosNaJanela;
     let primeiroHistoricoMs: number | null = null;
     for (const evento of baseCobertura) {
       const valor = evento.criadoEmMs;
