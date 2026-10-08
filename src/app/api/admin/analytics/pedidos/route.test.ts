@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   verifyToken: vi.fn(),
   consultarEventosAnaliticosComFallback: vi.fn(),
+  existeHistoricoAnaliticoAntesDe: vi.fn(),
   consultarClientesComHistoricoAnterior: vi.fn(),
   consultarEstrelasCreditadasPorPedidos: vi.fn(),
   obterTemporadaAtiva: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock("@/lib/historicoAnalitico", async (importOriginal) => {
   return {
     ...original,
     consultarClientesComHistoricoAnterior: mocks.consultarClientesComHistoricoAnterior,
+    existeHistoricoAnaliticoAntesDe: mocks.existeHistoricoAnaliticoAntesDe,
   };
 });
 vi.mock("@/lib/fidelidade", async (importOriginal) => {
@@ -63,6 +65,7 @@ beforeEach(() => {
     },
   });
   mocks.consultarClientesComHistoricoAnterior.mockResolvedValue(new Set());
+  mocks.existeHistoricoAnaliticoAntesDe.mockResolvedValue(false);
   mocks.consultarEstrelasCreditadasPorPedidos.mockResolvedValue({ estrelas: 0, pedidosComCredito: 0 });
   mocks.obterTemporadaAtiva.mockResolvedValue(null);
 });
@@ -180,6 +183,7 @@ describe("GET /api/admin/analytics/pedidos", () => {
       },
     });
     mocks.consultarClientesComHistoricoAnterior.mockResolvedValue(new Set(["c1"]));
+    mocks.existeHistoricoAnaliticoAntesDe.mockResolvedValue(true);
     const res = await GET(makeReq());
     const body = await res.json();
     expect(body.metricas.clientesUnicos).toBe(2);
@@ -198,6 +202,24 @@ describe("GET /api/admin/analytics/pedidos", () => {
     expect(texto).not.toContain("clienteId");
     expect(texto).not.toContain("telefone");
     expect(texto).not.toContain("endereco");
+  });
+
+  it("não bloqueia janelas grandes lendo extratos completos de centenas de clientes", async () => {
+    const eventos = Array.from({ length: 401 }, (_, indice) => ({
+      ...eventoBase,
+      pedidoId: `p-${indice}`,
+      clienteId: `c-${indice}`,
+    }));
+    mocks.consultarEventosAnaliticosComFallback.mockResolvedValue({
+      eventos,
+      fallbackTodos: [],
+      fonte: { indiceDisponivel: true, fallbackPedidosDisponivel: false, eventosIndice: eventos.length, eventosFallbackAdicionados: 0, origem: "analytics" },
+    });
+
+    const body = await (await GET(makeReq({ periodo: "30" }))).json();
+    expect(body.metricas.pedidosValidos).toBe(401);
+    expect(body.metricas.estrelasDistribuidas).toBeNull();
+    expect(mocks.consultarEstrelasCreditadasPorPedidos).not.toHaveBeenCalled();
   });
 
   it("rejeita período inválido", async () => {

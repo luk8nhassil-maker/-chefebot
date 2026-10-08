@@ -22,6 +22,7 @@ import {
   periodo90Dias,
   inicioDiaAnalytics,
   periodoDesdeInicioCampanha,
+  existeHistoricoAnaliticoAntesDe,
   TENANT_PADRAO_ANALYTICS,
 } from "@/lib/historicoAnalitico";
 import { consultarEventosAnaliticosComFallback } from "@/lib/analyticsPedidosReadModel.server";
@@ -107,7 +108,13 @@ export async function GET(req: NextRequest) {
     let historicoAnteriorParcial = false;
     if (faltantesNoFallback.length > 0 && leitura.fonte.indiceDisponivel) {
       try {
-        historicoIndice = await consultarClientesComHistoricoAnterior(tenantId, faltantesNoFallback, inicioMs);
+        // Se a campanha começou antes do primeiro evento indexado, evite uma
+        // consulta Redis por cliente. Uma checagem global poupa centenas de
+        // round-trips em lojas sem histórico anterior.
+        const existeHistoricoAnterior = await existeHistoricoAnaliticoAntesDe(tenantId, inicioMs);
+        if (existeHistoricoAnterior) {
+          historicoIndice = await consultarClientesComHistoricoAnterior(tenantId, faltantesNoFallback, inicioMs);
+        }
       } catch {
         historicoAnteriorParcial = true;
       }
@@ -121,19 +128,22 @@ export async function GET(req: NextRequest) {
       estrelasDistribuidas: number | null;
       pedidosComEstrelasRegistradas: number | null;
     } = { ...metricas, estrelasDistribuidas: null, pedidosComEstrelasRegistradas: null };
-    try {
-      const estrelas = await consultarEstrelasCreditadasPorPedidos(
-        eventos.flatMap((evento) => evento.statusAnalitico === "entregue" && evento.clienteId
-          ? [{ clienteId: evento.clienteId, pedidoId: evento.pedidoId }]
-          : []),
-      );
-      metricasComEstrelas = {
-        ...metricas,
-        estrelasDistribuidas: estrelas.estrelas,
-        pedidosComEstrelasRegistradas: estrelas.pedidosComCredito,
-      };
-    } catch {
-      // Se a leitura do extrato falhar, não transforme falta de acesso em zero.
+    const pedidosParaExtrato = eventos.flatMap((evento) => evento.statusAnalitico === "entregue" && evento.clienteId
+      ? [{ clienteId: evento.clienteId, pedidoId: evento.pedidoId }]
+      : []);
+    // O extrato guarda o histórico inteiro de cada cliente. Em janelas
+    // grandes, não deixe essa leitura pesada bloquear as métricas de pedidos.
+    if (pedidosParaExtrato.length <= 400) {
+      try {
+        const estrelas = await consultarEstrelasCreditadasPorPedidos(pedidosParaExtrato);
+        metricasComEstrelas = {
+          ...metricas,
+          estrelasDistribuidas: estrelas.estrelas,
+          pedidosComEstrelasRegistradas: estrelas.pedidosComCredito,
+        };
+      } catch {
+        // Se a leitura do extrato falhar, não transforme falta de acesso em zero.
+      }
     }
 
     const baseCobertura = periodo === "historico"
