@@ -204,6 +204,24 @@ describe("GET /api/admin/analytics/pedidos", () => {
     expect(texto).not.toContain("endereco");
   });
 
+  it("não bloqueia janelas grandes lendo extratos completos de centenas de clientes", async () => {
+    const eventos = Array.from({ length: 401 }, (_, indice) => ({
+      ...eventoBase,
+      pedidoId: `p-${indice}`,
+      clienteId: `c-${indice}`,
+    }));
+    mocks.consultarEventosAnaliticosComFallback.mockResolvedValue({
+      eventos,
+      fallbackTodos: [],
+      fonte: { indiceDisponivel: true, fallbackPedidosDisponivel: false, eventosIndice: eventos.length, eventosFallbackAdicionados: 0, origem: "analytics" },
+    });
+
+    const body = await (await GET(makeReq({ periodo: "30" }))).json();
+    expect(body.metricas.pedidosValidos).toBe(401);
+    expect(body.metricas.estrelasDistribuidas).toBeNull();
+    expect(mocks.consultarEstrelasCreditadasPorPedidos).not.toHaveBeenCalled();
+  });
+
   it("rejeita período inválido", async () => {
     const res = await GET(makeReq({ periodo: "45" }));
     expect(res.status).toBe(400);

@@ -130,19 +130,25 @@ export async function GET(req: NextRequest) {
       estrelasDistribuidas: number | null;
       pedidosComEstrelasRegistradas: number | null;
     } = { ...metricas, estrelasDistribuidas: null, pedidosComEstrelasRegistradas: null };
-    try {
-      const estrelas = await consultarEstrelasCreditadasPorPedidos(
-        eventos.flatMap((evento) => evento.statusAnalitico === "entregue" && evento.clienteId
-          ? [{ clienteId: evento.clienteId, pedidoId: evento.pedidoId }]
-          : []),
-      );
-      metricasComEstrelas = {
-        ...metricas,
-        estrelasDistribuidas: estrelas.estrelas,
-        pedidosComEstrelasRegistradas: estrelas.pedidosComCredito,
-      };
-    } catch {
-      // Se a leitura do extrato falhar, não transforme falta de acesso em zero.
+    const pedidosParaExtrato = eventos.flatMap((evento) => evento.statusAnalitico === "entregue" && evento.clienteId
+      ? [{ clienteId: evento.clienteId, pedidoId: evento.pedidoId }]
+      : []);
+    // O extrato de fidelidade guarda o histórico inteiro de cada cliente. Em
+    // janelas grandes, ler centenas de extratos completos deixa a tela lenta
+    // e aumenta o consumo do Redis. As métricas de pedidos continuam exatas;
+    // neste caso específico deixamos Estrelas como indisponível, em vez de
+    // bloquear o Analytics ou transformar uma falha de leitura em zero.
+    if (pedidosParaExtrato.length <= 400) {
+      try {
+        const estrelas = await consultarEstrelasCreditadasPorPedidos(pedidosParaExtrato);
+        metricasComEstrelas = {
+          ...metricas,
+          estrelasDistribuidas: estrelas.estrelas,
+          pedidosComEstrelasRegistradas: estrelas.pedidosComCredito,
+        };
+      } catch {
+        // Se a leitura do extrato falhar, não transforme falta de acesso em zero.
+      }
     }
 
     const baseCobertura = periodo === "historico"
