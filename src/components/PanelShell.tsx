@@ -39,6 +39,7 @@ export default function PanelShell({
   const onRelatorios = pathname.startsWith("/relatorios")
   const onFidelidade = pathname.startsWith("/admin/fidelidade")
   const onRadarVendas = pathname.startsWith("/admin/radar-vendas")
+  const onCustosProdutos = pathname.startsWith("/admin/custos-produtos")
   const onSalaoAcesso = pathname.startsWith("/admin/salao")
 
   const convBadgeColor = conversasUrgent ? "var(--danger)" : "var(--primary)"
@@ -165,6 +166,10 @@ export default function PanelShell({
             <button className={`ps-sidebar-btn${onRadarVendas ? " ps-active" : ""}`} onClick={() => router.push("/admin/radar-vendas")}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="2.2"/><path d="M12 12l5-3" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg>
               Radar de Vendas
+            </button>
+            <button className={`ps-sidebar-btn${onCustosProdutos ? " ps-active" : ""}`} onClick={() => router.push("/admin/custos-produtos")}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><circle cx="18" cy="17" r="2" stroke="currentColor" strokeWidth="2"/></svg>
+              Custos dos produtos
             </button>
           </>
         )}

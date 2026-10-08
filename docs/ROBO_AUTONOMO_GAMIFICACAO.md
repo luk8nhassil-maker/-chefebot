@@ -72,3 +72,20 @@ O motor de decisão, a trilha de progresso e o executor já estão separados do
 painel e são testáveis sem usar produção. A rotina diária só executa quando os
 portões de economia e capacidade estiverem completos; caso contrário, grava a
 decisão em observação. Nenhum deploy é feito por esta alteração.
+
+## Custos dos produtos e modo seguro
+
+O cadastro de custos fica separado do histórico de pedidos. Um ingrediente é
+salvo uma vez; cada receita só aponta para ele. O robô calcula o custo direto,
+embalagem, taxa e sobra estimada sem copiar esse cálculo para cada pedido.
+
+Enquanto não houver custo completo, o sistema fica em **modo vendas**: mede
+vendas e ticket, mas não promete lucro nem libera promoção baseada em margem.
+Quando os produtos elegíveis tiverem custo completo e cobrirem pelo menos 90%
+das vendas identificadas, muda sozinho para **margem ativa**. Se faltar dado,
+volta para modo seguro.
+
+A cobertura usa somente pedidos entregues com ID estruturado do produto. Itens
+antigos sem esse ID não são forçados para nenhum produto; isso evita uma conta
+bonita, porém errada. A tela de custos é só a etapa inicial para informar os
+preços reais; depois disso a leitura e a decisão são automáticas.
