@@ -57,6 +57,13 @@ type RankingStatus = {
   nota: string
 }
 
+type AuditoriaGrupo5Mais = {
+  totalClientesGrupo: number
+  totalNoTop10: number
+  posicoes: number[]
+  posicoesForaDoTop10: number[]
+}
+
 type MissoesStatus = {
   configuradas: boolean
   nota: string
@@ -183,6 +190,9 @@ export default function FidelidadePage() {
   const [resultadoTemporada, setResultadoTemporada] = useState<ResultadoTemporada | null>(null)
   const [carregandoResultado, setCarregandoResultado] = useState(false)
   const [erroResultado, setErroResultado] = useState<string | null>(null)
+  const [auditoriaGrupo5Mais, setAuditoriaGrupo5Mais] = useState<AuditoriaGrupo5Mais | null>(null)
+  const [carregandoAuditoriaGrupo5Mais, setCarregandoAuditoriaGrupo5Mais] = useState(false)
+  const [erroAuditoriaGrupo5Mais, setErroAuditoriaGrupo5Mais] = useState<string | null>(null)
 
   async function carregarStatus() {
     setLoadingStatus(true)
@@ -214,6 +224,22 @@ export default function FidelidadePage() {
     } finally {
       window.clearTimeout(timeout)
       setAnalyticsCarregado(true)
+    }
+  }
+
+  async function consultarAuditoriaGrupo5Mais() {
+    setCarregandoAuditoriaGrupo5Mais(true)
+    setErroAuditoriaGrupo5Mais(null)
+    try {
+      const r = await fetch('/api/admin/fidelidade/auditoria/grupo-5mais-top10', { cache: 'no-store' })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const data = await r.json() as AuditoriaGrupo5Mais & { ok?: boolean }
+      if (!data.ok) throw new Error('auditoria_indisponivel')
+      setAuditoriaGrupo5Mais(data)
+    } catch {
+      setErroAuditoriaGrupo5Mais('Não foi possível consultar esse grupo agora.')
+    } finally {
+      setCarregandoAuditoriaGrupo5Mais(false)
     }
   }
 
@@ -692,6 +718,23 @@ export default function FidelidadePage() {
                     ))}
                     <div style={{ marginTop: 8, fontSize: 11, color: 'var(--foreground-muted)' }}>
                       {status.ranking.nota}
+                    </div>
+                    <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                      <button
+                        type="button"
+                        onClick={consultarAuditoriaGrupo5Mais}
+                        disabled={carregandoAuditoriaGrupo5Mais}
+                        style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', fontWeight: 700, cursor: carregandoAuditoriaGrupo5Mais ? 'wait' : 'pointer' }}
+                      >
+                        {carregandoAuditoriaGrupo5Mais ? 'Conferindo…' : 'Conferir clientes com 5+ pedidos'}
+                      </button>
+                      {erroAuditoriaGrupo5Mais && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--danger, #b42318)' }}>{erroAuditoriaGrupo5Mais}</div>}
+                      {auditoriaGrupo5Mais && (
+                        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--foreground-secondary)', lineHeight: 1.6 }}>
+                          <div><strong>{auditoriaGrupo5Mais.totalNoTop10}</strong> de <strong>{auditoriaGrupo5Mais.totalClientesGrupo}</strong> estão no Top 10.</div>
+                          <div>Posições encontradas: {auditoriaGrupo5Mais.posicoes.length > 0 ? auditoriaGrupo5Mais.posicoes.map((posicao) => `#${posicao}`).join(', ') : 'nenhuma'}.</div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
