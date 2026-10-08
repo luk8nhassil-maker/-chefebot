@@ -10,6 +10,11 @@ on:
       - "src/lib/auth.test.ts"
       - "src/app/login/**"
       - "src/app/api/auth/**"
+      - "src/app/api/bot-status/route.ts"
+      - "src/app/api/bot-status/route.test.ts"
+      - "src/app/pedidos/page.tsx"
+      - "src/app/pedidos/page.test.ts"
+      - "src/app/api/pedido-app/route.test.ts"
       - ".github/workflows/admin-auth-ci.yml"
   workflow_dispatch:
 
@@ -46,6 +51,9 @@ jobs:
           src/lib/auth.test.ts
           src/proxy.legacy-login.test.ts
           middleware.assinatura-alias.test.ts
+          src/app/api/bot-status/route.test.ts
+          src/app/pedidos/page.test.ts
+          src/app/api/pedido-app/route.test.ts
 
       - name: Lint do patch de autenticação
         run: >-
@@ -55,6 +63,11 @@ jobs:
           src/proxy.ts
           src/proxy.legacy-login.test.ts
           middleware.assinatura-alias.test.ts
+          src/app/api/bot-status/route.ts
+          src/app/api/bot-status/route.test.ts
+          src/app/pedidos/page.tsx
+          src/app/pedidos/page.test.ts
+          src/app/api/pedido-app/route.test.ts
 
       - name: Typecheck
         run: npx tsc --noEmit
