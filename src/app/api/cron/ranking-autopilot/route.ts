@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { VERCEL_PROJECT_CHEFEBOT_OFICIAL } from '@/lib/vercelProjeto'
 import { consultarSimulacaoAutopilot } from '@/lib/rankingAutopilotReadModel.server'
 import { salvarEstadoAutopilot } from '@/lib/rankingAutopilotEstado.server'
+import { criarComandoAutopilot } from '@/lib/rankingAutopilotControle'
+import { aplicarComandoAutopilot, reverterAplicacaoAutopilot, type ResultadoExecucaoAutopilot } from '@/lib/rankingAutopilotExecucao.server'
 
 export const maxDuration = 30
 
@@ -24,21 +26,40 @@ export async function GET(req: Request) {
   try {
     const tenantId = 'default'
     const simulacao = await consultarSimulacaoAutopilot(tenantId)
+    const comando = criarComandoAutopilot(simulacao.plano)
+    let execucao: ResultadoExecucaoAutopilot
+    if (comando) {
+      execucao = await aplicarComandoAutopilot(tenantId, comando)
+    } else if (
+      simulacao.decisao.missao === 'nenhuma'
+      && simulacao.sinaisControle.fonteConfiavel
+      && simulacao.plano.percentual >= 60
+    ) {
+      // Só revoga o que o próprio robô deixou ativo e quando há dados
+      // suficientes para concluir que a ação não faz mais sentido.
+      execucao = await reverterAplicacaoAutopilot(tenantId)
+    } else {
+      execucao = { executado: false, status: 'sem_comando', motivo: simulacao.plano.motivo }
+    }
     const salvoEm = new Date().toISOString()
     const persistencia = await salvarEstadoAutopilot({
       tenantId,
       salvoEm,
-      modoExecucao: 'observacao',
-      executado: false,
+      modoExecucao: execucao.executado ? 'autonomo' : 'observacao',
+      executado: execucao.executado,
       decisao: simulacao.decisao,
+      plano: simulacao.plano,
+      execucao,
       janelaAtual: simulacao.janelaAtual,
       janelaAnterior: simulacao.janelaAnterior,
     })
     return NextResponse.json({
       ok: true,
-      modo: 'observacao',
-      executado: false,
+      modo: execucao.executado ? 'autonomo' : 'observacao',
+      executado: execucao.executado,
       decisao: simulacao.decisao,
+      plano: simulacao.plano,
+      execucao,
       persistencia,
     })
   } catch (erro) {

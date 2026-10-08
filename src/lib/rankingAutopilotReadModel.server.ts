@@ -7,6 +7,8 @@ import {
 } from './historicoAnalitico'
 import { consultarEventosAnaliticosComFallback, type FonteEventosAnalytics } from './analyticsPedidosReadModel.server'
 import { simularDecisaoAutopilot, type DecisaoAutopilot, type EntradaAutopilot } from './rankingAutopilot'
+import { montarPlanoAutopilot, type PlanoAutopilot, type SinaisControleAutopilot } from './rankingAutopilotControle'
+import { obterTemporadaAtiva } from './temporadas'
 
 const MS_DIA = 24 * 60 * 60 * 1000
 const JANELA_DIAS = 30
@@ -22,6 +24,9 @@ type CoberturaAutopilot = {
 export type ResultadoSimulacaoAutopilot = {
   entrada: EntradaAutopilot
   decisao: DecisaoAutopilot
+  plano: PlanoAutopilot
+  sinaisControle: SinaisControleAutopilot
+  temporadaAtiva: boolean
   fonte: FonteEventosAnalytics
   janelaAtual: { inicioMs: number; fimMs: number }
   janelaAnterior: { inicioMs: number; fimMs: number }
@@ -98,13 +103,19 @@ export async function consultarSimulacaoAutopilot(
   const fimAtual = agora
   const inicioAnterior = inicioAtual - JANELA_DIAS * MS_DIA
   const fimAnterior = inicioAtual - 1
-  const leitura = await consultarEventosAnaliticosComFallback(
-    tenantId,
-    inicioAnterior,
-    fimAtual,
-    agora,
-    { incluirIndiceCompleto: true },
-  )
+  // Uma leitura da temporada acompanha a leitura analítica. O robô não pode
+  // liberar uma missão fora de uma temporada ativa, mas também não precisa
+  // consultar o banco em cada pedido: isso acontece só na simulação/cron.
+  const [leitura, temporada] = await Promise.all([
+    consultarEventosAnaliticosComFallback(
+      tenantId,
+      inicioAnterior,
+      fimAtual,
+      agora,
+      { incluirIndiceCompleto: true },
+    ),
+    obterTemporadaAtiva(tenantId),
+  ])
 
   const eventosAtual = leitura.eventos.filter((evento) => evento.criadoEmMs >= inicioAtual && evento.criadoEmMs <= fimAtual)
   const eventosAnterior = leitura.eventos.filter((evento) => evento.criadoEmMs >= inicioAnterior && evento.criadoEmMs <= fimAnterior)
@@ -121,10 +132,26 @@ export async function consultarSimulacaoAutopilot(
     dadosConfiaveis: leitura.fonte.indiceDisponivel && eventosAtual.length > 0 && eventosAnterior.length > 0,
   }
   const entrada = montarEntradaAutopilot(metricasAtual, metricasAnterior, cobertura)
+  const decisao = simularDecisaoAutopilot(entrada)
+  const sinaisControle: SinaisControleAutopilot = {
+    fonteConfiavel: cobertura.dadosConfiaveis,
+    temporadaAtiva: temporada !== null,
+    // A fonte atual ainda não informa margem, orçamento e custo da campanha.
+    // False é deliberado: o robô fica impedido de gastar até aprender isso.
+    economiaConhecida: entrada.margemContribuicaoSemanalCents !== undefined
+      && entrada.orcamentoSemanalConfiguradoCents !== undefined,
+    custoConhecido: entrada.custoEstimadoMissaoCents !== undefined,
+    capacidadeConhecida: entrada.capacidadePedidosDia > 0,
+    idempotenciaPronta: true,
+    top10Completo: entrada.temporadaComTop10Completo === true,
+  }
 
   return {
     entrada,
-    decisao: simularDecisaoAutopilot(entrada),
+    decisao,
+    plano: montarPlanoAutopilot(entrada, decisao, sinaisControle),
+    sinaisControle,
+    temporadaAtiva: temporada !== null,
     fonte: leitura.fonte,
     janelaAtual: { inicioMs: inicioAtual, fimMs: fimAtual },
     janelaAnterior: { inicioMs: inicioAnterior, fimMs: fimAnterior },
