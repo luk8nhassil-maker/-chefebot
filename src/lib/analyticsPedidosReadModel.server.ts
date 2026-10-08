@@ -121,7 +121,55 @@ export async function consultarEventosAnaliticosComFallback(
   inicioMs: number,
   fimMs: number,
   agora = Date.now(),
+  opcoes: { incluirIndiceCompleto?: boolean } = {},
 ): Promise<{ eventos: EventoAnaliticoLeitura[]; fallbackTodos: EventoAnaliticoLeitura[]; fonte: FonteEventosAnalytics }> {
+  // O modo histórico precisa consultar as duas fontes: o índice permanente
+  // começou a ser gravado em 19/09, enquanto a lista operacional pode conter
+  // somente a janela mais recente de pedidos. Os períodos curtos permanecem
+  // no caminho rápido abaixo para não aumentar o consumo normal do Redis.
+  if (opcoes.incluirIndiceCompleto) {
+    const [indice, fallback] = await Promise.allSettled([
+      consultarEventosPorPeriodo(tenantId, inicioMs, fimMs),
+      lerEventosFallbackPedidos(tenantId, agora),
+    ]);
+
+    if (indice.status === "rejected" && fallback.status === "rejected") {
+      throw new Error("analytics_sources_unavailable");
+    }
+
+    const eventosIndice = indice.status === "fulfilled" ? indice.value : [];
+    const fallbackTodos = fallback.status === "fulfilled" ? fallback.value : [];
+    const fallbackPeriodo = fallbackTodos.filter(
+      (ev) => ev.criadoEmMs >= inicioMs && ev.criadoEmMs <= fimMs,
+    );
+
+    // O evento permanente é a fonte mais rica (regra/estrelas/canal). O
+    // pedido operacional só completa o que ainda não estiver no índice.
+    const porPedido = new Map<string, EventoAnaliticoLeitura>();
+    for (const ev of fallbackPeriodo) porPedido.set(ev.pedidoId, ev);
+    const idsIndice = new Set(eventosIndice.map((ev) => ev.pedidoId));
+    for (const ev of eventosIndice) porPedido.set(ev.pedidoId, ev);
+
+    const extrasFallback = fallbackPeriodo.filter((ev) => !idsIndice.has(ev.pedidoId)).length;
+    const origem: FonteEventosAnalytics["origem"] = extrasFallback > 0
+      ? (eventosIndice.length > 0 ? "analytics+pedidos" : "pedidos")
+      : eventosIndice.length > 0
+        ? "analytics"
+        : "pedidos";
+
+    return {
+      eventos: [...porPedido.values()],
+      fallbackTodos,
+      fonte: {
+        indiceDisponivel: indice.status === "fulfilled",
+        fallbackPedidosDisponivel: fallback.status === "fulfilled",
+        eventosIndice: eventosIndice.length,
+        eventosFallbackAdicionados: extrasFallback,
+        origem,
+      },
+    };
+  }
+
   // Caminho quente do painel: a chave `pedidos` já contém a fonte oficial da
   // operação e é lida em uma única chamada. Não espere o índice analítico
   // evento-a-evento quando essa fonte estiver disponível, porque isso transforma
