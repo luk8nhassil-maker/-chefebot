@@ -148,6 +148,27 @@ describe("GET /api/admin/analytics/pedidos", () => {
     expect(body.metricas.pedidosValidos).toBe(2);
   });
 
+  it("usa o índice permanente na mensagem de cobertura quando o fallback está fora da janela", async () => {
+    const agora = Date.now();
+    const eventoNaJanela = { ...eventoBase, pedidoId: "p-indice", criadoEmMs: agora - 2 * 86400000 };
+    const eventoForaDaJanela = { ...eventoBase, pedidoId: "p-fallback", criadoEmMs: agora - 40 * 86400000 };
+    mocks.consultarEventosAnaliticosComFallback.mockResolvedValue({
+      eventos: [eventoNaJanela],
+      fallbackTodos: [eventoForaDaJanela],
+      fonte: {
+        indiceDisponivel: true,
+        fallbackPedidosDisponivel: true,
+        eventosIndice: 1,
+        eventosFallbackAdicionados: 0,
+        origem: "analytics",
+      },
+    });
+
+    const body = await (await GET(makeReq({ periodo: "30" }))).json();
+    expect(body.cobertura.historicoEncontradoDesdeIso).toBe(new Date(eventoNaJanela.criadoEmMs).toISOString());
+    expect(body.cobertura.diasHistoricoEncontrado).toBeGreaterThan(0);
+  });
+
   it("ancora os filtros no início civil da campanha e limita ao dia atual", async () => {
     mocks.obterTemporadaAtiva.mockResolvedValue({
       temporadaId: "t-campanha",
