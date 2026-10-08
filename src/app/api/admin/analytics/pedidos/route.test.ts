@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   consultarEventosAnaliticosComFallback: vi.fn(),
   consultarClientesComHistoricoAnterior: vi.fn(),
   consultarEstrelasCreditadasPorPedidos: vi.fn(),
+  obterTemporadaAtiva: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({ verifyToken: mocks.verifyToken }));
@@ -23,6 +24,7 @@ vi.mock("@/lib/fidelidade", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/fidelidade")>();
   return { ...original, consultarEstrelasCreditadasPorPedidos: mocks.consultarEstrelasCreditadasPorPedidos };
 });
+vi.mock("@/lib/temporadas", () => ({ obterTemporadaAtiva: mocks.obterTemporadaAtiva }));
 
 import { GET } from "./route";
 
@@ -62,6 +64,7 @@ beforeEach(() => {
   });
   mocks.consultarClientesComHistoricoAnterior.mockResolvedValue(new Set());
   mocks.consultarEstrelasCreditadasPorPedidos.mockResolvedValue({ estrelas: 0, pedidosComCredito: 0 });
+  mocks.obterTemporadaAtiva.mockResolvedValue(null);
 });
 
 describe("GET /api/admin/analytics/pedidos", () => {
@@ -140,6 +143,28 @@ describe("GET /api/admin/analytics/pedidos", () => {
     expect(body.cobertura.diasHistoricoEncontrado).toBeLessThan(30);
     expect(body.cobertura.possuiDadosAntesDaJanela).toBe(false);
     expect(body.metricas.pedidosValidos).toBe(2);
+  });
+
+  it("ancora os filtros no início civil da campanha e limita ao dia atual", async () => {
+    mocks.obterTemporadaAtiva.mockResolvedValue({
+      temporadaId: "t-campanha",
+      tenantId: "default",
+      estado: "ativa",
+      ativadaEm: "2026-09-19T18:00:00.000Z",
+      duracaoDias: 30,
+    });
+    const agora = new Date("2026-09-25T15:00:00.000Z").getTime();
+    vi.setSystemTime(agora);
+
+    const res = await GET(makeReq({ periodo: "30" }));
+    const body = await res.json();
+    expect(body.inicioIso).toBe("2026-09-19T03:00:00.000Z");
+    expect(body.fimIso).toBe(new Date(agora).toISOString());
+    expect(body.cobertura.ancoradaNoInicioCampanha).toBe(true);
+    expect(body.cobertura.diasCorridosDisponiveis).toBe(7);
+    expect(mocks.consultarEventosAnaliticosComFallback.mock.calls[0][1]).toBe(new Date("2026-09-19T03:00:00.000Z").getTime());
+    expect(mocks.consultarEventosAnaliticosComFallback.mock.calls[0][4]).toEqual({ incluirIndiceCompleto: true });
+    vi.useRealTimers();
   });
 
   it("consulta histórico anterior somente dos clientes atuais", async () => {
