@@ -97,6 +97,7 @@ export const TENANT_PADRAO_ANALYTICS = "default";
 // ── Typed Redis cast (Upstash SDK supports these ops natively) ───────────────
 
 type RedisAnalitico = typeof redis & {
+  mget: <T>(...keys: string[]) => Promise<Array<T | null>>;
   zadd: (
     key: string,
     opts: { score: number; member: string } | Array<{ score: number; member: string }>
@@ -247,12 +248,16 @@ async function lerTodosEventosDaChave(
 
     if (pagina.length === 0) break;
 
-    // Fetch this page's events in parallel batches
+    // Fetch this page's events in batches. MGET keeps the complete-history
+    // view from turning into one network request per order. The fallback is
+    // kept for the small in-memory test client and older compatible clients.
     for (let i = 0; i < pagina.length; i += BATCH_GET) {
       const slice = pagina.slice(i, i + BATCH_GET);
-      const resultados = await Promise.all(
-        slice.map((id) => redis.get<EventoAnalitico>(chaveEvento(tenantId, id)))
-      );
+      const chaves = slice.map((id) => chaveEvento(tenantId, id));
+      const mget = (aredis as Partial<RedisAnalitico>).mget;
+      const resultados = typeof mget === "function"
+        ? await mget<EventoAnalitico>(...chaves)
+        : await Promise.all(chaves.map((chave) => redis.get<EventoAnalitico>(chave)));
       for (const ev of resultados) {
         if (ev !== null) todos.push(ev);
       }
