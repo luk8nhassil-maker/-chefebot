@@ -275,3 +275,16 @@ describe("/pedidos — comanda do Salão como uma unidade operacional visual", (
     expect(fonte).toContain("{timerMins}m")
   })
 })
+
+
+describe("/pedidos — pausa do bot exige ação explícita", () => {
+  test("parâmetro de URL não pode mais pausar o bot automaticamente", () => {
+    expect(fonte).not.toContain('params.get("acao")');
+    expect(fonte).not.toContain('acaoParam === "pausar"');
+  });
+
+  test("botão manual continua enviando a mudança e identifica a origem", () => {
+    expect(fonte).toContain('source: "painel_toggle"');
+    expect(fonte).toContain('const novo = !botAtivo');
+  });
+});

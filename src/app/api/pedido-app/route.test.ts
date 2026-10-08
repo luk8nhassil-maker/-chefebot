@@ -1382,6 +1382,43 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
     // clientRequestIds diferentes NUNCA recebem o mesmo pedidoId, e cada um
     // continua endereçável e recuperável (retry) pelo seu próprio id — nunca
     // pelo do outro.
+    it("dois clientes finalizando AO MESMO TEMPO no mesmo milissegundo persistem os dois pedidos sem sobrescrita", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(1732000000456);
+
+      try {
+        const payloadA = {
+          ...basePayload,
+          cliente: "Cliente Concorrente A",
+          telefone: "(99) 99999-1111",
+          clientRequestId: "concorrencia-dois-clientes-A",
+        };
+        const payloadB = {
+          ...basePayload,
+          cliente: "Cliente Concorrente B",
+          telefone: "(99) 99999-2222",
+          clientRequestId: "concorrencia-dois-clientes-B",
+        };
+
+        const [resA, resB] = await Promise.all([POST(postReq(payloadA)), POST(postReq(payloadB))]);
+
+        expect(resA.status).toBe(200);
+        expect(resB.status).toBe(200);
+        const bodyA = await resA.json();
+        const bodyB = await resB.json();
+
+        expect(bodyA.pedidoId).not.toBe(bodyB.pedidoId);
+        const pedidos = store.get("pedidos") as Array<{ id: string; cliente: string }>;
+        expect(pedidos).toHaveLength(2);
+        expect(new Set(pedidos.map((p) => p.id)).size).toBe(2);
+        expect(new Set(pedidos.map((p) => p.cliente))).toEqual(
+          new Set(["Cliente Concorrente A", "Cliente Concorrente B"])
+        );
+      } finally {
+        dateNowSpy.mockRestore();
+      }
+    });
+
     it("dois pedidos criados no MESMO milissegundo (clientRequestIds diferentes) recebem ids DIFERENTES; cada um permanece endereçável só pelo próprio id", async () => {
       vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
 
