@@ -41,7 +41,7 @@ describe("pixGuardiaoScheduler", () => {
     redisMock.del.mockClear();
     vi.resetModules();
     delete process.env.QSTASH_TOKEN;
-    delete process.env.VERCEL_URL;
+    process.env.VERCEL_URL = "chefebot-contingencia-test.vercel.app";
     delete process.env.PIX_GUARDIAO_QSTASH_CALLBACK_URL;
     delete process.env.PIX_GUARDIAO_QSTASH_FLOW_CONTROL_PARALLELISM;
   });
@@ -70,11 +70,20 @@ describe("pixGuardiaoScheduler", () => {
     expect(chamada.delay).toBe(5);
     expect(chamada.deduplicationId).toBe("pix-guardiao-pedido-1-g1-1");
     expect(chamada.deduplicationId).not.toContain(":");
-    expect(chamada.url).toBe("https://chefebot-pjif.vercel.app/api/interno/pix-guardiao/verificar");
+    expect(chamada.url).toBe("https://chefebot-contingencia-test.vercel.app/api/interno/pix-guardiao/verificar");
 
     // Segunda chamada para o mesmo pedido: lock NX ja adquirido -> no-op.
     await mod.iniciarCadeiaGuardiaoPix("pedido-1");
     expect(publishJSONMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("com QSTASH_TOKEN mas sem VERCEL_URL e sem override, falha fechado e não publica", async () => {
+    process.env.QSTASH_TOKEN = "token-teste";
+    delete process.env.VERCEL_URL;
+    const mod = await import("./pixGuardiaoScheduler");
+    const agendou = await mod.agendarProximaVerificacaoPixGuardiao({ pedidoId: "pedido-sem-url", geracao: 1, tentativa: 1, delayMs: 5_000 });
+    expect(agendou).toBe(false);
+    expect(publishJSONMock).not.toHaveBeenCalled();
   });
 
   test("flowControl é incluído por padrão (parallelism > 0) e pode ser desativado por env var", async () => {

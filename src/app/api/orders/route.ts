@@ -41,7 +41,7 @@ import { chaveExpedienteOperacional, chaveExpedienteDoPedido } from '@/lib/exped
 import { registrarContatoPesquisaConfirmado } from '@/lib/pesquisaPreferenciaContatosRedis'
 import { confirmarConviteRankingWhatsapp, prepararConviteRankingWhatsapp } from '@/lib/rankingConviteWhatsapp'
 
-const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
+const APP_BASE_URL = 'https://chefedapizza.com.br'
 
 type Status = 'novo' | 'em_preparo' | 'saiu_entrega' | 'entregue' | 'cancelado'
 type Pedido = PedidoComEdicao & {

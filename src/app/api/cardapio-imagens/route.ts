@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
 
     await writeFile(path, buffer)
 
-    const baseUrl = process.env.NEXT_PUBLIC_URL ?? 'https://chefebot-pjif.vercel.app'
+    const baseUrl = 'https://chefedapizza.com.br'
     const url = `${baseUrl}/cardapio/${filename}?t=${Date.now()}`
 
     const imagens = await redis.get<ImagensCardapio>('cardapio:imagens') || { ativo: true }

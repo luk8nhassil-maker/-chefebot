@@ -79,7 +79,7 @@ describe("bot global pausado (bot_ativo === false) + sem sessão prévia — pri
     expect(mensagensEnviadasAoCliente()).toHaveLength(1);
     expect(mensagensEnviadasAoCliente()[0]).toContain("Bem-vindo à *Chefe da Pizza*");
     expect(mensagensEnviadasAoCliente()[0]).toContain("cardápio digital");
-    expect(mensagensEnviadasAoCliente()[0]).toContain("https://chefebot-pjif.vercel.app/cardapio");
+    expect(mensagensEnviadasAoCliente()[0]).toContain("https://chefedapizza.com.br/cardapio");
   });
 
   it("dispara mesmo quando a primeira mensagem não é uma saudação (ex.: já pede direto)", async () => {
@@ -119,6 +119,6 @@ describe("bot ligado, cliente novo cumprimenta — mesma copy padrão", () => {
     const textos = mensagensEnviadasAoCliente();
     expect(textos[0]).toContain("Bem-vindo à *Chefe da Pizza*");
     expect(textos[0]).toContain("cardápio digital");
-    expect(textos[0]).toContain("https://chefebot-pjif.vercel.app/cardapio");
+    expect(textos[0]).toContain("https://chefedapizza.com.br/cardapio");
   });
 });

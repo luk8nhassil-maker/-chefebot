@@ -291,7 +291,9 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
 
   // Dispara Web Push para todos os dispositivos inscritos
   try {
-    const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://chefebot-pjif.vercel.app";
+    const vercelUrl = process.env.VERCEL_URL?.trim();
+    if (!vercelUrl) throw new Error("push_base_url_ausente");
+    const baseUrl = `https://${vercelUrl}`;
     const firstName = (session.customerName || phone).split(" ")[0];
     const itensResumo = itens.slice(0, 2).join(", ") + (itens.length > 2 ? "..." : "");
     await fetch(`${baseUrl}/api/push`, {

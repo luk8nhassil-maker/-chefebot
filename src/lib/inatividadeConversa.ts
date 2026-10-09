@@ -63,14 +63,16 @@ function obterClienteQstash(): Client | null {
   return clienteQstash;
 }
 
-function resolveBaseUrl(): string {
-  return process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://chefebot-pjif.vercel.app";
+function resolveBaseUrl(): string | null {
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  return vercelUrl ? `https://${vercelUrl}` : null;
 }
 
-function endpointCancelamentoUrl(): string {
+function endpointCancelamentoUrl(): string | null {
   const override = process.env.CANCELAMENTO_INATIVIDADE_QSTASH_CALLBACK_URL?.trim();
   if (override) return override;
-  return `${resolveBaseUrl()}/api/interno/cancelamento-inatividade`;
+  const baseUrl = resolveBaseUrl();
+  return baseUrl ? `${baseUrl}/api/interno/cancelamento-inatividade` : null;
 }
 
 // QStash rejeita ":" em deduplicationId (mesmo motivo documentado em
@@ -102,10 +104,12 @@ export async function sincronizarCronometroInatividade(phone: string, autor: Aut
 
     const client = obterClienteQstash();
     if (!client) return;
+    const callbackUrl = endpointCancelamentoUrl();
+    if (!callbackUrl) return;
 
     const delaySegundos = Math.max(1, Math.round(CANCELAMENTO_INATIVIDADE_DELAY_MS / 1000));
     await client.publishJSON({
-      url: endpointCancelamentoUrl(),
+      url: callbackUrl,
       body: { phone, geracao },
       delay: delaySegundos,
       deduplicationId: `cancelamento-inatividade-${sanitizarParaDeduplicationId(phone)}-g${geracao}`,

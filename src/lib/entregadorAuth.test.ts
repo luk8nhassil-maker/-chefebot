@@ -74,7 +74,7 @@ describe("ticket opaco do entregador", () => {
   it("gera link com fragmento e nunca coloca o ticket na query string", () => {
     const ticket = "a".repeat(43);
     const link = montarLinkAcessoEntregador(ticket);
-    expect(link).toContain(`/entregador#acesso=${ticket}`);
+    expect(link).toContain(`https://chefedapizza.com.br/entregador#acesso=${ticket}`);
     expect(link).not.toContain("?acesso=");
   });
 });

@@ -44,7 +44,7 @@ beforeEach(() => {
   clientCtorMock.mockClear();
   vi.resetModules();
   delete process.env.QSTASH_TOKEN;
-  delete process.env.VERCEL_URL;
+  process.env.VERCEL_URL = "chefebot-contingencia-test.vercel.app";
   delete process.env.CANCELAMENTO_INATIVIDADE_QSTASH_CALLBACK_URL;
 });
 
@@ -73,7 +73,7 @@ describe("sincronizarCronometroInatividade — geração avança sempre, tick s�
     const chamada = publishJSONMock.mock.calls[0][0];
     expect(chamada.body).toEqual({ phone: PHONE, geracao: 1 });
     expect(chamada.delay).toBe(1200); // 20 min em segundos
-    expect(chamada.url).toBe("https://chefebot-pjif.vercel.app/api/interno/cancelamento-inatividade");
+    expect(chamada.url).toBe("https://chefebot-contingencia-test.vercel.app/api/interno/cancelamento-inatividade");
     expect(chamada.deduplicationId).toBe(`cancelamento-inatividade-${PHONE}-g1`);
     expect(chamada.retries).toBe(2);
   });
@@ -133,6 +133,15 @@ describe("sincronizarCronometroInatividade — geração avança sempre, tick s�
   });
 
   test("sem QSTASH_TOKEN, nunca agenda e nunca lança", async () => {
+    const mod = await import("./inatividadeConversa");
+    store.set(`session:${PHONE}`, { step: "category" });
+    await expect(mod.sincronizarCronometroInatividade(PHONE, "bot")).resolves.toBeUndefined();
+    expect(publishJSONMock).not.toHaveBeenCalled();
+  });
+
+  test("com QSTASH_TOKEN mas sem VERCEL_URL e sem override, falha fechado e não publica", async () => {
+    process.env.QSTASH_TOKEN = "token-teste";
+    delete process.env.VERCEL_URL;
     const mod = await import("./inatividadeConversa");
     store.set(`session:${PHONE}`, { step: "category" });
     await expect(mod.sincronizarCronometroInatividade(PHONE, "bot")).resolves.toBeUndefined();

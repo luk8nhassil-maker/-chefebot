@@ -41,7 +41,7 @@ jobs:
             exit 1
           fi
 
-          URL="${MCP_OBSERVER_URL:-https://chefebot-pjif.vercel.app/api/cron/mcp-observer}"
+          URL="${MCP_OBSERVER_URL:-https://chefedapizza.com.br/api/cron/mcp-observer}"
           STATUS=$(curl -sS -o /tmp/mcp-observer-response.json -w '%{http_code}' \
             --max-time 35 \
             -H "Authorization: Bearer ${CRON_SECRET}" \

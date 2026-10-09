@@ -1880,7 +1880,9 @@ export async function POST(req: NextRequest) {
     // Dispara notificação push para a Kellyne (mesmo canal do WhatsApp).
     // Testes nunca acionam integração externa real.
     if (process.env.NODE_ENV !== "test") try {
-      const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://chefebot-pjif.vercel.app";
+      const vercelUrl = process.env.VERCEL_URL?.trim();
+      if (!vercelUrl) throw new Error("push_base_url_ausente");
+      const baseUrl = `https://${vercelUrl}`;
       const firstName = body.cliente.split(" ")[0];
       const itensResumo = itens.slice(0, 2).join(", ") + (itens.length > 2 ? "..." : "");
       await fetch(`${baseUrl}/api/push`, {

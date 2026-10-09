@@ -1,0 +1,107 @@
+name: legacy-url-isolation-ci
+
+# Gate hermético para impedir que o domínio Vercel legado volte a ser usado
+# por fluxos operacionais. Não recebe secrets e não chama produção.
+on:
+  pull_request:
+    paths:
+      - "src/lib/bot.ts"
+      - "src/lib/bot.cardapio_link.test.ts"
+      - "src/lib/fallbackInteligente.cardapio_link.test.ts"
+      - "src/lib/linkCardapio.gate.test.ts"
+      - "src/lib/cardapioToken.ts"
+      - "src/lib/cardapioToken.test.ts"
+      - "src/lib/entregadorAuth.ts"
+      - "src/lib/entregadorAuth.test.ts"
+      - "src/lib/pixGuardiaoScheduler.ts"
+      - "src/lib/pixGuardiaoScheduler.test.ts"
+      - "src/lib/inatividadeConversa.ts"
+      - "src/lib/inatividadeConversa.test.ts"
+      - "src/app/api/orders/route.ts"
+      - "src/app/api/cardapio-imagens/route.ts"
+      - "src/app/api/whatsapp/route.ts"
+      - "src/app/api/whatsapp/enviarMensagem.test.ts"
+      - "src/app/api/whatsapp/entradasCliente.test.ts"
+      - "src/app/api/whatsapp/saudacaoPadraoBotPausado.test.ts"
+      - "src/app/api/pedido-app/route.ts"
+      - ".github/workflows/mcp-observer-cron.yml"
+      - ".github/workflows/legacy-url-isolation-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: legacy-url-isolation-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout do SHA validado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Bloquear domínio legado em fluxos operacionais
+        shell: bash
+        run: |
+          set -euo pipefail
+          arquivos=(
+            src/lib/bot.ts
+            src/lib/entregadorAuth.ts
+            src/lib/pixGuardiaoScheduler.ts
+            src/lib/inatividadeConversa.ts
+            src/app/api/orders/route.ts
+            src/app/api/cardapio-imagens/route.ts
+            src/app/api/whatsapp/route.ts
+            src/app/api/pedido-app/route.ts
+            .github/workflows/mcp-observer-cron.yml
+          )
+          if grep -nH "chefebot-pjif\.vercel\.app" "${arquivos[@]}"; then
+            echo "Domínio legado encontrado em fluxo operacional."
+            exit 1
+          fi
+
+      - name: Testes focados
+        run: >-
+          npm test --
+          src/lib/cardapioToken.test.ts
+          src/lib/entregadorAuth.test.ts
+          src/lib/pixGuardiaoScheduler.test.ts
+          src/lib/inatividadeConversa.test.ts
+          src/app/api/whatsapp/enviarMensagem.test.ts
+          src/lib/bot.cardapio_link.test.ts
+          src/lib/fallbackInteligente.cardapio_link.test.ts
+          src/lib/linkCardapio.gate.test.ts
+          src/app/api/whatsapp/entradasCliente.test.ts
+          src/app/api/whatsapp/saudacaoPadraoBotPausado.test.ts
+
+      - name: Lint dos arquivos alterados
+        run: >-
+          npm run lint --
+          src/lib/bot.ts
+          src/lib/cardapioToken.ts
+          src/lib/cardapioToken.test.ts
+          src/lib/entregadorAuth.ts
+          src/lib/entregadorAuth.test.ts
+          src/lib/pixGuardiaoScheduler.ts
+          src/lib/pixGuardiaoScheduler.test.ts
+          src/lib/inatividadeConversa.ts
+          src/lib/inatividadeConversa.test.ts
+          src/app/api/orders/route.ts
+          src/app/api/cardapio-imagens/route.ts
+          src/app/api/whatsapp/route.ts
+          src/app/api/whatsapp/enviarMensagem.test.ts
+          src/lib/bot.cardapio_link.test.ts
+          src/lib/fallbackInteligente.cardapio_link.test.ts
+          src/lib/linkCardapio.gate.test.ts
+          src/app/api/whatsapp/entradasCliente.test.ts
+          src/app/api/whatsapp/saudacaoPadraoBotPausado.test.ts
+          src/app/api/pedido-app/route.ts
