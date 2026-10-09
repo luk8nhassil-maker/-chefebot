@@ -7,7 +7,7 @@ import type { EntregadorCadastro } from "@/types/entregador";
 export const ENTREGADOR_COOKIE = "entregador-token";
 export const ENTREGADOR_TICKET_TTL_SEGUNDOS = 24 * 60 * 60;
 export const ENTREGADOR_SESSAO_TTL_SEGUNDOS = 7 * 24 * 60 * 60;
-export const ENTREGADOR_APP_BASE_URL = "https://chefebot-pjif.vercel.app";
+export const ENTREGADOR_APP_BASE_URL = "https://chefedapizza.com.br";
 
 const ENTREGADOR_ISSUER = "chefebot:entregador-auth";
 const ENTREGADOR_AUDIENCE = "chefebot:area-entregador";
