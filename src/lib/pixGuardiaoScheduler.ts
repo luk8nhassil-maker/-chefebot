@@ -62,14 +62,16 @@ export function gerarDeduplicationIdGuardiaoPix(pedidoId: string, geracao: numbe
 
 let avisoSemTokenEmitido = false;
 
-function resolveBaseUrl(): string {
-  return process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://chefebot-pjif.vercel.app";
+function resolveBaseUrl(): string | null {
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  return vercelUrl ? `https://${vercelUrl}` : null;
 }
 
-function endpointVerificacaoUrl(): string {
+function endpointVerificacaoUrl(): string | null {
   const override = process.env.PIX_GUARDIAO_QSTASH_CALLBACK_URL?.trim();
   if (override) return override;
-  return `${resolveBaseUrl()}/api/interno/pix-guardiao/verificar`;
+  const baseUrl = resolveBaseUrl();
+  return baseUrl ? `${baseUrl}/api/interno/pix-guardiao/verificar` : null;
 }
 
 let clienteQstash: Client | null | undefined;
@@ -104,12 +106,14 @@ export type AgendarTickInput = {
 export async function agendarProximaVerificacaoPixGuardiao(input: AgendarTickInput): Promise<boolean> {
   const client = obterClienteQstash();
   if (!client) return false;
+  const callbackUrl = endpointVerificacaoUrl();
+  if (!callbackUrl) return false;
   if (input.tentativa > QSTASH_MAX_TENTATIVAS_CADEIA) return false;
 
   const delaySegundos = Math.max(1, Math.round(input.delayMs / 1000));
   try {
     await client.publishJSON({
-      url: endpointVerificacaoUrl(),
+      url: callbackUrl,
       body: { pedidoId: input.pedidoId, geracao: input.geracao, tentativa: input.tentativa },
       delay: delaySegundos,
       deduplicationId: gerarDeduplicationIdGuardiaoPix(input.pedidoId, input.geracao, input.tentativa),
