@@ -17,6 +17,7 @@ on:
       - "src/app/api/orders/route.ts"
       - "src/app/api/cardapio-imagens/route.ts"
       - "src/app/api/whatsapp/route.ts"
+      - "src/app/api/whatsapp/enviarMensagem.test.ts"
       - "src/app/api/pedido-app/route.ts"
       - ".github/workflows/mcp-observer-cron.yml"
       - ".github/workflows/legacy-url-isolation-ci.yml"
@@ -55,6 +56,7 @@ jobs:
             src/app/api/orders/route.ts
             src/app/api/cardapio-imagens/route.ts
             src/app/api/whatsapp/route.ts
+          src/app/api/whatsapp/enviarMensagem.test.ts
             src/app/api/pedido-app/route.ts
             .github/workflows/mcp-observer-cron.yml
           )
@@ -70,6 +72,7 @@ jobs:
           src/lib/entregadorAuth.test.ts
           src/lib/pixGuardiaoScheduler.test.ts
           src/lib/inatividadeConversa.test.ts
+          src/app/api/whatsapp/enviarMensagem.test.ts
 
       - name: Lint dos arquivos alterados
         run: >-
