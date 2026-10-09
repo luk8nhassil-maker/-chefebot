@@ -56,7 +56,6 @@ jobs:
             src/app/api/orders/route.ts
             src/app/api/cardapio-imagens/route.ts
             src/app/api/whatsapp/route.ts
-          src/app/api/whatsapp/enviarMensagem.test.ts
             src/app/api/pedido-app/route.ts
             .github/workflows/mcp-observer-cron.yml
           )
@@ -89,4 +88,5 @@ jobs:
           src/app/api/orders/route.ts
           src/app/api/cardapio-imagens/route.ts
           src/app/api/whatsapp/route.ts
+          src/app/api/whatsapp/enviarMensagem.test.ts
           src/app/api/pedido-app/route.ts
