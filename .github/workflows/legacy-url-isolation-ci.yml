@@ -6,6 +6,9 @@ on:
   pull_request:
     paths:
       - "src/lib/bot.ts"
+      - "src/lib/bot.cardapio_link.test.ts"
+      - "src/lib/fallbackInteligente.cardapio_link.test.ts"
+      - "src/lib/linkCardapio.gate.test.ts"
       - "src/lib/cardapioToken.ts"
       - "src/lib/cardapioToken.test.ts"
       - "src/lib/entregadorAuth.ts"
@@ -18,6 +21,8 @@ on:
       - "src/app/api/cardapio-imagens/route.ts"
       - "src/app/api/whatsapp/route.ts"
       - "src/app/api/whatsapp/enviarMensagem.test.ts"
+      - "src/app/api/whatsapp/entradasCliente.test.ts"
+      - "src/app/api/whatsapp/saudacaoPadraoBotPausado.test.ts"
       - "src/app/api/pedido-app/route.ts"
       - ".github/workflows/mcp-observer-cron.yml"
       - ".github/workflows/legacy-url-isolation-ci.yml"
@@ -72,6 +77,11 @@ jobs:
           src/lib/pixGuardiaoScheduler.test.ts
           src/lib/inatividadeConversa.test.ts
           src/app/api/whatsapp/enviarMensagem.test.ts
+          src/lib/bot.cardapio_link.test.ts
+          src/lib/fallbackInteligente.cardapio_link.test.ts
+          src/lib/linkCardapio.gate.test.ts
+          src/app/api/whatsapp/entradasCliente.test.ts
+          src/app/api/whatsapp/saudacaoPadraoBotPausado.test.ts
 
       - name: Lint dos arquivos alterados
         run: >-
@@ -89,4 +99,9 @@ jobs:
           src/app/api/cardapio-imagens/route.ts
           src/app/api/whatsapp/route.ts
           src/app/api/whatsapp/enviarMensagem.test.ts
+          src/lib/bot.cardapio_link.test.ts
+          src/lib/fallbackInteligente.cardapio_link.test.ts
+          src/lib/linkCardapio.gate.test.ts
+          src/app/api/whatsapp/entradasCliente.test.ts
+          src/app/api/whatsapp/saudacaoPadraoBotPausado.test.ts
           src/app/api/pedido-app/route.ts
