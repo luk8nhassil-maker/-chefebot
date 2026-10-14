@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Receiver } from "@upstash/qstash";
 import { executarJobWhatsapp } from "@/lib/whatsappMensagem";
-import { processarFilaWhatsapp, recuperarLeasesWhatsapp, resumoFilaWhatsapp } from "@/lib/whatsappOutbox";
+import { registrarMensagem } from "@/lib/conversa";
+import {
+  agendarDrenoWhatsapp,
+  processarFilaWhatsapp,
+  recuperarLeasesWhatsapp,
+  resumoFilaWhatsapp,
+  sincronizarHistoricoMensagensHumanas,
+} from "@/lib/whatsappOutbox";
 
 function receiver(): Receiver | null {
   const currentSigningKey = process.env.QSTASH_CURRENT_SIGNING_KEY;
@@ -24,7 +31,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, motivo: "assinatura_invalida" }, { status: 401 });
   }
   const recovered = await recuperarLeasesWhatsapp();
-  const drained = await processarFilaWhatsapp(executarJobWhatsapp, 8);
+  // Processa lote maior que a concorrência, mantendo o limite global no
+  // Redis. Isso evita que uma fila acumulada dependa de novos enfileiramentos.
+  const drained = await processarFilaWhatsapp(executarJobWhatsapp, 8, 100);
+  const humanHistorySynced = await sincronizarHistoricoMensagensHumanas(async (job) => {
+    await registrarMensagem(job.phone, "atendente", `[${job.humanSenderName}] ${job.text}`);
+  });
   const queue = await resumoFilaWhatsapp();
-  return NextResponse.json({ ok: true, recovered, ...drained, queue });
+  // Um lote cheio agenda a continuação, mas a recuperação cron também cobre
+  // falha de publicação ou interrupção do worker.
+  if (queue.pending > 0) void agendarDrenoWhatsapp();
+  return NextResponse.json({ ok: true, recovered, ...drained, humanHistorySynced, queue });
 }

@@ -16,16 +16,10 @@ import {
 // consumidores fora do fluxo de conversa do bot (ex.: notificação pós-conciliação
 // do Pix Mercado Pago, Nível 6.6A; canário de diagnóstico E2E).
 //
-// Timeout explícito (AbortController) e até 1 retry (2 tentativas no total)
-// só para falha de rede ou HTTP 5xx — nunca para 4xx, que é erro do payload/
-// credencial e repetir não muda o resultado. Jitter curto entre tentativas
-// para não martelar a Evolution em rajada.
-//
-// Aviso de idempotência: retry protege contra falha de rede/timeout ANTES da
-// Evolution processar o envio. Não há garantia total contra duplicidade no
-// caso raro de a Evolution ter enviado a mensagem mas a resposta HTTP ter se
-// perdido (timeout pós-envio) — a Evolution não expõe uma idempotency key
-// para sendText. Fluxos proativos podem optar por uma única tentativa.
+// Timeout explícito (AbortController) e uma única tentativa por job. A
+// Evolution não fornece idempotency key: rede, timeout e 5xx podem ocorrer
+// depois de o provider aceitar o envio, portanto são encaminhados para
+// reconciliação, nunca repetidos automaticamente.
 export type ResultadoEnvioWhatsApp = {
   ok: boolean;
   motivo?: string;
@@ -35,25 +29,24 @@ export type ResultadoEnvioWhatsApp = {
   messageIdInterno?: string;
   latenciaMs: number;
   tentativas: number;
+  /** Identificador da outbox para consulta/reconciliação; nunca é da Evolution. */
+  jobId?: string;
 };
 
 const TIMEOUT_PADRAO_MS = 10_000;
-const MAX_TENTATIVAS = 2;
 type OpcoesEnvio = {
-  delay?: number; presence?: "composing"; timeoutMs?: number; maxAttempts?: 1 | 2;
+  delay?: number; presence?: "composing"; timeoutMs?: number; maxAttempts?: 1;
   /** Evento estável de negócio; evita criar duas tarefas para o mesmo efeito. */
   idempotencyKey?: string;
   prioridade?: PrioridadeWhatsapp;
+  /** Só usado pelo painel: o histórico é confirmado pelo worker depois do provider. */
+  humanSenderName?: string;
 };
 const LINK_CARDAPIO_OFICIAL = "https://chefedapizza.com.br/cardapio";
 const LINK_CARDAPIO_LEGADO = /https?:\/\/chefebot-pjif\.vercel\.app\/cardapio(?=$|[\s/?#])/gi;
 
 export function normalizarLinksPublicosWhatsApp(text: string) {
   return text.replace(LINK_CARDAPIO_LEGADO, LINK_CARDAPIO_OFICIAL);
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function extrairMessageId(data: unknown): string | undefined {
@@ -112,6 +105,7 @@ export async function enviarTextoWhatsApp(
   try {
     const enfileirado = await enfileirarMensagemWhatsapp({
       phone, text, opts, priority: opts?.prioridade ?? "critica", idempotencyKey: opts?.idempotencyKey,
+      humanSenderName: opts?.humanSenderName,
     });
     void agendarDrenoWhatsapp();
     await processarFilaWhatsapp(executarJobWhatsapp, 1);
@@ -119,6 +113,7 @@ export async function enviarTextoWhatsApp(
     resultado = !job && process.env.NODE_ENV === "test"
       ? await executarEnvioTexto(phone, text, opts)
       : resultadoDoJob(job);
+    resultado.jobId = enfileirado.jobId;
   } catch (erro) {
     // Mocks legados de rotas não conheciam a API de scripts da outbox. O
     // desvio é exclusivamente de teste; em runtime real a indisponibilidade
@@ -175,7 +170,10 @@ export async function executarEnvioTexto(
     body.options = { delay: opts.delay, presence: opts.presence ?? "composing" };
   }
   const timeoutMs = opts?.timeoutMs ?? TIMEOUT_PADRAO_MS;
-  const maxTentativas = opts?.maxAttempts ?? MAX_TENTATIVAS;
+  // A Evolution não oferece chave de idempotência. Logo timeout, rede e 5xx
+  // são resultados incertos: repetir pode duplicar a mensagem. Cada job faz
+  // exatamente uma chamada; a outbox conserva o estado para reconciliação.
+  const maxTentativas = 1;
 
   let tentativas = 0;
   let ultimoResultado: Awaited<ReturnType<typeof tentarEnvio>> | null = null;
@@ -197,14 +195,13 @@ export async function executarEnvioTexto(
           tentativas,
         };
       }
-      // 4xx nunca é retentado — erro de payload/credencial, repetir não ajuda.
-      // status pode vir 0/undefined em mocks de teste incompletos — trata como
-      // não retentável (mesma cautela que um 4xx) em vez de assumir 5xx.
+      // 4xx, 5xx e respostas incompletas não são retentados. Em especial, um
+      // 5xx pode ter sido devolvido depois de a Evolution aceitar o envio.
       if (!(status >= 500) || tentativa === maxTentativas) {
         return { ok: false, motivo: `http_${status}`, statusHttp: status, latenciaMs: Date.now() - inicio, tentativas };
       }
     } else {
-      // Falha de rede/timeout — só retenta se ainda houver tentativa disponível.
+      // Falha de rede/timeout é ambígua e também não recebe retry automático.
       if (tentativa === maxTentativas) {
         const timeoutOcorreu = ultimoResultado.erro instanceof Error && ultimoResultado.erro.name === "AbortError";
         return {
@@ -216,8 +213,6 @@ export async function executarEnvioTexto(
       }
     }
 
-    // Jitter curto (100–300ms) antes da próxima tentativa.
-    await sleep(100 + Math.floor(Math.random() * 200));
   }
 
   // Inalcançável na prática (o loop sempre retorna dentro de si), mas mantém

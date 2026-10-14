@@ -6,6 +6,7 @@ import { validarEnvioMensagemHumana } from "@/lib/validarEnvioMensagemHumana";
 import { marcarEcoPainel } from "@/lib/conversaEcoPainel";
 import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
+import { confirmarHistoricoMensagemHumana, reivindicarHistoricoMensagemHumana } from "@/lib/whatsappOutbox";
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -52,11 +53,22 @@ export async function POST(req: NextRequest) {
   if (!obterConfigEvolution()) {
     return NextResponse.json({ ok: false, error: "Provider de WhatsApp não configurado (EVOLUTION_API_URL/EVOLUTION_API_KEY)" }, { status: 503 });
   }
-  const resultado = await enviarTextoWhatsApp(phone, text, { delay, prioridade: "critica" });
+  const resultado = await enviarTextoWhatsApp(phone, text, { delay, prioridade: "critica", humanSenderName: senderName });
   if (!resultado.ok) {
+    if (resultado.motivo === "queued_pending") {
+      // Aceite durável, ainda sem confirmação da Evolution. O painel recebe
+      // um estado explícito e não deve reenviar pelo simples 202.
+      return NextResponse.json({ ok: true, status: "queued", jobId: resultado.jobId, senderName, phone }, { status: 202 });
+    }
     return NextResponse.json(
-      { ok: false, error: resultado.motivo === "queued_pending" ? "Mensagem enfileirada; aguarde a confirmação." : "Falha ao enviar mensagem para o WhatsApp" },
-      { status: resultado.motivo === "queued_pending" ? 202 : 502 },
+      {
+        ok: false,
+        status: resultado.motivo === "timeout" || resultado.motivo === "network_error" || resultado.statusHttp && resultado.statusHttp >= 500
+          ? "ambiguous" : "failed",
+        jobId: resultado.jobId,
+        error: "Resultado do envio incerto; não reenvie. A mensagem foi preservada para reconciliação.",
+      },
+      { status: 502 },
     );
   }
 
@@ -73,8 +85,13 @@ export async function POST(req: NextRequest) {
     await marcarEcoPainel(resultado.messageIdInterno);
   }
 
-  // Só registra após confirmação de envio bem-sucedido pela Evolution API
-  await registrarMensagem(phone, "atendente", `[${senderName}] ${text}`);
+  // Só registra após confirmação de envio bem-sucedido pela Evolution API.
+  // A claim evita duplicação com o worker assíncrono; se ele já tiver tomado
+  // a claim, o índice durável dele atualizará o histórico em seguida.
+  if (resultado.jobId && await reivindicarHistoricoMensagemHumana(resultado.jobId)) {
+    await registrarMensagem(phone, "atendente", `[${senderName}] ${text}`);
+    await confirmarHistoricoMensagemHumana(resultado.jobId);
+  }
   await redis.del(`nova_msg_manual:${phone}`);
 
   // Renova TTL de manual e session enquanto o atendimento está ativo.
@@ -85,7 +102,7 @@ export async function POST(req: NextRequest) {
     await redis.set(`session:${phone}`, sessaoEnvio, { ex: 7200 });
   }
 
-  return NextResponse.json({ ok: true, senderName, phone });
+  return NextResponse.json({ ok: true, status: "delivered", jobId: resultado.jobId, senderName, phone });
 }
 
 // Tipo helper local para o narrowing após validação

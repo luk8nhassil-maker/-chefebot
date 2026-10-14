@@ -1184,6 +1184,10 @@ export default function PedidosPage() {
         setMensagemHumana(prev => ({ ...prev, [phone]: "" }))
         isNearBottomRef.current = true
         setNovasMsgCount(0)
+        if (data.status === "queued") {
+          setErroEnvioMensagem(prev => ({ ...prev, [phone]: "Mensagem enfileirada; aguardando confirmação." }))
+          return
+        }
         setHistoricoMsgs(prev => [...prev, { autor: "atendente", texto: `[${userName || "Kellyne"}] ${texto}`, ts: Date.now() }])
       } else {
         setErroEnvioMensagem(prev => ({ ...prev, [phone]: data.error || "Erro ao enviar." }))

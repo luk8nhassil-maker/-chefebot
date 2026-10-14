@@ -23,6 +23,8 @@ vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 vi.mock("@/lib/whatsappOutbox", () => ({
   enfileirarMensagemWhatsapp: vi.fn(async (input: Record<string, unknown>) => { const id = `job-${jobs.size + 1}`; jobs.set(id, { id, createdAt: Date.now(), attempt: 0, state: "pending", ...input }); return { jobId: id, deduplicated: false }; }),
   agendarDrenoWhatsapp: vi.fn(async () => false),
+  reivindicarHistoricoMensagemHumana: vi.fn(async () => true),
+  confirmarHistoricoMensagemHumana: vi.fn(async () => {}),
   processarFilaWhatsapp: vi.fn(async (executar: (job: { phone: string; text: string; opts?: unknown }) => Promise<unknown>) => { const [id, job] = [...jobs.entries()].find(([, j]) => j.state === "pending")!; const result = await executar(job as { phone: string; text: string; opts?: unknown }); jobs.set(id, { ...job, state: (result as { ok?: boolean }).ok ? "delivered" : "failed", attempt: 1, result }); return {}; }),
   obterJobWhatsapp: vi.fn(async (id: string) => jobs.get(id) ?? null),
 }));
@@ -45,7 +47,7 @@ function postReq(body: unknown, token?: string) {
 
 function mockFetchOk() {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
-  enviarTextoMock.mockResolvedValue({ ok: true, latenciaMs: 1, tentativas: 1 });
+  enviarTextoMock.mockResolvedValue({ ok: true, latenciaMs: 1, tentativas: 1, jobId: "job-confirmed" });
 }
 
 function mockFetchFail() {
@@ -58,7 +60,7 @@ function mockFetchOkComMessageId(messageId: string) {
     "fetch",
     vi.fn().mockResolvedValue({ ok: true, json: async () => ({ key: { id: messageId } }) })
   );
-  enviarTextoMock.mockResolvedValue({ ok: true, latenciaMs: 1, tentativas: 1, messageIdInterno: messageId });
+  enviarTextoMock.mockResolvedValue({ ok: true, latenciaMs: 1, tentativas: 1, jobId: "job-confirmed", messageIdInterno: messageId });
 }
 
 beforeEach(() => {
@@ -137,6 +139,23 @@ describe("POST /api/conversas/enviar-mensagem-humana — TTL 7200", () => {
       k === `manual:${PHONE}`
     );
     expect(manualRenewal).toBeUndefined();
+  });
+
+  it("202 identifica mensagem humana enfileirada sem registrá-la como enviada", async () => {
+    enviarTextoMock.mockResolvedValue({ ok: false, motivo: "queued_pending", jobId: "job-pending", latenciaMs: 1, tentativas: 0 });
+    const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+    const res = await POST(postReq({ phone: PHONE, text: "Aguarde um momento" }, token));
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ ok: true, status: "queued", jobId: "job-pending" });
+    expect(redisMock.set.mock.calls.some(([k]) => k === `conversa:${PHONE}`)).toBe(false);
+  });
+
+  it("resultado incerto informa reconciliação e não induz reenvio", async () => {
+    enviarTextoMock.mockResolvedValue({ ok: false, motivo: "timeout", jobId: "job-ambiguous", latenciaMs: 1, tentativas: 1 });
+    const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+    const res = await POST(postReq({ phone: PHONE, text: "Aguarde um momento" }, token));
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ ok: false, status: "ambiguous", jobId: "job-ambiguous" });
   });
 
   it("provider nao configurado retorna 503, nunca chama fetch, nunca vaza segredo", async () => {

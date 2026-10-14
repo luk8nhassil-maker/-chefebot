@@ -149,17 +149,17 @@ describe("enviarTextoWhatsApp", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  test("HTTP 5xx é retentado uma vez e falha definitivamente após a 2ª tentativa", async () => {
+  test("HTTP 5xx é resultado incerto e nunca é repetido automaticamente", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({}) } as Response);
     vi.stubGlobal("fetch", fetchMock);
 
     const resultado = await enviarTextoWhatsApp("5511999998888", "oi");
 
-    expect(resultado).toMatchObject({ ok: false, motivo: "http_503", statusHttp: 503, tentativas: 2 });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(resultado).toMatchObject({ ok: false, motivo: "http_503", statusHttp: 503, tentativas: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  test("HTTP 5xx seguido de sucesso na 2ª tentativa retorna ok:true", async () => {
+  test("não consome uma resposta posterior após 5xx, evitando duplicidade", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({ ok: false, status: 502, json: async () => ({}) } as Response)
@@ -168,9 +168,8 @@ describe("enviarTextoWhatsApp", () => {
 
     const resultado = await enviarTextoWhatsApp("5511999998888", "oi");
 
-    expect(resultado.ok).toBe(true);
-    expect(resultado.tentativas).toBe(2);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(resultado).toMatchObject({ ok: false, motivo: "http_502", tentativas: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   test("fluxo proativo com maxAttempts:1 não repete envio ambíguo após HTTP 5xx", async () => {
@@ -226,14 +225,14 @@ describe("enviarTextoWhatsApp", () => {
     expect(new Set(destinatarios).size).toBe(50);
   });
 
-  test("erro de rede (fetch lançando) não propaga — vira ok:false motivo network_error após esgotar tentativas", async () => {
+  test("erro de rede vira resultado incerto após uma única tentativa", async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
     vi.stubGlobal("fetch", fetchMock);
 
     const resultado = await enviarTextoWhatsApp("5511999998888", "oi");
 
-    expect(resultado).toMatchObject({ ok: false, motivo: "network_error", tentativas: 2 });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(resultado).toMatchObject({ ok: false, motivo: "network_error", tentativas: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   test("timeout explícito: fetch que nunca resolve dispara abort e retorna motivo timeout", async () => {
@@ -249,6 +248,6 @@ describe("enviarTextoWhatsApp", () => {
 
     expect(resultado.ok).toBe(false);
     expect(resultado.motivo).toBe("timeout");
-    expect(resultado.tentativas).toBe(2);
+    expect(resultado.tentativas).toBe(1);
   }, 10_000);
 });

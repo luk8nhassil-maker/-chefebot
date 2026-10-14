@@ -81,11 +81,15 @@ describe("whatsappOutbox", () => {
 
   test.each([50, 100, 200])("aceita e entrega %i mensagens sem duplicar", async (total) => {
     const ids = await Promise.all(Array.from({ length: total }, (_, i) => enfileirarMensagemWhatsapp({ phone: `5511${String(i).padStart(8, "0")}`, text: `m${i}`, priority: "normal", idempotencyKey: `event-${i}` })));
-    let entregues = 0; const inicio = performance.now();
-    const drenado = await drenar(async () => { entregues++; await new Promise(r => setTimeout(r, 1)); return { ok: true, latenciaMs: 1, tentativas: 1 }; });
+    let entregues = 0, emVoo = 0, maxEmVoo = 0; const inicio = performance.now();
+    const drenado = await drenar(async () => {
+      entregues++; emVoo++; maxEmVoo = Math.max(maxEmVoo, emVoo);
+      await new Promise(r => setTimeout(r, 1)); emVoo--;
+      return { ok: true, latenciaMs: 1, tentativas: 1 };
+    });
     const fila = await resumoFilaWhatsapp();
-    console.log(JSON.stringify({ benchmark: "outbox-isolada", total, enfileiradas: ids.length, entregues, processadas: drenado.total, maxPorLote: drenado.max, esperaMs: Math.round(performance.now() - inicio) }));
-    expect(new Set(ids.map(x => x.jobId)).size).toBe(total); expect(entregues).toBe(total); expect(fila.pending).toBe(0);
+    console.log(JSON.stringify({ benchmark: "outbox-isolada", total, enfileiradas: ids.length, entregues, processadas: drenado.total, concorrenciaMaxima: maxEmVoo, esperaMs: Math.round(performance.now() - inicio) }));
+    expect(new Set(ids.map(x => x.jobId)).size).toBe(total); expect(entregues).toBe(total); expect(maxEmVoo).toBeLessThanOrEqual(4); expect(fila.pending).toBe(0);
   });
 
   test("resultado ambíguo não é reenviado automaticamente e permanece identificável", async () => {
@@ -96,6 +100,16 @@ describe("whatsappOutbox", () => {
     expect(chamadas).toBe(1); expect(job?.state).toBe("ambiguous");
     await drenar(async () => { chamadas++; return { ok: true, latenciaMs: 1, tentativas: 1 }; });
     expect(chamadas).toBe(1);
+  });
+
+  test("pausa global suprime promoção já enfileirada antes do contato com provider", async () => {
+    values.set("bot_ativo", false);
+    const { jobId } = await enfileirarMensagemWhatsapp({ phone: "5511999990001", text: "promo", priority: "promocional" });
+    const executar = vi.fn(async () => ({ ok: true, latenciaMs: 1, tentativas: 1 }));
+    await drenar(executar);
+    expect(executar).not.toHaveBeenCalled();
+    expect((await obterJobWhatsapp(jobId))?.state).toBe("suppressed");
+    expect(await resumoFilaWhatsapp()).toEqual({ pending: 0, inFlight: 0 });
   });
 
   test("imagem usa a mesma fila, prioridade e ordem da conversa", async () => {
@@ -113,7 +127,7 @@ describe("whatsappOutbox", () => {
     const emExecucao = processarFilaWhatsapp(async () => new Promise((resolve) => { liberar = () => resolve({ ok: true, latenciaMs: 1, tentativas: 1 }); }), 1);
     await vi.waitFor(() => expect(liberar).toBeTypeOf("function"));
     clock.mockReturnValue(32_000);
-    expect(await recuperarLeasesWhatsapp()).toBe(1);
+    expect(await recuperarLeasesWhatsapp()).toEqual({ reconciled: 1, unresolved: 0 });
     expect((await obterJobWhatsapp(jobId))?.state).toBe("ambiguous");
     liberar();
     await emExecucao;

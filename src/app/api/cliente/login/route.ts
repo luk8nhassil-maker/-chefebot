@@ -25,7 +25,15 @@ async function enviarOtpPorWhatsapp(telefone: string, codigo: string): Promise<v
   const texto = `Seu código para entrar no ChefeBot é: *${codigo}*\n\nVale por 5 minutos.`;
   try {
     const resultado = await enviarTextoWhatsApp(sanitizePhoneEnvio(telefone), texto, { prioridade: "critica", maxAttempts: 1 });
-    if (!resultado.ok) console.error("[ChefeBot] OTP aceito na fila mas ainda sem confirmação do provider.");
+    if (!resultado.ok) {
+      // Mantém diagnóstico operacional sem expor telefone, OTP ou detalhes
+      // do provider. Um resultado incerto fica na outbox para reconciliação.
+      if (resultado.motivo === "provider_not_configured") {
+        console.log("[ChefeBot] Provider de WhatsApp não configurado — OTP não enviado.");
+      } else {
+        console.error("[ChefeBot] OTP aceito na fila mas ainda sem confirmação do provider.");
+      }
+    }
   } catch (err) {
     console.error("[ChefeBot] Erro ao enviar OTP por WhatsApp:", err);
   }

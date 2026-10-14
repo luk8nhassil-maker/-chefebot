@@ -283,6 +283,12 @@ export default function ConversasPage() {
       const data = await r.json()
       if (data.ok) {
         setMensagem("")
+        if (data.status === "queued") {
+          // Não renderiza como enviada: o worker acrescentará ao histórico
+          // somente depois da confirmação da Evolution.
+          showToast("Mensagem enfileirada; aguardando confirmação.")
+          return
+        }
         setHistoricoMsgs(prev => [...prev, { autor: "atendente", texto: `[Kellyne] ${texto}`, ts: Date.now() }])
         mensagemInputRef.current?.focus()
       } else {
