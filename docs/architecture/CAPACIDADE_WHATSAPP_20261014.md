@@ -44,7 +44,7 @@ O ensaio separado da outbox aceitou e entregou 50/50, 100/100 e 200/200 mensagen
 1. Persistir a outbox na mesma transação lógica da transição de pedido/pagamento/entrega. Hoje ela persiste antes do envio, mas a transição de pedido e a criação do job ainda não são uma única operação Redis.
 2. Para resultado ambíguo após timeout, consultar o estado do provider por ID/evento antes de repetir ou encaminhar à revisão humana. Sem idempotência no provider, exatamente-uma-vez não é demonstrável apenas com Redis/QStash.
 3. Calibrar o limite com métricas de latência, 429/5xx e desconexões numa instância Evolution **isolada**, com destinatários de teste autorizados e sem mensagens reais a clientes. Subir 50 → 100 → 200 gradualmente e fazer ensaios de falha/reconexão. Sem essa instância/credenciais, não é possível comprovar capacidade real nem quantificar tempo de recuperação ou custo adicional. QStash, invocações Vercel e comandos Upstash terão custo dependente do volume e do plano; não há preço medido neste ambiente.
-4. Rotacionar externamente a credencial Evolution historicamente rastreada em `atualizar.ps1`; este trabalho não reescreve histórico Git nem revela o valor. A exposição deve ser tratada como comprometimento até a rotação e invalidação no provedor.
+4. Rotacionar externamente a credencial Evolution historicamente exposta em um arquivo removido do HEAD; este trabalho não reescreve histórico Git nem revela o valor. A exposição deve ser tratada como comprometimento até a rotação e invalidação no provedor. Procedimento: `docs/operations/EVOLUTION_CREDENTIAL_ROTATION.md`.
 
 ## Verificação executada
 
