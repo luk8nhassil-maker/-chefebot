@@ -1338,7 +1338,10 @@ export async function POST(req: NextRequest) {
           await enviarMensagem(pedido.telefone, `*${firstName}*, pedido entregue! 😊\n\nEsperamos que tenha curtido muito. Volte sempre que quiser — estamos aqui! 🍕`)
           const chaveAvaliacao = `avaliacao_enviada:${pedido.id}`
           const jaEnviou = await redis.get(chaveAvaliacao)
-          if (!jaEnviou) {
+          // Entrega e aviso ao cliente permanecem; só a pesquisa proativa
+          // respeita a pausa global, sem consumir sua reserva.
+          const botPausadoParaPesquisa = await redis.get<boolean>("bot_ativo").catch(() => false) === false
+          if (!botPausadoParaPesquisa && !jaEnviou) {
             await redis.set(chaveAvaliacao, true, { ex: 86400 })
             await redis.set(`avaliacao:${pedido.telefone}`, true, { ex: 3600 })
             const avaliacaoEnviada = await enviarMensagem(pedido.telefone, `*${firstName}*, como foi sua experiência hoje? 😊\n\nAvalia nossa pizza de 1 a 5:\n\n  ⭐ 1 — Ruim\n  ⭐⭐ 2 — Regular\n  ⭐⭐⭐ 3 — Bom\n  ⭐⭐⭐⭐ 4 — Muito bom\n  ⭐⭐⭐⭐⭐ 5 — Excelente\n\nÉ só digitar o número! 😄`)

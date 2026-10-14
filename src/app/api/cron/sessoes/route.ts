@@ -27,6 +27,11 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
+    // Rotina legada de retomada: com o bot pausado, não apaga sessões nem
+    // dispara convites para começar outro pedido.
+    if (await redis.get<boolean>('bot_ativo') === false) {
+      return NextResponse.json({ ok: true, skipped: true, motivo: 'bot_pausado' })
+    }
     const agora = Date.now()
     const resetadas: string[] = []
 
@@ -34,6 +39,7 @@ export async function GET(req: Request) {
     const chaves = await redis.keys('session_ts:*')
 
     for (const chave of chaves) {
+      if (await redis.get<boolean>('bot_ativo') === false) break
       const phone = chave.replace('session_ts:', '')
       const ts = await redis.get<number>(chave)
       if (!ts) continue

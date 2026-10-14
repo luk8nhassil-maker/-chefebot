@@ -269,6 +269,9 @@ async function notificarConviteRankingComMotor(pedido: Pedido): Promise<{ ok: bo
   if (digitos.length < 10) return null
 
   try {
+    // O aviso de cozinha é transacional; o convite não é. Com o robô
+    // pausado, não reserva exposição nem envia comunicação promocional.
+    if (await redis.get<boolean>('bot_ativo').catch(() => false) === false) return null
     const preparado = await prepararConviteRankingWhatsapp({
       telefone: sanitizePhone(pedido.telefone),
       triggerEventId: `cozinha:${pedido.id}`,
@@ -790,7 +793,10 @@ export async function PATCH(req: NextRequest) {
     const phone = sanitizePhone(pedidos[index].telefone)
     const chaveAvaliacao = `avaliacao_enviada:${id}`
     const jaEnviou = await redis.get(chaveAvaliacao)
-    if (!jaEnviou) {
+    // A pesquisa é proativa, separada da confirmação de entrega acima.
+    // Não consome a reserva de pesquisa enquanto o robô está pausado.
+    const botPausado = await redis.get<boolean>('bot_ativo').catch(() => false) === false
+    if (!botPausado && !jaEnviou) {
       await redis.set(chaveAvaliacao, true, { ex: 86400 })
       await redis.set(`avaliacao:${phone}`, true, { ex: 3600 })
       const firstName = pedidos[index].cliente.split(' ')[0]

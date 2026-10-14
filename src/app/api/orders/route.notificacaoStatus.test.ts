@@ -168,6 +168,19 @@ describe("PATCH /api/orders — cliente recebe a sequência completa de status",
     expect(confirmarConviteRankingMock).toHaveBeenCalledWith({ exposureId: "exp-cozinha-1" });
   });
 
+  test("bot pausado preserva aviso de cozinha e suprime apenas convite do Ranking", async () => {
+    redisStore.set("bot_ativo", false);
+    seedPedido({ status: "novo" });
+
+    const res = await PATCH(patchRequest({ id: "ped_notif_1", status: "em_preparo" }));
+
+    expect(res.status).toBe(200);
+    expect(textosEnviados()).toHaveLength(1);
+    expect(textosEnviados()[0]).toContain("pedido foi enviado para a cozinha");
+    expect(prepararConviteRankingMock).not.toHaveBeenCalled();
+    expect(redisStore.get("pedidos")).toEqual(expect.arrayContaining([expect.objectContaining({ status: "em_preparo" })]));
+  });
+
   test("motor suprimido mantém somente a mensagem normal da cozinha", async () => {
     seedPedido({ status: "novo" });
 
@@ -218,6 +231,20 @@ describe("PATCH /api/orders — cliente recebe a sequência completa de status",
       origem: "avaliacao_pos_entrega",
       eventId: "ped_notif_1",
     });
+  });
+
+  test("bot pausado preserva confirmação de entrega sem pesquisa nem reserva consumida", async () => {
+    redisStore.set("bot_ativo", false);
+    seedPedido({ status: "saiu_entrega", tipoEntrega: "delivery" });
+
+    const res = await PATCH(patchRequest({ id: "ped_notif_1", status: "entregue" }));
+
+    expect(res.status).toBe(200);
+    expect(textosEnviados().some((texto) => texto.includes("pedido foi finalizado"))).toBe(true);
+    expect(textosEnviados().some((texto) => texto.includes("Avalia nossa pizza"))).toBe(false);
+    expect(redisStore.has("avaliacao_enviada:ped_notif_1")).toBe(false);
+    expect(registrarContatoPesquisaConfirmadoMock).not.toHaveBeenCalled();
+    expect(redisStore.get("pedidos")).toEqual(expect.arrayContaining([expect.objectContaining({ status: "entregue" })]));
   });
 
   test("falha no envio da avaliação não cria exposição falsa no orçamento", async () => {

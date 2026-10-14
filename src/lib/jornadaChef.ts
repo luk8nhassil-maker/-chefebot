@@ -1730,6 +1730,9 @@ async function enviarMensagensProgresso(
 ): Promise<void> {
   if (!config.mensagensWhatsappAtivas || !pedido.telefone) return;
   if (resultado.pizzasNaTrilha <= 0) return;
+  // A pontuação/recompensa já foi persistida; a pausa suprime apenas a
+  // comunicação proativa, antes de reivindicar a chave de deduplicação.
+  if (await redis.get<boolean>("bot_ativo").catch(() => false) === false) return;
 
   if (resultado.recompensasDesbloqueadas.length > 0) {
     if (!(await jaEnviouMensagem(tenantId, pedido.id, "caixa"))) {
