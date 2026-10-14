@@ -3,8 +3,9 @@ import { vi, describe, it, expect, beforeEach } from "vitest";
 // Garante que POST /api/conversas/enviar-mensagem-humana renova manual:{phone}
 // e session:{phone} com TTL 7200 após envio bem-sucedido pela Evolution API.
 
-const { store, redisMock } = vi.hoisted(() => {
+const { store, redisMock, jobs, enviarTextoMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
+  const jobs = new Map<string, Record<string, unknown>>();
   const redisMock = {
     get: vi.fn(async (key: string) => store.get(key) ?? null),
     set: vi.fn(async (key: string, value: unknown, opts?: { ex?: number }) => {
@@ -14,10 +15,18 @@ const { store, redisMock } = vi.hoisted(() => {
     }),
     del: vi.fn(async () => 1),
   };
-  return { store, redisMock };
+  const enviarTextoMock = vi.fn();
+  return { store, redisMock, jobs, enviarTextoMock };
 });
 
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
+vi.mock("@/lib/whatsappOutbox", () => ({
+  enfileirarMensagemWhatsapp: vi.fn(async (input: Record<string, unknown>) => { const id = `job-${jobs.size + 1}`; jobs.set(id, { id, createdAt: Date.now(), attempt: 0, state: "pending", ...input }); return { jobId: id, deduplicated: false }; }),
+  agendarDrenoWhatsapp: vi.fn(async () => false),
+  processarFilaWhatsapp: vi.fn(async (executar: (job: { phone: string; text: string; opts?: unknown }) => Promise<unknown>) => { const [id, job] = [...jobs.entries()].find(([, j]) => j.state === "pending")!; const result = await executar(job as { phone: string; text: string; opts?: unknown }); jobs.set(id, { ...job, state: (result as { ok?: boolean }).ok ? "delivered" : "failed", attempt: 1, result }); return {}; }),
+  obterJobWhatsapp: vi.fn(async (id: string) => jobs.get(id) ?? null),
+}));
+vi.mock("@/lib/whatsappMensagem", () => ({ enviarTextoWhatsApp: enviarTextoMock }));
 
 import { POST } from "./route";
 import { createToken } from "@/lib/auth";
@@ -36,10 +45,12 @@ function postReq(body: unknown, token?: string) {
 
 function mockFetchOk() {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+  enviarTextoMock.mockResolvedValue({ ok: true, latenciaMs: 1, tentativas: 1 });
 }
 
 function mockFetchFail() {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
+  enviarTextoMock.mockResolvedValue({ ok: false, motivo: "http_500", latenciaMs: 1, tentativas: 1 });
 }
 
 function mockFetchOkComMessageId(messageId: string) {
@@ -47,10 +58,12 @@ function mockFetchOkComMessageId(messageId: string) {
     "fetch",
     vi.fn().mockResolvedValue({ ok: true, json: async () => ({ key: { id: messageId } }) })
   );
+  enviarTextoMock.mockResolvedValue({ ok: true, latenciaMs: 1, tentativas: 1, messageIdInterno: messageId });
 }
 
 beforeEach(() => {
   store.clear();
+  jobs.clear();
   vi.clearAllMocks();
   process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
   process.env.EVOLUTION_API_KEY = "chave-de-teste";
@@ -115,6 +128,7 @@ describe("POST /api/conversas/enviar-mensagem-humana — TTL 7200", () => {
 
   it("não renova TTL quando Evolution API lança exceção de rede", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network error")));
+    enviarTextoMock.mockResolvedValue({ ok: false, motivo: "network_error", latenciaMs: 1, tentativas: 1 });
     const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
     const res = await POST(postReq({ phone: PHONE, text: "Olá!" }, token));
     expect(res.status).toBe(502);

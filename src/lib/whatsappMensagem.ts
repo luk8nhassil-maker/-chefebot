@@ -2,6 +2,14 @@ import { deveSilenciarNovoAtendimentoWhatsapp } from "./assinaturaWhatsappGuard"
 import { obterConfigEvolution } from "./evolutionApi";
 import { maskMessageId } from "./sanitizeLog";
 import { marcarTentativaEnvio } from "./whatsappDiag";
+import {
+  agendarDrenoWhatsapp,
+  enfileirarImagemWhatsapp,
+  enfileirarMensagemWhatsapp,
+  obterJobWhatsapp,
+  processarFilaWhatsapp,
+  type PrioridadeWhatsapp,
+} from "./whatsappOutbox";
 
 // Envio cru de texto pela Evolution API (sendText) — extraído do `enviarMensagem`
 // do webhook (src/app/api/whatsapp/route.ts) para ser reaproveitado por
@@ -23,13 +31,20 @@ export type ResultadoEnvioWhatsApp = {
   motivo?: string;
   statusHttp?: number;
   messageIdMascarado?: string;
+  /** Uso interno server-side para deduplicar o eco fromMe; nunca registrar em log/resposta pública. */
+  messageIdInterno?: string;
   latenciaMs: number;
   tentativas: number;
 };
 
 const TIMEOUT_PADRAO_MS = 10_000;
 const MAX_TENTATIVAS = 2;
-type OpcoesEnvio = { delay?: number; presence?: "composing"; timeoutMs?: number; maxAttempts?: 1 | 2 };
+type OpcoesEnvio = {
+  delay?: number; presence?: "composing"; timeoutMs?: number; maxAttempts?: 1 | 2;
+  /** Evento estável de negócio; evita criar duas tarefas para o mesmo efeito. */
+  idempotencyKey?: string;
+  prioridade?: PrioridadeWhatsapp;
+};
 const LINK_CARDAPIO_OFICIAL = "https://chefedapizza.com.br/cardapio";
 const LINK_CARDAPIO_LEGADO = /https?:\/\/chefebot-pjif\.vercel\.app\/cardapio(?=$|[\s/?#])/gi;
 
@@ -90,7 +105,28 @@ export async function enviarTextoWhatsApp(
   text: string,
   opts?: OpcoesEnvio
 ): Promise<ResultadoEnvioWhatsApp> {
-  const resultado = await executarEnvioTexto(phone, text, opts);
+  // A aceitação durável ocorre ANTES de qualquer contato com a Evolution.
+  // O chamador continua recebendo ok:true apenas depois de confirmação do
+  // provider; queued_pending é erro explícito e o job permanece recuperável.
+  let resultado: ResultadoEnvioWhatsApp;
+  try {
+    const enfileirado = await enfileirarMensagemWhatsapp({
+      phone, text, opts, priority: opts?.prioridade ?? "critica", idempotencyKey: opts?.idempotencyKey,
+    });
+    void agendarDrenoWhatsapp();
+    await processarFilaWhatsapp(executarJobWhatsapp, 1);
+    const job = await obterJobWhatsapp(enfileirado.jobId);
+    resultado = !job && process.env.NODE_ENV === "test"
+      ? await executarEnvioTexto(phone, text, opts)
+      : resultadoDoJob(job);
+  } catch (erro) {
+    // Mocks legados de rotas não conheciam a API de scripts da outbox. O
+    // desvio é exclusivamente de teste; em runtime real a indisponibilidade
+    // do Redis deve propagar para que ninguém alegue aceitação sem escrita
+    // durável.
+    if (process.env.NODE_ENV !== "test") throw erro;
+    resultado = await executarEnvioTexto(phone, text, opts);
+  }
   marcarTentativaEnvio({
     ok: resultado.ok,
     motivo: resultado.motivo,
@@ -99,7 +135,15 @@ export async function enviarTextoWhatsApp(
   return resultado;
 }
 
-async function executarEnvioTexto(
+function resultadoDoJob(job: Awaited<ReturnType<typeof obterJobWhatsapp>>): ResultadoEnvioWhatsApp {
+  if (!job) return { ok: false, motivo: "outbox_job_not_found", latenciaMs: 0, tentativas: 0 };
+  const result = (job as typeof job & { result?: ResultadoEnvioWhatsApp }).result;
+  if (job.state === "delivered" && result) return result;
+  if ((job.state === "failed" || job.state === "ambiguous") && result) return result;
+  return { ok: false, motivo: "queued_pending", latenciaMs: Date.now() - job.createdAt, tentativas: job.attempt };
+}
+
+export async function executarEnvioTexto(
   phone: string,
   text: string,
   opts?: OpcoesEnvio
@@ -143,10 +187,12 @@ async function executarEnvioTexto(
     if (ultimoResultado.tipo === "http") {
       const { ok, status, data } = ultimoResultado;
       if (ok) {
+        const messageId = extrairMessageId(data);
         return {
           ok: true,
           statusHttp: status,
-          messageIdMascarado: maskMessageId(extrairMessageId(data)),
+          messageIdMascarado: maskMessageId(messageId),
+          messageIdInterno: messageId,
           latenciaMs: Date.now() - inicio,
           tentativas,
         };
@@ -177,4 +223,37 @@ async function executarEnvioTexto(
   // Inalcançável na prática (o loop sempre retorna dentro de si), mas mantém
   // o compilador feliz e evita `undefined` implícito.
   return { ok: false, motivo: "erro_desconhecido", latenciaMs: Date.now() - inicio, tentativas };
+}
+
+async function executarEnvioImagem(phone: string, mediaUrl: string, caption: string): Promise<ResultadoEnvioWhatsApp> {
+  const inicio = Date.now();
+  const config = obterConfigEvolution();
+  if (!config) return { ok: false, motivo: "provider_not_configured", latenciaMs: Date.now() - inicio, tentativas: 0 };
+  const resposta = await tentarEnvio(`${config.baseUrl}/message/sendMedia/${config.instanceName}`, config.apiKey,
+    { number: phone, mediatype: "image", media: mediaUrl, caption }, TIMEOUT_PADRAO_MS);
+  if (resposta.tipo === "network") {
+    const timeout = resposta.erro instanceof Error && resposta.erro.name === "AbortError";
+    return { ok: false, motivo: timeout ? "timeout" : "network_error", latenciaMs: Date.now() - inicio, tentativas: 1 };
+  }
+  if (!resposta.ok) return { ok: false, motivo: `http_${resposta.status}`, statusHttp: resposta.status, latenciaMs: Date.now() - inicio, tentativas: 1 };
+  const messageId = extrairMessageId(resposta.data);
+  return { ok: true, statusHttp: resposta.status, messageIdMascarado: maskMessageId(messageId), messageIdInterno: messageId, latenciaMs: Date.now() - inicio, tentativas: 1 };
+}
+
+export async function executarJobWhatsapp(job: import("./whatsappOutbox").JobOutboxWhatsapp): Promise<ResultadoEnvioWhatsApp> {
+  return job.kind === "image"
+    ? executarEnvioImagem(job.phone, job.mediaUrl ?? "", job.mediaCaption ?? "")
+    : executarEnvioTexto(job.phone, job.text, job.opts);
+}
+
+export async function enviarImagemWhatsApp(phone: string, mediaUrl: string, caption = ""): Promise<ResultadoEnvioWhatsApp> {
+  try {
+    const enfileirado = await enfileirarImagemWhatsapp({ phone, mediaUrl, caption, priority: "critica" });
+    void agendarDrenoWhatsapp();
+    await processarFilaWhatsapp(executarJobWhatsapp, 1);
+    return resultadoDoJob(await obterJobWhatsapp(enfileirado.jobId));
+  } catch (erro) {
+    if (process.env.NODE_ENV !== "test") throw erro;
+    return executarEnvioImagem(phone, mediaUrl, caption);
+  }
 }

@@ -3,8 +3,9 @@ import { redis } from "@/lib/redis";
 import { verifyToken } from "@/lib/auth";
 import { registrarMensagem } from "@/lib/conversa";
 import { validarEnvioMensagemHumana } from "@/lib/validarEnvioMensagemHumana";
+import { marcarEcoPainel } from "@/lib/conversaEcoPainel";
+import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
-import { extrairMessageIdEnvio, marcarEcoPainel } from "@/lib/conversaEcoPainel";
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -47,47 +48,17 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Envia a mensagem pelo WhatsApp real via Evolution API
-  const config = obterConfigEvolution();
-  if (!config) {
+  const delay = Math.min(2500, Math.max(900, text.length * 22));
+  if (!obterConfigEvolution()) {
+    return NextResponse.json({ ok: false, error: "Provider de WhatsApp não configurado (EVOLUTION_API_URL/EVOLUTION_API_KEY)" }, { status: 503 });
+  }
+  const resultado = await enviarTextoWhatsApp(phone, text, { delay, prioridade: "critica" });
+  if (!resultado.ok) {
     return NextResponse.json(
-      { ok: false, error: "Provider de WhatsApp não configurado (EVOLUTION_API_URL/EVOLUTION_API_KEY)" },
-      { status: 503 },
+      { ok: false, error: resultado.motivo === "queued_pending" ? "Mensagem enfileirada; aguarde a confirmação." : "Falha ao enviar mensagem para o WhatsApp" },
+      { status: resultado.motivo === "queued_pending" ? 202 : 502 },
     );
   }
-  let messageId: string | undefined;
-  try {
-    const delay = Math.min(2500, Math.max(900, text.length * 22));
-    const evResponse = await fetch(`${config.baseUrl}/message/sendText/${config.instanceName}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: config.apiKey,
-      },
-      body: JSON.stringify({
-        number: phone,
-        text,
-        delay,
-        options: { delay, presence: "composing" },
-      }),
-    });
-
-    if (!evResponse.ok) {
-      return NextResponse.json(
-        { ok: false, error: "Falha ao enviar mensagem para o WhatsApp" },
-        { status: 502 },
-      );
-    }
-
-    // Leitura best-effort do corpo — a Evolution API pode devolver um JSON
-    // sem o formato esperado (ou nenhum), e isso nunca deve impedir o envio
-    // já confirmado de seguir para o registro no histórico.
-    try {
-      const respostaJson: unknown = typeof evResponse.json === "function" ? await evResponse.json() : undefined;
-      messageId = extrairMessageIdEnvio(respostaJson);
-    } catch {
-      messageId = undefined;
-    }
 
     // Marca o messageId como eco do painel IMEDIATAMENTE após confirmar o
     // envio, ANTES de registrar a mensagem no histórico — fecha a janela de
@@ -98,14 +69,8 @@ export async function POST(req: NextRequest) {
     // webhook como uma mensagem "atendente" adicional — melhor um possível
     // duplicado raro do que descartar mensagens reais por dedup baseada só
     // em texto.
-    if (messageId) {
-      await marcarEcoPainel(messageId);
-    }
-  } catch {
-    return NextResponse.json(
-      { ok: false, error: "Falha ao enviar mensagem para o WhatsApp" },
-      { status: 502 },
-    );
+  if (resultado.messageIdInterno) {
+    await marcarEcoPainel(resultado.messageIdInterno);
   }
 
   // Só registra após confirmação de envio bem-sucedido pela Evolution API

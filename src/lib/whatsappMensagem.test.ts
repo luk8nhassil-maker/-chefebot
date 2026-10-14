@@ -1,11 +1,29 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+const { jobs } = vi.hoisted(() => ({ jobs: new Map<string, Record<string, unknown>>() }));
 vi.mock("./whatsappDiag", () => ({ marcarTentativaEnvio: vi.fn(async () => {}) }));
+vi.mock("./whatsappOutbox", () => ({
+  enfileirarMensagemWhatsapp: vi.fn(async (input: Record<string, unknown>) => {
+    const id = `job-${jobs.size + 1}`;
+    jobs.set(id, { id, createdAt: Date.now(), attempt: 0, state: "pending", ...input });
+    return { jobId: id, deduplicated: false };
+  }),
+  agendarDrenoWhatsapp: vi.fn(async () => false),
+  processarFilaWhatsapp: vi.fn(async (executar: (job: { phone: string; text: string; opts?: unknown }) => Promise<unknown>) => {
+    const [id, job] = [...jobs.entries()].find(([, value]) => value.state === "pending")!;
+    jobs.set(id, { ...job, state: "leased" });
+    const resultado = await executar(job as { phone: string; text: string; opts?: unknown });
+    jobs.set(id, { ...job, attempt: 1, state: (resultado as { ok?: boolean }).ok ? "delivered" : "failed", result: resultado });
+    return { processed: 1, delivered: (resultado as { ok?: boolean }).ok ? 1 : 0, failed: (resultado as { ok?: boolean }).ok ? 0 : 1, ambiguous: 0 };
+  }),
+  obterJobWhatsapp: vi.fn(async (id: string) => jobs.get(id) ?? null),
+}));
 import { enviarTextoWhatsApp, normalizarLinksPublicosWhatsApp } from "./whatsappMensagem";
 
 const ENV_KEYS = ["EVOLUTION_API_URL", "EVOLUTION_API_KEY", "EVOLUTION_INSTANCE_NAME"] as const;
 const originais: Record<string, string | undefined> = {};
 
 beforeEach(() => {
+  jobs.clear();
   for (const key of ENV_KEYS) originais[key] = process.env[key];
   process.env.EVOLUTION_API_URL = "https://evolution.exemplo.com";
   process.env.EVOLUTION_API_KEY = "chave-teste";
@@ -40,6 +58,26 @@ describe("normalizarLinksPublicosWhatsApp", () => {
 });
 
 describe("enviarTextoWhatsApp", () => {
+  test.runIf(process.env.CHEFEBOT_CAPACITY_BENCH === "1")("mede rajadas isoladas sem chamar a Evolution real", async () => {
+    for (const total of [50, 100, 200]) {
+      let emVoo = 0;
+      let maxEmVoo = 0;
+      const fetchMock = vi.fn(async () => {
+        emVoo++;
+        maxEmVoo = Math.max(maxEmVoo, emVoo);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        emVoo--;
+        return respostaOk();
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const resultados = await Promise.all(Array.from({ length: total }, (_, indice) =>
+        enviarTextoWhatsApp(`55119999${String(indice).padStart(4, "0")}`, "teste isolado")));
+      console.log(JSON.stringify({ benchmark: "envio-mock-isolado", total,
+        aceitos: resultados.filter((r) => r.ok).length, maxEmVoo }));
+      expect(resultados.every((r) => r.ok)).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(total);
+    }
+  }, 15_000);
   test("provider não configurado retorna ok:false sem chamar fetch", async () => {
     delete process.env.EVOLUTION_API_URL;
     delete process.env.EVOLUTION_API_KEY;

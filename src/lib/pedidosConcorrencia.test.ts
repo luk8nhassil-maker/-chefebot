@@ -3,6 +3,7 @@ import { vi, describe, test, expect, beforeEach } from "vitest";
 const redisStore = new Map<string, unknown>();
 let falharProximosSets = 0;
 let falharProximosEvals = 0;
+let latenciaRedisMs = 0;
 
 function deepClone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v));
@@ -11,10 +12,12 @@ function deepClone<T>(v: T): T {
 vi.mock("./redis", () => ({
   redis: {
     get: vi.fn(async (key: string) => {
+      if (latenciaRedisMs) await new Promise((resolve) => setTimeout(resolve, latenciaRedisMs));
       if (!redisStore.has(key)) return null;
       return deepClone(redisStore.get(key));
     }),
     set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
+      if (latenciaRedisMs) await new Promise((resolve) => setTimeout(resolve, latenciaRedisMs));
       if (falharProximosSets > 0) {
         falharProximosSets -= 1;
         throw new Error("Redis indisponível (simulado)");
@@ -23,6 +26,12 @@ vi.mock("./redis", () => ({
       redisStore.set(key, value);
       return "OK";
     }),
+    incr: vi.fn(async (key: string) => {
+      if (latenciaRedisMs) await new Promise((resolve) => setTimeout(resolve, latenciaRedisMs));
+      const next = Number(redisStore.get(key) ?? 0) + 1;
+      redisStore.set(key, next);
+      return next;
+    }),
     del: vi.fn(async (key: string) => (redisStore.delete(key) ? 1 : 0)),
     multi: vi.fn(() => {
       const operacoes: Array<{ tipo: "set"; key: string; value: unknown } | { tipo: "incr"; key: string }> = [];
@@ -30,6 +39,7 @@ vi.mock("./redis", () => ({
         set(key: string, value: unknown) { operacoes.push({ tipo: "set", key, value }); return tx; },
         incr(key: string) { operacoes.push({ tipo: "incr", key }); return tx; },
         async exec() {
+          if (latenciaRedisMs) await new Promise((resolve) => setTimeout(resolve, latenciaRedisMs));
           if (falharProximosSets > 0) {
             falharProximosSets -= 1;
             throw new Error("Redis indisponível (simulado)");
@@ -46,14 +56,28 @@ vi.mock("./redis", () => ({
     }),
     // Simula o Lua de liberação: GET+DEL condicional numa única "operação".
     eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (latenciaRedisMs) await new Promise((resolve) => setTimeout(resolve, latenciaRedisMs));
       if (falharProximosEvals > 0) {
         falharProximosEvals -= 1;
         throw new Error("Redis indisponível (simulado) — eval");
       }
+      if (_script.includes("ticket = tonumber")) {
+        const [lockKey, servingKey] = keys;
+        const [ticketRaw, token] = args;
+        const ticket = Number(ticketRaw);
+        let serving = Number(redisStore.get(servingKey) ?? 0);
+        if (!serving) { redisStore.set(servingKey, 1); serving = 1; }
+        if (serving > ticket) return -1;
+        if (serving !== ticket) return 0;
+        if (redisStore.has(lockKey)) return 0;
+        redisStore.set(lockKey, token);
+        return 1;
+      }
       const [chave] = keys;
-      const [tokenEsperado] = args;
+      const [tokenEsperado, proximoTicket] = args;
       if (redisStore.get(chave) === tokenEsperado) {
         redisStore.delete(chave);
+        if (keys[1] && proximoTicket) redisStore.set(keys[1], Number(proximoTicket));
         return 1;
       }
       return 0;
@@ -72,6 +96,7 @@ beforeEach(() => {
   redisStore.clear();
   falharProximosSets = 0;
   falharProximosEvals = 0;
+  latenciaRedisMs = 0;
 });
 
 describe("adquirirMutexPedidos / liberarMutexPedidos", () => {
@@ -133,7 +158,7 @@ describe("adquirirMutexPedidos / liberarMutexPedidos", () => {
   test("lock indisponível (nunca liberado): esgota tentativas e lança MutexPedidosIndisponivelError — nunca finge ter adquirido", async () => {
     await adquirirMutexPedidos(); // nunca libera de propósito
     await expect(adquirirMutexPedidos()).rejects.toThrow(MutexPedidosIndisponivelError);
-  }, 10_000);
+  }, 18_000);
 
   test("Redis falha durante a AQUISIÇÃO (SET NX lança): trata como tentativa falha, tenta de novo, eventualmente adquire se o Redis volta", async () => {
     falharProximosSets = 3;
@@ -150,6 +175,31 @@ describe("adquirirMutexPedidos / liberarMutexPedidos", () => {
 });
 
 describe("mutarPedidos", () => {
+  test.runIf(process.env.CHEFEBOT_CAPACITY_BENCH === "1")("mede o mutex com latência simulada por comando Redis", async () => {
+    latenciaRedisMs = Number(process.env.CHEFEBOT_CAPACITY_REDIS_LATENCY_MS ?? 5);
+    for (const total of [50, 100, 200]) {
+      redisStore.clear();
+      const resultados = await Promise.allSettled(Array.from({ length: total }, async (_, indice) => {
+        const inicio = performance.now();
+        await mutarPedidos<{ id: number }, void>((pedidos) => ({
+          persistir: true,
+          pedidos: [...pedidos, { id: indice }],
+          resultado: undefined,
+        }));
+        return performance.now() - inicio;
+      }));
+      const latencias = resultados.filter((r): r is PromiseFulfilledResult<number> => r.status === "fulfilled")
+        .map((r) => r.value).sort((a, b) => a - b);
+      const pedidos = (redisStore.get("pedidos") as Array<{ id: number }> | undefined) ?? [];
+      console.log(JSON.stringify({ benchmark: "mutex-redis-simulado", latenciaRedisMs, total,
+        persistidos: pedidos.length, falhas: total - latencias.length,
+        mediaMs: Math.round(latencias.reduce((a, b) => a + b, 0) / (latencias.length || 1)),
+        p95Ms: latencias.length ? Math.round(latencias[Math.ceil(latencias.length * 0.95) - 1]) : null,
+      }));
+      expect(pedidos).toHaveLength(total);
+      expect(new Set(pedidos.map((p) => p.id)).size).toBe(total);
+    }
+  }, 60_000);
   test("lê fresco, aplica a mutação, persiste, libera o lock — devolve o resultado", async () => {
     redisStore.set("pedidos", [{ id: "1", status: "novo" }]);
     const resultado = await mutarPedidos<{ id: string; status: string }, string>((pedidos) => {

@@ -33,7 +33,7 @@ import type { BotStep } from "@/lib/bot";
 import { ehEventoQrAtualizado, extrairQrBase64, obterConfigEvolution } from "@/lib/evolutionApi";
 import { extrairTelefoneIndividualDaChave } from "@/lib/whatsappJid";
 import { limparQrAtual, persistirQrAtual } from "@/lib/whatsappQrCache";
-import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
+import { enviarImagemWhatsApp, enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 import { ehEcoPainel, validarMessageId } from "@/lib/conversaEcoPainel";
 import {
   CanaryInboundRetryableError,
@@ -430,14 +430,8 @@ export async function enviarMensagem(phone: string, message: string, ritmoRapido
 
 async function enviarImagem(phone: string, imageUrl: string) {
   try {
-    const config = obterConfigEvolution();
-    if (!config) { console.error("[ChefeBot] Provider de WhatsApp não configurado — imagem não enviada."); return; }
-    const url = `${config.baseUrl}/message/sendMedia/${config.instanceName}`;
-    await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", apikey: config.apiKey },
-      body: JSON.stringify({ number: phone, mediatype: "image", media: imageUrl, caption: "" }),
-    });
+    const resultado = await enviarImagemWhatsApp(phone, imageUrl);
+    if (!resultado.ok) console.error("[ChefeBot] Imagem pendente ou não confirmada pela Evolution.");
   } catch (err) {
     console.error("[ChefeBot] Erro ao enviar imagem:", err instanceof Error ? err.name : "erro_desconhecido");
   }

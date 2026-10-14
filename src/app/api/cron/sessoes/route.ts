@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
-import { obterConfigEvolution } from "@/lib/evolutionApi";
+import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 
 const TIMEOUT_MS = 15 * 60 * 1000 // 15 minutos
 const STEPS_IGNORADOS = ['done', 'escalado', 'confirm', 'welcome']
@@ -10,14 +10,8 @@ type SessaoComStep = {
 }
 
 async function enviarMensagem(phone: string, text: string) {
-  const config = obterConfigEvolution()
-  if (!config) { console.error('[cron sessoes] Provider de WhatsApp não configurado — mensagem não enviada.'); return }
   try {
-    await fetch(`${config.baseUrl}/message/sendText/${config.instanceName}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: config.apiKey },
-      body: JSON.stringify({ number: phone, text }),
-    })
+    await enviarTextoWhatsApp(phone, text, { prioridade: 'promocional', maxAttempts: 1 })
   } catch {}
 }
 

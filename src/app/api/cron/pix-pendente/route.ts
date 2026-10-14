@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
-import { obterConfigEvolution } from "@/lib/evolutionApi";
+import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 import { ehProjetoVercelLegado } from "@/lib/vercelProjeto";
 
 type SessaoPixPendente = {
@@ -21,14 +21,8 @@ type PedidoPixPendente = {
 };
 
 async function enviarMensagem(phone: string, text: string) {
-  const config = obterConfigEvolution();
-  if (!config) { console.error("[cron pix-pendente] Provider de WhatsApp não configurado — mensagem não enviada."); return; }
   try {
-    await fetch(`${config.baseUrl}/message/sendText/${config.instanceName}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", apikey: config.apiKey },
-      body: JSON.stringify({ number: phone, text }),
-    });
+    await enviarTextoWhatsApp(phone, text, { prioridade: "critica", maxAttempts: 1 });
   } catch {}
 }
 

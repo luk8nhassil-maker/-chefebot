@@ -8,7 +8,6 @@ import { processarEfeitosPedidoEntregue, processarEfeitosPedidoCancelado } from 
 import type { ItemElegibilidadeJornada } from '@/lib/jornadaChef'
 import type { ItemApp } from '@/lib/pedidoAppItens'
 import type { PedidoSnapshotOficial } from '@/lib/pedidoSnapshot'
-import { obterConfigEvolution } from '@/lib/evolutionApi'
 import {
   classificarPendencia,
   registrarResolucao,
@@ -800,22 +799,12 @@ export async function PATCH(req: NextRequest) {
       await redis.set(chaveAvaliacao, true, { ex: 86400 })
       await redis.set(`avaliacao:${phone}`, true, { ex: 3600 })
       const firstName = pedidos[index].cliente.split(' ')[0]
-      const configAvaliacao = obterConfigEvolution()
-      if (!configAvaliacao) {
-        console.error('[ChefeBot] Provider de WhatsApp não configurado — pesquisa de avaliação não enviada.')
-      } else {
       try {
-        const respostaAvaliacao = await fetch(`${configAvaliacao.baseUrl}/message/sendText/${configAvaliacao.instanceName}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': configAvaliacao.apiKey,
-          },
-          body: JSON.stringify({
-            number: phone,
-            text: `*${firstName}*, como foi sua experiência hoje? 😊\n\nAvalia nossa pizza de 1 a 5:\n\n  ⭐ 1 — Ruim\n  ⭐⭐ 2 — Regular\n  ⭐⭐⭐ 3 — Bom\n  ⭐⭐⭐⭐ 4 — Muito bom\n  ⭐⭐⭐⭐⭐ 5 — Excelente\n\nÉ só digitar o número! 😄`,
-          }),
-        })
+        const respostaAvaliacao = await enviarTextoWhatsApp(
+          phone,
+          `*${firstName}*, como foi sua experiência hoje? 😊\n\nAvalia nossa pizza de 1 a 5:\n\n  ⭐ 1 — Ruim\n  ⭐⭐ 2 — Regular\n  ⭐⭐⭐ 3 — Bom\n  ⭐⭐⭐⭐ 4 — Muito bom\n  ⭐⭐⭐⭐⭐ 5 — Excelente\n\nÉ só digitar o número! 😄`,
+          { prioridade: 'promocional', maxAttempts: 1, idempotencyKey: `avaliacao:${id}` },
+        )
         if (respostaAvaliacao.ok) {
           try {
             await registrarContatoPesquisaConfirmado({
@@ -829,7 +818,6 @@ export async function PATCH(req: NextRequest) {
         }
       } catch (err) {
         console.error('[ChefeBot] Erro ao enviar pesquisa:', err)
-      }
       }
     }
 

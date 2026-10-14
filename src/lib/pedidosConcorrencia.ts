@@ -26,8 +26,10 @@ import { redis } from "@/lib/redis";
 export const CHAVE_REVISAO_PEDIDOS = "pedidos:revision";
 const CHAVE_MUTEX_PEDIDOS = "pedidos:mutex:global";
 const MUTEX_TTL_SEGUNDOS = 5;
-const MUTEX_MAX_TENTATIVAS = 50;
-const MUTEX_ESPERA_MS = 20;
+// A escrita atual ainda é um array único; backoff+jitter reduz a rajada de
+// SET NX enquanto a migração estrutural do armazenamento não acontece.
+const MUTEX_PRAZO_MS = 15_000;
+const MUTEX_ESPERA_MAX_MS = 200;
 
 function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -51,18 +53,22 @@ export class MutexPedidosIndisponivelError extends Error {
  * finge ter adquirido o lock.
  */
 export async function adquirirMutexPedidos(): Promise<string> {
-  for (let tentativa = 0; tentativa < MUTEX_MAX_TENTATIVAS; tentativa++) {
+  const prazo = Date.now() + MUTEX_PRAZO_MS;
+  for (let tentativa = 0; ; tentativa++) {
     const token = randomUUID();
-    let obtido: unknown;
+    let obtido: unknown = 0;
     try {
       obtido = await redis.set(CHAVE_MUTEX_PEDIDOS, token, { nx: true, ex: MUTEX_TTL_SEGUNDOS });
     } catch {
       obtido = null;
     }
     if (obtido) return token;
-    await esperar(MUTEX_ESPERA_MS);
+    const restante = prazo - Date.now();
+    if (restante <= 0) break;
+    const espera = Math.min(restante, Math.min(MUTEX_ESPERA_MAX_MS, 20 + tentativa * 5) + Math.floor(Math.random() * 20));
+    await esperar(espera);
   }
-  throw new MutexPedidosIndisponivelError(`${MUTEX_MAX_TENTATIVAS} tentativas esgotadas`);
+  throw new MutexPedidosIndisponivelError(`prazo de ${MUTEX_PRAZO_MS} ms esgotado`);
 }
 
 const LIBERAR_MUTEX_LUA = `

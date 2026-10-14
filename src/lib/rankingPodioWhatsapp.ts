@@ -385,7 +385,7 @@ export async function processarPodioWhatsapp18h(params?: {
       tentativasEnvio++;
       // Timeout/5xx pode ocorrer depois de a Evolution enviar; sem chave de
       // idempotência no provider, não repetir uma mensagem proativa ambígua.
-      const resultado = await enviarTextoWhatsApp(phone, mensagem, { maxAttempts: 1 });
+      const resultado = await enviarTextoWhatsApp(phone, mensagem, { maxAttempts: 1, prioridade: "promocional", idempotencyKey: `podio:${tenantId}:${temporada.temporadaId}:${dataLocal}:${entrada.clienteId}` });
       requisicoesProvider += resultado.tentativas;
       if (!resultado.ok) {
         falhas++;
