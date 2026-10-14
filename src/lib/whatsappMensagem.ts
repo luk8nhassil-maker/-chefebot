@@ -107,7 +107,10 @@ export async function enviarTextoWhatsApp(
       phone, text, opts, priority: opts?.prioridade ?? "critica", idempotencyKey: opts?.idempotencyKey,
       humanSenderName: opts?.humanSenderName,
     });
-    void agendarDrenoWhatsapp();
+    // Espera a tentativa de despertar/assegurar a recuperação antes de a
+    // função serverless poder encerrar. Falha do QStash não desfaz a escrita
+    // durável no Redis nem transforma a mensagem em envio confirmado.
+    await agendarDrenoWhatsapp();
     await processarFilaWhatsapp(executarJobWhatsapp, 1);
     const job = await obterJobWhatsapp(enfileirado.jobId);
     resultado = !job && process.env.NODE_ENV === "test"
@@ -244,7 +247,7 @@ export async function executarJobWhatsapp(job: import("./whatsappOutbox").JobOut
 export async function enviarImagemWhatsApp(phone: string, mediaUrl: string, caption = ""): Promise<ResultadoEnvioWhatsApp> {
   try {
     const enfileirado = await enfileirarImagemWhatsapp({ phone, mediaUrl, caption, priority: "critica" });
-    void agendarDrenoWhatsapp();
+    await agendarDrenoWhatsapp();
     await processarFilaWhatsapp(executarJobWhatsapp, 1);
     return resultadoDoJob(await obterJobWhatsapp(enfileirado.jobId));
   } catch (erro) {

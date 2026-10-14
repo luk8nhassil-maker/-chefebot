@@ -40,6 +40,6 @@ export async function POST(req: NextRequest) {
   const queue = await resumoFilaWhatsapp();
   // Um lote cheio agenda a continuação, mas a recuperação cron também cobre
   // falha de publicação ou interrupção do worker.
-  if (queue.pending > 0) void agendarDrenoWhatsapp();
+  if (queue.pending > 0) await agendarDrenoWhatsapp();
   return NextResponse.json({ ok: true, recovered, ...drained, humanHistorySynced, queue });
 }

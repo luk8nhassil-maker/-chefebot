@@ -15,10 +15,6 @@
     {
       "path": "/api/cron/ranking-autopilot",
       "schedule": "30 4 * * *"
-    },
-    {
-      "path": "/api/cron/whatsapp-outbox",
-      "schedule": "*/5 * * * *"
     }
   ],
   "$schema": "https://openapi.vercel.sh/vercel.json",

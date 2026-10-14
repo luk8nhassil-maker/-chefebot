@@ -313,19 +313,73 @@ export async function reivindicarHistoricoMensagemHumana(jobId: string): Promise
 }
 
 let qstash: Client | null | undefined;
+let recoveryScheduleDestination: string | null = null;
+const QSTASH_RECOVERY_SCHEDULE_ID = "chefebot-whatsapp-outbox-recovery-v1";
+const QSTASH_RECOVERY_CRON = "*/5 * * * *";
+
 function clienteQstash(): Client | null {
   if (qstash !== undefined) return qstash;
   qstash = process.env.QSTASH_TOKEN ? new Client({ token: process.env.QSTASH_TOKEN }) : null;
   return qstash;
 }
 
+function destinoWorkerWhatsapp(): string {
+  return process.env.WHATSAPP_OUTBOX_CALLBACK_URL?.trim()
+    || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/api/interno/whatsapp-outbox/processar` : "");
+}
+
+// Uma agenda persistente não deve nascer em Preview. Em produção, VERCEL_URL
+// é seguro como fallback; fora dela exigimos a URL explícita configurada.
+function destinoRecuperacaoWhatsapp(): string {
+  const configured = process.env.WHATSAPP_OUTBOX_CALLBACK_URL?.trim();
+  if (configured) return configured;
+  return process.env.VERCEL_ENV === "production" ? destinoWorkerWhatsapp() : "";
+}
+
+/** Nomes somente: permite diagnosticar configuração sem revelar segredo algum. */
+export function configuracaoOutboxWhatsapp(): { ready: boolean; missing: string[] } {
+  const required = ["QSTASH_TOKEN", "QSTASH_CURRENT_SIGNING_KEY", "QSTASH_NEXT_SIGNING_KEY"];
+  const missing = required.filter((name) => !process.env[name]);
+  if (!destinoRecuperacaoWhatsapp()) missing.push("WHATSAPP_OUTBOX_CALLBACK_URL (ou VERCEL_URL em production)");
+  return { ready: missing.length === 0, missing };
+}
+
+/**
+ * O schedule vive no QStash, independente da frequência permitida pelo plano
+ * Vercel. `scheduleId` torna a criação idempotente e atualiza a mesma agenda
+ * caso a URL de callback mude. Ele só é solicitado após aceitar uma tarefa.
+ */
+async function assegurarRecuperacaoPeriodicaWhatsapp(client: Client, destination: string): Promise<boolean> {
+  if (recoveryScheduleDestination === destination) return true;
+  try {
+    await client.schedules.create({
+      destination,
+      cron: QSTASH_RECOVERY_CRON,
+      scheduleId: QSTASH_RECOVERY_SCHEDULE_ID,
+      body: "{}",
+      headers: { "Content-Type": "application/json" },
+      retries: 1,
+      flowControl: { key: "chefebot-whatsapp-outbox", parallelism: 1 },
+      redact: { body: true },
+    });
+    recoveryScheduleDestination = destination;
+    return true;
+  } catch {
+    // Não impede a publicação imediata; o job aceito segue no Redis e uma
+    // próxima chamada tentará restabelecer a agenda.
+    return false;
+  }
+}
+
 // Melhor esforço: a durabilidade está no Redis; QStash só desperta o worker.
 // Não publica sem token/URL e nunca impede que um pedido já aceito prossiga.
 export async function agendarDrenoWhatsapp(): Promise<boolean> {
   const client = clienteQstash();
-  const base = process.env.WHATSAPP_OUTBOX_CALLBACK_URL?.trim() || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/api/interno/whatsapp-outbox/processar` : "");
-  if (!client || !base) return false;
+  const base = destinoWorkerWhatsapp();
+  if (!client || !base || !configuracaoOutboxWhatsapp().ready) return false;
   try {
+    const recoveryDestination = destinoRecuperacaoWhatsapp();
+    if (recoveryDestination) await assegurarRecuperacaoPeriodicaWhatsapp(client, recoveryDestination);
     await client.publishJSON({
       url: base, body: {}, retries: 1,
       // Evita uma rajada de despertares idênticos; a recuperação periódica
