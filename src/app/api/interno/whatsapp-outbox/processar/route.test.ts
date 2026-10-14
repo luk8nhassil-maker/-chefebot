@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const mocks = vi.hoisted(() => ({ verify: vi.fn(), process: vi.fn(), recover: vi.fn(), summary: vi.fn(), sync: vi.fn(), schedule: vi.fn() }));
+const mocks = vi.hoisted(() => ({ verify: vi.fn(), process: vi.fn(), recover: vi.fn(), summary: vi.fn(), sync: vi.fn(), schedule: vi.fn(), markEco: vi.fn(), registrarOutbox: vi.fn(), markOutbound: vi.fn(), executarJob: vi.fn() }));
 
 vi.mock("@upstash/qstash", () => ({ Receiver: class { verify = mocks.verify; } }));
-vi.mock("@/lib/whatsappMensagem", () => ({ executarJobWhatsapp: vi.fn() }));
-vi.mock("@/lib/conversa", () => ({ registrarMensagem: vi.fn() }));
-vi.mock("@/lib/conversaEcoPainel", () => ({ marcarEcoPainel: vi.fn() }));
-vi.mock("@/lib/whatsappDiag", () => ({ marcarOutboundConfirmado: vi.fn() }));
+vi.mock("@/lib/whatsappMensagem", () => ({ executarJobWhatsapp: mocks.executarJob }));
+vi.mock("@/lib/conversa", () => ({ registrarMensagemOutbox: mocks.registrarOutbox }));
+vi.mock("@/lib/conversaEcoPainel", () => ({ marcarEcoPainel: mocks.markEco }));
+vi.mock("@/lib/whatsappDiag", () => ({ marcarOutboundConfirmado: mocks.markOutbound }));
 vi.mock("@/lib/whatsappOutbox", () => ({
   urlWorkerWhatsappAssinada: vi.fn(() => "https://chefedapizza.com.br/api/interno/whatsapp-outbox/processar"),
   processarFilaWhatsapp: mocks.process, recuperarLeasesWhatsapp: mocks.recover,
@@ -38,5 +38,40 @@ describe("worker da outbox", () => {
       url: "https://chefedapizza.com.br/api/interno/whatsapp-outbox/processar",
     }));
     expect(mocks.process).not.toHaveBeenCalled();
+  });
+
+  test("marca o eco de bot assíncrono antes do histórico", async () => {
+    mocks.verify.mockResolvedValue(true);
+    mocks.registrarOutbox.mockResolvedValue(true);
+    mocks.summary.mockResolvedValue({ pending: 0, inFlight: 0, ambiguous: 0, unresolved: 0 });
+    mocks.sync.mockImplementation(async (callback: (job: Record<string, unknown>) => Promise<void>) => {
+      await callback({
+        id: "bot-job-1", phone: "5511999990001",
+        history: { autor: "bot", texto: "Pedido confirmado", markOutbound: true },
+        result: { messageIdInterno: "EVO-BOT-1" },
+      });
+      return 1;
+    });
+    const response = await POST(new NextRequest("https://chefedapizza.com.br/api/interno/whatsapp-outbox/processar", {
+      method: "POST", headers: { "upstash-signature": "token" }, body: "{}",
+    }));
+    expect(response.status).toBe(200);
+    expect(mocks.markEco).toHaveBeenCalledWith("EVO-BOT-1");
+    expect(mocks.markEco.mock.invocationCallOrder[0]).toBeLessThan(mocks.registrarOutbox.mock.invocationCallOrder[0]);
+    expect(mocks.markOutbound).toHaveBeenCalledTimes(1);
+  });
+
+  test("marca o eco assim que o executor confirma, antes de finalizar o job", async () => {
+    mocks.verify.mockResolvedValue(true);
+    mocks.executarJob.mockResolvedValue({ ok: true, messageIdInterno: "EVO-ANTES-DO-FINALIZE", latenciaMs: 1, tentativas: 1 });
+    mocks.process.mockImplementation(async (executor: (job: Record<string, unknown>) => Promise<unknown>) => {
+      await executor({ id: "bot-job-cedo", phone: "5511999990001", history: { autor: "bot", texto: "ok" } });
+      return { processed: 1, delivered: 1, failed: 0, ambiguous: 0 };
+    });
+    const response = await POST(new NextRequest("https://chefedapizza.com.br/api/interno/whatsapp-outbox/processar", {
+      method: "POST", headers: { "upstash-signature": "token" }, body: "{}",
+    }));
+    expect(response.status).toBe(200);
+    expect(mocks.markEco).toHaveBeenCalledWith("EVO-ANTES-DO-FINALIZE");
   });
 });

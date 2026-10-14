@@ -20,9 +20,15 @@ vi.mock("./redis", () => ({
         return id;
       }
       if (script.includes("local leaseUntil")) {
-        const [leases, ...queues] = keys; const [nowRaw, untilRaw, limitRaw, token, jobPrefix, conversationPrefix, conversationQueuePrefix] = args;
+        const [leases, ...queues] = keys; const [nowRaw, untilRaw, limitRaw, token, jobPrefix, conversationPrefix, conversationQueuePrefix, _leaseMs, _ttl, rateLimitRaw] = args;
         const now = Number(nowRaw); if (zset(leases).size >= Number(limitRaw)) return null;
-        for (const queue of queues) for (const [id, due] of [...zset(queue)].sort((a, b) => a[1] - b[1])) {
+        const rateLimit = Number(rateLimitRaw ?? 0);
+        const rateKey = keys[4];
+        if (rateLimit > 0) {
+          zremrange(rateKey, now - 60_000);
+          if (zset(rateKey).size >= rateLimit) return null;
+        }
+        for (const queue of queues.slice(0, 3)) for (const [id, due] of [...zset(queue)].sort((a, b) => a[1] - b[1])) {
           if (due > now) continue;
           const job = values.get(jobPrefix + id) as Record<string, unknown> | undefined;
           if (!job || job.state !== "pending") { zset(queue).delete(id); continue; }
@@ -33,6 +39,7 @@ vi.mock("./redis", () => ({
           locks.set(ck, { value: id, until: Number(untilRaw) });
           job.state = "leased"; job.leaseToken = token; job.updatedAt = now; job.attempt = Number(job.attempt ?? 0) + 1;
           values.set(jobPrefix + id, job); zset(queue).delete(id); zset(leases).set(id, Number(untilRaw));
+          if (rateLimit > 0) zset(rateKey).set(token, now);
           return JSON.stringify(job);
         }
         return null;
@@ -64,7 +71,7 @@ vi.mock("./redis", () => ({
 
 import { configuracaoOutboxWhatsapp, enfileirarImagemWhatsapp, enfileirarMensagemWhatsapp, obterJobWhatsapp, processarFilaWhatsapp, recuperarLeasesWhatsapp, resumoFilaWhatsapp } from "./whatsappOutbox";
 
-beforeEach(() => { values.clear(); scores.clear(); locks.clear(); delete process.env.WHATSAPP_OUTBOX_CONCURRENCY; });
+beforeEach(() => { values.clear(); scores.clear(); locks.clear(); delete process.env.WHATSAPP_OUTBOX_CONCURRENCY; delete process.env.WHATSAPP_OUTBOX_RATE_LIMIT_PER_MINUTE; });
 
 async function drenar(executar: Parameters<typeof processarFilaWhatsapp>[0]) {
   let total = 0, max = 0;
@@ -95,6 +102,32 @@ describe("whatsappOutbox", () => {
     expect(resultado.total).toBe(4); expect(maxEmVoo).toBeLessThanOrEqual(4);
     expect(ordem.indexOf("normal")).toBeLessThan(ordem.indexOf("critica-1"));
     expect(ordem.indexOf("critica-1")).toBeLessThan(ordem.indexOf("critica-2"));
+  });
+
+  test("não deixa 32 pendências bloqueadas de uma conversa esconderem outra conversa apta", async () => {
+    const phoneBloqueado = "5511999990099";
+    // O primeiro job fica em voo; restam exatamente 32 pendências desta
+    // conversa à frente de uma segunda conversa independente.
+    await Promise.all(Array.from({ length: 33 }, (_, i) => enfileirarMensagemWhatsapp({ phone: phoneBloqueado, text: `bloqueada-${i}` })));
+    let liberar!: () => void;
+    const primeiro = processarFilaWhatsapp(async () => new Promise((resolve) => { liberar = () => resolve({ ok: true, latenciaMs: 1, tentativas: 1 }); }), 1, 1);
+    await vi.waitFor(() => expect(liberar).toBeTypeOf("function"));
+    await enfileirarMensagemWhatsapp({ phone: "5511999990100", text: "conversa-apta" });
+    const executarApta = vi.fn(async () => ({ ok: true, latenciaMs: 1, tentativas: 1 }));
+    await processarFilaWhatsapp(executarApta, 1, 1);
+    expect(executarApta).toHaveBeenCalledWith(expect.objectContaining({ text: "conversa-apta" }));
+    liberar();
+    await primeiro;
+  });
+
+  test("aplica teto distribuído de velocidade separado da concorrência", async () => {
+    process.env.WHATSAPP_OUTBOX_CONCURRENCY = "4";
+    process.env.WHATSAPP_OUTBOX_RATE_LIMIT_PER_MINUTE = "2";
+    await Promise.all(Array.from({ length: 3 }, (_, i) => enfileirarMensagemWhatsapp({ phone: `55119999902${i}`, text: `rate-${i}` })));
+    const executar = vi.fn(async () => ({ ok: true, latenciaMs: 1, tentativas: 1 }));
+    await processarFilaWhatsapp(executar, 4, 3);
+    expect(executar).toHaveBeenCalledTimes(2);
+    expect(await resumoFilaWhatsapp()).toMatchObject({ pending: 1, inFlight: 0 });
   });
 
   test.each([50, 100, 200])("aceita e entrega %i mensagens sem duplicar", async (total) => {

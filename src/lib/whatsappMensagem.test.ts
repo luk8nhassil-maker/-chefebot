@@ -17,9 +17,9 @@ vi.mock("./whatsappOutbox", () => ({
   }),
   obterJobWhatsapp: vi.fn(async (id: string) => jobs.get(id) ?? null),
 }));
-import { enviarTextoWhatsApp, normalizarLinksPublicosWhatsApp } from "./whatsappMensagem";
+import { executarJobWhatsapp, enviarImagemWhatsApp, enviarTextoWhatsApp, normalizarLinksPublicosWhatsApp } from "./whatsappMensagem";
 
-const ENV_KEYS = ["EVOLUTION_API_URL", "EVOLUTION_API_KEY", "EVOLUTION_INSTANCE_NAME"] as const;
+const ENV_KEYS = ["EVOLUTION_API_URL", "EVOLUTION_API_KEY", "EVOLUTION_INSTANCE_NAME", "VERCEL_ENV"] as const;
 const originais: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -58,6 +58,35 @@ describe("normalizarLinksPublicosWhatsApp", () => {
 });
 
 describe("enviarTextoWhatsApp", () => {
+  test("Preview bloqueia antes da outbox síncrona e nunca chama a Evolution", async () => {
+    process.env.VERCEL_ENV = "preview";
+    const fetchMock = vi.fn().mockResolvedValue(respostaOk());
+    vi.stubGlobal("fetch", fetchMock);
+    const resultado = await enviarTextoWhatsApp("5511999998888", "não pode sair");
+    expect(resultado).toMatchObject({ ok: false, motivo: "preview_send_blocked", tentativas: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("Preview também bloqueia imagem, inclusive quando chamada pelo caminho síncrono", async () => {
+    process.env.VERCEL_ENV = "preview";
+    const fetchMock = vi.fn().mockResolvedValue(respostaOk());
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(enviarImagemWhatsApp("5511999998888", "https://cdn.test/comprovante.png")).resolves.toMatchObject({
+      ok: false, motivo: "preview_send_blocked", tentativas: 0,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("Preview bloqueia também job pendente entregue diretamente ao worker", async () => {
+    process.env.VERCEL_ENV = "preview";
+    const fetchMock = vi.fn().mockResolvedValue(respostaOk());
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(executarJobWhatsapp({ kind: "text", phone: "5511999998888", text: "pendente" } as never)).resolves.toMatchObject({
+      ok: false, motivo: "preview_send_blocked", tentativas: 0,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   test.runIf(process.env.CHEFEBOT_CAPACITY_BENCH === "1")("mede rajadas isoladas sem chamar a Evolution real", async () => {
     for (const total of [50, 100, 200]) {
       let emVoo = 0;

@@ -35,7 +35,7 @@ import { extrairTelefoneIndividualDaChave } from "@/lib/whatsappJid";
 import { limparQrAtual, persistirQrAtual } from "@/lib/whatsappQrCache";
 import { enviarImagemWhatsApp, enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 import { confirmarHistoricoMensagemHumana, reivindicarHistoricoMensagemHumana } from "@/lib/whatsappOutbox";
-import { ehEcoPainel, validarMessageId } from "@/lib/conversaEcoPainel";
+import { ehEcoPainel, marcarEcoPainel, validarMessageId } from "@/lib/conversaEcoPainel";
 import {
   CanaryInboundRetryableError,
   ehEcoOutboundCanario,
@@ -429,6 +429,11 @@ export async function enviarMensagem(phone: string, message: string, ritmoRapido
   // a aparecer no histórico/painel.
   const podeRegistrar = !resultado.deduplicated && (!resultado.jobId || await reivindicarHistoricoMensagemHumana(resultado.jobId));
   if (podeRegistrar) {
+    // O bot também gera messages.upsert/fromMe. Marque o ID do provider antes
+    // do histórico, tal como o painel humano, para não registrar a mesma
+    // mensagem uma segunda vez como atendente. Mensagens digitadas no iPhone
+    // não possuem esta marca e continuam aparecendo normalmente.
+    if (resultado.messageIdInterno) await marcarEcoPainel(resultado.messageIdInterno);
     if (resultado.jobId) await registrarMensagemOutbox(phone, "bot", message, resultado.jobId);
     else await registrarMensagem(phone, "bot", message); // somente mocks legados de teste
     marcarOutboundConfirmado().catch(() => {});

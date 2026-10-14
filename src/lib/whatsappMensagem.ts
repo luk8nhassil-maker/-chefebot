@@ -50,6 +50,14 @@ type OpcoesEnvio = {
 const LINK_CARDAPIO_OFICIAL = "https://chefedapizza.com.br/cardapio";
 const LINK_CARDAPIO_LEGADO = /https?:\/\/chefebot-pjif\.vercel\.app\/cardapio(?=$|[\s/?#])/gi;
 
+function bloqueadoEmPreview(): boolean {
+  return process.env.VERCEL_ENV === "preview";
+}
+
+function resultadoPreviewBloqueado(): ResultadoEnvioWhatsApp {
+  return { ok: false, motivo: "preview_send_blocked", latenciaMs: 0, tentativas: 0 };
+}
+
 export function normalizarLinksPublicosWhatsApp(text: string) {
   return text.replace(LINK_CARDAPIO_LEGADO, LINK_CARDAPIO_OFICIAL);
 }
@@ -103,6 +111,9 @@ export async function enviarTextoWhatsApp(
   text: string,
   opts?: OpcoesEnvio
 ): Promise<ResultadoEnvioWhatsApp> {
+  // Não aceite nem drene a outbox em Preview: o caminho síncrono também deve
+  // ser incapaz de alcançar a Evolution se as variáveis forem espelhadas.
+  if (bloqueadoEmPreview()) return resultadoPreviewBloqueado();
   // A aceitação durável ocorre ANTES de qualquer contato com a Evolution.
   // O chamador continua recebendo ok:true apenas depois de confirmação do
   // provider; queued_pending é erro explícito e o job permanece recuperável.
@@ -163,6 +174,7 @@ export async function executarEnvioTexto(
   text: string,
   opts?: OpcoesEnvio
 ): Promise<ResultadoEnvioWhatsApp> {
+  if (bloqueadoEmPreview()) return resultadoPreviewBloqueado();
   const inicio = Date.now();
 
   // Somente mensagens automáticas do bot (identificadas pelo `delay`) passam
@@ -241,6 +253,7 @@ export async function executarEnvioTexto(
 }
 
 async function executarEnvioImagem(phone: string, mediaUrl: string, caption: string): Promise<ResultadoEnvioWhatsApp> {
+  if (bloqueadoEmPreview()) return resultadoPreviewBloqueado();
   const inicio = Date.now();
   const config = obterConfigEvolution();
   if (!config) return { ok: false, motivo: "provider_not_configured", latenciaMs: Date.now() - inicio, tentativas: 0 };
@@ -262,6 +275,7 @@ export async function executarJobWhatsapp(job: import("./whatsappOutbox").JobOut
 }
 
 export async function enviarImagemWhatsApp(phone: string, mediaUrl: string, caption = ""): Promise<ResultadoEnvioWhatsApp> {
+  if (bloqueadoEmPreview()) return resultadoPreviewBloqueado();
   try {
     const enfileirado = await enfileirarImagemWhatsapp({ phone, mediaUrl, caption, priority: "critica" });
     await agendarDrenoWhatsapp();

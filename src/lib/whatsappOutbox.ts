@@ -54,11 +54,22 @@ const CHAVE_LEASES = `${PREFIX}leases`;
 const CHAVE_HISTORICO_HUMANO = `${PREFIX}human-history`;
 const CHAVE_RECONCILIACAO = `${PREFIX}reconciliation`;
 const CHAVE_INCONSISTENCIAS = `${PREFIX}unresolved`;
+const CHAVE_VELOCIDADE = `${PREFIX}rate-window`;
 const chaveClaimHistoricoHumano = (id: string) => `${PREFIX}human-history-claim:${id}`;
 
 function limiteGlobal(): number {
   const n = Number(process.env.WHATSAPP_OUTBOX_CONCURRENCY ?? LIMITE_PADRAO);
   return Number.isInteger(n) && n > 0 ? Math.min(n, LIMITE_MAXIMO) : LIMITE_PADRAO;
+}
+
+/**
+ * Teto global opcional por janela deslizante. Não há número oficial público
+ * da Evolution: ausente/inválido significa desabilitado, para que a operação
+ * escolha o valor a partir de métricas da sua instância.
+ */
+function limiteVelocidadePorMinuto(): number {
+  const n = Number(process.env.WHATSAPP_OUTBOX_RATE_LIMIT_PER_MINUTE ?? 0);
+  return Number.isInteger(n) && n > 0 ? Math.min(n, 100_000) : 0;
 }
 
 function conversaSegura(phone: string): string {
@@ -88,11 +99,18 @@ local now = tonumber(ARGV[1])
 local leaseUntil = tonumber(ARGV[2])
 local limit = tonumber(ARGV[3])
 local leaseToken = ARGV[4]
+local rateLimit = tonumber(ARGV[10]) or 0
 -- Não remova leases vencidos aqui. Eles precisam passar pela reconciliação
 -- explícita antes de deixarem de contar para o limite global.
 if redis.call('ZCARD', KEYS[1]) >= limit then return nil end
+if rateLimit > 0 then
+  redis.call('ZREMRANGEBYSCORE', KEYS[5], '-inf', now - 60000)
+  if redis.call('ZCARD', KEYS[5]) >= rateLimit then return nil end
+end
 for q = 2, 4 do
-  local candidates = redis.call('ZRANGEBYSCORE', KEYS[q], '-inf', now, 'LIMIT', 0, 32)
+  -- Não use uma janela fixa: 32 cabeças bloqueadas de uma conversa não podem
+  -- ocultar uma conversa independente pronta logo depois na mesma fila.
+  local candidates = redis.call('ZRANGEBYSCORE', KEYS[q], '-inf', now)
   for _, id in ipairs(candidates) do
     local jobKey = ARGV[5] .. id
     local raw = redis.call('GET', jobKey)
@@ -115,6 +133,7 @@ for q = 2, 4 do
             redis.call('SET', jobKey, cjson.encode(job), 'EX', ARGV[9])
             redis.call('ZREM', KEYS[q], id)
             redis.call('ZADD', KEYS[1], leaseUntil, id)
+            if rateLimit > 0 then redis.call('ZADD', KEYS[5], now, leaseToken) end
             return cjson.encode(job)
           end
         end
@@ -229,8 +248,8 @@ export async function enfileirarImagemWhatsapp(input: {
 async function claimProximo(): Promise<JobOutboxWhatsapp | null> {
   const now = Date.now();
   const raw = await redis.eval(CLAIM_LUA,
-    [CHAVE_LEASES, chaveFila("critica"), chaveFila("normal"), chaveFila("promocional")],
-    [String(now), String(now + LEASE_MS), String(limiteGlobal()), randomUUID(), `${PREFIX}job:`, `${PREFIX}conversation:`, `${PREFIX}conversation-queue:`, String(LEASE_MS), String(TTL_SEGUNDOS)]);
+    [CHAVE_LEASES, chaveFila("critica"), chaveFila("normal"), chaveFila("promocional"), CHAVE_VELOCIDADE],
+    [String(now), String(now + LEASE_MS), String(limiteGlobal()), randomUUID(), `${PREFIX}job:`, `${PREFIX}conversation:`, `${PREFIX}conversation-queue:`, String(LEASE_MS), String(TTL_SEGUNDOS), String(limiteVelocidadePorMinuto())]);
   return raw ? JSON.parse(String(raw)) as JobOutboxWhatsapp : null;
 }
 

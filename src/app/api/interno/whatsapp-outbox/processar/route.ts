@@ -38,13 +38,24 @@ export async function POST(req: NextRequest) {
   const recovered = await recuperarLeasesWhatsapp();
   // Processa lote maior que a concorrência, mantendo o limite global no
   // Redis. Isso evita que uma fila acumulada dependa de novos enfileiramentos.
-  const drained = await processarFilaWhatsapp(executarJobWhatsapp, 8, 100);
+  const drained = await processarFilaWhatsapp(async (job) => {
+    const result = await executarJobWhatsapp(job);
+    // O webhook fromMe pode chegar logo após a confirmação HTTP. Registre a
+    // marca antes de o job ser finalizado e antes do histórico assíncrono;
+    // somente jobs gerados pelo sistema recebem a marca, nunca mensagens do
+    // iPhone/WhatsApp Business digitadas manualmente.
+    if (result.ok && (job.humanSenderName || job.history) && typeof result.messageIdInterno === "string") {
+      await marcarEcoPainel(result.messageIdInterno);
+    }
+    return result;
+  }, 8, 100);
   const humanHistorySynced = await sincronizarHistoricoMensagensHumanas(async (job) => {
     const result = job.result as { messageIdInterno?: unknown } | undefined;
     if (job.humanSenderName) {
       if (typeof result?.messageIdInterno === "string") await marcarEcoPainel(result.messageIdInterno);
       await registrarMensagemOutbox(job.phone, "atendente", `[${job.humanSenderName}] ${job.text}`, job.id);
     } else if (job.history) {
+      if (typeof result?.messageIdInterno === "string") await marcarEcoPainel(result.messageIdInterno);
       await registrarMensagemOutbox(job.phone, job.history.autor, job.history.texto, job.id);
       if (job.history.markOutbound) await marcarOutboundConfirmado();
     }
