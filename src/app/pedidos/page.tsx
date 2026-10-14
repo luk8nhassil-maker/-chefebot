@@ -626,6 +626,7 @@ export default function PedidosPage() {
   const simpleToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const historicoBottomRef = useRef<HTMLDivElement>(null)
   const sendInFlightRef = useRef(false)
+  const pendingHumanMessageIdsRef = useRef(new Map<string, string>())
   const chatMsgAreaRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
   const prevMsgCountRef = useRef(0)
@@ -1170,6 +1171,10 @@ export default function PedidosPage() {
     if (sendInFlightRef.current) return
     const texto = (mensagemHumana[phone] || "").trim()
     if (!texto) return
+    const chaveTentativa = `${phone}\u0000${texto}`
+    const clientMessageId = pendingHumanMessageIdsRef.current.get(chaveTentativa)
+      ?? (typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`)
+    pendingHumanMessageIdsRef.current.set(chaveTentativa, clientMessageId)
     sendInFlightRef.current = true
     setEnviandoMensagem(phone)
     setErroEnvioMensagem(prev => ({ ...prev, [phone]: "" }))
@@ -1177,7 +1182,7 @@ export default function PedidosPage() {
       const r = await fetch("/api/conversas/enviar-mensagem-humana", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, text: texto, senderName: userName || "Kellyne" }),
+        body: JSON.stringify({ phone, text: texto, senderName: userName || "Kellyne", clientMessageId }),
       })
       const data = await r.json()
       if (data.ok) {
@@ -1188,8 +1193,10 @@ export default function PedidosPage() {
           setErroEnvioMensagem(prev => ({ ...prev, [phone]: "Mensagem enfileirada; aguardando confirmação." }))
           return
         }
+        pendingHumanMessageIdsRef.current.delete(chaveTentativa)
         setHistoricoMsgs(prev => [...prev, { autor: "atendente", texto: `[${userName || "Kellyne"}] ${texto}`, ts: Date.now() }])
       } else {
+        if (data.status === "failed") pendingHumanMessageIdsRef.current.delete(chaveTentativa)
         setErroEnvioMensagem(prev => ({ ...prev, [phone]: data.error || "Erro ao enviar." }))
       }
     } catch {

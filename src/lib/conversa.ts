@@ -1,6 +1,6 @@
 import { redis } from "./redis";
 import type { AutorMensagem, MensagemRelevante } from "./bot";
-import { atualizarHistorico } from "./conversasHistorico";
+import { atualizarHistorico, atualizarHistoricoIdempotenteOutbox } from "./conversasHistorico";
 import { sincronizarCronometroInatividade } from "./inatividadeConversa";
 
 // Log curto e rotativo das mensagens da conversa por telefone. Serve apenas para
@@ -51,6 +51,23 @@ export async function registrarMensagem(
     await sincronizarCronometroInatividade(phone, autor);
   } catch {
     // nunca propaga — perder um agendamento de cronômetro não pode derrubar o registro da mensagem
+  }
+}
+
+/** Registro exatamente-uma-vez para jobs já confirmados da outbox. */
+export async function registrarMensagemOutbox(
+  phone: string,
+  autor: AutorMensagem,
+  texto: string,
+  jobId: string,
+): Promise<boolean> {
+  try {
+    const registrado = await atualizarHistoricoIdempotenteOutbox(phone, autor, texto, jobId);
+    if (registrado) await sincronizarCronometroInatividade(phone, autor);
+    return registrado;
+  } catch {
+    // Propaga para manter o item no índice da outbox e permitir recuperação.
+    throw new Error("historico_outbox_indisponivel");
   }
 }
 

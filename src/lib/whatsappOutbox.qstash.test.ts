@@ -36,8 +36,9 @@ describe("agendarDrenoWhatsapp", () => {
     expect(mocks.publishJSON).toHaveBeenCalledTimes(2);
   });
 
-  test("não cria schedule recorrente em Preview sem URL explícita", async () => {
+  test("não cria schedule nem publicação em Preview, mesmo com callback explícito", async () => {
     process.env.VERCEL_ENV = "preview";
+    process.env.WHATSAPP_OUTBOX_CALLBACK_URL = "https://preview.example.test/api/interno/whatsapp-outbox/processar";
     await expect(agendarDrenoWhatsapp()).resolves.toBe(false);
     expect(mocks.create).not.toHaveBeenCalled();
     expect(mocks.publishJSON).not.toHaveBeenCalled();

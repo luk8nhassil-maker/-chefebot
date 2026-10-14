@@ -232,7 +232,12 @@ async function notificarClienteWhatsAppSeElegivel(pedido: PedidoReconciliavel): 
 
     try {
       const telefone = (pedido.telefone as string).trim();
-      const resultado = await enviarTextoWhatsApp(telefone, MSG_PIX_CONFIRMADO_WHATSAPP);
+      // O conciliador pode rodar novamente após uma resposta ambígua. A mesma
+      // chave reapresenta o job preservado e nunca cria outro sendText.
+      const resultado = await enviarTextoWhatsApp(telefone, MSG_PIX_CONFIRMADO_WHATSAPP, {
+        prioridade: "critica",
+        idempotencyKey: `pix-confirmado:${pedidoId}`,
+      });
       if (resultado.ok) {
         // Marcador permanente (sem TTL) — só gravado após sucesso confirmado
         // pela Evolution. Enquanto ausente, a próxima rodada tenta de novo.

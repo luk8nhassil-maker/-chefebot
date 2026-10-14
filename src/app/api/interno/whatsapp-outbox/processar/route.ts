@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Receiver } from "@upstash/qstash";
 import { executarJobWhatsapp } from "@/lib/whatsappMensagem";
-import { registrarMensagem } from "@/lib/conversa";
+import { registrarMensagemOutbox } from "@/lib/conversa";
+import { marcarEcoPainel } from "@/lib/conversaEcoPainel";
+import { marcarOutboundConfirmado } from "@/lib/whatsappDiag";
 import {
   agendarDrenoWhatsapp,
   processarFilaWhatsapp,
   recuperarLeasesWhatsapp,
   resumoFilaWhatsapp,
   sincronizarHistoricoMensagensHumanas,
+  urlWorkerWhatsappAssinada,
 } from "@/lib/whatsappOutbox";
 
 function receiver(): Receiver | null {
@@ -25,8 +28,10 @@ export async function POST(req: NextRequest) {
   if (!verifier) return NextResponse.json({ ok: false, motivo: "assinatura_nao_configurada" }, { status: 503 });
   const signature = req.headers.get("upstash-signature");
   if (!signature) return NextResponse.json({ ok: false, motivo: "assinatura_ausente" }, { status: 401 });
+  const urlAssinada = urlWorkerWhatsappAssinada();
+  if (!urlAssinada) return NextResponse.json({ ok: false, motivo: "callback_nao_configurado" }, { status: 503 });
   try {
-    if (!await verifier.verify({ signature, body })) return NextResponse.json({ ok: false, motivo: "assinatura_invalida" }, { status: 401 });
+    if (!await verifier.verify({ signature, body, url: urlAssinada })) return NextResponse.json({ ok: false, motivo: "assinatura_invalida" }, { status: 401 });
   } catch {
     return NextResponse.json({ ok: false, motivo: "assinatura_invalida" }, { status: 401 });
   }
@@ -35,7 +40,14 @@ export async function POST(req: NextRequest) {
   // Redis. Isso evita que uma fila acumulada dependa de novos enfileiramentos.
   const drained = await processarFilaWhatsapp(executarJobWhatsapp, 8, 100);
   const humanHistorySynced = await sincronizarHistoricoMensagensHumanas(async (job) => {
-    await registrarMensagem(job.phone, "atendente", `[${job.humanSenderName}] ${job.text}`);
+    const result = job.result as { messageIdInterno?: unknown } | undefined;
+    if (job.humanSenderName) {
+      if (typeof result?.messageIdInterno === "string") await marcarEcoPainel(result.messageIdInterno);
+      await registrarMensagemOutbox(job.phone, "atendente", `[${job.humanSenderName}] ${job.text}`, job.id);
+    } else if (job.history) {
+      await registrarMensagemOutbox(job.phone, job.history.autor, job.history.texto, job.id);
+      if (job.history.markOutbound) await marcarOutboundConfirmado();
+    }
   });
   const queue = await resumoFilaWhatsapp();
   // Um lote cheio agenda a continuação, mas a recuperação cron também cobre

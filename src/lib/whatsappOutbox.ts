@@ -7,7 +7,7 @@ import { redis } from "./redis";
 // automaticamente um resultado ambíguo (timeout, rede ou 5xx).
 
 export type PrioridadeWhatsapp = "critica" | "normal" | "promocional";
-export type EstadoOutboxWhatsapp = "pending" | "leased" | "delivered" | "failed" | "ambiguous" | "suppressed";
+export type EstadoOutboxWhatsapp = "pending" | "leased" | "delivered" | "failed" | "ambiguous" | "suppressed" | "expired";
 
 export type JobOutboxWhatsapp = {
   id: string;
@@ -25,8 +25,12 @@ export type JobOutboxWhatsapp = {
   opts?: { delay?: number; presence?: "composing"; timeoutMs?: number; maxAttempts?: 1 };
   idempotencyKey?: string;
   leaseToken?: string;
+  /** Prazo de negócio (ex.: OTP); diferente da retenção técnica de 7 dias. */
+  expiresAt?: number;
   /** Metadado mínimo para atualizar o histórico só após confirmação do provider. */
   humanSenderName?: string;
+  /** Efeito de histórico que o worker conclui somente após entrega confirmada. */
+  history?: { autor: "bot" | "atendente"; texto: string; markOutbound?: boolean };
   result?: ResultadoTransporteWhatsapp | { motivo: string };
 };
 
@@ -48,6 +52,8 @@ const chaveSequenciaConversa = (id: string) => `${PREFIX}conversation-queue:${id
 const chaveContadorSequenciaConversa = (id: string) => `${PREFIX}conversation-sequence:${id}`;
 const CHAVE_LEASES = `${PREFIX}leases`;
 const CHAVE_HISTORICO_HUMANO = `${PREFIX}human-history`;
+const CHAVE_RECONCILIACAO = `${PREFIX}reconciliation`;
+const CHAVE_INCONSISTENCIAS = `${PREFIX}unresolved`;
 const chaveClaimHistoricoHumano = (id: string) => `${PREFIX}human-history-claim:${id}`;
 
 function limiteGlobal(): number {
@@ -132,8 +138,13 @@ redis.call('SET', KEYS[1], cjson.encode(job), 'EX', ARGV[5])
 redis.call('ZREM', KEYS[2], job.id)
 if redis.call('GET', KEYS[3]) == job.id then redis.call('DEL', KEYS[3]) end
 redis.call('ZREM', KEYS[4], job.id)
-if job.humanSenderName and ARGV[2] == 'delivered' then
+if (job.humanSenderName or job.history) and ARGV[2] == 'delivered' then
   redis.call('ZADD', KEYS[5], tonumber(ARGV[3]), job.id)
+end
+-- Erros definitivos podem ser corrigidos (payload/configuração) e submetidos
+-- novamente; resultados ambíguos permanecem deduplicados para não duplicar.
+if job.idempotencyKey and (ARGV[2] == 'failed' or ARGV[2] == 'expired' or ARGV[2] == 'suppressed') then
+  redis.call('DEL', ARGV[6] .. job.idempotencyKey)
 end
 return 1
 `;
@@ -153,19 +164,23 @@ for _, id in ipairs(ids) do
       job.leaseToken = nil
       job.result = { motivo = 'lease_expired_without_provider_confirmation' }
       redis.call('SET', ARGV[3] .. id, cjson.encode(job), 'EX', ARGV[4])
-      local ck = ARGV[5] .. job.conversationId
-      if redis.call('GET', ck) == id then redis.call('DEL', ck) end
-      redis.call('ZREM', ARGV[6] .. job.conversationId, id)
+      -- Mantém a cabeça e o lock lógico da conversa: um resultado incerto
+      -- não pode permitir que a mensagem seguinte ultrapasse esta.
+      redis.call('ZADD', KEYS[2], now, id)
       redis.call('ZREM', KEYS[1], id)
       reconciled = reconciled + 1
     else
       -- Inconsistência: mantenha o lease visível e bloqueando capacidade até
       -- uma reconciliação operacional, em vez de fazê-lo sumir.
+      redis.call('ZADD', KEYS[3], now, id)
+      redis.call('ZREM', KEYS[1], id)
       unresolved = unresolved + 1
     end
   else
     -- Uma chave de job ausente pode indicar expiração/evicção do Redis. O
     -- lease não é apagado automaticamente para não ocultar a pendência.
+    redis.call('ZADD', KEYS[3], now, id)
+    redis.call('ZREM', KEYS[1], id)
     unresolved = unresolved + 1
   end
 end
@@ -174,7 +189,7 @@ return { reconciled, unresolved }
 
 export async function enfileirarMensagemWhatsapp(input: {
   phone: string; text: string; priority?: PrioridadeWhatsapp;
-  opts?: JobOutboxWhatsapp["opts"]; idempotencyKey?: string; humanSenderName?: string;
+  opts?: JobOutboxWhatsapp["opts"]; idempotencyKey?: string; humanSenderName?: string; expiresAt?: number; history?: JobOutboxWhatsapp["history"];
 }): Promise<{ jobId: string; deduplicated: boolean }> {
   const id = randomUUID();
   const now = Date.now();
@@ -183,6 +198,8 @@ export async function enfileirarMensagemWhatsapp(input: {
     id, kind: "text", phone: input.phone, text: input.text, priority, state: "pending", createdAt: now, updatedAt: now,
     attempt: 0, conversationId: conversaSegura(input.phone), opts: input.opts, idempotencyKey: input.idempotencyKey,
     humanSenderName: input.humanSenderName,
+    expiresAt: input.expiresAt,
+    history: input.history,
   };
   const dedupe = input.idempotencyKey ? chaveDedupe(input.idempotencyKey) : "";
   const resultado = await redis.eval(ENFILEIRAR_LUA,
@@ -217,15 +234,15 @@ async function claimProximo(): Promise<JobOutboxWhatsapp | null> {
   return raw ? JSON.parse(String(raw)) as JobOutboxWhatsapp : null;
 }
 
-async function finalizar(job: JobOutboxWhatsapp, estado: "delivered" | "failed" | "ambiguous" | "suppressed", result: ResultadoTransporteWhatsapp | { motivo: string }) {
-  await redis.eval(FINALIZAR_LUA, [chaveJob(job.id), CHAVE_LEASES, chaveConversa(job.conversationId), chaveSequenciaConversa(job.conversationId), CHAVE_HISTORICO_HUMANO],
-    [job.leaseToken ?? "", estado, String(Date.now()), JSON.stringify(result), String(TTL_SEGUNDOS)]);
+async function finalizar(job: JobOutboxWhatsapp, estado: "delivered" | "failed" | "ambiguous" | "suppressed" | "expired", result: ResultadoTransporteWhatsapp | { motivo: string }): Promise<boolean> {
+  return Number(await redis.eval(FINALIZAR_LUA, [chaveJob(job.id), CHAVE_LEASES, chaveConversa(job.conversationId), chaveSequenciaConversa(job.conversationId), CHAVE_HISTORICO_HUMANO],
+    [job.leaseToken ?? "", estado, String(Date.now()), JSON.stringify(result), String(TTL_SEGUNDOS), `${PREFIX}dedupe:`])) === 1;
 }
 
 export type RecuperacaoLeasesWhatsapp = { reconciled: number; unresolved: number };
 
 export async function recuperarLeasesWhatsapp(limite = 100): Promise<RecuperacaoLeasesWhatsapp> {
-  const result = await redis.eval(RECUPERAR_LEASES_LUA, [CHAVE_LEASES],
+  const result = await redis.eval(RECUPERAR_LEASES_LUA, [CHAVE_LEASES, CHAVE_RECONCILIACAO, CHAVE_INCONSISTENCIAS],
     [String(Date.now()), String(Math.max(1, Math.min(limite, 500))), `${PREFIX}job:`, String(TTL_SEGUNDOS), `${PREFIX}conversation:`, `${PREFIX}conversation-queue:`]);
   const values = Array.isArray(result) ? result : [result, 0];
   return { reconciled: Number(values[0]) || 0, unresolved: Number(values[1]) || 0 };
@@ -242,14 +259,21 @@ export async function processarFilaWhatsapp(
   limiteJobs = limite,
 ): Promise<{ processed: number; delivered: number; failed: number; ambiguous: number }> {
   await recuperarLeasesWhatsapp();
-  let processed = 0, delivered = 0, failed = 0, ambiguous = 0;
+  let processed = 0, delivered = 0, failed = 0, ambiguous = 0, remaining = Math.max(0, limiteJobs);
   await Promise.all(Array.from({ length: Math.max(1, Math.min(limite, LIMITE_MAXIMO)) }, async () => {
     for (;;) {
-      if (processed >= limiteJobs) return;
+      // Reserva síncrona do orçamento antes do await do claim: nenhum worker
+      // pode ultrapassar o teto de lote por passar na mesma checagem.
+      if (remaining <= 0) return;
+      remaining--;
       const job = await claimProximo();
-      if (!job) return;
+      if (!job) { remaining++; return; }
       processed++;
       try {
+        if (job.expiresAt && job.expiresAt <= Date.now()) {
+          await finalizar(job, "expired", { motivo: "expired_before_provider_send" });
+          continue;
+        }
         // A pausa global também vale para promoções já aceitas pela outbox;
         // decidir somente no enfileiramento deixaria lotes antigos escaparem.
         if (job.priority === "promocional" && await redis.get<boolean>("bot_ativo") === false) {
@@ -257,7 +281,7 @@ export async function processarFilaWhatsapp(
           continue;
         }
         const resultado = await executar(job);
-        if (resultado.ok) { await finalizar(job, "delivered", resultado); delivered++; }
+        if (resultado.ok) { if (await finalizar(job, "delivered", resultado)) delivered++; }
         else if (resultado.motivo === "subscription_silenced_new_contact") { await finalizar(job, "suppressed", resultado); }
         else if (resultadoAmbiguo(resultado)) { await finalizar(job, "ambiguous", resultado); ambiguous++; }
         else { await finalizar(job, "failed", resultado); failed++; }
@@ -274,11 +298,12 @@ export async function obterJobWhatsapp(id: string): Promise<JobOutboxWhatsapp | 
   return await redis.get<JobOutboxWhatsapp>(chaveJob(id));
 }
 
-export async function resumoFilaWhatsapp(): Promise<{ pending: number; inFlight: number }> {
-  const [critica, normal, promocional, inFlight] = await Promise.all([
+export async function resumoFilaWhatsapp(): Promise<{ pending: number; inFlight: number; ambiguous: number; unresolved: number }> {
+  const [critica, normal, promocional, inFlight, ambiguous, unresolved] = await Promise.all([
     redis.zcard(chaveFila("critica")), redis.zcard(chaveFila("normal")), redis.zcard(chaveFila("promocional")), redis.zcard(CHAVE_LEASES),
+    redis.zcard(CHAVE_RECONCILIACAO), redis.zcard(CHAVE_INCONSISTENCIAS),
   ]);
-  return { pending: Number(critica) + Number(normal) + Number(promocional), inFlight: Number(inFlight) };
+  return { pending: Number(critica) + Number(normal) + Number(promocional), inFlight: Number(inFlight), ambiguous: Number(ambiguous), unresolved: Number(unresolved) };
 }
 
 /**
@@ -294,7 +319,12 @@ export async function sincronizarHistoricoMensagensHumanas(
   let synced = 0;
   for (const id of ids) {
     const job = await obterJobWhatsapp(id);
-    if (!job || job.state !== "delivered" || !job.humanSenderName) continue;
+    if (!job || job.state !== "delivered" || (!job.humanSenderName && !job.history)) {
+      // Não deixe referências inválidas ocuparem os primeiros 100 slots para
+      // sempre. A quarentena é auditável e não apaga a evidência do jobId.
+      await Promise.all([redis.zadd(CHAVE_INCONSISTENCIAS, { score: Date.now(), member: `history:${id}` }), redis.zrem(CHAVE_HISTORICO_HUMANO, id)]);
+      continue;
+    }
     if (!await reivindicarHistoricoMensagemHumana(id)) continue;
     await registrar(job);
     await confirmarHistoricoMensagemHumana(id);
@@ -328,9 +358,15 @@ function destinoWorkerWhatsapp(): string {
     || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/api/interno/whatsapp-outbox/processar` : "");
 }
 
+/** URL canônica incluída na assinatura QStash; nunca derive do Host recebido. */
+export function urlWorkerWhatsappAssinada(): string {
+  return destinoWorkerWhatsapp();
+}
+
 // Uma agenda persistente não deve nascer em Preview. Em produção, VERCEL_URL
 // é seguro como fallback; fora dela exigimos a URL explícita configurada.
 function destinoRecuperacaoWhatsapp(): string {
+  if (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== "production") return "";
   const configured = process.env.WHATSAPP_OUTBOX_CALLBACK_URL?.trim();
   if (configured) return configured;
   return process.env.VERCEL_ENV === "production" ? destinoWorkerWhatsapp() : "";
@@ -374,6 +410,7 @@ async function assegurarRecuperacaoPeriodicaWhatsapp(client: Client, destination
 // Melhor esforço: a durabilidade está no Redis; QStash só desperta o worker.
 // Não publica sem token/URL e nunca impede que um pedido já aceito prossiga.
 export async function agendarDrenoWhatsapp(): Promise<boolean> {
+  if (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== "production") return false;
   const client = clienteQstash();
   const base = destinoWorkerWhatsapp();
   if (!client || !base || !configuracaoOutboxWhatsapp().ready) return false;

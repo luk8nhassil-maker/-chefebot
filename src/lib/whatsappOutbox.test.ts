@@ -21,7 +21,7 @@ vi.mock("./redis", () => ({
       }
       if (script.includes("local leaseUntil")) {
         const [leases, ...queues] = keys; const [nowRaw, untilRaw, limitRaw, token, jobPrefix, conversationPrefix, conversationQueuePrefix] = args;
-        const now = Number(nowRaw); zremrange(leases, now); if (zset(leases).size >= Number(limitRaw)) return null;
+        const now = Number(nowRaw); if (zset(leases).size >= Number(limitRaw)) return null;
         for (const queue of queues) for (const [id, due] of [...zset(queue)].sort((a, b) => a[1] - b[1])) {
           if (due > now) continue;
           const job = values.get(jobPrefix + id) as Record<string, unknown> | undefined;
@@ -45,10 +45,15 @@ vi.mock("./redis", () => ({
         zset(leases).delete(String(job.id)); zset(conversationQueue).delete(String(job.id)); if (locks.get(conversation)?.value === job.id) locks.delete(conversation); return 1;
       }
       if (script.includes("lease_expired_without_provider_confirmation")) {
-        const [leases] = keys; const [nowRaw, maxRaw, jobPrefix, _ttl, conversationPrefix, conversationQueuePrefix] = args; const now = Number(nowRaw);
+        const [leases, _reconciliation, unresolved] = keys; const [nowRaw, maxRaw, jobPrefix] = args; const now = Number(nowRaw);
         const ids = [...zset(leases)].filter(([, due]) => due <= now).slice(0, Number(maxRaw)).map(([id]) => id);
-        for (const id of ids) { const job = values.get(jobPrefix + id) as Record<string, unknown> | undefined; if (job?.state === "leased") { job.state = "ambiguous"; job.result = { motivo: "lease_expired_without_provider_confirmation" }; values.set(jobPrefix + id, job); locks.delete(conversationPrefix + job.conversationId); zset(conversationQueuePrefix + job.conversationId).delete(id); } zset(leases).delete(id); }
-        return ids.length;
+        let reconciled = 0, inconsistentes = 0;
+        for (const id of ids) {
+          const job = values.get(jobPrefix + id) as Record<string, unknown> | undefined;
+          if (job?.state === "leased") { job.state = "ambiguous"; job.result = { motivo: "lease_expired_without_provider_confirmation" }; values.set(jobPrefix + id, job); zset(leases).delete(id); reconciled++; }
+          else { zset(unresolved).set(id, now); zset(leases).delete(id); inconsistentes++; }
+        }
+        return [reconciled, inconsistentes];
       }
       throw new Error("script desconhecido");
     }),
@@ -122,7 +127,7 @@ describe("whatsappOutbox", () => {
     await drenar(executar);
     expect(executar).not.toHaveBeenCalled();
     expect((await obterJobWhatsapp(jobId))?.state).toBe("suppressed");
-    expect(await resumoFilaWhatsapp()).toEqual({ pending: 0, inFlight: 0 });
+    expect(await resumoFilaWhatsapp()).toEqual({ pending: 0, inFlight: 0, ambiguous: 0, unresolved: 0 });
   });
 
   test("imagem usa a mesma fila, prioridade e ordem da conversa", async () => {
@@ -144,6 +149,46 @@ describe("whatsappOutbox", () => {
     expect((await obterJobWhatsapp(jobId))?.state).toBe("ambiguous");
     liberar();
     await emExecucao;
+    clock.mockRestore();
+  });
+
+  test("lease expirado mantém a barreira da conversa e não confirma resultado tardio", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    await enfileirarMensagemWhatsapp({ phone: "5511999990001", text: "primeira" });
+    await enfileirarMensagemWhatsapp({ phone: "5511999990001", text: "segunda" });
+    let liberar!: () => void;
+    const primeira = processarFilaWhatsapp(async () => new Promise((resolve) => { liberar = () => resolve({ ok: true, latenciaMs: 1, tentativas: 1 }); }), 1);
+    await vi.waitFor(() => expect(liberar).toBeTypeOf("function"));
+    clock.mockReturnValue(32_000);
+    await recuperarLeasesWhatsapp();
+    const segunda = vi.fn(async () => ({ ok: true, latenciaMs: 1, tentativas: 1 }));
+    await processarFilaWhatsapp(segunda, 1);
+    expect(segunda).not.toHaveBeenCalled();
+    liberar();
+    expect((await primeira).delivered).toBe(0);
+    clock.mockRestore();
+  });
+
+  test("job vencido é suprimido antes do provider", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    const { jobId } = await enfileirarMensagemWhatsapp({ phone: "5511999990001", text: "otp", expiresAt: 1_001 });
+    clock.mockReturnValue(1_002);
+    const executar = vi.fn(async () => ({ ok: true, latenciaMs: 1, tentativas: 1 }));
+    await processarFilaWhatsapp(executar, 1);
+    expect(executar).not.toHaveBeenCalled();
+    expect((await obterJobWhatsapp(jobId))?.state).toBe("expired");
+    clock.mockRestore();
+  });
+
+  test("lease sem job vira inconsistência visível e libera capacidade global", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    for (let i = 0; i < 4; i++) zset("whatsapp:outbox:leases").set(`perdido-${i}`, 999);
+    expect(await recuperarLeasesWhatsapp()).toEqual({ reconciled: 0, unresolved: 4 });
+    const executar = vi.fn(async () => ({ ok: true, latenciaMs: 1, tentativas: 1 }));
+    await enfileirarMensagemWhatsapp({ phone: "5511999990001", text: "nova" });
+    await processarFilaWhatsapp(executar, 1);
+    expect(executar).toHaveBeenCalledTimes(1);
+    expect((await resumoFilaWhatsapp()).unresolved).toBe(4);
     clock.mockRestore();
   });
 });

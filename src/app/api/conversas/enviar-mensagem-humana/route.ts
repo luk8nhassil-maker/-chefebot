@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { verifyToken } from "@/lib/auth";
-import { registrarMensagem } from "@/lib/conversa";
+import { registrarMensagemOutbox } from "@/lib/conversa";
 import { validarEnvioMensagemHumana } from "@/lib/validarEnvioMensagemHumana";
 import { marcarEcoPainel } from "@/lib/conversaEcoPainel";
 import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
@@ -40,6 +40,9 @@ export async function POST(req: NextRequest) {
   }
 
   const { phone, text, senderName } = validacao as Required<ValidacaoEnvioOk>;
+  const clientMessageId = typeof body.clientMessageId === "string" && /^[A-Za-z0-9_-]{8,128}$/.test(body.clientMessageId)
+    ? body.clientMessageId
+    : null;
 
   const emManual = await redis.get<boolean>(`manual:${phone}`);
   if (!emManual) {
@@ -53,7 +56,17 @@ export async function POST(req: NextRequest) {
   if (!obterConfigEvolution()) {
     return NextResponse.json({ ok: false, error: "Provider de WhatsApp não configurado (EVOLUTION_API_URL/EVOLUTION_API_KEY)" }, { status: 503 });
   }
-  const resultado = await enviarTextoWhatsApp(phone, text, { delay, prioridade: "critica", humanSenderName: senderName });
+  const resultado = await enviarTextoWhatsApp(phone, text, {
+    delay, prioridade: "critica", humanSenderName: senderName,
+    idempotencyKey: clientMessageId ? `human:${phone}:${clientMessageId}` : undefined,
+  });
+  // Aceite durável já representa atividade humana, mesmo se a confirmação da
+  // Evolution vier depois. Assim o bot não reassume durante a espera.
+  if (resultado.jobId) {
+    await redis.set(`manual:${phone}`, true, { ex: 7200 });
+    const sessaoEnvio = await redis.get(`session:${phone}`);
+    if (sessaoEnvio) await redis.set(`session:${phone}`, sessaoEnvio, { ex: 7200 });
+  }
   if (!resultado.ok) {
     if (resultado.motivo === "queued_pending") {
       // Aceite durável, ainda sem confirmação da Evolution. O painel recebe
@@ -81,26 +94,18 @@ export async function POST(req: NextRequest) {
     // webhook como uma mensagem "atendente" adicional — melhor um possível
     // duplicado raro do que descartar mensagens reais por dedup baseada só
     // em texto.
-  if (resultado.messageIdInterno) {
+  if (!resultado.deduplicated && resultado.messageIdInterno) {
     await marcarEcoPainel(resultado.messageIdInterno);
   }
 
   // Só registra após confirmação de envio bem-sucedido pela Evolution API.
   // A claim evita duplicação com o worker assíncrono; se ele já tiver tomado
   // a claim, o índice durável dele atualizará o histórico em seguida.
-  if (resultado.jobId && await reivindicarHistoricoMensagemHumana(resultado.jobId)) {
-    await registrarMensagem(phone, "atendente", `[${senderName}] ${text}`);
+  if (!resultado.deduplicated && resultado.jobId && await reivindicarHistoricoMensagemHumana(resultado.jobId)) {
+    await registrarMensagemOutbox(phone, "atendente", `[${senderName}] ${text}`, resultado.jobId);
     await confirmarHistoricoMensagemHumana(resultado.jobId);
   }
   await redis.del(`nova_msg_manual:${phone}`);
-
-  // Renova TTL de manual e session enquanto o atendimento está ativo.
-  // Previne que o flag manual expire durante conversas longas e o bot reassuma.
-  await redis.set(`manual:${phone}`, true, { ex: 7200 });
-  const sessaoEnvio = await redis.get(`session:${phone}`);
-  if (sessaoEnvio) {
-    await redis.set(`session:${phone}`, sessaoEnvio, { ex: 7200 });
-  }
 
   return NextResponse.json({ ok: true, status: "delivered", jobId: resultado.jobId, senderName, phone });
 }

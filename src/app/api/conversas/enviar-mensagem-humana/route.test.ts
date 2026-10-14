@@ -3,7 +3,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest";
 // Garante que POST /api/conversas/enviar-mensagem-humana renova manual:{phone}
 // e session:{phone} com TTL 7200 após envio bem-sucedido pela Evolution API.
 
-const { store, redisMock, jobs, enviarTextoMock } = vi.hoisted(() => {
+const { store, redisMock, jobs, enviarTextoMock, registrarOutboxMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const jobs = new Map<string, Record<string, unknown>>();
   const redisMock = {
@@ -16,7 +16,11 @@ const { store, redisMock, jobs, enviarTextoMock } = vi.hoisted(() => {
     del: vi.fn(async () => 1),
   };
   const enviarTextoMock = vi.fn();
-  return { store, redisMock, jobs, enviarTextoMock };
+  const registrarOutboxMock = vi.fn(async (phone: string, autor: string, texto: string) => {
+    await redisMock.set(`conversa:${phone}`, [{ autor, texto, ts: Date.now() }], { ex: 1800 });
+    return true;
+  });
+  return { store, redisMock, jobs, enviarTextoMock, registrarOutboxMock };
 });
 
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
@@ -29,6 +33,7 @@ vi.mock("@/lib/whatsappOutbox", () => ({
   obterJobWhatsapp: vi.fn(async (id: string) => jobs.get(id) ?? null),
 }));
 vi.mock("@/lib/whatsappMensagem", () => ({ enviarTextoWhatsApp: enviarTextoMock }));
+vi.mock("@/lib/conversa", () => ({ registrarMensagemOutbox: registrarOutboxMock }));
 
 import { POST } from "./route";
 import { createToken } from "@/lib/auth";
@@ -148,6 +153,7 @@ describe("POST /api/conversas/enviar-mensagem-humana — TTL 7200", () => {
     expect(res.status).toBe(202);
     expect(await res.json()).toMatchObject({ ok: true, status: "queued", jobId: "job-pending" });
     expect(redisMock.set.mock.calls.some(([k]) => k === `conversa:${PHONE}`)).toBe(false);
+    expect(redisMock.set.mock.calls.some(([k, value, opts]) => k === `manual:${PHONE}` && value === true && (opts as { ex?: number })?.ex === 7200)).toBe(true);
   });
 
   it("resultado incerto informa reconciliação e não induz reenvio", async () => {
@@ -156,6 +162,12 @@ describe("POST /api/conversas/enviar-mensagem-humana — TTL 7200", () => {
     const res = await POST(postReq({ phone: PHONE, text: "Aguarde um momento" }, token));
     expect(res.status).toBe(502);
     expect(await res.json()).toMatchObject({ ok: false, status: "ambiguous", jobId: "job-ambiguous" });
+  });
+
+  it("propaga clientMessageId como chave estável de idempotência", async () => {
+    const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+    await POST(postReq({ phone: PHONE, text: "Pedido pronto", clientMessageId: "cliente-msg-123456" }, token));
+    expect(enviarTextoMock).toHaveBeenCalledWith(PHONE, "Pedido pronto", expect.objectContaining({ idempotencyKey: `human:${PHONE}:cliente-msg-123456` }));
   });
 
   it("provider nao configurado retorna 503, nunca chama fetch, nunca vaza segredo", async () => {

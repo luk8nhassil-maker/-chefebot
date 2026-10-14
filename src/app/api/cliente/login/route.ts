@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { gerarOtp, podeReenviarOtp } from "@/lib/clienteAuth";
+import { gerarOtp, OTP_TTL_SEGUNDOS, podeReenviarOtp } from "@/lib/clienteAuth";
 import { sanitizeTelefoneCliente } from "@/lib/clientes";
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
@@ -24,7 +24,9 @@ async function enviarOtpPorWhatsapp(telefone: string, codigo: string): Promise<v
   }
   const texto = `Seu código para entrar no ChefeBot é: *${codigo}*\n\nVale por 5 minutos.`;
   try {
-    const resultado = await enviarTextoWhatsApp(sanitizePhoneEnvio(telefone), texto, { prioridade: "critica", maxAttempts: 1 });
+    const resultado = await enviarTextoWhatsApp(sanitizePhoneEnvio(telefone), texto, {
+      prioridade: "critica", maxAttempts: 1, expiresAt: Date.now() + OTP_TTL_SEGUNDOS * 1000,
+    });
     if (!resultado.ok) {
       // Mantém diagnóstico operacional sem expor telefone, OTP ou detalhes
       // do provider. Um resultado incerto fica na outbox para reconciliação.
@@ -34,8 +36,8 @@ async function enviarOtpPorWhatsapp(telefone: string, codigo: string): Promise<v
         console.error("[ChefeBot] OTP aceito na fila mas ainda sem confirmação do provider.");
       }
     }
-  } catch (err) {
-    console.error("[ChefeBot] Erro ao enviar OTP por WhatsApp:", err);
+  } catch {
+    console.error("[ChefeBot] Erro ao enviar OTP por WhatsApp.");
   }
 }
 

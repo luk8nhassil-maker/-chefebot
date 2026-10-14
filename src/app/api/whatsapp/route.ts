@@ -5,7 +5,7 @@ import { getMENUDinamico } from "@/lib/menu.server";
 import { redis } from "@/lib/redis";
 import { obterEsgotadosEfetivos } from "@/lib/estoque";
 import { interpretarMensagem, gerarRespostaGuardiao } from "@/lib/claude";
-import { registrarMensagem, ultimasMensagensRelevantes } from "@/lib/conversa";
+import { registrarMensagem, registrarMensagemOutbox, ultimasMensagensRelevantes } from "@/lib/conversa";
 import { atualizarRascunhoAtendimentoTempoReal } from "@/lib/rascunhoAtendimentoTempoReal";
 import { analisarConversaParaRetomada, validarRespostaIA } from "@/lib/conversationBrain";
 import { resolverFallbackInteligente, pareceFallbackSeco, avaliarHandoffPorConfusao, deveMarcarPrioridadePosPedido, houveAvancoReal } from "@/lib/fallbackInteligente";
@@ -34,6 +34,7 @@ import { ehEventoQrAtualizado, extrairQrBase64, obterConfigEvolution } from "@/l
 import { extrairTelefoneIndividualDaChave } from "@/lib/whatsappJid";
 import { limparQrAtual, persistirQrAtual } from "@/lib/whatsappQrCache";
 import { enviarImagemWhatsApp, enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
+import { confirmarHistoricoMensagemHumana, reivindicarHistoricoMensagemHumana } from "@/lib/whatsappOutbox";
 import { ehEcoPainel, validarMessageId } from "@/lib/conversaEcoPainel";
 import {
   CanaryInboundRetryableError,
@@ -409,7 +410,10 @@ export async function enviarMensagem(phone: string, message: string, ritmoRapido
     ? Math.min(600, Math.max(400, message.length * 6))
     : Math.min(2500, Math.max(900, message.length * 22));
   // delay no topo (Evolution v2) + options.delay/presence (Evolution v1) p/ compatibilidade
-  const resultado = await enviarTextoWhatsApp(phone, message, { delay });
+  const resultado = await enviarTextoWhatsApp(phone, message, {
+    delay,
+    history: { autor: "bot", texto: message, markOutbound: true },
+  });
   if (!resultado.ok) {
     if (resultado.motivo === "provider_not_configured") {
       console.error("[ChefeBot] Provider de WhatsApp não configurado — mensagem não enviada.");
@@ -423,8 +427,13 @@ export async function enviarMensagem(phone: string, message: string, ritmoRapido
   // que realmente chegou ao cliente. Centraliza aqui o que antes só
   // enviarRespostas() fazia, para que toda chamada de enviarMensagem() passe
   // a aparecer no histórico/painel.
-  await registrarMensagem(phone, "bot", message);
-  marcarOutboundConfirmado().catch(() => {});
+  const podeRegistrar = !resultado.deduplicated && (!resultado.jobId || await reivindicarHistoricoMensagemHumana(resultado.jobId));
+  if (podeRegistrar) {
+    if (resultado.jobId) await registrarMensagemOutbox(phone, "bot", message, resultado.jobId);
+    else await registrarMensagem(phone, "bot", message); // somente mocks legados de teste
+    marcarOutboundConfirmado().catch(() => {});
+    if (resultado.jobId) await confirmarHistoricoMensagemHumana(resultado.jobId);
+  }
   return true;
 }
 

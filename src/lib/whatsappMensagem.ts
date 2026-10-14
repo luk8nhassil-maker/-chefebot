@@ -31,6 +31,8 @@ export type ResultadoEnvioWhatsApp = {
   tentativas: number;
   /** Identificador da outbox para consulta/reconciliação; nunca é da Evolution. */
   jobId?: string;
+  /** A chamada reapresentou um job já aceito; não repetir efeitos locais. */
+  deduplicated?: boolean;
 };
 
 const TIMEOUT_PADRAO_MS = 10_000;
@@ -39,8 +41,11 @@ type OpcoesEnvio = {
   /** Evento estável de negócio; evita criar duas tarefas para o mesmo efeito. */
   idempotencyKey?: string;
   prioridade?: PrioridadeWhatsapp;
+  /** Prazo de negócio; depois dele o worker suprime o job antes do provider. */
+  expiresAt?: number;
   /** Só usado pelo painel: o histórico é confirmado pelo worker depois do provider. */
   humanSenderName?: string;
+  history?: import("./whatsappOutbox").JobOutboxWhatsapp["history"];
 };
 const LINK_CARDAPIO_OFICIAL = "https://chefedapizza.com.br/cardapio";
 const LINK_CARDAPIO_LEGADO = /https?:\/\/chefebot-pjif\.vercel\.app\/cardapio(?=$|[\s/?#])/gi;
@@ -106,6 +111,8 @@ export async function enviarTextoWhatsApp(
     const enfileirado = await enfileirarMensagemWhatsapp({
       phone, text, opts, priority: opts?.prioridade ?? "critica", idempotencyKey: opts?.idempotencyKey,
       humanSenderName: opts?.humanSenderName,
+      expiresAt: opts?.expiresAt,
+      history: opts?.history,
     });
     // Espera a tentativa de despertar/assegurar a recuperação antes de a
     // função serverless poder encerrar. Falha do QStash não desfaz a escrita
@@ -117,6 +124,7 @@ export async function enviarTextoWhatsApp(
       ? await executarEnvioTexto(phone, text, opts)
       : resultadoDoJob(job);
     resultado.jobId = enfileirado.jobId;
+    resultado.deduplicated = enfileirado.deduplicated;
   } catch (erro) {
     // Mocks legados de rotas não conheciam a API de scripts da outbox. O
     // desvio é exclusivamente de teste; em runtime real a indisponibilidade
@@ -137,7 +145,16 @@ function resultadoDoJob(job: Awaited<ReturnType<typeof obterJobWhatsapp>>): Resu
   if (!job) return { ok: false, motivo: "outbox_job_not_found", latenciaMs: 0, tentativas: 0 };
   const result = (job as typeof job & { result?: ResultadoEnvioWhatsApp }).result;
   if (job.state === "delivered" && result) return result;
-  if ((job.state === "failed" || job.state === "ambiguous") && result) return result;
+  if (job.state === "failed" || job.state === "ambiguous" || job.state === "expired" || job.state === "suppressed") {
+    return {
+      ok: false,
+      motivo: result?.motivo ?? job.state,
+      statusHttp: result?.statusHttp,
+      latenciaMs: result?.latenciaMs ?? Date.now() - job.createdAt,
+      tentativas: result?.tentativas ?? job.attempt,
+      jobId: job.id,
+    };
+  }
   return { ok: false, motivo: "queued_pending", latenciaMs: Date.now() - job.createdAt, tentativas: job.attempt };
 }
 

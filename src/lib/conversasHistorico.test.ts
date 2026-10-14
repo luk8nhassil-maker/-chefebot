@@ -12,12 +12,13 @@ const { redisMock } = vi.hoisted(() => ({
     zrange: vi.fn(),
     zcard: vi.fn(),
     keys: vi.fn(),
+    eval: vi.fn(),
   },
 }))
 
 vi.mock('./redis', () => ({ redis: redisMock }))
 
-import { atualizarHistorico, CONVERSAS_ZSET, MAX_FULL_MSGS } from './conversasHistorico'
+import { atualizarHistorico, atualizarHistoricoIdempotenteOutbox, CONVERSAS_ZSET, MAX_FULL_MSGS } from './conversasHistorico'
 
 function chamadaSet(chave: string) {
   return redisMock.set.mock.calls.find(([key]) => key === chave)
@@ -54,6 +55,7 @@ beforeEach(() => {
   redisMock.zadd.mockResolvedValue(1)
   redisMock.get.mockResolvedValue(null)
   redisMock.set.mockResolvedValue('OK')
+  redisMock.eval.mockResolvedValue(1)
 })
 
 describe('atualizarHistorico: ZSET', () => {
@@ -218,5 +220,30 @@ describe('atualizarHistorico: guards', () => {
   test('nunca lança erro mesmo com Redis falhando', async () => {
     redisMock.zadd.mockRejectedValue(new Error('Redis down'))
     await expect(atualizarHistorico('5586999990013', 'bot', 'oi', Date.now())).resolves.toBeUndefined()
+  })
+})
+
+describe('atualizarHistoricoIdempotenteOutbox', () => {
+  test('usa um único EVAL com chave de dedupe estável e preserva o nome da sessão', async () => {
+    redisMock.get.mockImplementation(async (key: string) =>
+      key === 'session:5586999990040' ? { customerName: 'Maria' } : null,
+    )
+    await expect(atualizarHistoricoIdempotenteOutbox('5586999990040', 'atendente', '[Ana] pedido pronto', 'job-40', 40)).resolves.toBe(true)
+    expect(redisMock.eval).toHaveBeenCalledWith(
+      expect.stringContaining("if redis.call('GET', KEYS[1]) then return 0 end"),
+      ['conversa:outbox-history:job-40', 'conversa:5586999990040', CONVERSAS_ZSET, 'conversa_full:5586999990040', 'conversa_meta:5586999990040'],
+      expect.arrayContaining(['atendente', '[Ana] pedido pronto', '40', '5586999990040', 'Maria']),
+    )
+  })
+
+  test('não considera histórico concluído quando o EVAL informa deduplicação pós-quebra', async () => {
+    redisMock.eval.mockResolvedValueOnce(0)
+    await expect(atualizarHistoricoIdempotenteOutbox('5586999990041', 'bot', 'ok', 'job-41', 41)).resolves.toBe(false)
+  })
+
+  test('não aceita campos vazios e não chama Redis', async () => {
+    await expect(atualizarHistoricoIdempotenteOutbox('', 'bot', 'ok', 'job', 1)).resolves.toBe(false)
+    await expect(atualizarHistoricoIdempotenteOutbox('5586999990042', 'bot', '', 'job', 1)).resolves.toBe(false)
+    expect(redisMock.eval).not.toHaveBeenCalled()
   })
 })
