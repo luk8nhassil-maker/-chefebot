@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+vi.mock("./whatsappDiag", () => ({ marcarTentativaEnvio: vi.fn(async () => {}) }));
 import { enviarTextoWhatsApp, normalizarLinksPublicosWhatsApp } from "./whatsappMensagem";
 
 const ENV_KEYS = ["EVOLUTION_API_URL", "EVOLUTION_API_KEY", "EVOLUTION_INSTANCE_NAME"] as const;
@@ -132,6 +133,59 @@ describe("enviarTextoWhatsApp", () => {
     expect(resultado.ok).toBe(true);
     expect(resultado.tentativas).toBe(2);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("fluxo proativo com maxAttempts:1 não repete envio ambíguo após HTTP 5xx", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({}) } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultado = await enviarTextoWhatsApp("5511999998888", "oi", { maxAttempts: 1 });
+
+    expect(resultado).toMatchObject({ ok: false, motivo: "http_503", tentativas: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("falha de rede ambígua não repete campanha, mas a próxima chamada pode enviar após reconexão", async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error("connection lost"))
+      .mockResolvedValueOnce(respostaOk());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const falha = await enviarTextoWhatsApp("5511999998888", "ranking", { maxAttempts: 1 });
+    expect(falha).toMatchObject({ ok: false, motivo: "network_error", tentativas: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const recuperado = await enviarTextoWhatsApp("5511999998888", "pedido confirmado");
+    expect(recuperado).toMatchObject({ ok: true, tentativas: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("401 não dispara retry e não impede envio após a conexão voltar", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) } as Response)
+      .mockResolvedValueOnce(respostaOk());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const desconectado = await enviarTextoWhatsApp("5511999998888", "pedido saiu");
+    expect(desconectado).toMatchObject({ ok: false, motivo: "http_401", tentativas: 1 });
+    const reconectado = await enviarTextoWhatsApp("5511999998888", "pedido saiu");
+    expect(reconectado).toMatchObject({ ok: true, tentativas: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("50 notificações transacionais simultâneas mantêm um resultado por destinatário", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => respostaOk());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultados = await Promise.all(Array.from({ length: 50 }, (_, index) =>
+      enviarTextoWhatsApp(`55119999${String(index).padStart(4, "0")}`, `pedido ${index}`)
+    ));
+
+    expect(resultados).toHaveLength(50);
+    expect(resultados.every((r) => r.ok && r.tentativas === 1)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(50);
+    const destinatarios = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body).number);
+    expect(new Set(destinatarios).size).toBe(50);
   });
 
   test("erro de rede (fetch lançando) não propaga — vira ok:false motivo network_error após esgotar tentativas", async () => {

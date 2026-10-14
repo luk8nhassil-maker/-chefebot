@@ -439,7 +439,7 @@ async function enviarImagem(phone: string, imageUrl: string) {
       body: JSON.stringify({ number: phone, mediatype: "image", media: imageUrl, caption: "" }),
     });
   } catch (err) {
-    console.error("[ChefeBot] Erro ao enviar imagem:", err);
+    console.error("[ChefeBot] Erro ao enviar imagem:", err instanceof Error ? err.name : "erro_desconhecido");
   }
 }
 
@@ -456,13 +456,13 @@ function existePedidoAbertoNaoPixDoTelefone(pedidos: Pedido[], phone: string): b
 async function encaminharComprovanteSemPedidoPix(phone: string, session: BotSession | null, origem: "texto" | "midia") {
   await enviarMensagem(phone, `Recebi seu comprovante, mas não consegui vincular automaticamente a um pedido Pix pendente. Vou encaminhar para conferência.`);
   await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: phone });
-  await log("aviso", "Comprovante Pix sem pedido pendente correspondente", `Phone: ${phone} origem: ${origem}`);
+  await log("aviso", "Comprovante Pix sem pedido pendente correspondente", `origem: ${origem}`);
 }
 
 async function bloquearComprovantePixReutilizado(phone: string, session: BotSession | null, pedidoAtivo: Pedido, origem: "texto" | "midia") {
   await enviarMensagem(phone, `⚠️ Este comprovante já foi utilizado anteriormente. Por favor, envie o comprovante correto ou entre em contato conosco.`);
   await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente });
-  await log("aviso", "Comprovante Pix reutilizado detectado", `Phone: ${phone} origem: ${origem}`);
+  await log("aviso", "Comprovante Pix reutilizado detectado", `origem: ${origem}`);
 }
 
 function temIdentificadorComprovantePix(identificador: PixComprovanteIdentificador): boolean {
@@ -582,7 +582,7 @@ async function tratarComprovantePixNaoAprovado(
   await log(
     "aviso",
     `Comprovante Pix marcado como ${avaliacao.decisao}`,
-    `Phone: ${phone} origem: ${origem} score: ${avaliacao.score} motivos: ${avaliacao.motivos.join("; ") || "-"}`
+    `origem: ${origem} score: ${avaliacao.score}`
   );
 }
 
@@ -626,7 +626,7 @@ async function bloquearComprovantePixAnterior(
   }));
   await enviarMensagem(phone, `Recebi seu comprovante, mas não consegui validar automaticamente a data/horário do pagamento para este pedido. Vou encaminhar para conferência.`);
   await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente });
-  await log("aviso", "Comprovante Pix anterior ao pedido", `Phone: ${phone} origem: ${origem} motivo: ${avaliacao.motivo}`);
+  await log("aviso", "Comprovante Pix anterior ao pedido", `origem: ${origem}`);
 }
 
 // ── Etapa 2A: representação segura no histórico para entradas do cliente que
@@ -810,7 +810,7 @@ Qualquer dúvida é só chamar. Bom apetite! 🍕`);
       await registrarDedupE2E(identificador);
       const sessionAtual = await redis.get<BotSession>(sessionKey);
       if (sessionAtual) await redis.set(sessionKey, { ...sessionAtual, step: "done" }, { ex: 1800 });
-      await log("info", `Pix texto confirmado para ${firstName}`, `Valor: ${resultado.valor}`);
+      await log("info", "Pix texto confirmado", "");
     } else {
       await atualizarPedidoPorId(pedidoAtivo!.id, (pedidoFresco) => ({
         pix: marcarPixRevisaoOuSuspeito(
@@ -821,7 +821,7 @@ Qualquer dúvida é só chamar. Bom apetite! 🍕`);
       await tratarComprovantePixNaoAprovado(phone, session, pedidoAtivo, "texto", decisaoFinal);
     }
   } catch (err) {
-    await log("erro", "Erro ao processar comprovante texto", String(err));
+    await log("erro", "Erro ao processar comprovante texto", err instanceof Error ? err.name : "erro_desconhecido");
   }
 }
 
@@ -832,7 +832,7 @@ async function processarComprovante(phone: string, data: unknown, config: Config
     const isAguardandoPix = session?.step === "aguardando_pix";
     let pedidos = await redis.get<Pedido[]>("pedidos") || [];
     let pedidoAtivo = encontrarPedidoPixPendentePorTelefone(pedidos, phone);
-    console.log("[ChefeBot] pedidoPixPendente:", !!pedidoAtivo, "step:", session?.step, "pagamento:", pedidoAtivo?.pagamento);
+    console.log("[ChefeBot] pedidoPixPendente:", !!pedidoAtivo, "step:", session?.step);
 
     // Pedido ainda nao foi salvo — salva agora antes de validar
     if (isAguardandoPix && !pedidoAtivo && session) {
@@ -840,14 +840,14 @@ async function processarComprovante(phone: string, data: unknown, config: Config
       pedidos = await redis.get<Pedido[]>("pedidos") || [];
       pedidoAtivo = encontrarPedidoPixPendentePorTelefone(pedidos, phone);
     }
-    console.log("[PEDIDO-CHECK]", pedidoAtivo ? pedidoAtivo.id : "NAO ENCONTRADO", "total:", pedidoAtivo?.total);
+    console.log("[PEDIDO-CHECK] encontrado:", !!pedidoAtivo);
     if (!pedidoAtivo) {
       if (session && !isAguardandoPix && !temPixNoPagamento(session.paymentMethod)) return;
       if (existePedidoAbertoNaoPixDoTelefone(pedidos, phone)) return;
       await encaminharComprovanteSemPedidoPix(phone, session, "midia");
       return;
     }
-    console.log("[COMP-INICIO] iniciando processamento phone:", phone);
+    console.log("[COMP-INICIO] iniciando processamento");
     await enviarMensagem(phone, `Comprovante recebido! 🔍 Verificando o pagamento...`);
     let imagemBase64 = "";
     let mediaType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf" = isImagem ? "image/jpeg" : "application/pdf";
@@ -869,14 +869,13 @@ async function processarComprovante(phone: string, data: unknown, config: Config
           mediaType = mimetype;
         }
       } else {
-        const errText = await downloadRes.text();
-        await log("aviso", "Download comprovante falhou", errText.slice(0, 200));
+        await log("aviso", "Download comprovante falhou", `http_${downloadRes.status}`);
       }
     } catch (err) {
-      await log("aviso", "Erro ao baixar comprovante", String(err));
+      await log("aviso", "Erro ao baixar comprovante", err instanceof Error ? err.name : "erro_desconhecido");
     }
     if (!imagemBase64) {
-      await log("aviso", "Comprovante sem base64 — download falhou", `Phone: ${phone} mediaType: ${mediaType}`);
+      await log("aviso", "Comprovante sem base64 — download falhou", `mediaType: ${mediaType}`);
       await enviarMensagem(phone, `Comprovante recebido! 📄 Nossa equipe vai verificar em instantes. ✅`);
       await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente });
       return;
@@ -946,7 +945,7 @@ async function processarComprovante(phone: string, data: unknown, config: Config
       await enviarMensagem(phone, `Pagamento confirmado! ✅🎉\n\nObrigado, *${firstName}*! Seu pedido já foi pra cozinha. Sua pizza chega em *${timeMsg}* 🛵\n\nQualquer dúvida é só chamar. Bom apetite! 🍕`);
       await redis.set(chaveHash, true, { ex: PIX_COMPROVANTE_DEDUP_TTL_SEGUNDOS })
       await registrarDedupE2E(identificador)
-      await log("info", `Pix confirmado automaticamente para ${firstName}`, `Valor: R$ ${resultado.valorEncontrado}`);
+      await log("info", "Pix confirmado automaticamente", "");
     } else {
       await atualizarPedidoPorId(pedidoAtivo.id, (pedidoFresco) => ({
         pix: marcarPixRevisaoOuSuspeito(
@@ -957,7 +956,7 @@ async function processarComprovante(phone: string, data: unknown, config: Config
       await tratarComprovantePixNaoAprovado(phone, session, pedidoAtivo, "midia", decisaoFinal);
     }
   } catch (err) {
-    await log("erro", "Erro ao processar comprovante", String(err));
+    await log("erro", "Erro ao processar comprovante", err instanceof Error ? err.name : "erro_desconhecido");
     await enviarMensagem(phone, `Comprovante recebido! 📄 Nossa equipe vai verificar em instantes. ✅`);
   }
 }
@@ -1046,7 +1045,10 @@ export async function POST(req: NextRequest) {
         const configConexao = obterConfigEvolution();
         if (configConexao) await limparQrAtual(configConexao.instanceName);
       }
-      await log("info", `WhatsApp connection.update: ${state} -> ${status}`, "");
+      await log("info", `WhatsApp connection.update: ${status}`, "");
+      if (status === "disconnected" && String(body.data?.statusReason) === "401") {
+        console.warn("[ChefeBot] WhatsApp desconectado: statusReason=401");
+      }
       return NextResponse.json({ ok: true });
     }
 
@@ -1084,7 +1086,7 @@ export async function POST(req: NextRequest) {
     try {
       await salvarStatusConexao("connected");
     } catch (err) {
-      console.error("[ChefeBot] Falha ao sincronizar status de conexão a partir de messages.upsert (ignorada):", err);
+      console.error("[ChefeBot] Falha ao sincronizar status de conexão a partir de messages.upsert (ignorada):", err instanceof Error ? err.name : "erro_desconhecido");
     }
 
     const data = body.data;
@@ -1195,7 +1197,6 @@ export async function POST(req: NextRequest) {
 
     // Detecta imagem ou PDF (comprovante Pix)
     // Detecta imagem/PDF pelo messageType do webhook (Evolution API v2.3.7)
-    console.log("[WEBHOOK-FULL]", JSON.stringify(data).slice(0,800));
     const messageType = data?.data?.messageType || data?.messageType || "";
     const isImagem = !!(data?.message?.imageMessage || messageType === "imageMessage" || messageType === "image");
     const isPDF = !!(
@@ -1221,7 +1222,6 @@ export async function POST(req: NextRequest) {
     const rawMsg = data?.data?.message || data?.message || {};
     const msgText = rawMsg?.conversation || rawMsg?.extendedTextMessage?.text || "";
     console.log("[DATA-KEYS]", JSON.stringify(Object.keys(data || {})), "[MSG-KEYS]", JSON.stringify(Object.keys(rawMsg)));
-    console.log("[PIX-FULL-MSG]", JSON.stringify(data?.message || {}).slice(0,500));
     const isPixReceipt = msgText.length > 20 && (
       (msgText.toLowerCase().includes("pix") && (msgText.includes("R$") || msgText.includes("valor")) && msgText.includes("nome")) ||
       msgText.toLowerCase().includes("comprovante") ||
@@ -1230,7 +1230,7 @@ export async function POST(req: NextRequest) {
       (msgText.toLowerCase().includes("destino") && msgText.toLowerCase().includes("origem"))
     );
     if (isPixReceipt) {
-      console.log("[PIX-TEXT] Comprovante em texto detectado:", msgText.slice(0, 200));
+      console.log("[PIX-TEXT] Comprovante em texto detectado");
       // Registra o texto original do cliente (mesmo caminho/limite do log
       // genérico de texto, aplicado dentro de registrarMensagem) antes de
       // processar a validação do comprovante — nunca adiciona marcador extra.
@@ -1330,7 +1330,7 @@ export async function POST(req: NextRequest) {
           try {
             await processarEfeitosPedidoEntregue(pedido)
           } catch (err) {
-            console.error('[ChefeBot] Efeitos de fidelidade pendentes após entrega (retry necessário):', err)
+            console.error('[ChefeBot] Efeitos de fidelidade pendentes após entrega (retry necessário):', err instanceof Error ? err.name : "erro_desconhecido")
           }
 
           await redis.del(`entregador_aguardando:${phone}`)
@@ -1350,7 +1350,7 @@ export async function POST(req: NextRequest) {
                   eventId: pedido.id,
                 })
               } catch (err) {
-                console.error("[ChefeBot] Avaliação enviada, mas orçamento de pesquisa não foi registrado:", err)
+                console.error("[ChefeBot] Avaliação enviada, mas orçamento de pesquisa não foi registrado:", err instanceof Error ? err.name : "erro_desconhecido")
               }
             }
           }
@@ -1960,8 +1960,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
 
   } catch (error) {
-    console.error("Webhook error:", error);
-    await log('erro', 'Erro no webhook WhatsApp', String(error));
+    const tipoErro = error instanceof Error ? error.name : "erro_desconhecido";
+    console.error("Webhook error:", tipoErro);
+    await log('erro', 'Erro no webhook WhatsApp', tipoErro);
     // Reverte o claim de idempotência (ver comentário em `msg_processed:`
     // acima): sem isso, esta mensagem ficaria marcada como "processada" por
     // 24h mesmo sem ter recebido resposta nenhuma. Best-effort — se o próprio

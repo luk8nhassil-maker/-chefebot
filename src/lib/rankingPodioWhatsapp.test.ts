@@ -10,11 +10,15 @@ const h = vi.hoisted(() => {
     optOut: new Set<string>(),
     coroa: { maxGapEstrelas: 5 } as { maxGapEstrelas: number } | null,
     envioOk: true,
+    falharEstadoPosEnvio: false,
+    falharSnapshot: false,
   };
 
   const redisMock = {
     get: vi.fn(async (key: string) => store.get(key) ?? null),
     set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
+      if (estado.falharEstadoPosEnvio && key.includes(":ultima:")) throw new Error("redis indisponível");
+      if (estado.falharSnapshot && key.includes(":snapshot:")) throw new Error("redis indisponível");
       if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
       return "OK";
@@ -92,6 +96,8 @@ beforeEach(() => {
   h.estado.optOut = new Set();
   h.estado.coroa = { maxGapEstrelas: 5 };
   h.estado.envioOk = true;
+  h.estado.falharEstadoPosEnvio = false;
+  h.estado.falharSnapshot = false;
   enviarTextoWhatsAppMock.mockReset().mockImplementation(async () => ({
     ok: h.estado.envioOk,
     motivo: h.estado.envioOk ? undefined : "http_500",
@@ -167,12 +173,38 @@ describe("Ranking Pódio WhatsApp — matemática e copy", () => {
 });
 
 describe("Ranking Pódio WhatsApp — execução diária", () => {
+  test("pausa global impede campanha proativa antes de reservar ou enviar", async () => {
+    seedTop3();
+    h.store.set("bot_ativo", false);
+
+    const r = await processarPodioWhatsapp18h({ agoraMs: T18 });
+
+    expect(r).toMatchObject({ enviados: 0, tentativasEnvio: 0, requisicoesProvider: 0, motivos: { bot_pausado: 1 } });
+    expect(enviarTextoWhatsAppMock).not.toHaveBeenCalled();
+    expect([...h.store.keys()].some((key) => key.startsWith("ranking:podio-whatsapp:dia:"))).toBe(false);
+  });
+
+  test("pausa acionada durante o lote impede os destinatários restantes", async () => {
+    seedTop3();
+    enviarTextoWhatsAppMock.mockImplementationOnce(async () => {
+      h.store.set("bot_ativo", false);
+      return { ok: true, latenciaMs: 1, tentativas: 1 };
+    });
+
+    const r = await processarPodioWhatsapp18h({ agoraMs: T18 });
+
+    expect(r).toMatchObject({ tentativasEnvio: 1, requisicoesProvider: 1, enviados: 1, suprimidos: 2, motivos: { bot_pausado: 2 } });
+    expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(1);
+  });
+
   test("ignora não participante e envia apenas para Top 3 reindexado da campanha", async () => {
     seedTop3();
 
     const r = await processarPodioWhatsapp18h({ agoraMs: T18 });
 
     expect(r.participantesTop3).toBe(3);
+    expect(r.tentativasEnvio).toBe(3);
+    expect(r.requisicoesProvider).toBe(3);
     expect(r.enviados).toBe(3);
     expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(3);
 
@@ -249,6 +281,50 @@ describe("Ranking Pódio WhatsApp — execução diária", () => {
     expect(segundo.enviados).toBe(0);
     expect(segundo.motivos.ja_reservado_no_dia).toBe(3);
     expect(enviarTextoWhatsAppMock).not.toHaveBeenCalled();
+  });
+
+  test("muitas execuções simultâneas disputam a reserva sem duplicar mensagens", async () => {
+    seedTop3();
+
+    const resultados = await Promise.all(Array.from({ length: 30 }, () =>
+      processarPodioWhatsapp18h({ agoraMs: T18 })
+    ));
+
+    expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(3);
+    expect(resultados.reduce((total, r) => total + r.enviados, 0)).toBe(3);
+    expect(resultados.reduce((total, r) => total + r.tentativasEnvio, 0)).toBe(3);
+  });
+
+  test("falha de conexão não é repetida no mesmo dia, mas permite nova tentativa no dia seguinte", async () => {
+    seedTop3();
+    h.estado.envioOk = false;
+    const falha = await processarPodioWhatsapp18h({ agoraMs: T18 });
+    expect(falha).toMatchObject({ enviados: 0, falhas: 3, requisicoesProvider: 3 });
+
+    h.estado.envioOk = true;
+    const recuperado = await processarPodioWhatsapp18h({ agoraMs: T18 + DIA });
+    expect(recuperado).toMatchObject({ enviados: 3, falhas: 0, requisicoesProvider: 3 });
+    expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(6);
+  });
+
+  test("falha do Redis após aceite do provider não transforma envio confirmado em falha", async () => {
+    seedTop3();
+    h.estado.falharEstadoPosEnvio = true;
+
+    const r = await processarPodioWhatsapp18h({ agoraMs: T18 });
+
+    expect(r).toMatchObject({ enviados: 3, falhas: 0, motivos: { estado_pos_envio_nao_persistido: 3 } });
+    expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(3);
+  });
+
+  test("snapshot indisponível após os envios preserva contadores e resultado da execução", async () => {
+    seedTop3();
+    h.estado.falharSnapshot = true;
+
+    const r = await processarPodioWhatsapp18h({ agoraMs: T18 });
+
+    expect(r).toMatchObject({ enviados: 3, falhas: 0, motivos: { snapshot_nao_persistido: 1 } });
+    expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(3);
   });
 
   test("fora das 18h nunca toca no provider", async () => {

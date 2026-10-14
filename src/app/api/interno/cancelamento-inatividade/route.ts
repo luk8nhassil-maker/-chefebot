@@ -69,6 +69,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, ignorado: true, motivo: "payload_invalido" });
   }
 
+  // A pausa global suspende lembretes proativos; o tick é consumido sem
+  // alterar sessão, pedido ou atendimento humano.
+  if (await redis.get<boolean>("bot_ativo") === false) {
+    return NextResponse.json({ ok: true, ignorado: true, motivo: "bot_pausado" });
+  }
+
   // Dedupe do tick: o QStash garante entrega "at-least-once" — evita agir
   // duas vezes sobre o mesmo (phone, geração) por retry de rede.
   const chaveDedupe = `${TICK_DEDUPE_PREFIXO}${phone}:${geracaoTick}`;

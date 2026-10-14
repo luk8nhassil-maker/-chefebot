@@ -17,7 +17,7 @@ import { marcarTentativaEnvio } from "./whatsappDiag";
 // Evolution processar o envio. Não há garantia total contra duplicidade no
 // caso raro de a Evolution ter enviado a mensagem mas a resposta HTTP ter se
 // perdido (timeout pós-envio) — a Evolution não expõe uma idempotency key
-// para sendText. Aceito como risco residual, documentado aqui.
+// para sendText. Fluxos proativos podem optar por uma única tentativa.
 export type ResultadoEnvioWhatsApp = {
   ok: boolean;
   motivo?: string;
@@ -29,6 +29,7 @@ export type ResultadoEnvioWhatsApp = {
 
 const TIMEOUT_PADRAO_MS = 10_000;
 const MAX_TENTATIVAS = 2;
+type OpcoesEnvio = { delay?: number; presence?: "composing"; timeoutMs?: number; maxAttempts?: 1 | 2 };
 const LINK_CARDAPIO_OFICIAL = "https://chefedapizza.com.br/cardapio";
 const LINK_CARDAPIO_LEGADO = /https?:\/\/chefebot-pjif\.vercel\.app\/cardapio(?=$|[\s/?#])/gi;
 
@@ -87,7 +88,7 @@ async function tentarEnvio(
 export async function enviarTextoWhatsApp(
   phone: string,
   text: string,
-  opts?: { delay?: number; presence?: "composing"; timeoutMs?: number }
+  opts?: OpcoesEnvio
 ): Promise<ResultadoEnvioWhatsApp> {
   const resultado = await executarEnvioTexto(phone, text, opts);
   marcarTentativaEnvio({
@@ -101,7 +102,7 @@ export async function enviarTextoWhatsApp(
 async function executarEnvioTexto(
   phone: string,
   text: string,
-  opts?: { delay?: number; presence?: "composing"; timeoutMs?: number }
+  opts?: OpcoesEnvio
 ): Promise<ResultadoEnvioWhatsApp> {
   const inicio = Date.now();
 
@@ -130,11 +131,12 @@ async function executarEnvioTexto(
     body.options = { delay: opts.delay, presence: opts.presence ?? "composing" };
   }
   const timeoutMs = opts?.timeoutMs ?? TIMEOUT_PADRAO_MS;
+  const maxTentativas = opts?.maxAttempts ?? MAX_TENTATIVAS;
 
   let tentativas = 0;
   let ultimoResultado: Awaited<ReturnType<typeof tentarEnvio>> | null = null;
 
-  for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
+  for (let tentativa = 1; tentativa <= maxTentativas; tentativa++) {
     tentativas = tentativa;
     ultimoResultado = await tentarEnvio(url, config.apiKey, body, timeoutMs);
 
@@ -152,12 +154,12 @@ async function executarEnvioTexto(
       // 4xx nunca é retentado — erro de payload/credencial, repetir não ajuda.
       // status pode vir 0/undefined em mocks de teste incompletos — trata como
       // não retentável (mesma cautela que um 4xx) em vez de assumir 5xx.
-      if (!(status >= 500) || tentativa === MAX_TENTATIVAS) {
+      if (!(status >= 500) || tentativa === maxTentativas) {
         return { ok: false, motivo: `http_${status}`, statusHttp: status, latenciaMs: Date.now() - inicio, tentativas };
       }
     } else {
       // Falha de rede/timeout — só retenta se ainda houver tentativa disponível.
-      if (tentativa === MAX_TENTATIVAS) {
+      if (tentativa === maxTentativas) {
         const timeoutOcorreu = ultimoResultado.erro instanceof Error && ultimoResultado.erro.name === "AbortError";
         return {
           ok: false,
