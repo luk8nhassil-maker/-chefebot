@@ -54,6 +54,9 @@ const CHAVE_LEASES = `${PREFIX}leases`;
 const CHAVE_HISTORICO_HUMANO = `${PREFIX}human-history`;
 const CHAVE_RECONCILIACAO = `${PREFIX}reconciliation`;
 const CHAVE_INCONSISTENCIAS = `${PREFIX}unresolved`;
+// Índice reverso durável: permite limpar uma cabeça órfã sem varrer todas as
+// conversas. Ele é apagado junto com terminalidades seguras.
+const CHAVE_CONVERSAS_POR_JOB = `${PREFIX}job-conversations`;
 const CHAVE_VELOCIDADE = `${PREFIX}rate-window`;
 const chaveClaimHistoricoHumano = (id: string) => `${PREFIX}human-history-claim:${id}`;
 
@@ -90,6 +93,7 @@ redis.call('ZADD', KEYS[3], ARGV[3], ARGV[5])
 local sequence = redis.call('INCR', KEYS[5])
 redis.call('EXPIRE', KEYS[5], ARGV[4])
 redis.call('ZADD', KEYS[4], sequence, ARGV[5])
+redis.call('HSET', KEYS[6], ARGV[5], ARGV[6])
 if dedupe ~= '' then redis.call('SET', KEYS[1], ARGV[5], 'EX', ARGV[4]) end
 return ARGV[5]
 `;
@@ -116,6 +120,15 @@ for q = 2, 4 do
     local raw = redis.call('GET', jobKey)
     if not raw then
       redis.call('ZREM', KEYS[q], id)
+      -- Nunca reenvie um job cujo registro se perdeu. O índice reverso
+      -- permite retirar somente sua cabeça, manter a evidência visível e
+      -- liberar as mensagens posteriores da mesma conversa.
+      local conversationId = redis.call('HGET', KEYS[6], id)
+      if conversationId then
+        redis.call('ZREM', ARGV[7] .. conversationId, id)
+        redis.call('HDEL', KEYS[6], id)
+      end
+      redis.call('ZADD', KEYS[7], now, id)
     else
       local job = cjson.decode(raw)
       if job.state ~= 'pending' then
@@ -156,7 +169,15 @@ job.result = cjson.decode(ARGV[4])
 redis.call('SET', KEYS[1], cjson.encode(job), 'EX', ARGV[5])
 redis.call('ZREM', KEYS[2], job.id)
 if redis.call('GET', KEYS[3]) == job.id then redis.call('DEL', KEYS[3]) end
-redis.call('ZREM', KEYS[4], job.id)
+-- Somente uma terminalidade comprovada libera a próxima mensagem da
+-- conversa. Resultado ambíguo preserva a cabeça até reconciliação explícita.
+if ARGV[2] == 'ambiguous' then
+  redis.call('ZADD', KEYS[6], tonumber(ARGV[3]), job.id)
+else
+  redis.call('ZREM', KEYS[4], job.id)
+  redis.call('ZREM', KEYS[6], job.id)
+  redis.call('HDEL', KEYS[7], job.id)
+end
 if (job.humanSenderName or job.history) and ARGV[2] == 'delivered' then
   redis.call('ZADD', KEYS[5], tonumber(ARGV[3]), job.id)
 end
@@ -197,7 +218,14 @@ for _, id in ipairs(ids) do
     end
   else
     -- Uma chave de job ausente pode indicar expiração/evicção do Redis. O
-    -- lease não é apagado automaticamente para não ocultar a pendência.
+    -- job não é reenviado. Limpe sua cabeça pelo índice reverso e mantenha
+    -- a pendência na quarentena auditável, sem bloquear a conversa para
+    -- sempre.
+    local conversationId = redis.call('HGET', KEYS[4], id)
+    if conversationId then
+      redis.call('ZREM', ARGV[6] .. conversationId, id)
+      redis.call('HDEL', KEYS[4], id)
+    end
     redis.call('ZADD', KEYS[3], now, id)
     redis.call('ZREM', KEYS[1], id)
     unresolved = unresolved + 1
@@ -222,8 +250,8 @@ export async function enfileirarMensagemWhatsapp(input: {
   };
   const dedupe = input.idempotencyKey ? chaveDedupe(input.idempotencyKey) : "";
   const resultado = await redis.eval(ENFILEIRAR_LUA,
-    [dedupe || `${PREFIX}no-dedupe:${id}`, chaveJob(id), chaveFila(priority), chaveSequenciaConversa(job.conversationId), chaveContadorSequenciaConversa(job.conversationId)],
-    [dedupe, JSON.stringify(job), String(now), String(TTL_SEGUNDOS), id]);
+    [dedupe || `${PREFIX}no-dedupe:${id}`, chaveJob(id), chaveFila(priority), chaveSequenciaConversa(job.conversationId), chaveContadorSequenciaConversa(job.conversationId), CHAVE_CONVERSAS_POR_JOB],
+    [dedupe, JSON.stringify(job), String(now), String(TTL_SEGUNDOS), id, job.conversationId]);
   return { jobId: String(resultado), deduplicated: String(resultado) !== id };
 }
 
@@ -240,28 +268,28 @@ export async function enfileirarImagemWhatsapp(input: {
   };
   const dedupe = input.idempotencyKey ? chaveDedupe(input.idempotencyKey) : "";
   const resultado = await redis.eval(ENFILEIRAR_LUA,
-    [dedupe || `${PREFIX}no-dedupe:${id}`, chaveJob(id), chaveFila(priority), chaveSequenciaConversa(job.conversationId), chaveContadorSequenciaConversa(job.conversationId)],
-    [dedupe, JSON.stringify(job), String(now), String(TTL_SEGUNDOS), id]);
+    [dedupe || `${PREFIX}no-dedupe:${id}`, chaveJob(id), chaveFila(priority), chaveSequenciaConversa(job.conversationId), chaveContadorSequenciaConversa(job.conversationId), CHAVE_CONVERSAS_POR_JOB],
+    [dedupe, JSON.stringify(job), String(now), String(TTL_SEGUNDOS), id, job.conversationId]);
   return { jobId: String(resultado), deduplicated: String(resultado) !== id };
 }
 
 async function claimProximo(): Promise<JobOutboxWhatsapp | null> {
   const now = Date.now();
   const raw = await redis.eval(CLAIM_LUA,
-    [CHAVE_LEASES, chaveFila("critica"), chaveFila("normal"), chaveFila("promocional"), CHAVE_VELOCIDADE],
+    [CHAVE_LEASES, chaveFila("critica"), chaveFila("normal"), chaveFila("promocional"), CHAVE_VELOCIDADE, CHAVE_CONVERSAS_POR_JOB, CHAVE_INCONSISTENCIAS],
     [String(now), String(now + LEASE_MS), String(limiteGlobal()), randomUUID(), `${PREFIX}job:`, `${PREFIX}conversation:`, `${PREFIX}conversation-queue:`, String(LEASE_MS), String(TTL_SEGUNDOS), String(limiteVelocidadePorMinuto())]);
   return raw ? JSON.parse(String(raw)) as JobOutboxWhatsapp : null;
 }
 
 async function finalizar(job: JobOutboxWhatsapp, estado: "delivered" | "failed" | "ambiguous" | "suppressed" | "expired", result: ResultadoTransporteWhatsapp | { motivo: string }): Promise<boolean> {
-  return Number(await redis.eval(FINALIZAR_LUA, [chaveJob(job.id), CHAVE_LEASES, chaveConversa(job.conversationId), chaveSequenciaConversa(job.conversationId), CHAVE_HISTORICO_HUMANO],
+  return Number(await redis.eval(FINALIZAR_LUA, [chaveJob(job.id), CHAVE_LEASES, chaveConversa(job.conversationId), chaveSequenciaConversa(job.conversationId), CHAVE_HISTORICO_HUMANO, CHAVE_RECONCILIACAO, CHAVE_CONVERSAS_POR_JOB],
     [job.leaseToken ?? "", estado, String(Date.now()), JSON.stringify(result), String(TTL_SEGUNDOS), `${PREFIX}dedupe:`])) === 1;
 }
 
 export type RecuperacaoLeasesWhatsapp = { reconciled: number; unresolved: number };
 
 export async function recuperarLeasesWhatsapp(limite = 100): Promise<RecuperacaoLeasesWhatsapp> {
-  const result = await redis.eval(RECUPERAR_LEASES_LUA, [CHAVE_LEASES, CHAVE_RECONCILIACAO, CHAVE_INCONSISTENCIAS],
+  const result = await redis.eval(RECUPERAR_LEASES_LUA, [CHAVE_LEASES, CHAVE_RECONCILIACAO, CHAVE_INCONSISTENCIAS, CHAVE_CONVERSAS_POR_JOB],
     [String(Date.now()), String(Math.max(1, Math.min(limite, 500))), `${PREFIX}job:`, String(TTL_SEGUNDOS), `${PREFIX}conversation:`, `${PREFIX}conversation-queue:`]);
   const values = Array.isArray(result) ? result : [result, 0];
   return { reconciled: Number(values[0]) || 0, unresolved: Number(values[1]) || 0 };

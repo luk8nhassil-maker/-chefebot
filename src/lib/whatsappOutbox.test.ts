@@ -1,21 +1,22 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { values, scores, locks } = vi.hoisted(() => ({
-  values: new Map<string, unknown>(), scores: new Map<string, Map<string, number>>(), locks: new Map<string, { value: string; until: number }>(),
+const { values, scores, locks, hashes } = vi.hoisted(() => ({
+  values: new Map<string, unknown>(), scores: new Map<string, Map<string, number>>(), locks: new Map<string, { value: string; until: number }>(), hashes: new Map<string, Map<string, string>>(),
 }));
 
 function zset(key: string) { const set = scores.get(key) ?? new Map<string, number>(); scores.set(key, set); return set; }
+function hash(key: string) { const map = hashes.get(key) ?? new Map<string, string>(); hashes.set(key, map); return map; }
 function zremrange(key: string, now: number) { for (const [id, score] of zset(key)) if (score <= now) zset(key).delete(id); }
 
 vi.mock("./redis", () => ({
   redis: {
     eval: vi.fn(async (script: string, keys: string[], args: string[]) => {
       if (script.includes("local dedupe = ARGV[1]")) {
-        const [dedupe, jobKey, queue, conversationQueue, conversationCounter] = keys; const [dedupeArg, raw, now, ttl, id] = args;
+        const [dedupe, jobKey, queue, conversationQueue, conversationCounter, jobConversations] = keys; const [dedupeArg, raw, now, ttl, id, conversationId] = args;
         if (dedupeArg && values.has(dedupe)) return values.get(dedupe);
         const sequence = Number(values.get(conversationCounter) ?? 0) + 1;
         values.set(conversationCounter, sequence);
-        values.set(jobKey, JSON.parse(raw)); zset(queue).set(id, Number(now)); zset(conversationQueue).set(id, sequence);
+        values.set(jobKey, JSON.parse(raw)); zset(queue).set(id, Number(now)); zset(conversationQueue).set(id, sequence); hash(jobConversations).set(id, conversationId);
         if (dedupeArg) values.set(dedupe, id);
         return id;
       }
@@ -31,7 +32,14 @@ vi.mock("./redis", () => ({
         for (const queue of queues.slice(0, 3)) for (const [id, due] of [...zset(queue)].sort((a, b) => a[1] - b[1])) {
           if (due > now) continue;
           const job = values.get(jobPrefix + id) as Record<string, unknown> | undefined;
-          if (!job || job.state !== "pending") { zset(queue).delete(id); continue; }
+          if (!job) {
+            zset(queue).delete(id);
+            const conversationId = hash(keys[5]).get(id);
+            if (conversationId) { zset(conversationQueuePrefix + conversationId).delete(id); hash(keys[5]).delete(id); }
+            zset(keys[6]).set(id, now);
+            continue;
+          }
+          if (job.state !== "pending") { zset(queue).delete(id); continue; }
           const first = [...zset(conversationQueuePrefix + job.conversationId)].sort((a, b) => a[1] - b[1])[0]?.[0];
           if (first !== id) continue;
           const ck = conversationPrefix + job.conversationId; const lock = locks.get(ck);
@@ -45,20 +53,27 @@ vi.mock("./redis", () => ({
         return null;
       }
       if (script.includes("job.state ~= 'leased'")) {
-        const [jobKey, leases, conversation, conversationQueue] = keys; const [token, state, now, raw] = args;
+        const [jobKey, leases, conversation, conversationQueue, _history, reconciliation, jobConversations] = keys; const [token, state, now, raw] = args;
         const job = values.get(jobKey) as Record<string, unknown> | undefined;
         if (!job || job.state !== "leased" || job.leaseToken !== token) return 0;
         job.state = state; job.updatedAt = Number(now); delete job.leaseToken; job.result = JSON.parse(raw); values.set(jobKey, job);
-        zset(leases).delete(String(job.id)); zset(conversationQueue).delete(String(job.id)); if (locks.get(conversation)?.value === job.id) locks.delete(conversation); return 1;
+        zset(leases).delete(String(job.id));
+        if (state === "ambiguous") zset(reconciliation).set(String(job.id), Number(now));
+        else { zset(conversationQueue).delete(String(job.id)); zset(reconciliation).delete(String(job.id)); hash(jobConversations).delete(String(job.id)); }
+        if (locks.get(conversation)?.value === job.id) locks.delete(conversation); return 1;
       }
       if (script.includes("lease_expired_without_provider_confirmation")) {
-        const [leases, _reconciliation, unresolved] = keys; const [nowRaw, maxRaw, jobPrefix] = args; const now = Number(nowRaw);
+        const [leases, _reconciliation, unresolved, jobConversations] = keys; const [nowRaw, maxRaw, jobPrefix, _ttl, _conversationPrefix, conversationQueuePrefix] = args; const now = Number(nowRaw);
         const ids = [...zset(leases)].filter(([, due]) => due <= now).slice(0, Number(maxRaw)).map(([id]) => id);
         let reconciled = 0, inconsistentes = 0;
         for (const id of ids) {
           const job = values.get(jobPrefix + id) as Record<string, unknown> | undefined;
           if (job?.state === "leased") { job.state = "ambiguous"; job.result = { motivo: "lease_expired_without_provider_confirmation" }; values.set(jobPrefix + id, job); zset(leases).delete(id); reconciled++; }
-          else { zset(unresolved).set(id, now); zset(leases).delete(id); inconsistentes++; }
+          else {
+            const conversationId = hash(jobConversations).get(id);
+            if (conversationId) { zset(conversationQueuePrefix + conversationId).delete(id); hash(jobConversations).delete(id); }
+            zset(unresolved).set(id, now); zset(leases).delete(id); inconsistentes++;
+          }
         }
         return [reconciled, inconsistentes];
       }
@@ -71,7 +86,7 @@ vi.mock("./redis", () => ({
 
 import { configuracaoOutboxWhatsapp, enfileirarImagemWhatsapp, enfileirarMensagemWhatsapp, obterJobWhatsapp, processarFilaWhatsapp, recuperarLeasesWhatsapp, resumoFilaWhatsapp } from "./whatsappOutbox";
 
-beforeEach(() => { values.clear(); scores.clear(); locks.clear(); delete process.env.WHATSAPP_OUTBOX_CONCURRENCY; delete process.env.WHATSAPP_OUTBOX_RATE_LIMIT_PER_MINUTE; });
+beforeEach(() => { values.clear(); scores.clear(); locks.clear(); hashes.clear(); delete process.env.WHATSAPP_OUTBOX_CONCURRENCY; delete process.env.WHATSAPP_OUTBOX_RATE_LIMIT_PER_MINUTE; });
 
 async function drenar(executar: Parameters<typeof processarFilaWhatsapp>[0]) {
   let total = 0, max = 0;
@@ -151,6 +166,54 @@ describe("whatsappOutbox", () => {
     expect(chamadas).toBe(1); expect(job?.state).toBe("ambiguous");
     await drenar(async () => { chamadas++; return { ok: true, latenciaMs: 1, tentativas: 1 }; });
     expect(chamadas).toBe(1);
+  });
+
+  test("resultado ambíguo mantém a cabeça da conversa até reconciliação", async () => {
+    await enfileirarMensagemWhatsapp({ phone: "5511999990040", text: "primeira" });
+    await enfileirarMensagemWhatsapp({ phone: "5511999990040", text: "segunda" });
+
+    await processarFilaWhatsapp(async () => ({ ok: false, motivo: "timeout", latenciaMs: 1, tentativas: 1 }), 1, 1);
+
+    const enviarPosterior = vi.fn(async () => ({ ok: true, latenciaMs: 1, tentativas: 1 }));
+    await processarFilaWhatsapp(enviarPosterior, 1, 1);
+
+    expect(enviarPosterior).not.toHaveBeenCalled();
+    expect(await resumoFilaWhatsapp()).toMatchObject({ pending: 1, ambiguous: 1 });
+  });
+
+  test("cabeça de conversa sem job é removida para não bloquear a mensagem posterior", async () => {
+    const phone = "5511999990041";
+    const { jobId } = await enfileirarMensagemWhatsapp({ phone, text: "órfã" });
+    await enfileirarMensagemWhatsapp({ phone, text: "posterior" });
+    values.delete(`whatsapp:outbox:job:${jobId}`);
+
+    const executar = vi.fn(async () => ({ ok: true, latenciaMs: 1, tentativas: 1 }));
+    await processarFilaWhatsapp(executar, 1, 1);
+
+    expect(executar).toHaveBeenCalledWith(expect.objectContaining({ text: "posterior" }));
+    expect(await resumoFilaWhatsapp()).toMatchObject({ unresolved: 1 });
+  });
+
+  test("lease expirado sem job remove sua própria cabeça e preserva a quarentena", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    const phone = "5511999990042";
+    const { jobId } = await enfileirarMensagemWhatsapp({ phone, text: "órfã-em-lease" });
+    await enfileirarMensagemWhatsapp({ phone, text: "posterior-ao-lease" });
+    let liberar!: () => void;
+    const primeiro = processarFilaWhatsapp(async () => new Promise((resolve) => { liberar = () => resolve({ ok: true, latenciaMs: 1, tentativas: 1 }); }), 1, 1);
+    await vi.waitFor(() => expect(liberar).toBeTypeOf("function"));
+    values.delete(`whatsapp:outbox:job:${jobId}`);
+    clock.mockReturnValue(32_000);
+    expect(await recuperarLeasesWhatsapp()).toEqual({ reconciled: 0, unresolved: 1 });
+
+    const enviarPosterior = vi.fn(async () => ({ ok: true, latenciaMs: 1, tentativas: 1 }));
+    await processarFilaWhatsapp(enviarPosterior, 1, 1);
+    expect(enviarPosterior).toHaveBeenCalledWith(expect.objectContaining({ text: "posterior-ao-lease" }));
+    expect(await resumoFilaWhatsapp()).toMatchObject({ unresolved: 1 });
+
+    liberar();
+    await primeiro;
+    clock.mockRestore();
   });
 
   test("pausa global suprime promoção já enfileirada antes do contato com provider", async () => {
