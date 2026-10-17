@@ -96,6 +96,7 @@ async function drenar(executar: Parameters<typeof processarFilaWhatsapp>[0]) {
 describe("whatsappOutbox", () => {
   test("expõe apenas nomes das configurações QStash ausentes", () => {
     delete process.env.QSTASH_TOKEN;
+    delete process.env.QSTASH_URL;
     delete process.env.QSTASH_CURRENT_SIGNING_KEY;
     delete process.env.QSTASH_NEXT_SIGNING_KEY;
     delete process.env.WHATSAPP_OUTBOX_CALLBACK_URL;
@@ -103,8 +104,23 @@ describe("whatsappOutbox", () => {
     delete process.env.VERCEL_ENV;
     expect(configuracaoOutboxWhatsapp()).toEqual({
       ready: false,
-      missing: ["QSTASH_TOKEN", "QSTASH_CURRENT_SIGNING_KEY", "QSTASH_NEXT_SIGNING_KEY", "WHATSAPP_OUTBOX_CALLBACK_URL (ou VERCEL_URL em production)"],
+      missing: ["QSTASH_TOKEN", "QSTASH_CURRENT_SIGNING_KEY", "QSTASH_NEXT_SIGNING_KEY", "QSTASH_URL (endpoint HTTPS da região Upstash)", "WHATSAPP_OUTBOX_CALLBACK_URL (ou VERCEL_URL em production)"],
     });
+  });
+
+  test("rejeita endpoint QStash ausente ou de domínio externo, sem cair no EU padrão", () => {
+    const previous = process.env.QSTASH_URL;
+    try {
+      process.env.QSTASH_URL = "http://qstash-us-east-1.upstash.io";
+      expect(configuracaoOutboxWhatsapp().missing).toContain("QSTASH_URL (endpoint HTTPS da região Upstash)");
+      process.env.QSTASH_URL = "https://example.com";
+      expect(configuracaoOutboxWhatsapp().missing).toContain("QSTASH_URL (endpoint HTTPS da região Upstash)");
+      process.env.QSTASH_URL = "https://qstash-us-east-1.upstash.io";
+      expect(configuracaoOutboxWhatsapp().missing).not.toContain("QSTASH_URL (endpoint HTTPS da região Upstash)");
+    } finally {
+      if (previous === undefined) delete process.env.QSTASH_URL;
+      else process.env.QSTASH_URL = previous;
+    }
   });
 
   test("prioriza crítica, limita globalmente a quatro e preserva ordem da conversa", async () => {
