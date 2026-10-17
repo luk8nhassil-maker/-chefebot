@@ -433,7 +433,14 @@ export async function enviarMensagem(phone: string, message: string, ritmoRapido
     // do histórico, tal como o painel humano, para não registrar a mesma
     // mensagem uma segunda vez como atendente. Mensagens digitadas no iPhone
     // não possuem esta marca e continuam aparecendo normalmente.
-    if (resultado.messageIdInterno) await marcarEcoPainel(resultado.messageIdInterno);
+    if (resultado.messageIdInterno) {
+      try {
+        await marcarEcoPainel(resultado.messageIdInterno);
+      } catch {
+        // Falha do marcador não desfaz envio confirmado pela Evolution.
+        // O índice durável de histórico tentará marcar novamente no worker.
+      }
+    }
     if (resultado.jobId) await registrarMensagemOutbox(phone, "bot", message, resultado.jobId);
     else await registrarMensagem(phone, "bot", message); // somente mocks legados de teste
     marcarOutboundConfirmado().catch(() => {});
