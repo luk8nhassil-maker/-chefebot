@@ -130,7 +130,8 @@ describe("whatsappOutbox", () => {
     });
     const executar = vi.fn(async () => ({ ok: true, statusHttp: 200, latenciaMs: 1, tentativas: 1 }));
     const resultado = await processarFilaWhatsapp(executar, 1, 1);
-    expect(executar).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: jobId, text: "canario-e2e", state: "leased" }));
+    expect(executar).toHaveBeenCalledTimes(1);
+    expect(executar).toHaveBeenCalledWith(expect.objectContaining({ id: jobId, text: "canario-e2e", state: "leased" }));
     expect(resultado).toEqual({ processed: 1, delivered: 1, failed: 0, ambiguous: 0 });
     expect((await obterJobWhatsapp(jobId))?.state).toBe("delivered");
     expect(await resumoFilaWhatsapp()).toEqual({ pending: 0, inFlight: 0, ambiguous: 0, unresolved: 0 });
