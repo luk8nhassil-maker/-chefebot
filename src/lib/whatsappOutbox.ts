@@ -58,6 +58,9 @@ const CHAVE_INCONSISTENCIAS = `${PREFIX}unresolved`;
 // conversas. Ele é apagado junto com terminalidades seguras.
 const CHAVE_CONVERSAS_POR_JOB = `${PREFIX}job-conversations`;
 const CHAVE_VELOCIDADE = `${PREFIX}rate-window`;
+// Telemetria agregada e sem PII, escrita atomicamente nos scripts existentes.
+const CHAVE_METRICAS = `${PREFIX}monitor:metrics`;
+const CHAVE_INCIDENTES = `${PREFIX}monitor:incidents`;
 const chaveClaimHistoricoHumano = (id: string) => `${PREFIX}human-history-claim:${id}`;
 
 function limiteGlobal(): number {
@@ -95,6 +98,8 @@ redis.call('EXPIRE', KEYS[5], ARGV[4])
 redis.call('ZADD', KEYS[4], sequence, ARGV[5])
 redis.call('HSET', KEYS[6], ARGV[5], ARGV[6])
 if dedupe ~= '' then redis.call('SET', KEYS[1], ARGV[5], 'EX', ARGV[4]) end
+redis.pcall('HSETNX', KEYS[7], 'since', ARGV[3])
+redis.pcall('HINCRBY', KEYS[7], 'queued', 1)
 return ARGV[5]
 `;
 
@@ -186,6 +191,12 @@ end
 if job.idempotencyKey and (ARGV[2] == 'failed' or ARGV[2] == 'expired' or ARGV[2] == 'suppressed') then
   redis.call('DEL', ARGV[6] .. job.idempotencyKey)
 end
+redis.pcall('HINCRBY', KEYS[8], ARGV[2], 1)
+if ARGV[2] == 'failed' or ARGV[2] == 'ambiguous' then
+  redis.pcall('ZADD', KEYS[9], tonumber(ARGV[3]), job.id)
+  local size = redis.pcall('ZCARD', KEYS[9])
+  if type(size) == 'number' and size > 100 then redis.pcall('ZREMRANGEBYRANK', KEYS[9], 0, size - 101) end
+end
 return 1
 `;
 
@@ -207,6 +218,7 @@ for _, id in ipairs(ids) do
       -- Mantém a cabeça e o lock lógico da conversa: um resultado incerto
       -- não pode permitir que a mensagem seguinte ultrapasse esta.
       redis.call('ZADD', KEYS[2], now, id)
+      redis.pcall('ZADD', KEYS[6], now, id)
       redis.call('ZREM', KEYS[1], id)
       reconciled = reconciled + 1
     else
@@ -231,6 +243,15 @@ for _, id in ipairs(ids) do
     unresolved = unresolved + 1
   end
 end
+local incidentSize = redis.pcall('ZCARD', KEYS[6])
+if type(incidentSize) == 'number' and incidentSize > 100 then
+  redis.pcall('ZREMRANGEBYRANK', KEYS[6], 0, incidentSize - 101)
+end
+if reconciled > 0 then
+  redis.pcall('HINCRBY', KEYS[5], 'recovered', reconciled)
+  redis.pcall('HINCRBY', KEYS[5], 'ambiguous', reconciled)
+end
+if unresolved > 0 then redis.pcall('HINCRBY', KEYS[5], 'unresolvedEvents', unresolved) end
 return { reconciled, unresolved }
 `;
 
@@ -250,7 +271,7 @@ export async function enfileirarMensagemWhatsapp(input: {
   };
   const dedupe = input.idempotencyKey ? chaveDedupe(input.idempotencyKey) : "";
   const resultado = await redis.eval(ENFILEIRAR_LUA,
-    [dedupe || `${PREFIX}no-dedupe:${id}`, chaveJob(id), chaveFila(priority), chaveSequenciaConversa(job.conversationId), chaveContadorSequenciaConversa(job.conversationId), CHAVE_CONVERSAS_POR_JOB],
+    [dedupe || `${PREFIX}no-dedupe:${id}`, chaveJob(id), chaveFila(priority), chaveSequenciaConversa(job.conversationId), chaveContadorSequenciaConversa(job.conversationId), CHAVE_CONVERSAS_POR_JOB, CHAVE_METRICAS],
     [dedupe, JSON.stringify(job), String(now), String(TTL_SEGUNDOS), id, job.conversationId]);
   return { jobId: String(resultado), deduplicated: String(resultado) !== id };
 }
@@ -268,7 +289,7 @@ export async function enfileirarImagemWhatsapp(input: {
   };
   const dedupe = input.idempotencyKey ? chaveDedupe(input.idempotencyKey) : "";
   const resultado = await redis.eval(ENFILEIRAR_LUA,
-    [dedupe || `${PREFIX}no-dedupe:${id}`, chaveJob(id), chaveFila(priority), chaveSequenciaConversa(job.conversationId), chaveContadorSequenciaConversa(job.conversationId), CHAVE_CONVERSAS_POR_JOB],
+    [dedupe || `${PREFIX}no-dedupe:${id}`, chaveJob(id), chaveFila(priority), chaveSequenciaConversa(job.conversationId), chaveContadorSequenciaConversa(job.conversationId), CHAVE_CONVERSAS_POR_JOB, CHAVE_METRICAS],
     [dedupe, JSON.stringify(job), String(now), String(TTL_SEGUNDOS), id, job.conversationId]);
   return { jobId: String(resultado), deduplicated: String(resultado) !== id };
 }
@@ -282,14 +303,14 @@ async function claimProximo(): Promise<JobOutboxWhatsapp | null> {
 }
 
 async function finalizar(job: JobOutboxWhatsapp, estado: "delivered" | "failed" | "ambiguous" | "suppressed" | "expired", result: ResultadoTransporteWhatsapp | { motivo: string }): Promise<boolean> {
-  return Number(await redis.eval(FINALIZAR_LUA, [chaveJob(job.id), CHAVE_LEASES, chaveConversa(job.conversationId), chaveSequenciaConversa(job.conversationId), CHAVE_HISTORICO_HUMANO, CHAVE_RECONCILIACAO, CHAVE_CONVERSAS_POR_JOB],
+  return Number(await redis.eval(FINALIZAR_LUA, [chaveJob(job.id), CHAVE_LEASES, chaveConversa(job.conversationId), chaveSequenciaConversa(job.conversationId), CHAVE_HISTORICO_HUMANO, CHAVE_RECONCILIACAO, CHAVE_CONVERSAS_POR_JOB, CHAVE_METRICAS, CHAVE_INCIDENTES],
     [job.leaseToken ?? "", estado, String(Date.now()), JSON.stringify(result), String(TTL_SEGUNDOS), `${PREFIX}dedupe:`])) === 1;
 }
 
 export type RecuperacaoLeasesWhatsapp = { reconciled: number; unresolved: number };
 
 export async function recuperarLeasesWhatsapp(limite = 100): Promise<RecuperacaoLeasesWhatsapp> {
-  const result = await redis.eval(RECUPERAR_LEASES_LUA, [CHAVE_LEASES, CHAVE_RECONCILIACAO, CHAVE_INCONSISTENCIAS, CHAVE_CONVERSAS_POR_JOB],
+  const result = await redis.eval(RECUPERAR_LEASES_LUA, [CHAVE_LEASES, CHAVE_RECONCILIACAO, CHAVE_INCONSISTENCIAS, CHAVE_CONVERSAS_POR_JOB, CHAVE_METRICAS, CHAVE_INCIDENTES],
     [String(Date.now()), String(Math.max(1, Math.min(limite, 500))), `${PREFIX}job:`, String(TTL_SEGUNDOS), `${PREFIX}conversation:`, `${PREFIX}conversation-queue:`]);
   const values = Array.isArray(result) ? result : [result, 0];
   return { reconciled: Number(values[0]) || 0, unresolved: Number(values[1]) || 0 };

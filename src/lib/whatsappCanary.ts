@@ -39,6 +39,8 @@ export type CanaryRecord = {
   outboundAttempts?: number;
   outboundHttpStatus?: number;
   outboundMessageIdMasked?: string;
+  /** Identifica a outbox usada pelo teste, sem armazenar o telefone no monitor. */
+  outboundOutboxJobId?: string;
   outboundError?: string;
   inboundAt?: number;
   ackAt?: number;
@@ -419,6 +421,7 @@ export async function iniciarCanario(): Promise<IniciarCanarioResultado> {
     outboundAttempts: envio.tentativas,
     outboundHttpStatus: envio.statusHttp,
     outboundMessageIdMasked: envio.messageIdMascarado || undefined,
+    outboundOutboxJobId: envio.jobId,
     outboundError: envio.motivo,
   };
   const consolidado = await consolidarEvidenciaOutbound(recordEnvio, revisaoAntesEnvio);
