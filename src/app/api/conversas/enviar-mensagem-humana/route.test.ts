@@ -199,6 +199,26 @@ describe("POST /api/conversas/enviar-mensagem-humana — eco do painel (Etapa 2B
     expect(JSON.stringify(ecoCall)).not.toContain("Seu pedido está pronto");
   });
 
+  it("falha no Redis de eco não transforma resposta confirmada em erro de envio", async () => {
+    const original = redisMock.set.getMockImplementation();
+    expect(original).toBeDefined();
+    mockFetchOkComMessageId("WHATS-ECO-INDISPONIVEL");
+    redisMock.set.mockImplementation(async (key, value, opts) => {
+      if (key === "conversa:echo-painel:WHATS-ECO-INDISPONIVEL") throw new Error("eco indisponível");
+      return original!(key, value, opts);
+    });
+    try {
+      const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+      const res = await POST(postReq({ phone: PHONE, text: "Pedido pronto" }, token));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual(expect.objectContaining({ status: "delivered" }));
+      expect(registrarOutboxMock).toHaveBeenCalledTimes(1);
+      expect(enviarTextoMock).toHaveBeenCalledTimes(1);
+    } finally {
+      redisMock.set.mockImplementation(original!);
+    }
+  });
+
   it("registra a mensagem mesmo quando a Evolution não retorna message id, sem criar chave de eco inválida", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
     const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
