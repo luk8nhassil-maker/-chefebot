@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { verifyToken } from "@/lib/auth";
-import { registrarMensagemOutbox } from "@/lib/conversa";
+import { registrarMensagem, registrarMensagemOutbox } from "@/lib/conversa";
 import { validarEnvioMensagemHumana } from "@/lib/validarEnvioMensagemHumana";
 import { marcarEcoPainel } from "@/lib/conversaEcoPainel";
 import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
@@ -106,9 +106,15 @@ export async function POST(req: NextRequest) {
   // Só registra após confirmação de envio bem-sucedido pela Evolution API.
   // A claim evita duplicação com o worker assíncrono; se ele já tiver tomado
   // a claim, o índice durável dele atualizará o histórico em seguida.
-  if (!resultado.deduplicated && resultado.jobId && await reivindicarHistoricoMensagemHumana(resultado.jobId)) {
-    await registrarMensagemOutbox(phone, "atendente", `[${senderName}] ${text}`, resultado.jobId);
-    await confirmarHistoricoMensagemHumana(resultado.jobId);
+  if (!resultado.deduplicated) {
+    if (!resultado.jobId) {
+      // Rollout canário: atendentes fora da outbox continuam registrando
+      // o histórico no mesmo caminho da produção anterior.
+      await registrarMensagem(phone, "atendente", `[${senderName}] ${text}`);
+    } else if (await reivindicarHistoricoMensagemHumana(resultado.jobId)) {
+      await registrarMensagemOutbox(phone, "atendente", `[${senderName}] ${text}`, resultado.jobId);
+      await confirmarHistoricoMensagemHumana(resultado.jobId);
+    }
   }
   await redis.del(`nova_msg_manual:${phone}`);
 
