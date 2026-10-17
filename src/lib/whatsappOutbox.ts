@@ -394,9 +394,25 @@ let recoveryScheduleDestination: string | null = null;
 const QSTASH_RECOVERY_SCHEDULE_ID = "chefebot-whatsapp-outbox-recovery-v1";
 const QSTASH_RECOVERY_CRON = "*/5 * * * *";
 
+function baseQstashConfigurada(): string | null {
+  const raw = process.env.QSTASH_URL?.trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    // Região explicitamente configurada: nunca cair silenciosamente no
+    // endpoint europeu quando a instância vinculada é a dos EUA.
+    if (url.protocol !== "https:" || url.username || url.password ||
+      !["qstash-us-east-1.upstash.io", "qstash-eu-central-1.upstash.io", "qstash.upstash.io"].includes(url.hostname) ||
+      url.pathname !== "/" || url.search || url.hash) return null;
+    return url.origin;
+  } catch { return null; }
+}
+
 function clienteQstash(): Client | null {
   if (qstash !== undefined) return qstash;
-  qstash = process.env.QSTASH_TOKEN ? new Client({ token: process.env.QSTASH_TOKEN }) : null;
+  const token = process.env.QSTASH_TOKEN?.trim();
+  const baseUrl = baseQstashConfigurada();
+  qstash = token && baseUrl ? new Client({ token, baseUrl }) : null;
   return qstash;
 }
 
@@ -423,6 +439,7 @@ function destinoRecuperacaoWhatsapp(): string {
 export function configuracaoOutboxWhatsapp(): { ready: boolean; missing: string[] } {
   const required = ["QSTASH_TOKEN", "QSTASH_CURRENT_SIGNING_KEY", "QSTASH_NEXT_SIGNING_KEY"];
   const missing = required.filter((name) => !process.env[name]);
+  if (!baseQstashConfigurada()) missing.push("QSTASH_URL (endpoint HTTPS da região Upstash)");
   if (!destinoRecuperacaoWhatsapp()) missing.push("WHATSAPP_OUTBOX_CALLBACK_URL (ou VERCEL_URL em production)");
   return { ready: missing.length === 0, missing };
 }
