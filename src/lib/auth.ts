@@ -30,6 +30,7 @@ export const ROUTE_ROLES: Array<{ path: string; roles: Role[] }> = [
   // O diagnóstico/canário já valida admin|dev na página e na API. Esta regra
   // específica precisa vir antes do prefixo /dev para o admin conseguir abrir
   // a ferramenta sem ganhar acesso às demais rotas exclusivas de dev.
+  { path: "/dev/whatsapp/monitoramento", roles: ["dev"] },
   { path: "/dev/whatsapp", roles: ["admin", "dev"] },
   { path: "/dev/pesquisa-preferencia", roles: ["admin", "dev"] },
   { path: "/dev", roles: ["dev"] },

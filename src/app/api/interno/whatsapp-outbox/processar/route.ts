@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { redis } from "@/lib/redis";
 import { Receiver } from "@upstash/qstash";
 import { executarJobWhatsapp } from "@/lib/whatsappMensagem";
 import { registrarMensagemOutbox } from "@/lib/conversa";
@@ -71,5 +72,10 @@ export async function POST(req: NextRequest) {
   // Um lote cheio agenda a continuação, mas a recuperação cron também cobre
   // falha de publicação ou interrupção do worker.
   if (queue.pending > 0) await agendarDrenoWhatsapp();
+  // Evidência de callback QStash assinado que terminou com sucesso.
+  // Telemetria é melhor esforço: falha jamais altera o resultado do worker.
+  try {
+    await redis.hset("whatsapp:outbox:monitor:metrics", { lastWorkerOkAt: Date.now() });
+  } catch { /* apenas observabilidade */ }
   return NextResponse.json({ ok: true, recovered, ...drained, humanHistorySynced, queue });
 }
