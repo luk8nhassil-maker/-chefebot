@@ -66,8 +66,8 @@ export function outboxWhatsappHabilitadaPara(phone: string): boolean {
     (process.env.NODE_ENV === "test" ? "all" : "canary");
   if (rollout === "all") return true;
   if (rollout !== "canary") return false;
-  const canary = process.env.WHATSAPP_CANARY_PHONE?.replace(/\\D/g, "") ?? "";
-  const phoneDigits = phone.replace(/\\D/g, "");
+  const canary = process.env.WHATSAPP_CANARY_PHONE?.replace(/\D/g, "") ?? "";
+  const phoneDigits = phone.replace(/\D/g, "");
   return canary.length >= 11 && phoneDigits === canary;
 }
 
