@@ -61,6 +61,28 @@ describe("worker da outbox", () => {
     expect(mocks.markOutbound).toHaveBeenCalledTimes(1);
   });
 
+  test("falha no marcador de eco não invalida entrega já confirmada pela Evolution", async () => {
+    mocks.verify.mockResolvedValue(true);
+    mocks.executarJob.mockResolvedValue({
+      ok: true, messageIdInterno: "EVO-CONFIRMADO", latenciaMs: 1, tentativas: 1,
+    });
+    mocks.markEco.mockRejectedValue(new Error("Redis temporariamente indisponível"));
+    mocks.process.mockImplementation(async (executor: (job: Record<string, unknown>) => Promise<unknown>) => {
+      const transport = await executor({
+        id: "bot-job-confirmado", phone: "5511999990001",
+        history: { autor: "bot", texto: "ok" },
+      });
+      expect(transport).toEqual(expect.objectContaining({ ok: true }));
+      return { processed: 1, delivered: 1, failed: 0, ambiguous: 0 };
+    });
+    const response = await POST(new NextRequest("https://chefedapizza.com.br/api/interno/whatsapp-outbox/processar", {
+      method: "POST", headers: { "upstash-signature": "token" }, body: "{}",
+    }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(expect.objectContaining({ delivered: 1, ambiguous: 0 }));
+    expect(mocks.markEco).toHaveBeenCalledWith("EVO-CONFIRMADO");
+  });
+
   test("marca o eco assim que o executor confirma, antes de finalizar o job", async () => {
     mocks.verify.mockResolvedValue(true);
     mocks.executarJob.mockResolvedValue({ ok: true, messageIdInterno: "EVO-ANTES-DO-FINALIZE", latenciaMs: 1, tentativas: 1 });
