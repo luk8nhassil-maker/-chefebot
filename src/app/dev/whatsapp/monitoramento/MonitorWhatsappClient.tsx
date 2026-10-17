@@ -83,8 +83,8 @@ export default function MonitorWhatsappClient() {
       <header style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 14, marginBottom: 22 }}>
         <div>
           <a href="/dev" style={{ color: muted, textDecoration: 'none', fontSize: 12 }}>← Área DEV</a>
-          <h1 style={{ fontSize: 25, margin: '9px 0 4px', fontWeight: 800 }}>Centro de Monitoramento do WhatsApp</h1>
-          <p style={{ margin: 0, color: muted, fontSize: 13 }}>Acompanhamento somente leitura da fila. Nenhum envio ou mudança de fase é feito aqui.</p>
+          <h1 style={{ fontSize: 25, margin: '9px 0 4px', fontWeight: 800 }}>Monitoramento do WhatsApp</h1>
+          <p style={{ margin: 0, color: muted, fontSize: 13 }}>Visão exclusiva DEV · Somente leitura</p>
         </div>
         <button onClick={() => { setLoading(true); void refresh() }} disabled={loading}
           style={{ cursor: loading ? 'wait' : 'pointer', padding: '10px 16px', borderRadius: 10, background: 'var(--attention)', border: 0, color: '#fff', fontWeight: 700 }}>
@@ -95,7 +95,7 @@ export default function MonitorWhatsappClient() {
       {error && <section role="alert" style={{ ...panel, marginBottom: 16, color: 'var(--danger)' }}>Não foi possível atualizar: {error}. {snapshot ? 'Os últimos dados podem estar desatualizados.' : 'Não há dados disponíveis.'}</section>}
       {!snapshot ? <div style={panel}> {loading ? 'Consultando integrações e dados da fila…' : 'Sem evidências disponíveis. Verifique a conexão e o acesso DEV.'} </div> : <>
         <p style={{ color: muted, fontSize: 12, margin: '0 0 16px' }}>
-          Última verificação: {dt(snapshot.checkedAt)} · Atualização a cada 2 minutos com a aba aberta
+          Atualizado em {dt(snapshot.checkedAt)} · a cada 2 minutos com a aba aberta
           {stale && <strong style={{ color: 'var(--danger)' }}> · Dados antigos</strong>}
           {snapshot.since && <> · Contadores desde {dt(snapshot.since)}</>}
         </p>
@@ -103,68 +103,94 @@ export default function MonitorWhatsappClient() {
         <section style={{ ...panel, marginBottom: 16, borderLeft: '4px solid var(--attention)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
             <div>
-              <div style={{ color: muted, fontSize: 12 }}>Etapa configurada: {snapshot.stage} de 4 · modo de envio: {snapshot.mode}</div>
+              <div style={{ color: muted, fontSize: 12 }}>Etapa {snapshot.stage} de 4 · modo: {snapshot.mode}</div>
               <h2 style={{ margin: '6px 0 4px', fontSize: 20 }}>{current?.title ?? 'Aguardando evidências'}</h2>
-              <p style={{ fontSize: 13, color: muted, margin: 0 }}>Avanço sempre manual, após verificação e aprovação. A configuração não prova aprovação anterior.</p>
+              <p style={{ fontSize: 13, color: muted, margin: 0 }}>O monitor não autoriza nem altera a liberação.</p>
             </div>
             <Status kind={current?.passed ? 'ok' : 'unknown'} label={current?.passed ? 'Critérios visíveis atendidos — exige aprovação' : 'Não aprovado para avançar'} />
           </div>
-          <p style={{ margin: '14px 0 0', fontSize: 13 }}><strong>Próxima ação:</strong> {snapshot.recommendation}</p>
+          <p style={{ margin: '14px 0 0', fontSize: 13, lineHeight: 1.6 }}><strong>O que fazer agora:</strong> {snapshot.recommendation}</p>
         </section>
 
-        <section aria-label="Métricas da fila" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(155px,1fr))', gap: 10, marginBottom: 20 }}>
-          <Metric label="Enfileiradas" value={count(m?.queued)} detail="Desde o início da medição" />
-          <Metric label="Aceitas pela Evolution" value={count(m?.accepted)} detail="HTTP confirmado; entrega no telefone não medida" />
+        <h2 style={{ fontSize: 17, margin: '20px 0 12px' }}>Resumo da fila</h2>
+        <section aria-label="Indicadores principais" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(145px,1fr))', gap: 10, marginBottom: 12 }}>
           <Metric label="Pendentes" value={count(m?.pending)} detail="Aguardando envio" />
-          <Metric label="Em processamento" value={count(m?.inFlight)} />
-          <Metric label="Falhas definitivas" value={count(m?.failed)} />
-          <Metric label="Leases recuperados" value={count(m?.recovered)} detail="Reclassificados para revisão; não reenviados" />
-          <Metric label="Intervenções" value={m ? count(m.ambiguous + m.unresolved) : '—'} detail="Ambíguas + inconsistências" />
-          <Metric label="Maior espera observada" value={duration(m?.oldestWaitingMs)} detail="Amostra das primeiras posições por prioridade" />
+          <Metric label="Aceitas pela Evolution" value={count(m?.accepted)} detail="Confirmação HTTP; não é entrega no aparelho" />
+          <Metric label="Falhas definitivas" value={count(m?.failed)} detail="Acumuladas desde o início da medição" />
+          <Metric label="Precisam de revisão" value={m ? count(m.ambiguous + m.unresolved) : '—'} detail="Resultados incertos e inconsistências" />
         </section>
+        <details style={{ ...panel, marginBottom: 20, padding: '12px 16px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>Ver outros indicadores da fila</summary>
+          <section aria-label="Indicadores adicionais" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(145px,1fr))', gap: 10, marginTop: 14 }}>
+            <Metric label="Enfileiradas" value={count(m?.queued)} detail="Desde o início da medição" />
+            <Metric label="Em processamento" value={count(m?.inFlight)} />
+            <Metric label="Leases recuperados" value={count(m?.recovered)} detail="Movidos para revisão; sem reenvio" />
+            <Metric label="Maior espera observada" value={duration(m?.oldestWaitingMs)} detail="Amostra por prioridade" />
+          </section>
+        </details>
 
         <h2 style={{ fontSize: 17, margin: '24px 0 12px' }}>Saúde das integrações</h2>
-        <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 10, marginBottom: 22 }}>
-          <div style={panel}><strong>Evolution</strong><div style={{ margin: '12px 0 7px' }}><Status kind={snapshot.health.evolution === 'connected' ? 'ok' : snapshot.health.evolution === 'unverified' ? 'unknown' : 'bad'} label={snapshot.health.evolution === 'connected' ? 'Conectada' : snapshot.health.evolution === 'unverified' ? 'Não verificada' : 'Desconectada'} /></div><small style={{ color: muted }}>Conexão consultada sem enviar mensagens.</small></div>
-          <div style={panel}><strong>Redis</strong><div style={{ margin: '12px 0 7px' }}><Status kind={snapshot.health.redis === 'ok' ? 'ok' : 'bad'} label={snapshot.health.redis === 'ok' ? 'Leitura disponível' : 'Leitura indisponível'} /></div><small style={{ color: muted }}>Dados e contadores reais, quando acessíveis.</small></div>
-          <div style={panel}><strong>QStash</strong><div style={{ margin: '12px 0 7px' }}><Status kind={snapshot.health.qstash === 'configured_not_verified' ? 'unknown' : 'bad'} label={snapshot.health.qstash === 'configured_not_verified' ? 'Configurado, agenda não comprovada' : 'Configuração incompleta'} /></div><small style={{ color: muted }}>{snapshot.health.qstashMissing.length ? 'Faltando: ' + snapshot.health.qstashMissing.join(', ') : snapshot.health.lastSignedWorkerSuccessAt ? 'Último callback assinado concluído: ' + dt(snapshot.health.lastSignedWorkerSuccessAt) + '. Não confirma a agenda periódica.' : 'Sem evidência registrada de callback concluído.'}</small></div>
+        <section aria-label="Saúde das integrações" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 10, marginBottom: 12 }}>
+          <div style={{ ...panel, padding: 14 }}><strong>Evolution</strong><div style={{ marginTop: 8 }}><Status kind={snapshot.health.evolution === 'connected' ? 'ok' : snapshot.health.evolution === 'unverified' ? 'unknown' : 'bad'} label={snapshot.health.evolution === 'connected' ? 'Conectada' : snapshot.health.evolution === 'unverified' ? 'Não verificada' : 'Desconectada'} /></div></div>
+          <div style={{ ...panel, padding: 14 }}><strong>Redis</strong><div style={{ marginTop: 8 }}><Status kind={snapshot.health.redis === 'ok' ? 'ok' : 'bad'} label={snapshot.health.redis === 'ok' ? 'Disponível' : 'Indisponível'} /></div></div>
+          <div style={{ ...panel, padding: 14 }}><strong>QStash</strong><div style={{ marginTop: 8 }}><Status kind="unknown" label={snapshot.health.qstash === 'configured_not_verified' ? 'Agenda não verificada' : 'Configuração incompleta'} /></div></div>
+        </section>
+        <details style={{ ...panel, marginBottom: 20, padding: '12px 16px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>Ver detalhes das conexões</summary>
+          <div style={{ color: muted, fontSize: 12, lineHeight: 1.7, marginTop: 12 }}>
+            <p style={{ margin: '0 0 8px' }}><strong>Evolution:</strong> estado consultado sem enviar mensagens.</p>
+            <p style={{ margin: '0 0 8px' }}><strong>Redis:</strong> dados e contadores reais somente quando a leitura está disponível.</p>
+            <p style={{ margin: 0 }}><strong>QStash:</strong> {snapshot.health.qstashMissing.length ? 'Configuração pendente: ' + snapshot.health.qstashMissing.join(', ') + '. ' : ''}
+              {snapshot.health.lastSignedWorkerSuccessAt ? 'Último callback assinado concluído: ' + dt(snapshot.health.lastSignedWorkerSuccessAt) + '. ' : 'Sem callback concluído comprovado. '}
+              A agenda periódica não foi comprovada.</p>
+          </div>
+        </details>
+
+        <h2 style={{ fontSize: 17, margin: '24px 0 12px' }}>Etapas de liberação</h2>
+        <section aria-label="Etapas de liberação" style={{ ...panel, padding: '4px 16px', marginBottom: 22 }}>
+          {snapshot.stages.map(stage => <details key={stage.step} style={{ borderBottom: stage.step === 4 ? 'none' : border, padding: '12px 0' }}>
+            <summary style={{ cursor: 'pointer', fontSize: 13, lineHeight: 1.6 }}>
+              <strong>Etapa {stage.step} · {stage.title}</strong>
+              {stage.step === snapshot.stage && <span style={{ marginLeft: 8, color: 'var(--attention)', fontWeight: 700 }}>Atual</span>}
+              <span style={{ display: 'block', color: muted, fontSize: 12 }}>{stage.passed ? 'Critérios observáveis atendidos — requer aprovação' : 'Evidências insuficientes'}</span>
+            </summary>
+            <div style={{ padding: '12px 0 0 18px' }}>
+              {stage.checks.map((c, i) => <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 10, fontSize: 12, lineHeight: 1.5 }}>
+                <span aria-hidden="true" style={{ color: c.ok === true ? 'var(--success)' : c.ok === false ? 'var(--danger)' : 'var(--attention)' }}>{c.ok === true ? '✓' : c.ok === false ? '×' : '•'}</span>
+                <span>{c.text} {c.ok === null && <em style={{ color: muted }}>(sem prova)</em>}</span>
+              </div>)}
+            </div>
+          </details>)}
         </section>
 
-        <h2 style={{ fontSize: 17, margin: '24px 0 12px' }}>Quatro etapas de liberação</h2>
-        <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 10, marginBottom: 24 }}>
-          {snapshot.stages.map((stage) => <article key={stage.step} style={{ ...panel, border: stage.step === snapshot.stage ? '1px solid var(--attention)' : border }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: muted }}>ETAPA {stage.step} {stage.step === snapshot.stage && '· ATUAL'}</div>
-            <h3 style={{ fontSize: 15, margin: '8px 0 12px' }}>{stage.title}</h3>
-            {stage.checks.map((c, i) => <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 11, fontSize: 12, lineHeight: 1.5 }}>
-              <span aria-hidden="true" style={{ color: c.ok === true ? 'var(--success)' : c.ok === false ? 'var(--danger)' : 'var(--attention)' }}>{c.ok === true ? '✓' : c.ok === false ? '×' : '•'}</span>
-              <span>{c.text} {c.ok === null && <em style={{ color: muted }}>(sem prova)</em>}</span>
-            </div>)}
-            <Status kind={stage.passed ? 'ok' : 'unknown'} label={stage.passed ? 'Critérios observáveis completos' : 'Evidências insuficientes'} />
-          </article>)}
-        </section>
-
-        <h2 style={{ fontSize: 17, margin: '24px 0 12px' }}>Histórico técnico de falhas</h2>
-        <section style={{ ...panel, marginBottom: 22, overflowX: 'auto' }}>
-          <p style={{ color: muted, fontSize: 12, marginTop: 0 }}>Somente eventos após a instrumentação, até 15 registros recentes. Nenhum telefone, nome ou conteúdo é exibido.</p>
-          {!snapshot.incidents.length ? <p style={{ margin: 0, color: muted, fontSize: 13 }}>Nenhum evento registrado neste histórico. Isso não comprova ausência de falhas anteriores.</p> :
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
-            <thead><tr>{['Horário', 'Estado', 'Motivo técnico', 'HTTP'].map(h => <th key={h} style={{ padding: 9, borderBottom: border, color: muted }}>{h}</th>)}</tr></thead>
-            <tbody>{snapshot.incidents.map((inc, i) => <tr key={i}>
-              <td style={{ padding: 9, borderBottom: border }}>{dt(inc.at)}</td>
-              <td style={{ padding: 9, borderBottom: border }}>{inc.state === 'ambiguous' ? 'Resultado incerto — revisar' : 'Falha definitiva'}</td>
-              <td style={{ padding: 9, borderBottom: border }}>{inc.reason.replaceAll('_', ' ')}</td>
-              <td style={{ padding: 9, borderBottom: border }}>{inc.statusHttp ?? '—'}</td>
-            </tr>)}</tbody>
-          </table>}
-        </section>
-        <section style={{ ...panel, marginBottom: 20 }}>
-          <h2 style={{ fontSize: 16, margin: '0 0 8px' }}>Consumo e possíveis custos</h2>
-          <p style={{ fontSize: 13, margin: '0 0 8px' }}>Uso faturável de Redis, Evolution, QStash e Vercel: <strong>não disponível nesta leitura</strong>. Nenhum preço ou valor estimado foi inventado.</p>
-          <p style={{ fontSize: 12, margin: 0, color: muted }}>{snapshot.limits.note} Despertares adicionais dependem do tráfego; verificar o painel oficial de cada serviço antes de liberar geral.</p>
-        </section>
+        <details style={{ ...panel, marginBottom: 12, padding: '12px 16px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>
+            Histórico de incidentes · {snapshot.incidents.length} {snapshot.incidents.length === 1 ? 'registro recente' : 'registros recentes'}
+          </summary>
+          <div style={{ marginTop: 14, overflowX: 'auto' }}>
+            <p style={{ color: muted, fontSize: 12, marginTop: 0 }}>Até 15 eventos após a instrumentação. Sem telefone, nome ou conteúdo de mensagem.</p>
+            {!snapshot.incidents.length ? <p style={{ margin: 0, color: muted, fontSize: 13 }}>Sem eventos neste histórico. Isso não comprova ausência de falhas anteriores.</p> :
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
+              <thead><tr>{['Horário', 'Estado', 'Motivo técnico', 'HTTP'].map(h => <th key={h} style={{ padding: 9, borderBottom: border, color: muted }}>{h}</th>)}</tr></thead>
+              <tbody>{snapshot.incidents.map((inc, i) => <tr key={i}>
+                <td style={{ padding: 9, borderBottom: border }}>{dt(inc.at)}</td>
+                <td style={{ padding: 9, borderBottom: border }}>{inc.state === 'ambiguous' ? 'Resultado incerto — revisar' : 'Falha definitiva'}</td>
+                <td style={{ padding: 9, borderBottom: border }}>{inc.reason.replaceAll('_', ' ')}</td>
+                <td style={{ padding: 9, borderBottom: border }}>{inc.statusHttp ?? '—'}</td>
+              </tr>)}</tbody>
+            </table>}
+          </div>
+        </details>
+        <details style={{ ...panel, marginBottom: 20, padding: '12px 16px' }}>
+          <summary style={{ cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>Consumo e custos</summary>
+          <p style={{ fontSize: 13, margin: '12px 0 8px' }}>Uso faturável de Redis, Evolution, QStash e Vercel: <strong>não disponível nesta leitura</strong>. Nenhum preço foi estimado.</p>
+          <p style={{ fontSize: 12, margin: 0, color: muted }}>{snapshot.limits.note} Verificar os painéis oficiais antes de liberar geral.</p>
+        </details>
         <footer style={{ fontSize: 12, color: muted, paddingBottom: 24, lineHeight: 1.6 }}>
-          <strong>Precisão:</strong> {snapshot.glossary.accepted} {snapshot.glossary.recovered} {snapshot.glossary.counters}
-          <p>Para iniciar o canário autorizado, use o diagnóstico já existente em <a href="/dev/whatsapp" style={{ color: 'var(--attention)' }}>Diagnóstico WhatsApp</a>. Este Centro não envia nenhuma mensagem.</p>
+          <p>O Centro não envia mensagens nem altera a etapa. O canário autorizado fica no <a href="/dev/whatsapp" style={{ color: 'var(--attention)' }}>Diagnóstico WhatsApp</a>.</p>
+          <details><summary style={{ cursor: 'pointer' }}>Como interpretar os números</summary>
+            <p>{snapshot.glossary.accepted} {snapshot.glossary.recovered} {snapshot.glossary.counters}</p>
+          </details>
         </footer>
       </>}
     </div>
