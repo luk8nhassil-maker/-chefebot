@@ -33,7 +33,12 @@ vi.mock("@/lib/whatsappOutbox", () => ({
   obterJobWhatsapp: vi.fn(async (id: string) => jobs.get(id) ?? null),
 }));
 vi.mock("@/lib/whatsappMensagem", () => ({ enviarTextoWhatsApp: enviarTextoMock }));
-vi.mock("@/lib/conversa", () => ({ registrarMensagemOutbox: registrarOutboxMock }));
+vi.mock("@/lib/conversa", () => ({
+  registrarMensagemOutbox: registrarOutboxMock,
+  registrarMensagem: vi.fn(async (phone: string, autor: string, texto: string) => {
+    await redisMock.set(`conversa:${phone}`, [{ autor, texto, ts: Date.now() }], { ex: 1800 });
+  }),
+}));
 
 import { POST } from "./route";
 import { createToken } from "@/lib/auth";
@@ -197,6 +202,20 @@ describe("POST /api/conversas/enviar-mensagem-humana — eco do painel (Etapa 2B
     expect(ecoCall?.[0]).not.toContain(PHONE);
     expect(ecoCall?.[0]).not.toContain("Kellyne");
     expect(JSON.stringify(ecoCall)).not.toContain("Seu pedido está pronto");
+  });
+
+  it("sem jobId no rollout canário, mantém registro humano no histórico legado", async () => {
+    enviarTextoMock.mockResolvedValue({
+      ok: true, statusHttp: 201, messageIdInterno: "EVO-LEGADO", latenciaMs: 1, tentativas: 1,
+    });
+    const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+    const res = await POST(postReq({ phone: PHONE, text: "Vou verificar seu pedido" }, token));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(expect.objectContaining({ status: "delivered" }));
+    expect(store.get(`conversa:${PHONE}`)).toEqual([
+      expect.objectContaining({ autor: "atendente", texto: "[Kellyne] Vou verificar seu pedido" }),
+    ]);
+    expect(registrarOutboxMock).not.toHaveBeenCalled();
   });
 
   it("falha no Redis de eco não transforma resposta confirmada em erro de envio", async () => {
