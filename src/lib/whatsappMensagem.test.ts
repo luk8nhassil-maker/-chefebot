@@ -19,7 +19,7 @@ vi.mock("./whatsappOutbox", () => ({
 }));
 import { executarJobWhatsapp, enviarImagemWhatsApp, enviarTextoWhatsApp, normalizarLinksPublicosWhatsApp } from "./whatsappMensagem";
 
-const ENV_KEYS = ["EVOLUTION_API_URL", "EVOLUTION_API_KEY", "EVOLUTION_INSTANCE_NAME", "VERCEL_ENV"] as const;
+const ENV_KEYS = ["EVOLUTION_API_URL", "EVOLUTION_API_KEY", "EVOLUTION_INSTANCE_NAME", "VERCEL_ENV", "WHATSAPP_OUTBOX_ROLLOUT", "WHATSAPP_CANARY_PHONE"] as const;
 const originais: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -54,6 +54,46 @@ describe("normalizarLinksPublicosWhatsApp", () => {
   test("não altera mensagem que já usa o domínio oficial", () => {
     const texto = "Veja aqui: https://chefedapizza.com.br/cardapio";
     expect(normalizarLinksPublicosWhatsApp(texto)).toBe(texto);
+  });
+});
+
+describe("rollout controlado da outbox", () => {
+  test("modo off não cria jobs e conserva envio legado com confirmação HTTP", async () => {
+    process.env.WHATSAPP_OUTBOX_ROLLOUT = "off";
+    const fetchMock = vi.fn().mockResolvedValue(respostaOk({ key: { id: "EVO-DIRETO" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const resultado = await enviarTextoWhatsApp("5511999998888", "mensagem real controlada");
+    expect(resultado).toMatchObject({ ok: true, messageIdInterno: "EVO-DIRETO" });
+    expect(resultado.jobId).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jobs.size).toBe(0);
+  });
+
+  test("modo canary só enfileira número autorizado e preserva demais clientes", async () => {
+    process.env.WHATSAPP_OUTBOX_ROLLOUT = "canary";
+    process.env.WHATSAPP_CANARY_PHONE = "+55 (11) 99999-8888";
+    const fetchMock = vi.fn().mockResolvedValue(respostaOk({ key: { id: "EVO-OK" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const direto = await enviarTextoWhatsApp("5511999997777", "fora do canário");
+    expect(direto.jobId).toBeUndefined();
+    expect(jobs.size).toBe(0);
+    const canary = await enviarTextoWhatsApp("5511999998888", "autorizado");
+    expect(canary.ok).toBe(true);
+    expect(canary.jobId).toBeTruthy();
+    expect(jobs.size).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("valor desconhecido e canário não configurado bloqueiam outbox sem bloquear envio legado", async () => {
+    process.env.WHATSAPP_OUTBOX_ROLLOUT = "canary";
+    delete process.env.WHATSAPP_CANARY_PHONE;
+    const fetchMock = vi.fn().mockResolvedValue(respostaOk());
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await enviarTextoWhatsApp("5511999998888", "teste")).jobId).toBeUndefined();
+    process.env.WHATSAPP_OUTBOX_ROLLOUT = "valor-desconhecido";
+    expect((await enviarTextoWhatsApp("5511999998888", "teste")).jobId).toBeUndefined();
+    expect(jobs.size).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
