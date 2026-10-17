@@ -1,3 +1,5 @@
+import { bloquearOperacaoRealEmPreview } from "./previewSafety";
+
 export type CriarCobrancaPixMercadoPagoInput = {
   pedidoId: string;
   txid: string;
@@ -39,6 +41,7 @@ function normalizarValor(valor: number): number {
 export async function criarCobrancaPixMercadoPago(
   input: CriarCobrancaPixMercadoPagoInput
 ): Promise<CobrancaPixMercadoPago> {
+  bloquearOperacaoRealEmPreview("MercadoPago");
   const accessToken = input.accessTokenOverride || process.env.MERCADOPAGO_ACCESS_TOKEN;
   if (!accessToken) {
     throw new MercadoPagoPixError("MERCADOPAGO_ACCESS_TOKEN ausente");

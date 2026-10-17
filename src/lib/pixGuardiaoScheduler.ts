@@ -9,6 +9,7 @@ import {
 } from "./pixAutoCheckConfig";
 import { iniciarEstadoSentinela } from "./pixSentinela";
 import { incrementarContadorPix } from "./pixMetricas";
+import { emPreviewVercel } from "./previewSafety";
 
 // Guardião Pix server-side — agendamento atrasado via QStash (Nível 6.8),
 // coordenado pelo Sentinela Pix (Nível 6.9). Anteriormente o Guardião só
@@ -104,6 +105,7 @@ export type AgendarTickInput = {
 // derrubar a criação do Pix nem a reconciliação em andamento; o polling do
 // painel continua como rede de segurança se a cadeia parar de avançar.
 export async function agendarProximaVerificacaoPixGuardiao(input: AgendarTickInput): Promise<boolean> {
+  if (emPreviewVercel()) return false;
   const client = obterClienteQstash();
   if (!client) return false;
   const callbackUrl = endpointVerificacaoUrl();
@@ -148,6 +150,7 @@ export async function agendarProximaVerificacaoPixGuardiao(input: AgendarTickInp
 // tick, para o endpoint já encontrar um estado consistente na primeira
 // entrega do QStash.
 export async function iniciarCadeiaGuardiaoPix(pedidoId: string): Promise<void> {
+  if (emPreviewVercel()) return;
   if (!pedidoId) return;
   const client = obterClienteQstash();
   if (!client) return;

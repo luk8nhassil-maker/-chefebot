@@ -6,6 +6,7 @@ const ENV_KEYS = [
   "EVOLUTION_API_KEY",
   "EVOLUTION_INSTANCE_NAME",
   "EVOLUTION_WEBHOOK_URL",
+  "VERCEL_ENV",
 ] as const;
 const originais: Record<string, string | undefined> = {};
 
@@ -45,5 +46,11 @@ describe("obterConfigEvolution - webhook", () => {
     process.env.EVOLUTION_WEBHOOK_URL = "https://webhook.exemplo.com/evolution";
 
     expect(obterConfigEvolution()?.webhookUrl).toBe("https://webhook.exemplo.com/evolution");
+  });
+
+  test("não disponibiliza credenciais da Evolution em Preview", () => {
+    process.env.VERCEL_ENV = "preview";
+
+    expect(obterConfigEvolution()).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import webpush, { type PushSubscription } from "web-push";
 import { Redis } from "@upstash/redis";
+import { emPreviewVercel } from "@/lib/previewSafety";
 
 const redis = new Redis({
   url: process.env.KV_REST_API_URL!,
@@ -29,6 +30,9 @@ function errorMessage(error: unknown): string {
 }
 
 export async function POST(req: NextRequest) {
+  if (emPreviewVercel()) {
+    return NextResponse.json({ error: "preview_real_operation_blocked" }, { status: 503 });
+  }
   try {
     initWebPush();
     const body: unknown = await req.json();

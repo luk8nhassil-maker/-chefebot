@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { redis } from "@/lib/redis";
+import { emPreviewVercel } from "./previewSafety";
 
 export type MercadoPagoIntegrationConfig = {
   provider: "mercadopago";
@@ -157,6 +158,7 @@ export async function updateMercadoPagoIntegrationConfig(
 }
 
 export async function resolveActiveMercadoPagoToken(): Promise<string | null> {
+  if (emPreviewVercel()) return null;
   const config = await getMercadoPagoIntegrationConfig();
   if (config?.enabled && config.accessTokenEncrypted) {
     const decrypted = decryptMercadoPagoToken(config.accessTokenEncrypted);
@@ -177,6 +179,7 @@ export type MercadoPagoAuthResolution = {
 // habilitado e com token valido; PIX_PROVIDER=mercadopago + env continua
 // funcionando como fallback/legado quando o painel nao esta ativo.
 export async function resolveActiveMercadoPagoAuth(): Promise<MercadoPagoAuthResolution> {
+  if (emPreviewVercel()) return { active: false, source: "none", accessToken: null };
   const config = await getMercadoPagoIntegrationConfig();
   if (config?.enabled && config.accessTokenEncrypted) {
     const decrypted = decryptMercadoPagoToken(config.accessTokenEncrypted);
