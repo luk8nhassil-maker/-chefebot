@@ -54,6 +54,23 @@ function bloqueadoEmPreview(): boolean {
   return process.env.VERCEL_ENV === "preview";
 }
 
+/**
+ * Ativação progressiva da nova outbox: começa só no número canário já
+ * autorizado, sem arriscar os pedidos reais no primeiro deployment.
+ * Após comprovação operacional, WHATSAPP_OUTBOX_ROLLOUT=all ativa a fila
+ * para todos. "off" e valores desconhecidos mantêm a entrega anterior.
+ */
+export function outboxWhatsappHabilitadaPara(phone: string): boolean {
+  if (bloqueadoEmPreview()) return false;
+  const rollout = process.env.WHATSAPP_OUTBOX_ROLLOUT?.trim() ||
+    (process.env.NODE_ENV === "test" ? "all" : "canary");
+  if (rollout === "all") return true;
+  if (rollout !== "canary") return false;
+  const canary = process.env.WHATSAPP_CANARY_PHONE?.replace(/\\D/g, "") ?? "";
+  const phoneDigits = phone.replace(/\\D/g, "");
+  return canary.length >= 11 && phoneDigits === canary;
+}
+
 function resultadoPreviewBloqueado(): ResultadoEnvioWhatsApp {
   return { ok: false, motivo: "preview_send_blocked", latenciaMs: 0, tentativas: 0 };
 }
@@ -114,6 +131,13 @@ export async function enviarTextoWhatsApp(
   // Não aceite nem drene a outbox em Preview: o caminho síncrono também deve
   // ser incapaz de alcançar a Evolution se as variáveis forem espelhadas.
   if (bloqueadoEmPreview()) return resultadoPreviewBloqueado();
+  // Clientes fora do canário continuam no transporte já consolidado.
+  // Sem escrita extra em Redis ou QStash, sem alteração nos fluxos comerciais.
+  if (!outboxWhatsappHabilitadaPara(phone)) {
+    const direto = await executarEnvioTexto(phone, text, opts);
+    marcarTentativaEnvio({ ok: direto.ok, motivo: direto.motivo, statusHttp: direto.statusHttp }).catch(() => {});
+    return direto;
+  }
   // A aceitação durável ocorre ANTES de qualquer contato com a Evolution.
   // O chamador continua recebendo ok:true apenas depois de confirmação do
   // provider; queued_pending é erro explícito e o job permanece recuperável.
@@ -276,6 +300,7 @@ export async function executarJobWhatsapp(job: import("./whatsappOutbox").JobOut
 
 export async function enviarImagemWhatsApp(phone: string, mediaUrl: string, caption = ""): Promise<ResultadoEnvioWhatsApp> {
   if (bloqueadoEmPreview()) return resultadoPreviewBloqueado();
+  if (!outboxWhatsappHabilitadaPara(phone)) return executarEnvioImagem(phone, mediaUrl, caption);
   try {
     const enfileirado = await enfileirarImagemWhatsapp({ phone, mediaUrl, caption, priority: "critica" });
     await agendarDrenoWhatsapp();
