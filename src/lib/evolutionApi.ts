@@ -1,3 +1,5 @@
+import { emPreviewVercel } from "./previewSafety";
+
 // Configuração central da Evolution API — usada por todas as rotas e
 // funções que enviam, consultam ou reconectam o WhatsApp. Sem fallback
 // hardcoded para nenhum host da Evolution: sem env var válida, quem
@@ -52,6 +54,7 @@ function normalizarBaseUrl(url: string): string | null {
  * `apikey: undefined` para a Evolution API.
  */
 export function obterConfigEvolution(): EvolutionConfig | null {
+  if (emPreviewVercel()) return null;
   const urlBruta = process.env.EVOLUTION_API_URL;
   const apiKey = process.env.EVOLUTION_API_KEY;
   if (!urlBruta || !apiKey) return null;

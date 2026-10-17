@@ -5,7 +5,7 @@ import { sanitizeTelefoneCliente } from "./clientes";
 
 export const CLIENTE_COOKIE = "cliente-token";
 
-const OTP_TTL_SEGUNDOS = 5 * 60;
+export const OTP_TTL_SEGUNDOS = 5 * 60;
 const OTP_MAX_TENTATIVAS = 5;
 const OTP_COOLDOWN_SEGUNDOS = 60;
 const SESSAO_DURACAO = "30d";

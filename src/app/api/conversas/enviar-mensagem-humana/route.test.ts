@@ -3,8 +3,9 @@ import { vi, describe, it, expect, beforeEach } from "vitest";
 // Garante que POST /api/conversas/enviar-mensagem-humana renova manual:{phone}
 // e session:{phone} com TTL 7200 após envio bem-sucedido pela Evolution API.
 
-const { store, redisMock } = vi.hoisted(() => {
+const { store, redisMock, jobs, enviarTextoMock, registrarOutboxMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
+  const jobs = new Map<string, Record<string, unknown>>();
   const redisMock = {
     get: vi.fn(async (key: string) => store.get(key) ?? null),
     set: vi.fn(async (key: string, value: unknown, opts?: { ex?: number }) => {
@@ -14,10 +15,30 @@ const { store, redisMock } = vi.hoisted(() => {
     }),
     del: vi.fn(async () => 1),
   };
-  return { store, redisMock };
+  const enviarTextoMock = vi.fn();
+  const registrarOutboxMock = vi.fn(async (phone: string, autor: string, texto: string) => {
+    await redisMock.set(`conversa:${phone}`, [{ autor, texto, ts: Date.now() }], { ex: 1800 });
+    return true;
+  });
+  return { store, redisMock, jobs, enviarTextoMock, registrarOutboxMock };
 });
 
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
+vi.mock("@/lib/whatsappOutbox", () => ({
+  enfileirarMensagemWhatsapp: vi.fn(async (input: Record<string, unknown>) => { const id = `job-${jobs.size + 1}`; jobs.set(id, { id, createdAt: Date.now(), attempt: 0, state: "pending", ...input }); return { jobId: id, deduplicated: false }; }),
+  agendarDrenoWhatsapp: vi.fn(async () => false),
+  reivindicarHistoricoMensagemHumana: vi.fn(async () => true),
+  confirmarHistoricoMensagemHumana: vi.fn(async () => {}),
+  processarFilaWhatsapp: vi.fn(async (executar: (job: { phone: string; text: string; opts?: unknown }) => Promise<unknown>) => { const [id, job] = [...jobs.entries()].find(([, j]) => j.state === "pending")!; const result = await executar(job as { phone: string; text: string; opts?: unknown }); jobs.set(id, { ...job, state: (result as { ok?: boolean }).ok ? "delivered" : "failed", attempt: 1, result }); return {}; }),
+  obterJobWhatsapp: vi.fn(async (id: string) => jobs.get(id) ?? null),
+}));
+vi.mock("@/lib/whatsappMensagem", () => ({ enviarTextoWhatsApp: enviarTextoMock }));
+vi.mock("@/lib/conversa", () => ({
+  registrarMensagemOutbox: registrarOutboxMock,
+  registrarMensagem: vi.fn(async (phone: string, autor: string, texto: string) => {
+    await redisMock.set(`conversa:${phone}`, [{ autor, texto, ts: Date.now() }], { ex: 1800 });
+  }),
+}));
 
 import { POST } from "./route";
 import { createToken } from "@/lib/auth";
@@ -36,10 +57,12 @@ function postReq(body: unknown, token?: string) {
 
 function mockFetchOk() {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+  enviarTextoMock.mockResolvedValue({ ok: true, latenciaMs: 1, tentativas: 1, jobId: "job-confirmed" });
 }
 
 function mockFetchFail() {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
+  enviarTextoMock.mockResolvedValue({ ok: false, motivo: "http_500", latenciaMs: 1, tentativas: 1 });
 }
 
 function mockFetchOkComMessageId(messageId: string) {
@@ -47,10 +70,12 @@ function mockFetchOkComMessageId(messageId: string) {
     "fetch",
     vi.fn().mockResolvedValue({ ok: true, json: async () => ({ key: { id: messageId } }) })
   );
+  enviarTextoMock.mockResolvedValue({ ok: true, latenciaMs: 1, tentativas: 1, jobId: "job-confirmed", messageIdInterno: messageId });
 }
 
 beforeEach(() => {
   store.clear();
+  jobs.clear();
   vi.clearAllMocks();
   process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
   process.env.EVOLUTION_API_KEY = "chave-de-teste";
@@ -115,6 +140,7 @@ describe("POST /api/conversas/enviar-mensagem-humana — TTL 7200", () => {
 
   it("não renova TTL quando Evolution API lança exceção de rede", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network error")));
+    enviarTextoMock.mockResolvedValue({ ok: false, motivo: "network_error", latenciaMs: 1, tentativas: 1 });
     const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
     const res = await POST(postReq({ phone: PHONE, text: "Olá!" }, token));
     expect(res.status).toBe(502);
@@ -123,6 +149,30 @@ describe("POST /api/conversas/enviar-mensagem-humana — TTL 7200", () => {
       k === `manual:${PHONE}`
     );
     expect(manualRenewal).toBeUndefined();
+  });
+
+  it("202 identifica mensagem humana enfileirada sem registrá-la como enviada", async () => {
+    enviarTextoMock.mockResolvedValue({ ok: false, motivo: "queued_pending", jobId: "job-pending", latenciaMs: 1, tentativas: 0 });
+    const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+    const res = await POST(postReq({ phone: PHONE, text: "Aguarde um momento" }, token));
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ ok: true, status: "queued", jobId: "job-pending" });
+    expect(redisMock.set.mock.calls.some(([k]) => k === `conversa:${PHONE}`)).toBe(false);
+    expect(redisMock.set.mock.calls.some(([k, value, opts]) => k === `manual:${PHONE}` && value === true && (opts as { ex?: number })?.ex === 7200)).toBe(true);
+  });
+
+  it("resultado incerto informa reconciliação e não induz reenvio", async () => {
+    enviarTextoMock.mockResolvedValue({ ok: false, motivo: "timeout", jobId: "job-ambiguous", latenciaMs: 1, tentativas: 1 });
+    const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+    const res = await POST(postReq({ phone: PHONE, text: "Aguarde um momento" }, token));
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ ok: false, status: "ambiguous", jobId: "job-ambiguous" });
+  });
+
+  it("propaga clientMessageId como chave estável de idempotência", async () => {
+    const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+    await POST(postReq({ phone: PHONE, text: "Pedido pronto", clientMessageId: "cliente-msg-123456" }, token));
+    expect(enviarTextoMock).toHaveBeenCalledWith(PHONE, "Pedido pronto", expect.objectContaining({ idempotencyKey: `human:${PHONE}:cliente-msg-123456` }));
   });
 
   it("provider nao configurado retorna 503, nunca chama fetch, nunca vaza segredo", async () => {
@@ -152,6 +202,40 @@ describe("POST /api/conversas/enviar-mensagem-humana — eco do painel (Etapa 2B
     expect(ecoCall?.[0]).not.toContain(PHONE);
     expect(ecoCall?.[0]).not.toContain("Kellyne");
     expect(JSON.stringify(ecoCall)).not.toContain("Seu pedido está pronto");
+  });
+
+  it("sem jobId no rollout canário, mantém registro humano no histórico legado", async () => {
+    enviarTextoMock.mockResolvedValue({
+      ok: true, statusHttp: 201, messageIdInterno: "EVO-LEGADO", latenciaMs: 1, tentativas: 1,
+    });
+    const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+    const res = await POST(postReq({ phone: PHONE, text: "Vou verificar seu pedido" }, token));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(expect.objectContaining({ status: "delivered" }));
+    expect(store.get(`conversa:${PHONE}`)).toEqual([
+      expect.objectContaining({ autor: "atendente", texto: "[Kellyne] Vou verificar seu pedido" }),
+    ]);
+    expect(registrarOutboxMock).not.toHaveBeenCalled();
+  });
+
+  it("falha no Redis de eco não transforma resposta confirmada em erro de envio", async () => {
+    const original = redisMock.set.getMockImplementation();
+    expect(original).toBeDefined();
+    mockFetchOkComMessageId("WHATS-ECO-INDISPONIVEL");
+    redisMock.set.mockImplementation(async (key, value, opts) => {
+      if (key === "conversa:echo-painel:WHATS-ECO-INDISPONIVEL") throw new Error("eco indisponível");
+      return original!(key, value, opts);
+    });
+    try {
+      const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+      const res = await POST(postReq({ phone: PHONE, text: "Pedido pronto" }, token));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual(expect.objectContaining({ status: "delivered" }));
+      expect(registrarOutboxMock).toHaveBeenCalledTimes(1);
+      expect(enviarTextoMock).toHaveBeenCalledTimes(1);
+    } finally {
+      redisMock.set.mockImplementation(original!);
+    }
   });
 
   it("registra a mensagem mesmo quando a Evolution não retorna message id, sem criar chave de eco inválida", async () => {

@@ -177,6 +177,7 @@ export default function ConversasPage() {
   const [historicoErro, setHistoricoErro] = useState(false)
   const historicoBottomRef = useRef<HTMLDivElement>(null)
   const mensagemInputRef = useRef<HTMLTextAreaElement>(null)
+  const pendingMessageIdsRef = useRef(new Map<string, string>())
 
   // Recentes: all conversations from last 30 min (conversa:* TTL)
   const [conversasRecentes, setConversasRecentes] = useState<ConversaRecente[]>([])
@@ -273,19 +274,31 @@ export default function ConversasPage() {
   async function enviarMensagem() {
     if (!conversaSelecionada || !mensagem.trim() || enviando) return
     const texto = mensagem.trim()
+    const chaveTentativa = `${conversaSelecionada}\u0000${texto}`
+    const clientMessageId = pendingMessageIdsRef.current.get(chaveTentativa)
+      ?? (typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`)
+    pendingMessageIdsRef.current.set(chaveTentativa, clientMessageId)
     setEnviando(true)
     try {
       const r = await fetch("/api/conversas/enviar-mensagem-humana", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: conversaSelecionada, text: texto, senderName: "Kellyne" }),
+        body: JSON.stringify({ phone: conversaSelecionada, text: texto, senderName: "Kellyne", clientMessageId }),
       })
       const data = await r.json()
       if (data.ok) {
         setMensagem("")
-        setHistoricoMsgs(prev => [...prev, { autor: "atendente", texto: `[Kellyne] ${texto}`, ts: Date.now() }])
-        mensagemInputRef.current?.focus()
+        if (data.status === "queued") {
+          // Não renderiza como enviada: o worker acrescentará ao histórico
+          // somente depois da confirmação da Evolution.
+          showToast("Mensagem enfileirada; aguardando confirmação.")
+        } else {
+          pendingMessageIdsRef.current.delete(chaveTentativa)
+          setHistoricoMsgs(prev => [...prev, { autor: "atendente", texto: `[Kellyne] ${texto}`, ts: Date.now() }])
+          mensagemInputRef.current?.focus()
+        }
       } else {
+        if (data.status === "failed") pendingMessageIdsRef.current.delete(chaveTentativa)
         showToast(data.error || "Erro ao enviar mensagem.")
       }
     } catch {

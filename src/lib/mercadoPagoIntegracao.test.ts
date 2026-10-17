@@ -58,6 +58,15 @@ describe("resolveActiveMercadoPagoAuth", () => {
     expect(auth).toEqual({ active: false, source: "none", accessToken: null });
   });
 
+  test("Preview não lê token nem configuração Pix persistida", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("PIX_PROVIDER", "mercadopago");
+    vi.stubEnv("MERCADOPAGO_ACCESS_TOKEN", "token-nao-usar");
+
+    await expect(resolveActiveMercadoPagoAuth()).resolves.toEqual({ active: false, source: "none", accessToken: null });
+    expect(redisGetMock).not.toHaveBeenCalled();
+  });
+
   test("PIX_PROVIDER=mercadopago continua funcionando como fallback legado quando painel nao esta ativo", async () => {
     vi.stubEnv("PIX_PROVIDER", "mercadopago");
     vi.stubEnv("MERCADOPAGO_ACCESS_TOKEN", "token-env");

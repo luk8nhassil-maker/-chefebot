@@ -218,4 +218,15 @@ describe("processarConclusaoPedidoJornada respeita o rollout", () => {
     await processarConclusaoPedidoJornada(pedidoDe(TELEFONE_OUTRO, "ped_wa_bloqueado"));
     expect(enviarTextoWhatsAppMock).not.toHaveBeenCalled();
   });
+
+  test("bot pausado preserva crédito da Jornada sem enviar ou reservar mensagem", async () => {
+    await salvarConfigJornadaChef({ modoRollout: "on", sequenciaRecompensas: SEQUENCIA_VALIDA, mensagensWhatsappAtivas: true });
+    store.set("bot_ativo", false);
+
+    const resultado = await processarConclusaoPedidoJornada(pedidoDe(TELEFONE_AUTORIZADO, "ped_wa_pausado"));
+
+    expect(resultado?.processado).toBe(true);
+    expect(enviarTextoWhatsAppMock).not.toHaveBeenCalled();
+    expect([...store.keys()].some((key) => key.includes("jornada:msg:") && key.includes("ped_wa_pausado"))).toBe(false);
+  });
 });

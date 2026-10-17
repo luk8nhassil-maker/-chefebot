@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { verifyToken } from "@/lib/auth";
-import { registrarMensagem } from "@/lib/conversa";
+import { registrarMensagem, registrarMensagemOutbox } from "@/lib/conversa";
 import { validarEnvioMensagemHumana } from "@/lib/validarEnvioMensagemHumana";
+import { marcarEcoPainel } from "@/lib/conversaEcoPainel";
+import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
-import { extrairMessageIdEnvio, marcarEcoPainel } from "@/lib/conversaEcoPainel";
+import { confirmarHistoricoMensagemHumana, reivindicarHistoricoMensagemHumana } from "@/lib/whatsappOutbox";
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -38,6 +40,9 @@ export async function POST(req: NextRequest) {
   }
 
   const { phone, text, senderName } = validacao as Required<ValidacaoEnvioOk>;
+  const clientMessageId = typeof body.clientMessageId === "string" && /^[A-Za-z0-9_-]{8,128}$/.test(body.clientMessageId)
+    ? body.clientMessageId
+    : null;
 
   const emManual = await redis.get<boolean>(`manual:${phone}`);
   if (!emManual) {
@@ -47,47 +52,38 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Envia a mensagem pelo WhatsApp real via Evolution API
-  const config = obterConfigEvolution();
-  if (!config) {
+  const delay = Math.min(2500, Math.max(900, text.length * 22));
+  if (!obterConfigEvolution()) {
+    return NextResponse.json({ ok: false, error: "Provider de WhatsApp não configurado (EVOLUTION_API_URL/EVOLUTION_API_KEY)" }, { status: 503 });
+  }
+  const resultado = await enviarTextoWhatsApp(phone, text, {
+    delay, prioridade: "critica", humanSenderName: senderName,
+    idempotencyKey: clientMessageId ? `human:${phone}:${clientMessageId}` : undefined,
+  });
+  // Aceite durável já representa atividade humana, mesmo se a confirmação da
+  // Evolution vier depois. Assim o bot não reassume durante a espera.
+  if (resultado.jobId) {
+    await redis.set(`manual:${phone}`, true, { ex: 7200 });
+    const sessaoEnvio = await redis.get(`session:${phone}`);
+    if (sessaoEnvio) await redis.set(`session:${phone}`, sessaoEnvio, { ex: 7200 });
+  }
+  if (!resultado.ok) {
+    if (resultado.motivo === "queued_pending") {
+      // Aceite durável, ainda sem confirmação da Evolution. O painel recebe
+      // um estado explícito e não deve reenviar pelo simples 202.
+      return NextResponse.json({ ok: true, status: "queued", jobId: resultado.jobId, senderName, phone }, { status: 202 });
+    }
     return NextResponse.json(
-      { ok: false, error: "Provider de WhatsApp não configurado (EVOLUTION_API_URL/EVOLUTION_API_KEY)" },
-      { status: 503 },
+      {
+        ok: false,
+        status: resultado.motivo === "timeout" || resultado.motivo === "network_error" || resultado.statusHttp && resultado.statusHttp >= 500
+          ? "ambiguous" : "failed",
+        jobId: resultado.jobId,
+        error: "Resultado do envio incerto; não reenvie. A mensagem foi preservada para reconciliação.",
+      },
+      { status: 502 },
     );
   }
-  let messageId: string | undefined;
-  try {
-    const delay = Math.min(2500, Math.max(900, text.length * 22));
-    const evResponse = await fetch(`${config.baseUrl}/message/sendText/${config.instanceName}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: config.apiKey,
-      },
-      body: JSON.stringify({
-        number: phone,
-        text,
-        delay,
-        options: { delay, presence: "composing" },
-      }),
-    });
-
-    if (!evResponse.ok) {
-      return NextResponse.json(
-        { ok: false, error: "Falha ao enviar mensagem para o WhatsApp" },
-        { status: 502 },
-      );
-    }
-
-    // Leitura best-effort do corpo — a Evolution API pode devolver um JSON
-    // sem o formato esperado (ou nenhum), e isso nunca deve impedir o envio
-    // já confirmado de seguir para o registro no histórico.
-    try {
-      const respostaJson: unknown = typeof evResponse.json === "function" ? await evResponse.json() : undefined;
-      messageId = extrairMessageIdEnvio(respostaJson);
-    } catch {
-      messageId = undefined;
-    }
 
     // Marca o messageId como eco do painel IMEDIATAMENTE após confirmar o
     // envio, ANTES de registrar a mensagem no histórico — fecha a janela de
@@ -98,29 +94,31 @@ export async function POST(req: NextRequest) {
     // webhook como uma mensagem "atendente" adicional — melhor um possível
     // duplicado raro do que descartar mensagens reais por dedup baseada só
     // em texto.
-    if (messageId) {
-      await marcarEcoPainel(messageId);
+  if (!resultado.deduplicated && resultado.messageIdInterno) {
+    try {
+      await marcarEcoPainel(resultado.messageIdInterno);
+    } catch {
+      // O envio foi confirmado pelo provider. A gravação durável do histórico
+      // poderá reexecutar o marcador; não mande o atendente reenviar a mensagem.
     }
-  } catch {
-    return NextResponse.json(
-      { ok: false, error: "Falha ao enviar mensagem para o WhatsApp" },
-      { status: 502 },
-    );
   }
 
-  // Só registra após confirmação de envio bem-sucedido pela Evolution API
-  await registrarMensagem(phone, "atendente", `[${senderName}] ${text}`);
+  // Só registra após confirmação de envio bem-sucedido pela Evolution API.
+  // A claim evita duplicação com o worker assíncrono; se ele já tiver tomado
+  // a claim, o índice durável dele atualizará o histórico em seguida.
+  if (!resultado.deduplicated) {
+    if (!resultado.jobId) {
+      // Rollout canário: atendentes fora da outbox continuam registrando
+      // o histórico no mesmo caminho da produção anterior.
+      await registrarMensagem(phone, "atendente", `[${senderName}] ${text}`);
+    } else if (await reivindicarHistoricoMensagemHumana(resultado.jobId)) {
+      await registrarMensagemOutbox(phone, "atendente", `[${senderName}] ${text}`, resultado.jobId);
+      await confirmarHistoricoMensagemHumana(resultado.jobId);
+    }
+  }
   await redis.del(`nova_msg_manual:${phone}`);
 
-  // Renova TTL de manual e session enquanto o atendimento está ativo.
-  // Previne que o flag manual expire durante conversas longas e o bot reassuma.
-  await redis.set(`manual:${phone}`, true, { ex: 7200 });
-  const sessaoEnvio = await redis.get(`session:${phone}`);
-  if (sessaoEnvio) {
-    await redis.set(`session:${phone}`, sessaoEnvio, { ex: 7200 });
-  }
-
-  return NextResponse.json({ ok: true, senderName, phone });
+  return NextResponse.json({ ok: true, status: "delivered", jobId: resultado.jobId, senderName, phone });
 }
 
 // Tipo helper local para o narrowing após validação

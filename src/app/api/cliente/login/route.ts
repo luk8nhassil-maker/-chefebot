@@ -1,9 +1,9 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { gerarOtp, podeReenviarOtp } from "@/lib/clienteAuth";
+import { gerarOtp, OTP_TTL_SEGUNDOS, podeReenviarOtp } from "@/lib/clienteAuth";
 import { sanitizeTelefoneCliente } from "@/lib/clientes";
 import { validarTokenCardapio } from "@/lib/cardapioToken";
-import { obterConfigEvolution } from "@/lib/evolutionApi";
+import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 
 function sanitizePhoneEnvio(telefone: string): string {
   const digits = telefone.replace(/\D/g, "");
@@ -23,22 +23,21 @@ async function enviarOtpPorWhatsapp(telefone: string, codigo: string): Promise<v
     return;
   }
   const texto = `Seu código para entrar no ChefeBot é: *${codigo}*\n\nVale por 5 minutos.`;
-  const config = obterConfigEvolution();
-  if (!config) {
-    // Provider não configurado (ou mal configurado): não envia o OTP.
-    // Nunca registra telefone ou código no log — apenas uma mensagem
-    // genérica. Nunca tenta um host hardcoded antigo.
-    console.log("[ChefeBot] Provider de WhatsApp não configurado — OTP não enviado.");
-    return;
-  }
   try {
-    await fetch(`${config.baseUrl}/message/sendText/${config.instanceName}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", apikey: config.apiKey },
-      body: JSON.stringify({ number: sanitizePhoneEnvio(telefone), text: texto }),
+    const resultado = await enviarTextoWhatsApp(sanitizePhoneEnvio(telefone), texto, {
+      prioridade: "critica", maxAttempts: 1, expiresAt: Date.now() + OTP_TTL_SEGUNDOS * 1000,
     });
-  } catch (err) {
-    console.error("[ChefeBot] Erro ao enviar OTP por WhatsApp:", err);
+    if (!resultado.ok) {
+      // Mantém diagnóstico operacional sem expor telefone, OTP ou detalhes
+      // do provider. Um resultado incerto fica na outbox para reconciliação.
+      if (resultado.motivo === "provider_not_configured") {
+        console.log("[ChefeBot] Provider de WhatsApp não configurado — OTP não enviado.");
+      } else {
+        console.error("[ChefeBot] OTP aceito na fila mas ainda sem confirmação do provider.");
+      }
+    }
+  } catch {
+    console.error("[ChefeBot] Erro ao enviar OTP por WhatsApp.");
   }
 }
 

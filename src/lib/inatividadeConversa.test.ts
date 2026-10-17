@@ -44,6 +44,7 @@ beforeEach(() => {
   clientCtorMock.mockClear();
   vi.resetModules();
   delete process.env.QSTASH_TOKEN;
+  delete process.env.VERCEL_ENV;
   process.env.VERCEL_URL = "chefebot-contingencia-test.vercel.app";
   delete process.env.CANCELAMENTO_INATIVIDADE_QSTASH_CALLBACK_URL;
 });
@@ -53,6 +54,16 @@ afterEach(() => {
 });
 
 describe("sincronizarCronometroInatividade — geração avança sempre, tick só quando somos nós", () => {
+  test("Preview não grava geração nem publica lembrete", async () => {
+    process.env.VERCEL_ENV = "preview";
+    process.env.QSTASH_TOKEN = "token-nao-usar";
+    const mod = await import("./inatividadeConversa");
+
+    await mod.sincronizarCronometroInatividade(PHONE, "bot");
+    expect(publishJSONMock).not.toHaveBeenCalled();
+    expect(store.size).toBe(0);
+  });
+
   test("mensagem do cliente avança a geração mas nunca agenda tick", async () => {
     process.env.QSTASH_TOKEN = "token-teste";
     const mod = await import("./inatividadeConversa");

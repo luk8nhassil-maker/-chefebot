@@ -153,6 +153,41 @@ beforeEach(() => {
 });
 
 describe("POST /api/pedido-app", () => {
+  it.runIf(process.env.CHEFEBOT_CAPACITY_BENCH === "1")("mede criação isolada de 50, 100 e 200 pedidos concorrentes", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    for (const total of [50, 100, 200]) {
+      store.clear();
+      const inicio = performance.now();
+      const resultados = await Promise.all(Array.from({ length: total }, async (_, indice) => {
+        const comeco = performance.now();
+        const resposta = await POST(postReq({
+          ...basePayload,
+          pagamento: "Dinheiro",
+          troco: "Sem troco",
+          telefone: `119${String(indice).padStart(8, "0")}`,
+          clientRequestId: `capacity-benchmark-${total}-${indice}`,
+        }));
+        const body = await resposta.json();
+        return { status: resposta.status, pedidoId: body.pedidoId as string | undefined, latenciaMs: performance.now() - comeco };
+      }));
+      const latencias = resultados.map((r) => r.latenciaMs).sort((a, b) => a - b);
+      const pedidos = (store.get("pedidos") as Array<{ id: string }> | undefined) ?? [];
+      const ids = resultados.map((r) => r.pedidoId).filter(Boolean);
+      console.log(JSON.stringify({
+        benchmark: "pedido-app-isolado",
+        total,
+        persistidos: pedidos.length,
+        sucessos: resultados.filter((r) => r.status === 200).length,
+        duplicados: ids.length - new Set(ids).size,
+        mediaMs: Math.round(latencias.reduce((a, b) => a + b, 0) / total),
+        p95Ms: Math.round(latencias[Math.ceil(total * 0.95) - 1]),
+        duracaoMs: Math.round(performance.now() - inicio),
+      }));
+      expect(resultados.every((r) => r.status === 200)).toBe(true);
+      expect(pedidos).toHaveLength(total);
+      expect(new Set(ids).size).toBe(total);
+    }
+  }, 30_000);
   it("rejeita delivery sem bairro", async () => {
     const res = await POST(postReq({
       ...basePayload,

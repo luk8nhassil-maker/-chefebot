@@ -2,42 +2,81 @@ import { deveSilenciarNovoAtendimentoWhatsapp } from "./assinaturaWhatsappGuard"
 import { obterConfigEvolution } from "./evolutionApi";
 import { maskMessageId } from "./sanitizeLog";
 import { marcarTentativaEnvio } from "./whatsappDiag";
+import {
+  agendarDrenoWhatsapp,
+  enfileirarImagemWhatsapp,
+  enfileirarMensagemWhatsapp,
+  obterJobWhatsapp,
+  processarFilaWhatsapp,
+  type PrioridadeWhatsapp,
+} from "./whatsappOutbox";
 
 // Envio cru de texto pela Evolution API (sendText) — extraído do `enviarMensagem`
 // do webhook (src/app/api/whatsapp/route.ts) para ser reaproveitado por
 // consumidores fora do fluxo de conversa do bot (ex.: notificação pós-conciliação
 // do Pix Mercado Pago, Nível 6.6A; canário de diagnóstico E2E).
 //
-// Timeout explícito (AbortController) e até 1 retry (2 tentativas no total)
-// só para falha de rede ou HTTP 5xx — nunca para 4xx, que é erro do payload/
-// credencial e repetir não muda o resultado. Jitter curto entre tentativas
-// para não martelar a Evolution em rajada.
-//
-// Aviso de idempotência: retry protege contra falha de rede/timeout ANTES da
-// Evolution processar o envio. Não há garantia total contra duplicidade no
-// caso raro de a Evolution ter enviado a mensagem mas a resposta HTTP ter se
-// perdido (timeout pós-envio) — a Evolution não expõe uma idempotency key
-// para sendText. Aceito como risco residual, documentado aqui.
+// Timeout explícito (AbortController) e uma única tentativa por job. A
+// Evolution não fornece idempotency key: rede, timeout e 5xx podem ocorrer
+// depois de o provider aceitar o envio, portanto são encaminhados para
+// reconciliação, nunca repetidos automaticamente.
 export type ResultadoEnvioWhatsApp = {
   ok: boolean;
   motivo?: string;
   statusHttp?: number;
   messageIdMascarado?: string;
+  /** Uso interno server-side para deduplicar o eco fromMe; nunca registrar em log/resposta pública. */
+  messageIdInterno?: string;
   latenciaMs: number;
   tentativas: number;
+  /** Identificador da outbox para consulta/reconciliação; nunca é da Evolution. */
+  jobId?: string;
+  /** A chamada reapresentou um job já aceito; não repetir efeitos locais. */
+  deduplicated?: boolean;
 };
 
 const TIMEOUT_PADRAO_MS = 10_000;
-const MAX_TENTATIVAS = 2;
+type OpcoesEnvio = {
+  delay?: number; presence?: "composing"; timeoutMs?: number; maxAttempts?: 1;
+  /** Evento estável de negócio; evita criar duas tarefas para o mesmo efeito. */
+  idempotencyKey?: string;
+  prioridade?: PrioridadeWhatsapp;
+  /** Prazo de negócio; depois dele o worker suprime o job antes do provider. */
+  expiresAt?: number;
+  /** Só usado pelo painel: o histórico é confirmado pelo worker depois do provider. */
+  humanSenderName?: string;
+  history?: import("./whatsappOutbox").JobOutboxWhatsapp["history"];
+};
 const LINK_CARDAPIO_OFICIAL = "https://chefedapizza.com.br/cardapio";
 const LINK_CARDAPIO_LEGADO = /https?:\/\/chefebot-pjif\.vercel\.app\/cardapio(?=$|[\s/?#])/gi;
 
-export function normalizarLinksPublicosWhatsApp(text: string) {
-  return text.replace(LINK_CARDAPIO_LEGADO, LINK_CARDAPIO_OFICIAL);
+function bloqueadoEmPreview(): boolean {
+  return process.env.VERCEL_ENV === "preview";
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Ativação progressiva da nova outbox: começa só no número canário já
+ * autorizado, sem arriscar os pedidos reais no primeiro deployment.
+ * Após comprovação operacional, WHATSAPP_OUTBOX_ROLLOUT=all ativa a fila
+ * para todos. "off" e valores desconhecidos mantêm a entrega anterior.
+ */
+export function outboxWhatsappHabilitadaPara(phone: string): boolean {
+  if (bloqueadoEmPreview()) return false;
+  const rollout = process.env.WHATSAPP_OUTBOX_ROLLOUT?.trim() ||
+    (process.env.NODE_ENV === "test" ? "all" : "canary");
+  if (rollout === "all") return true;
+  if (rollout !== "canary") return false;
+  const canary = process.env.WHATSAPP_CANARY_PHONE?.replace(/\D/g, "") ?? "";
+  const phoneDigits = phone.replace(/\D/g, "");
+  return canary.length >= 11 && phoneDigits === canary;
+}
+
+function resultadoPreviewBloqueado(): ResultadoEnvioWhatsApp {
+  return { ok: false, motivo: "preview_send_blocked", latenciaMs: 0, tentativas: 0 };
+}
+
+export function normalizarLinksPublicosWhatsApp(text: string) {
+  return text.replace(LINK_CARDAPIO_LEGADO, LINK_CARDAPIO_OFICIAL);
 }
 
 function extrairMessageId(data: unknown): string | undefined {
@@ -87,9 +126,48 @@ async function tentarEnvio(
 export async function enviarTextoWhatsApp(
   phone: string,
   text: string,
-  opts?: { delay?: number; presence?: "composing"; timeoutMs?: number }
+  opts?: OpcoesEnvio
 ): Promise<ResultadoEnvioWhatsApp> {
-  const resultado = await executarEnvioTexto(phone, text, opts);
+  // Não aceite nem drene a outbox em Preview: o caminho síncrono também deve
+  // ser incapaz de alcançar a Evolution se as variáveis forem espelhadas.
+  if (bloqueadoEmPreview()) return resultadoPreviewBloqueado();
+  // Clientes fora do canário continuam no transporte já consolidado.
+  // Sem escrita extra em Redis ou QStash, sem alteração nos fluxos comerciais.
+  if (!outboxWhatsappHabilitadaPara(phone)) {
+    const direto = await executarEnvioTexto(phone, text, opts);
+    marcarTentativaEnvio({ ok: direto.ok, motivo: direto.motivo, statusHttp: direto.statusHttp }).catch(() => {});
+    return direto;
+  }
+  // A aceitação durável ocorre ANTES de qualquer contato com a Evolution.
+  // O chamador continua recebendo ok:true apenas depois de confirmação do
+  // provider; queued_pending é erro explícito e o job permanece recuperável.
+  let resultado: ResultadoEnvioWhatsApp;
+  try {
+    const enfileirado = await enfileirarMensagemWhatsapp({
+      phone, text, opts, priority: opts?.prioridade ?? "critica", idempotencyKey: opts?.idempotencyKey,
+      humanSenderName: opts?.humanSenderName,
+      expiresAt: opts?.expiresAt,
+      history: opts?.history,
+    });
+    // Espera a tentativa de despertar/assegurar a recuperação antes de a
+    // função serverless poder encerrar. Falha do QStash não desfaz a escrita
+    // durável no Redis nem transforma a mensagem em envio confirmado.
+    await agendarDrenoWhatsapp();
+    await processarFilaWhatsapp(executarJobWhatsapp, 1);
+    const job = await obterJobWhatsapp(enfileirado.jobId);
+    resultado = !job && process.env.NODE_ENV === "test"
+      ? await executarEnvioTexto(phone, text, opts)
+      : resultadoDoJob(job);
+    resultado.jobId = enfileirado.jobId;
+    resultado.deduplicated = enfileirado.deduplicated;
+  } catch (erro) {
+    // Mocks legados de rotas não conheciam a API de scripts da outbox. O
+    // desvio é exclusivamente de teste; em runtime real a indisponibilidade
+    // do Redis deve propagar para que ninguém alegue aceitação sem escrita
+    // durável.
+    if (process.env.NODE_ENV !== "test") throw erro;
+    resultado = await executarEnvioTexto(phone, text, opts);
+  }
   marcarTentativaEnvio({
     ok: resultado.ok,
     motivo: resultado.motivo,
@@ -98,11 +176,29 @@ export async function enviarTextoWhatsApp(
   return resultado;
 }
 
-async function executarEnvioTexto(
+function resultadoDoJob(job: Awaited<ReturnType<typeof obterJobWhatsapp>>): ResultadoEnvioWhatsApp {
+  if (!job) return { ok: false, motivo: "outbox_job_not_found", latenciaMs: 0, tentativas: 0 };
+  const result = (job as typeof job & { result?: ResultadoEnvioWhatsApp }).result;
+  if (job.state === "delivered" && result) return result;
+  if (job.state === "failed" || job.state === "ambiguous" || job.state === "expired" || job.state === "suppressed") {
+    return {
+      ok: false,
+      motivo: result?.motivo ?? job.state,
+      statusHttp: result?.statusHttp,
+      latenciaMs: result?.latenciaMs ?? Date.now() - job.createdAt,
+      tentativas: result?.tentativas ?? job.attempt,
+      jobId: job.id,
+    };
+  }
+  return { ok: false, motivo: "queued_pending", latenciaMs: Date.now() - job.createdAt, tentativas: job.attempt };
+}
+
+export async function executarEnvioTexto(
   phone: string,
   text: string,
-  opts?: { delay?: number; presence?: "composing"; timeoutMs?: number }
+  opts?: OpcoesEnvio
 ): Promise<ResultadoEnvioWhatsApp> {
+  if (bloqueadoEmPreview()) return resultadoPreviewBloqueado();
   const inicio = Date.now();
 
   // Somente mensagens automáticas do bot (identificadas pelo `delay`) passam
@@ -130,34 +226,39 @@ async function executarEnvioTexto(
     body.options = { delay: opts.delay, presence: opts.presence ?? "composing" };
   }
   const timeoutMs = opts?.timeoutMs ?? TIMEOUT_PADRAO_MS;
+  // A Evolution não oferece chave de idempotência. Logo timeout, rede e 5xx
+  // são resultados incertos: repetir pode duplicar a mensagem. Cada job faz
+  // exatamente uma chamada; a outbox conserva o estado para reconciliação.
+  const maxTentativas = 1;
 
   let tentativas = 0;
   let ultimoResultado: Awaited<ReturnType<typeof tentarEnvio>> | null = null;
 
-  for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
+  for (let tentativa = 1; tentativa <= maxTentativas; tentativa++) {
     tentativas = tentativa;
     ultimoResultado = await tentarEnvio(url, config.apiKey, body, timeoutMs);
 
     if (ultimoResultado.tipo === "http") {
       const { ok, status, data } = ultimoResultado;
       if (ok) {
+        const messageId = extrairMessageId(data);
         return {
           ok: true,
           statusHttp: status,
-          messageIdMascarado: maskMessageId(extrairMessageId(data)),
+          messageIdMascarado: maskMessageId(messageId),
+          messageIdInterno: messageId,
           latenciaMs: Date.now() - inicio,
           tentativas,
         };
       }
-      // 4xx nunca é retentado — erro de payload/credencial, repetir não ajuda.
-      // status pode vir 0/undefined em mocks de teste incompletos — trata como
-      // não retentável (mesma cautela que um 4xx) em vez de assumir 5xx.
-      if (!(status >= 500) || tentativa === MAX_TENTATIVAS) {
+      // 4xx, 5xx e respostas incompletas não são retentados. Em especial, um
+      // 5xx pode ter sido devolvido depois de a Evolution aceitar o envio.
+      if (!(status >= 500) || tentativa === maxTentativas) {
         return { ok: false, motivo: `http_${status}`, statusHttp: status, latenciaMs: Date.now() - inicio, tentativas };
       }
     } else {
-      // Falha de rede/timeout — só retenta se ainda houver tentativa disponível.
-      if (tentativa === MAX_TENTATIVAS) {
+      // Falha de rede/timeout é ambígua e também não recebe retry automático.
+      if (tentativa === maxTentativas) {
         const timeoutOcorreu = ultimoResultado.erro instanceof Error && ultimoResultado.erro.name === "AbortError";
         return {
           ok: false,
@@ -168,11 +269,45 @@ async function executarEnvioTexto(
       }
     }
 
-    // Jitter curto (100–300ms) antes da próxima tentativa.
-    await sleep(100 + Math.floor(Math.random() * 200));
   }
 
   // Inalcançável na prática (o loop sempre retorna dentro de si), mas mantém
   // o compilador feliz e evita `undefined` implícito.
   return { ok: false, motivo: "erro_desconhecido", latenciaMs: Date.now() - inicio, tentativas };
+}
+
+async function executarEnvioImagem(phone: string, mediaUrl: string, caption: string): Promise<ResultadoEnvioWhatsApp> {
+  if (bloqueadoEmPreview()) return resultadoPreviewBloqueado();
+  const inicio = Date.now();
+  const config = obterConfigEvolution();
+  if (!config) return { ok: false, motivo: "provider_not_configured", latenciaMs: Date.now() - inicio, tentativas: 0 };
+  const resposta = await tentarEnvio(`${config.baseUrl}/message/sendMedia/${config.instanceName}`, config.apiKey,
+    { number: phone, mediatype: "image", media: mediaUrl, caption }, TIMEOUT_PADRAO_MS);
+  if (resposta.tipo === "network") {
+    const timeout = resposta.erro instanceof Error && resposta.erro.name === "AbortError";
+    return { ok: false, motivo: timeout ? "timeout" : "network_error", latenciaMs: Date.now() - inicio, tentativas: 1 };
+  }
+  if (!resposta.ok) return { ok: false, motivo: `http_${resposta.status}`, statusHttp: resposta.status, latenciaMs: Date.now() - inicio, tentativas: 1 };
+  const messageId = extrairMessageId(resposta.data);
+  return { ok: true, statusHttp: resposta.status, messageIdMascarado: maskMessageId(messageId), messageIdInterno: messageId, latenciaMs: Date.now() - inicio, tentativas: 1 };
+}
+
+export async function executarJobWhatsapp(job: import("./whatsappOutbox").JobOutboxWhatsapp): Promise<ResultadoEnvioWhatsApp> {
+  return job.kind === "image"
+    ? executarEnvioImagem(job.phone, job.mediaUrl ?? "", job.mediaCaption ?? "")
+    : executarEnvioTexto(job.phone, job.text, job.opts);
+}
+
+export async function enviarImagemWhatsApp(phone: string, mediaUrl: string, caption = ""): Promise<ResultadoEnvioWhatsApp> {
+  if (bloqueadoEmPreview()) return resultadoPreviewBloqueado();
+  if (!outboxWhatsappHabilitadaPara(phone)) return executarEnvioImagem(phone, mediaUrl, caption);
+  try {
+    const enfileirado = await enfileirarImagemWhatsapp({ phone, mediaUrl, caption, priority: "critica" });
+    await agendarDrenoWhatsapp();
+    await processarFilaWhatsapp(executarJobWhatsapp, 1);
+    return resultadoDoJob(await obterJobWhatsapp(enfileirado.jobId));
+  } catch (erro) {
+    if (process.env.NODE_ENV !== "test") throw erro;
+    return executarEnvioImagem(phone, mediaUrl, caption);
+  }
 }

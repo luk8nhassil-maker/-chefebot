@@ -41,6 +41,7 @@ describe("pixGuardiaoScheduler", () => {
     redisMock.del.mockClear();
     vi.resetModules();
     delete process.env.QSTASH_TOKEN;
+    delete process.env.VERCEL_ENV;
     process.env.VERCEL_URL = "chefebot-contingencia-test.vercel.app";
     delete process.env.PIX_GUARDIAO_QSTASH_CALLBACK_URL;
     delete process.env.PIX_GUARDIAO_QSTASH_FLOW_CONTROL_PARALLELISM;
@@ -57,6 +58,17 @@ describe("pixGuardiaoScheduler", () => {
 
     const agendou = await mod.agendarProximaVerificacaoPixGuardiao({ pedidoId: "pedido-1", geracao: 1, tentativa: 2, delayMs: 20_000 });
     expect(agendou).toBe(false);
+  });
+
+  test("Preview não publica QStash nem cria estado de guardião", async () => {
+    process.env.VERCEL_ENV = "preview";
+    process.env.QSTASH_TOKEN = "token-nao-usar";
+    const mod = await import("./pixGuardiaoScheduler");
+
+    await mod.iniciarCadeiaGuardiaoPix("pedido-preview");
+    await expect(mod.agendarProximaVerificacaoPixGuardiao({ pedidoId: "pedido-preview", geracao: 1, tentativa: 1, delayMs: 5_000 })).resolves.toBe(false);
+    expect(publishJSONMock).not.toHaveBeenCalled();
+    expect(store.size).toBe(0);
   });
 
   test("com QSTASH_TOKEN, iniciarCadeiaGuardiaoPix cria o estado do Sentinela (geracao 1), publica o primeiro tick com delay de 5s e trava a cadeia (nao duplica)", async () => {

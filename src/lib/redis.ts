@@ -1,5 +1,6 @@
 import { Redis } from '@upstash/redis'
 import { wrapRedisClient } from './redisTelemetry'
+import { bloquearClienteRealEmPreview } from './previewSafety'
 
 const rawRedisClient = new Redis({
   url: process.env.KV_REST_API_URL!,
@@ -10,4 +11,4 @@ const rawRedisClient = new Redis({
 // mesma API, mesmo comportamento, mesmos retornos e erros — só observa
 // comandos/latência/erros para o painel /dev/redis-status. Nunca altera o
 // que é lido/gravado no Redis.
-export const redis = wrapRedisClient(rawRedisClient)
+export const redis = bloquearClienteRealEmPreview(wrapRedisClient(rawRedisClient), 'Redis')

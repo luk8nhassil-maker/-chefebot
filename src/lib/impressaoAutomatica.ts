@@ -1,4 +1,5 @@
 import { redis } from "./redis";
+import { emPreviewVercel } from "./previewSafety";
 
 // Proteção contra impressão automática duplicada do mesmo pedido — nunca
 // substitui nem altera a impressão em si (a rota /pedidos/[id]/imprimir
@@ -31,6 +32,7 @@ function chaveClaimImpressaoAutomatica(pedidoId: string): string {
  * do pedido.
  */
 export async function reivindicarImpressaoAutomatica(pedidoId: string): Promise<boolean> {
+  if (emPreviewVercel()) return false;
   try {
     const ok = await redis.set(chaveClaimImpressaoAutomatica(pedidoId), String(Date.now()), { nx: true });
     return !!ok;

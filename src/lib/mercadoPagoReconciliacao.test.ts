@@ -518,7 +518,8 @@ describe("reconciliarPixMercadoPago", () => {
       expect(enviarTextoMock).toHaveBeenCalledTimes(1);
       expect(enviarTextoMock).toHaveBeenCalledWith(
         "5511999998888",
-        "Pagamento confirmado ✅ Recebemos seu Pix e seu pedido foi confirmado."
+        "Pagamento confirmado ✅ Recebemos seu Pix e seu pedido foi confirmado.",
+        expect.objectContaining({ idempotencyKey: "pix-confirmado:ped-1" }),
       );
       expect(store.get("pix:notificado:ped-1")).toBe("1");
     });
@@ -537,7 +538,7 @@ describe("reconciliarPixMercadoPago", () => {
       expect(enviarTextoMock).toHaveBeenCalledTimes(1);
     });
 
-    test("falha da Evolution não marca como notificado e permite retry", async () => {
+    test("resultado ambíguo reapresenta a mesma chave de outbox, sem criar outro envio", async () => {
       store.set("pedidos", [pedidoWhatsApp()]);
       buscarPagamentoMock.mockResolvedValue(ok());
       enviarTextoMock.mockResolvedValueOnce({ ok: false, motivo: "http_500" });
@@ -547,12 +548,14 @@ describe("reconciliarPixMercadoPago", () => {
       expect(enviarTextoMock).toHaveBeenCalledTimes(1);
       expect(store.get("pix:notificado:ped-1")).toBeUndefined();
 
-      // Rodada seguinte: nada novo para reconciliar, mas o retry de
-      // notificação deve tentar de novo porque não há marcador permanente.
+      // A rodada seguinte consulta a mesma tarefa. A outbox real devolve o
+      // job ambíguo, sem chamar a Evolution outra vez.
       enviarTextoMock.mockResolvedValueOnce({ ok: true });
       await reconciliarPixMercadoPago();
 
       expect(enviarTextoMock).toHaveBeenCalledTimes(2);
+      expect(enviarTextoMock.mock.calls[0]?.[2]).toMatchObject({ idempotencyKey: "pix-confirmado:ped-1" });
+      expect(enviarTextoMock.mock.calls[1]?.[2]).toMatchObject({ idempotencyKey: "pix-confirmado:ped-1" });
       expect(store.get("pix:notificado:ped-1")).toBe("1");
     });
 

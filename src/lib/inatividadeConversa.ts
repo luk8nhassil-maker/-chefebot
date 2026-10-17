@@ -1,5 +1,6 @@
 import { Client } from "@upstash/qstash";
 import { redis } from "./redis";
+import { emPreviewVercel } from "./previewSafety";
 import type { AutorMensagem, BotSession, BotStep } from "./bot";
 
 // Cronômetro de inatividade da conversa do WhatsApp — depois de
@@ -89,6 +90,7 @@ function sanitizarParaDeduplicationId(valor: string): string {
  * sincronizar isso manualmente. Nunca lança.
  */
 export async function sincronizarCronometroInatividade(phone: string, autor: AutorMensagem): Promise<void> {
+  if (emPreviewVercel()) return;
   if (!phone) return;
   try {
     // Toda mensagem (de qualquer autor) invalida um tick pendente, avançando

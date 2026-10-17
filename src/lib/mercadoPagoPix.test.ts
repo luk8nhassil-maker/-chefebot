@@ -130,6 +130,14 @@ describe("criarCobrancaPixMercadoPago", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  test("bloqueia Pix antes de qualquer fetch quando roda em Preview", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    const fetchMock = mockFetchOk();
+
+    await expect(criarCobrancaPixMercadoPago(baseInput())).rejects.toThrow("preview_real_operation_blocked:MercadoPago");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   test("falha com erro claro se nao houver payerEmail nem fallback", async () => {
     const fetchMock = mockFetchOk();
 

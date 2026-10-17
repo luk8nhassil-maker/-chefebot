@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
-import { obterConfigEvolution } from "@/lib/evolutionApi";
+import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 
 const TIMEOUT_MS = 15 * 60 * 1000 // 15 minutos
 const STEPS_IGNORADOS = ['done', 'escalado', 'confirm', 'welcome']
@@ -10,14 +10,8 @@ type SessaoComStep = {
 }
 
 async function enviarMensagem(phone: string, text: string) {
-  const config = obterConfigEvolution()
-  if (!config) { console.error('[cron sessoes] Provider de WhatsApp não configurado — mensagem não enviada.'); return }
   try {
-    await fetch(`${config.baseUrl}/message/sendText/${config.instanceName}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: config.apiKey },
-      body: JSON.stringify({ number: phone, text }),
-    })
+    await enviarTextoWhatsApp(phone, text, { prioridade: 'promocional', maxAttempts: 1 })
   } catch {}
 }
 
@@ -27,6 +21,11 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
+    // Rotina legada de retomada: com o bot pausado, não apaga sessões nem
+    // dispara convites para começar outro pedido.
+    if (await redis.get<boolean>('bot_ativo') === false) {
+      return NextResponse.json({ ok: true, skipped: true, motivo: 'bot_pausado' })
+    }
     const agora = Date.now()
     const resetadas: string[] = []
 
@@ -34,6 +33,7 @@ export async function GET(req: Request) {
     const chaves = await redis.keys('session_ts:*')
 
     for (const chave of chaves) {
+      if (await redis.get<boolean>('bot_ativo') === false) break
       const phone = chave.replace('session_ts:', '')
       const ts = await redis.get<number>(chave)
       if (!ts) continue

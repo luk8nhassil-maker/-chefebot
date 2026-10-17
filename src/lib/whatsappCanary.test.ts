@@ -191,7 +191,9 @@ describe("10 e 11. token correto + número autorizado marca inbound_received e r
       "acknowledgement_sent",
       "roundtrip_ok",
     ]);
-    const estadosPersistidos = redisMock.eval.mock.calls.map(([, , args]) => JSON.parse(args[2]).state);
+    const estadosPersistidos = redisMock.eval.mock.calls
+      .filter(([, keys]) => keys[0] === "whatsapp:canary:active")
+      .map(([, , args]) => JSON.parse(args[2]).state);
     expect(estadosPersistidos).toEqual(["inbound_received", "acknowledgement_sent", "roundtrip_ok"]);
   });
 

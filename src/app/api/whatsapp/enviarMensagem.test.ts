@@ -28,13 +28,18 @@ const { enviarTextoWhatsAppMock } = vi.hoisted(() => ({
     (
       telefone: string,
       mensagem: string,
-    ) => Promise<{ ok: true } | { ok: false; motivo: string }>
+    ) => Promise<{ ok: true; messageIdInterno?: string } | { ok: false; motivo: string }>
   >(),
 }));
 
 vi.mock("@/lib/whatsappMensagem", () => ({
   enviarTextoWhatsApp: enviarTextoWhatsAppMock,
 }));
+
+const { marcarEcoMock } = vi.hoisted(() => ({
+  marcarEcoMock: vi.fn(async () => {}),
+}));
+vi.mock("@/lib/conversaEcoPainel", () => ({ marcarEcoPainel: marcarEcoMock }));
 
 const { registrarMensagemMock } = vi.hoisted(() => ({
   registrarMensagemMock: vi.fn<
@@ -66,6 +71,22 @@ describe("enviarMensagem — envio confirmado registra exatamente uma mensagem b
     expect(enviarTextoWhatsAppMock.mock.calls[0][0]).toBe(PHONE);
     expect(registrarMensagemMock).toHaveBeenCalledTimes(1);
     expect(registrarMensagemMock).toHaveBeenCalledWith(PHONE, "bot", "Olá! Como posso ajudar?");
+  });
+
+  test("falha secundária de eco não faz o bot reenviar mensagem já confirmada", async () => {
+    enviarTextoWhatsAppMock.mockResolvedValue({ ok: true, messageIdInterno: "BOT-CONFIRMADO-1" });
+    marcarEcoMock.mockRejectedValueOnce(new Error("falha simulada Redis de eco"));
+    await expect(enviarMensagem(PHONE, "Pedido pronto")).resolves.toBe(true);
+    expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(1);
+    expect(registrarMensagemMock).toHaveBeenCalledTimes(1);
+    expect(registrarMensagemMock).toHaveBeenCalledWith(PHONE, "bot", "Pedido pronto");
+  });
+
+  test("marca o ID do envio automático antes do histórico para suprimir o eco fromMe", async () => {
+    enviarTextoWhatsAppMock.mockResolvedValue({ ok: true, messageIdInterno: "BOT-EVO-1" });
+    await enviarMensagem(PHONE, "Resposta automática");
+    expect(marcarEcoMock).toHaveBeenCalledWith("BOT-EVO-1");
+    expect(marcarEcoMock.mock.invocationCallOrder[0]).toBeLessThan(registrarMensagemMock.mock.invocationCallOrder[0]);
   });
 });
 

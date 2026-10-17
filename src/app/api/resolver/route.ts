@@ -2,7 +2,7 @@
 import { verifyToken } from "@/lib/auth";
 import { redis } from "@/lib/redis";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
-import { obterConfigEvolution } from "@/lib/evolutionApi";
+import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -27,17 +27,8 @@ type Pedido = {
 };
 
 async function enviarMensagem(phone: string, message: string) {
-  const config = obterConfigEvolution();
-  if (!config) { console.error("[ChefeBot] Provider de WhatsApp não configurado — mensagem de encerramento não enviada."); return; }
   try {
-    await fetch(`${config.baseUrl}/message/sendText/${config.instanceName}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: config.apiKey,
-      },
-      body: JSON.stringify({ number: phone, text: message }),
-    });
+    await enviarTextoWhatsApp(phone, message, { prioridade: "critica", maxAttempts: 1 });
   } catch (err) {
     console.error("[ChefeBot] Erro ao enviar mensagem de encerramento:", err);
   }

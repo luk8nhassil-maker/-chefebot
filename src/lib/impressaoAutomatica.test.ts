@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
@@ -21,6 +21,8 @@ beforeEach(() => {
   store.clear();
   vi.clearAllMocks();
 });
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe("reivindicarImpressaoAutomatica", () => {
   it("a primeira chamada para um pedido reivindica com sucesso", async () => {
@@ -61,5 +63,12 @@ describe("reivindicarImpressaoAutomatica", () => {
   it("Redis indisponível: nunca lança erro, apenas nega a impressão automática desta vez", async () => {
     redisMock.set.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     await expect(reivindicarImpressaoAutomatica("ped_redis_fora")).resolves.toBe(false);
+  });
+
+  it("Preview não reivindica impressão automática nem toca no Redis", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+
+    await expect(reivindicarImpressaoAutomatica("ped_preview")).resolves.toBe(false);
+    expect(redisMock.set).not.toHaveBeenCalled();
   });
 });

@@ -56,6 +56,8 @@ export type ResultadoProcessamentoPodioWhatsapp = {
   ok: boolean;
   temporadaId: string | null;
   participantesTop3: number;
+  tentativasEnvio: number;
+  requisicoesProvider: number;
   enviados: number;
   suprimidos: number;
   falhas: number;
@@ -278,17 +280,23 @@ export async function processarPodioWhatsapp18h(params?: {
 
   const dataLocal = dataLocalPodioWhatsapp(agoraMs);
   if (!dataLocal || !ehHorarioDisparoPodioWhatsapp(agoraMs)) {
-    return { ok: true, temporadaId: null, participantesTop3: 0, enviados: 0, suprimidos: 0, falhas: 0, motivos: { fora_horario: 1 } };
+    return { ok: true, temporadaId: null, participantesTop3: 0, tentativasEnvio: 0, requisicoesProvider: 0, enviados: 0, suprimidos: 0, falhas: 0, motivos: { fora_horario: 1 } };
+  }
+
+  // A pausa global também cobre mensagens proativas de marketing. Avisos
+  // transacionais de pedidos continuam nos próprios fluxos operacionais.
+  if (await redis.get<boolean>("bot_ativo") === false) {
+    return { ok: true, temporadaId: null, participantesTop3: 0, tentativasEnvio: 0, requisicoesProvider: 0, enviados: 0, suprimidos: 0, falhas: 0, motivos: { bot_pausado: 1 } };
   }
 
   const temporada = await obterTemporadaAtiva(tenantId);
   if (!temporada) {
-    return { ok: true, temporadaId: null, participantesTop3: 0, enviados: 0, suprimidos: 0, falhas: 0, motivos: { sem_temporada_ativa: 1 } };
+    return { ok: true, temporadaId: null, participantesTop3: 0, tentativasEnvio: 0, requisicoesProvider: 0, enviados: 0, suprimidos: 0, falhas: 0, motivos: { sem_temporada_ativa: 1 } };
   }
 
   const rankingCompleto = await obterRankingCompleto(tenantId, temporada.temporadaId);
   if (rankingCompleto.length === 0) {
-    return { ok: true, temporadaId: temporada.temporadaId, participantesTop3: 0, enviados: 0, suprimidos: 0, falhas: 0, motivos: { ranking_vazio: 1 } };
+    return { ok: true, temporadaId: temporada.temporadaId, participantesTop3: 0, tentativasEnvio: 0, requisicoesProvider: 0, enviados: 0, suprimidos: 0, falhas: 0, motivos: { ranking_vazio: 1 } };
   }
 
   const ids = rankingCompleto.map((e) => e.clienteId);
@@ -305,8 +313,17 @@ export async function processarPodioWhatsapp18h(params?: {
   let enviados = 0;
   let suprimidos = 0;
   let falhas = 0;
+  let tentativasEnvio = 0;
+  let requisicoesProvider = 0;
 
-  for (const entrada of top3) {
+  for (const [index, entrada] of top3.entries()) {
+    // Reavalia a pausa entre destinatários para limitar um disparo em curso.
+    if (await redis.get<boolean>("bot_ativo") === false) {
+      const restantes = top3.length - index;
+      suprimidos += restantes;
+      motivos.bot_pausado = (motivos.bot_pausado ?? 0) + restantes;
+      break;
+    }
     const cliente = await buscarClientePorId(entrada.clienteId);
     if (!cliente?.telefone) {
       suprimidos++;
@@ -365,18 +382,28 @@ export async function processarPodioWhatsapp18h(params?: {
     }
 
     try {
-      const resultado = await enviarTextoWhatsApp(phone, mensagem);
+      tentativasEnvio++;
+      // Timeout/5xx pode ocorrer depois de a Evolution enviar; sem chave de
+      // idempotência no provider, não repetir uma mensagem proativa ambígua.
+      const resultado = await enviarTextoWhatsApp(phone, mensagem, { maxAttempts: 1, prioridade: "promocional", idempotencyKey: `podio:${tenantId}:${temporada.temporadaId}:${dataLocal}:${entrada.clienteId}` });
+      requisicoesProvider += resultado.tentativas;
       if (!resultado.ok) {
         falhas++;
         incrementar(motivos, resultado.motivo ? `provider_${resultado.motivo}` : "provider_falhou");
         continue;
       }
-      await redis.set(
-        chaveUltimaMensagem(tenantId, temporada.temporadaId, entrada.clienteId),
-        { fingerprint, enviadoEmMs: agoraMs, temporadaId: temporada.temporadaId } satisfies UltimaMensagemPodio,
-        { ex: TTL_ESTADO_SEGUNDOS },
-      );
+      // A confirmação do provider é a fonte do contador de envios. Uma falha
+      // posterior no cache não desfaz uma mensagem já aceita pela Evolution.
       enviados++;
+      try {
+        await redis.set(
+          chaveUltimaMensagem(tenantId, temporada.temporadaId, entrada.clienteId),
+          { fingerprint, enviadoEmMs: agoraMs, temporadaId: temporada.temporadaId } satisfies UltimaMensagemPodio,
+          { ex: TTL_ESTADO_SEGUNDOS },
+        );
+      } catch {
+        incrementar(motivos, "estado_pos_envio_nao_persistido");
+      }
     } catch {
       falhas++;
       incrementar(motivos, "erro_envio");
@@ -388,12 +415,20 @@ export async function processarPodioWhatsapp18h(params?: {
     criadoEmMs: agoraMs,
     entradas: top3.map(({ clienteId, posicao, score }) => ({ clienteId, posicao, score })),
   };
-  await redis.set(snapshotKey, snapshot, { ex: TTL_ESTADO_SEGUNDOS });
+  try {
+    await redis.set(snapshotKey, snapshot, { ex: TTL_ESTADO_SEGUNDOS });
+  } catch {
+    // O snapshot é auxiliar. Um erro posterior aos envios não deve converter
+    // a execução inteira em 500 nem apagar a contagem já confirmada.
+    incrementar(motivos, "snapshot_nao_persistido");
+  }
 
   return {
     ok: true,
     temporadaId: temporada.temporadaId,
     participantesTop3: top3.length,
+    tentativasEnvio,
+    requisicoesProvider,
     enviados,
     suprimidos,
     falhas,

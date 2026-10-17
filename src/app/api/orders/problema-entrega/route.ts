@@ -207,14 +207,23 @@ export async function POST(req: NextRequest) {
   const texto = mensagemProblemaEntrega(motivoContato, preparado.pedido.cliente);
   let resultado: Awaited<ReturnType<typeof enviarTextoWhatsApp>>;
   try {
-    resultado = await enviarTextoWhatsApp(telefone, texto);
+    resultado = await enviarTextoWhatsApp(telefone, texto, {
+      prioridade: "critica",
+      idempotencyKey: `entrega-problema:${contatoId}`,
+    });
   } catch {
     await concluirContato(id, contatoId, operador, false, "network_error");
     return NextResponse.json({ error: "Não consegui enviar a mensagem ao cliente. Tente novamente ou use o contato manual." }, { status: 502 });
   }
   if (!resultado.ok) {
+    const incerto = resultado.motivo === "timeout" || resultado.motivo === "network_error" || (resultado.statusHttp ?? 0) >= 500;
     await concluirContato(id, contatoId, operador, false, resultado.motivo);
-    return NextResponse.json({ error: "Não consegui confirmar o envio ao cliente. Tente novamente ou use o contato manual." }, { status: 502 });
+    return NextResponse.json({
+      error: incerto
+        ? "Resultado do envio incerto; a mensagem foi preservada para reconciliação. Não reenvie agora."
+        : "Não consegui confirmar o envio ao cliente. Tente novamente ou use o contato manual.",
+      status: incerto ? "ambiguous" : "failed", jobId: resultado.jobId,
+    }, { status: 502 });
   }
   await concluirContato(id, contatoId, operador, true);
   return NextResponse.json({ ok: true, enviado: true, tentativas: Math.max(2, preparado.tentativas) });

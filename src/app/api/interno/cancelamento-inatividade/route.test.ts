@@ -128,6 +128,15 @@ describe("/api/interno/cancelamento-inatividade — segurança/assinatura", () =
 });
 
 describe("/api/interno/cancelamento-inatividade — travas contra cancelamento indevido", () => {
+  test("pausa global consome o tick sem enviar lembrete ou mexer na sessão", async () => {
+    store.set("bot_ativo", false);
+    const { POST } = await import("./route");
+    const res = await POST(req({ phone: PHONE, geracao: 1 }));
+    expect(await res.json()).toMatchObject({ ignorado: true, motivo: "bot_pausado" });
+    expect(enviarTextoWhatsAppMock).not.toHaveBeenCalled();
+    expect(store.has(`session:${PHONE}`)).toBe(true);
+  });
+
   test("geração desatualizada (cliente ou nós respondemos de novo depois do agendamento): ignora", async () => {
     geracaoAtualMock.mockResolvedValueOnce(2);
     const { POST } = await import("./route");

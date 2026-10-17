@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
-import { obterConfigEvolution } from "@/lib/evolutionApi";
+import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 import { ehProjetoVercelLegado } from "@/lib/vercelProjeto";
 
 type SessaoPixPendente = {
@@ -21,14 +21,8 @@ type PedidoPixPendente = {
 };
 
 async function enviarMensagem(phone: string, text: string) {
-  const config = obterConfigEvolution();
-  if (!config) { console.error("[cron pix-pendente] Provider de WhatsApp não configurado — mensagem não enviada."); return; }
   try {
-    await fetch(`${config.baseUrl}/message/sendText/${config.instanceName}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", apikey: config.apiKey },
-      body: JSON.stringify({ number: phone, text }),
-    });
+    await enviarTextoWhatsApp(phone, text, { prioridade: "critica", maxAttempts: 1 });
   } catch {}
 }
 
@@ -51,6 +45,9 @@ export async function GET(req: Request) {
     for (const key of keys) {
       const session = await redis.get<SessaoPixPendente>(key);
       if (!session || session.step !== "aguardando_pix") continue;
+      // Reavalia a pausa a cada destinatário: um lote em andamento não deve
+      // continuar enviando depois de a equipe assumir o controle.
+      const botPausado = await redis.get<boolean>("bot_ativo") === false;
 
       const phone = key.replace("session:", "");
       const pixIniciadoEm = session.pixIniciadoEm || Date.now();
@@ -74,18 +71,24 @@ export async function GET(req: Request) {
           };
         });
 
-        await enviarMensagem(phone, `⏰ Ei! Seu pedido está aguardando o comprovante do Pix.\n\nNossa equipe vai entrar em contato para te ajudar. 😊`);
+        // O escalonamento para a equipe é operacional e continua. A pausa
+        // suspende apenas o lembrete automático ao cliente.
+        if (!botPausado) {
+          await enviarMensagem(phone, `⏰ Ei! Seu pedido está aguardando o comprovante do Pix.\n\nNossa equipe vai entrar em contato para te ajudar. 😊`);
+        }
         await redis.set(key, { ...session, pixCobrancas: 3 }, { ex: 1800 });
         escalados++;
 
       } else if (minutos >= 4 && cobrancas < 2) {
         // 4 minutos — 2a cobrança
+        if (botPausado) continue;
         await enviarMensagem(phone, `⚠️ Seu pedido ainda está aguardando o comprovante do Pix.\n\nEnvie a imagem ou PDF do comprovante para confirmarmos! 📄`);
         await redis.set(key, { ...session, pixCobrancas: 2 }, { ex: 1800 });
         cobrados++;
 
       } else if (minutos >= 2 && cobrancas < 1) {
         // 2 minutos — 1a cobrança
+        if (botPausado) continue;
         await enviarMensagem(phone, `Lembrete: para confirmar seu pedido, envie o comprovante do Pix! 📄\n\nÉ rapidinho, só enviar a imagem aqui. 😊`);
         await redis.set(key, { ...session, pixCobrancas: 1 }, { ex: 1800 });
         cobrados++;

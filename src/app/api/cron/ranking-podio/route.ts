@@ -30,10 +30,22 @@ export async function GET(req: Request) {
 
   try {
     const resultado = await processarPodioWhatsapp18h({ tenantId: "default", agoraMs });
+    // Contadores sem destinatário, texto ou credencial: permitem auditar a
+    // execução mesmo quando a plataforma não retém o corpo da resposta.
+    console.info("[ranking-podio-whatsapp] resultado", {
+      horaUtc: new Date(agoraMs).toISOString(),
+      participantesTop3: resultado.participantesTop3,
+      tentativasEnvio: resultado.tentativasEnvio,
+      requisicoesProvider: resultado.requisicoesProvider,
+      enviados: resultado.enviados,
+      suprimidos: resultado.suprimidos,
+      falhas: resultado.falhas,
+      motivos: resultado.motivos,
+    });
     return NextResponse.json(resultado);
   } catch (err) {
     console.error("[ranking-podio-whatsapp] cron falhou fechado", {
-      erro: err instanceof Error ? err.message : "erro_inesperado",
+      erro: err instanceof Error ? err.name : "erro_inesperado",
     });
     return NextResponse.json({ ok: false, error: "falha_processamento_podio" }, { status: 500 });
   }
