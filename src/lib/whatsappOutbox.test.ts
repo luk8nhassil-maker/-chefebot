@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { values, scores, locks, hashes } = vi.hoisted(() => ({
-  values: new Map<string, unknown>(), scores: new Map<string, Map<string, number>>(), locks: new Map<string, { value: string; until: number }>(), hashes: new Map<string, Map<string, string>>(),
+const { values, scores, locks, hashes, claimFormat } = vi.hoisted(() => ({
+  values: new Map<string, unknown>(), scores: new Map<string, Map<string, number>>(), locks: new Map<string, { value: string; until: number }>(), hashes: new Map<string, Map<string, string>>(), claimFormat: { asObject: false },
 }));
 
 function zset(key: string) { const set = scores.get(key) ?? new Map<string, number>(); scores.set(key, set); return set; }
@@ -48,7 +48,7 @@ vi.mock("./redis", () => ({
           job.state = "leased"; job.leaseToken = token; job.updatedAt = now; job.attempt = Number(job.attempt ?? 0) + 1;
           values.set(jobPrefix + id, job); zset(queue).delete(id); zset(leases).set(id, Number(untilRaw));
           if (rateLimit > 0) zset(rateKey).set(token, now);
-          return JSON.stringify(job);
+          return claimFormat.asObject ? { ...job } : JSON.stringify(job);
         }
         return null;
       }
@@ -86,7 +86,7 @@ vi.mock("./redis", () => ({
 
 import { configuracaoOutboxWhatsapp, enfileirarImagemWhatsapp, enfileirarMensagemWhatsapp, obterJobWhatsapp, processarFilaWhatsapp, recuperarLeasesWhatsapp, resumoFilaWhatsapp } from "./whatsappOutbox";
 
-beforeEach(() => { values.clear(); scores.clear(); locks.clear(); hashes.clear(); delete process.env.WHATSAPP_OUTBOX_CONCURRENCY; delete process.env.WHATSAPP_OUTBOX_RATE_LIMIT_PER_MINUTE; });
+beforeEach(() => { values.clear(); scores.clear(); locks.clear(); hashes.clear(); claimFormat.asObject = false; delete process.env.WHATSAPP_OUTBOX_CONCURRENCY; delete process.env.WHATSAPP_OUTBOX_RATE_LIMIT_PER_MINUTE; });
 
 async function drenar(executar: Parameters<typeof processarFilaWhatsapp>[0]) {
   let total = 0, max = 0;
@@ -121,6 +121,19 @@ describe("whatsappOutbox", () => {
       if (previous === undefined) delete process.env.QSTASH_URL;
       else process.env.QSTASH_URL = previous;
     }
+  });
+
+  test("processa claim de Lua já desserializado pelo SDK Upstash sem erro 500 ou lease órfão", async () => {
+    claimFormat.asObject = true;
+    const { jobId } = await enfileirarMensagemWhatsapp({
+      phone: "5511999990900", text: "canario-e2e", priority: "critica",
+    });
+    const executar = vi.fn(async () => ({ ok: true, statusHttp: 200, latenciaMs: 1, tentativas: 1 }));
+    const resultado = await processarFilaWhatsapp(executar, 1, 1);
+    expect(executar).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: jobId, text: "canario-e2e", state: "leased" }));
+    expect(resultado).toEqual({ processed: 1, delivered: 1, failed: 0, ambiguous: 0 });
+    expect((await obterJobWhatsapp(jobId))?.state).toBe("delivered");
+    expect(await resumoFilaWhatsapp()).toEqual({ pending: 0, inFlight: 0, ambiguous: 0, unresolved: 0 });
   });
 
   test("prioriza crítica, limita globalmente a quatro e preserva ordem da conversa", async () => {
