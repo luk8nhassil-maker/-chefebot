@@ -20,6 +20,7 @@ export function avaliarGatesWhatsApp(e: MonitorEvidence): GateResult[] {
     { text: "QStash configurado (não comprova agenda em execução)", ok: e.qstashConfigured },
     { text: "Canário com ida e volta confirmada", ok: e.canary.state === "roundtrip_ok" },
     { text: "Confirmação HTTP 2xx do canário", ok: e.canary.outboundHttpStatus !== null && e.canary.outboundHttpStatus >= 200 && e.canary.outboundHttpStatus < 300 },
+    { text: "Contador real de envios aceitos pela Evolution disponível e positivo", ok: m.accepted === null ? null : m.accepted > 0 },
     { text: "Envio do próprio canário aceito pela outbox", ok: e.canary.outboxAccepted },
   ];
   const step2 = [
