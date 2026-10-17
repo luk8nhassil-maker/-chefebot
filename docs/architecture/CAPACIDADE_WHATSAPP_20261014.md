@@ -39,6 +39,21 @@ O ensaio separado da outbox aceitou e entregou 50/50, 100/100 e 200/200 mensagen
 - A Evolution não oferece chave de idempotência comprovada para `sendText`; timeout após envio é um resultado ambíguo. Retry automático pode duplicar mensagem e permanece proibido.
 - O teste da rota usa mocks de Redis e efeitos secundários. Ele prova persistência no armazenamento simulado, **não** valida estoque, fidelidade, latência de rede, custo ou entrega real. O teste de mutex mede só a seção crítica, não checkout completo.
 
+## Rollout seguro sem alterar o atendimento atual
+
+O módulo `src/lib/whatsappMensagem.ts` aplica `WHATSAPP_OUTBOX_ROLLOUT`:
+
+- **Sem configuração em Production:** modo `canary`, restrito ao número de teste já autorizado em `WHATSAPP_CANARY_PHONE`; os demais números mantêm o envio direto anterior, inclusive mensagens humanas, imagens, OTP e notificações. Se o número canário não estiver configurado, nenhuma mensagem usará a outbox.
+- `WHATSAPP_OUTBOX_ROLLOUT=off`: nenhuma nova mensagem vai para a outbox. Não desliga processamento de jobs já aceitos.
+- `WHATSAPP_OUTBOX_ROLLOUT=canary`: apenas o número canário autorizado.
+- `WHATSAPP_OUTBOX_ROLLOUT=all`: todas as mensagens usam a outbox. **Só habilitar após prova real da agenda QStash, callback assinado, destinatário canário, painel humano, OTP e inexistência de duplicações.**
+- Preview nunca utiliza o transporte real, independentemente do modo.
+- Os testes usam `NODE_ENV=test` e exercitam a outbox por padrão, com casos específicos de `off` e `canary`.
+
+**Rollback operacional:** antes de reverter um deployment que inclua o worker, **pausar/remover a agenda QStash com ID `chefebot-whatsapp-outbox-recovery-v1`** para não atingir uma rota inexistente da versão antiga a cada cinco minutos. Não apagar dados/jobs Redis; primeiro inspecionar `pending`, `inFlight`, `ambiguous` e `unresolved`. Usar rollback Vercel apenas com alias/commit corretos e verificar WhatsApp, pedidos e Pix em leitura.
+
+**Limite de custo:** o Free QStash tem teto diário sujeito ao plano. Um schedule a cada cinco minutos dispara aproximadamente 288 vezes por dia, além dos despertares imediatos e das funções já existentes. Verificar uso real antes de `all`; não mudar para plano pago automaticamente.
+
 ## Mudança maior necessária antes da aprovação
 
 1. Persistir a outbox na mesma transação lógica da transição de pedido/pagamento/entrega. Hoje ela persiste antes do envio, mas a transição de pedido e a criação do job ainda não são uma única operação Redis.
