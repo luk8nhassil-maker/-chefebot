@@ -45,7 +45,14 @@ export async function POST(req: NextRequest) {
     // somente jobs gerados pelo sistema recebem a marca, nunca mensagens do
     // iPhone/WhatsApp Business digitadas manualmente.
     if (result.ok && (job.humanSenderName || job.history) && typeof result.messageIdInterno === "string") {
-      await marcarEcoPainel(result.messageIdInterno);
+      // Falha secundária no marcador de eco NÃO transforma em "ambíguo" um
+      // sendText já confirmado pela Evolution. O sincronizador de histórico
+      // tenta marcar novamente antes de gravar a mensagem idempotente.
+      try {
+        await marcarEcoPainel(result.messageIdInterno);
+      } catch {
+        // Sem log de ID, telefone ou conteúdo da mensagem.
+      }
     }
     return result;
   }, 8, 100);
