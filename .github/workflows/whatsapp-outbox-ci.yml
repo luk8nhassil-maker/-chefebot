@@ -1,0 +1,40 @@
+name: whatsapp-outbox-ci
+
+# Gate hermetico e barato para a fila WhatsApp. Nao chama Evolution, QStash,
+# Redis de producao ou rotas de envio reais; somente mocks Vitest.
+on:
+  pull_request:
+    paths:
+      - "src/lib/whatsappOutbox.ts"
+      - "src/lib/whatsappOutbox.test.ts"
+      - ".github/workflows/whatsapp-outbox-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-outbox-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout do HEAD exato do PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Testes focados da fila WhatsApp
+        run: npm test -- src/lib/whatsappOutbox.test.ts
+      - name: Lint do patch
+        run: npm run lint -- src/lib/whatsappOutbox.ts src/lib/whatsappOutbox.test.ts
+      - name: Typecheck
+        run: ./node_modules/.bin/tsc --noEmit
