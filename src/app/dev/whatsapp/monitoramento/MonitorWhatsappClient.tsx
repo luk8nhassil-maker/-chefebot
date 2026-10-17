@@ -23,7 +23,7 @@ type Snapshot = {
 
 const bg = 'var(--info-soft)'
 const foreground = 'var(--foreground)'
-const muted = 'var(--border-strong)'
+const muted = 'var(--foreground-muted)'
 const border = '1px solid rgba(var(--overlay-rgb), .12)'
 const panel: React.CSSProperties = { border, background: 'rgba(var(--overlay-rgb), .035)', borderRadius: 14, padding: 18 }
 const dt = (v: number | null | undefined) => v ? new Date(v).toLocaleString('pt-BR') : 'Sem evidência'
@@ -87,7 +87,7 @@ export default function MonitorWhatsappClient() {
           <p style={{ margin: 0, color: muted, fontSize: 13 }}>Acompanhamento somente leitura da fila. Nenhum envio ou mudança de fase é feito aqui.</p>
         </div>
         <button onClick={() => { setLoading(true); void refresh() }} disabled={loading}
-          style={{ cursor: loading ? 'wait' : 'pointer', padding: '10px 16px', borderRadius: 10, background: 'var(--attention)', border: 0, color: '#181818', fontWeight: 700 }}>
+          style={{ cursor: loading ? 'wait' : 'pointer', padding: '10px 16px', borderRadius: 10, background: 'var(--attention)', border: 0, color: '#fff', fontWeight: 700 }}>
           {loading ? 'Consultando…' : 'Atualizar agora'}
         </button>
       </header>
