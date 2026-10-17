@@ -95,7 +95,12 @@ export async function POST(req: NextRequest) {
     // duplicado raro do que descartar mensagens reais por dedup baseada só
     // em texto.
   if (!resultado.deduplicated && resultado.messageIdInterno) {
-    await marcarEcoPainel(resultado.messageIdInterno);
+    try {
+      await marcarEcoPainel(resultado.messageIdInterno);
+    } catch {
+      // O envio foi confirmado pelo provider. A gravação durável do histórico
+      // poderá reexecutar o marcador; não mande o atendente reenviar a mensagem.
+    }
   }
 
   // Só registra após confirmação de envio bem-sucedido pela Evolution API.
