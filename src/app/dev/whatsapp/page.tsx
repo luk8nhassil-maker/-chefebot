@@ -104,6 +104,19 @@ const ESTADOS_LABEL: Record<CanaryState, string> = {
   expired: 'Expirado',
 }
 
+const DESCRICOES_ERRO_EVOLUTION: Record<string, string> = {
+  http_400_numero_invalido: 'A Evolution recusou o formato do número de teste.',
+  http_400_numero_nao_registrado: 'A Evolution não reconheceu o número como registrado no WhatsApp.',
+  http_400_nao_aceitavel: 'O WhatsApp recusou a operação (not-acceptable). A conexão pode estar aberta, mas o envio não foi aceito.',
+  http_400_sessao_indisponivel: 'A sessão do WhatsApp não estava disponível para enviar.',
+  http_400_formato_invalido: 'A Evolution recusou o formato da solicitação.',
+  http_400: 'A Evolution recusou a mensagem (HTTP 400), mas não informou um motivo reconhecível.',
+}
+function descreverErroEvolucao(raw: unknown) {
+  const codigo = typeof raw === 'string' ? raw : 'desconhecido'
+  return DESCRICOES_ERRO_EVOLUTION[codigo] ?? codigo
+}
+
 function fmt(ts: number | null | undefined) {
   if (!ts) return 'nunca'
   return new Date(ts).toLocaleString('pt-BR')
@@ -148,7 +161,7 @@ export default function WhatsappDiagPage() {
           return
         }
         if (body?.canary?.state === 'outbound_failed') {
-          setErro('O envio NÃO foi confirmado pela Evolution. Motivo: ' + String(body?.canary?.outboundError ?? 'transporte sem confirmação') + '. Não repita o teste.')
+          setErro('O envio NÃO foi confirmado pela Evolution. Motivo: ' + descreverErroEvolucao(body?.canary?.outboundError) + '. Não repita o teste.')
           return
         }
         if (body?.canary?.state !== 'outbound_sent' && body?.canary?.state !== 'roundtrip_ok') {
@@ -188,7 +201,7 @@ export default function WhatsappDiagPage() {
 
         {erro && (
           <div style={{ background: 'color-mix(in srgb, var(--danger) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)', borderRadius: 10, padding: '12px 16px', marginBottom: 20, color: 'var(--danger)', fontSize: 13 }}>
-            Falha ao carregar: {erro}
+            Atenção: {erro}
           </div>
         )}
 
