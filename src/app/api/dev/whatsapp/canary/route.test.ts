@@ -49,6 +49,21 @@ const { store, redisMock } = vi.hoisted(() => {
 });
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 vi.mock("@/lib/logger", () => ({ log: vi.fn(async () => {}) }));
+// Este teste isola autenticação, rate limit e respostas HTTP do canário.
+// A reconciliação da outbox tem testes próprios; aqui simulamos fila sem
+// pendências para não exigir ZCARD/ZRANGE de um Redis falso incompleto.
+vi.mock("@/lib/whatsappOutbox", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/whatsappOutbox")>();
+  return {
+    ...actual,
+    encerrarCanariosExpiradosSemReenvio: vi.fn(async () => 0),
+    encerrarCanarioVinculadoSemReenvio: vi.fn(async () => 0),
+    resumoFilaWhatsapp: vi.fn(async () => ({
+      pending: 0, inFlight: 0, ambiguous: 0, unresolved: 0,
+    })),
+  };
+});
+
 
 vi.stubGlobal("fetch", vi.fn());
 
