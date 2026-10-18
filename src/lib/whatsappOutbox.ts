@@ -395,11 +395,16 @@ if not raw then return 0 end
 if not redis.call('ZSCORE', KEYS[2], ARGV[1]) then return 0 end
 local job = cjson.decode(raw)
 if job.id ~= ARGV[1] or job.state ~= 'ambiguous' then return 0 end
-if job.idempotencyKey ~= ARGV[2] or job.phone ~= ARGV[3] then return 0 end
+if job.phone ~= ARGV[3] or job.priority ~= 'critica' then return 0 end
+-- Canários de versões antigas não gravavam chave de idempotência.
+-- Qualquer chave presente e diferente continua bloqueando a conciliação.
+if job.idempotencyKey and job.idempotencyKey ~= '' and job.idempotencyKey ~= ARGV[2] then return 0 end
 if job.kind ~= 'text' or job.text ~= ARGV[4] then return 0 end
 if job.conversationId ~= ARGV[7] then return 0 end
 if not job.result or job.result.motivo ~= 'lease_expired_without_provider_confirmation' then return 0 end
 if (tonumber(job.createdAt) or 0) > tonumber(ARGV[5]) - 1200000 then return 0 end
+local created = tonumber(job.createdAt) or 0
+if created < tonumber(ARGV[8]) - 30000 or created > tonumber(ARGV[9]) then return 0 end
 job.state = 'suppressed'
 job.updatedAt = tonumber(ARGV[5])
 job.result = { motivo = 'expired_technical_canary_closed_without_resend' }
@@ -476,26 +481,40 @@ export async function encerrarCanarioVinculadoSemReenvio(
   return Number(changed) === 1 ? 1 : 0;
 }
 
-export async function encerrarCanariosExpiradosSemReenvio(telefoneAutorizado: string): Promise<number> {
+export async function encerrarCanariosExpiradosSemReenvio(
+  telefoneAutorizado: string, canario: VinculoCanarioExpirado | null = null
+): Promise<number> {
+  const agora = Date.now();
+  // Exige a prova independente do teste expirado lida do próprio Redis.
+  // O canário legado não tinha jobId nem idempotencyKey: o texto técnico
+  // exato, horário, telefone e motivo do lease são as provas disponíveis.
+  if (!canario || canario.state !== 'expired' ||
+    !/^CBTEST-[A-Z0-9]{4}$/.test(canario.token) ||
+    !Number.isFinite(canario.createdAt) || !Number.isFinite(canario.expiresAt) ||
+    canario.expiresAt <= canario.createdAt || canario.expiresAt > agora ||
+    canario.createdAt > agora - 20 * 60_000) return 0;
+  const textoEsperado = `Teste técnico do ChefeBot: ${canario.token}\nResponda exatamente: ${canario.token}`;
+  const dedupeEsperado = `canary:${canario.token}`;
   const ids = await redis.zrange<string[]>(CHAVE_RECONCILIACAO, 0, 99);
   let encerrados = 0;
-  const agora = Date.now();
   for (const id of ids) {
     if (typeof id !== 'string') continue;
     const job = await obterJobWhatsapp(id);
-    if (!job || job.kind !== 'text' || job.phone !== telefoneAutorizado ||
-      job.state !== 'ambiguous' || job.result?.motivo !== 'lease_expired_without_provider_confirmation' ||
-      agora - job.createdAt < 20 * 60_000) continue;
-    const token = job.idempotencyKey?.startsWith('canary:')
-      ? job.idempotencyKey.slice('canary:'.length) : '';
-    if (!/^CBTEST-[A-Z0-9]{4}$/.test(token)) continue;
-    const textoEsperado = `Teste técnico do ChefeBot: ${token}\nResponda exatamente: ${token}`;
-    if (job.text !== textoEsperado) continue;
+    if (!job || job.kind !== 'text' || job.priority !== 'critica' ||
+      job.phone !== telefoneAutorizado || job.state !== 'ambiguous' ||
+      job.result?.motivo !== 'lease_expired_without_provider_confirmation' ||
+      job.createdAt < canario.createdAt - 30_000 ||
+      job.createdAt > canario.expiresAt ||
+      agora - job.createdAt < 20 * 60_000 ||
+      job.text !== textoEsperado ||
+      (job.idempotencyKey != null && job.idempotencyKey !== '' &&
+       job.idempotencyKey !== dedupeEsperado)) continue;
     const changed = await redis.eval(ENCERRAR_CANARIO_EXPIRADO_LUA,
       [chaveJob(id), CHAVE_RECONCILIACAO, chaveConversa(job.conversationId),
         chaveSequenciaConversa(job.conversationId), CHAVE_CONVERSAS_POR_JOB, CHAVE_METRICAS],
-      [id, job.idempotencyKey!, telefoneAutorizado, textoEsperado, String(agora),
-        String(TTL_SEGUNDOS), job.conversationId]);
+      [id, dedupeEsperado, telefoneAutorizado, textoEsperado, String(agora),
+        String(TTL_SEGUNDOS), job.conversationId,
+        String(canario.createdAt), String(canario.expiresAt)]);
     if (Number(changed) === 1) encerrados++;
   }
   return encerrados;

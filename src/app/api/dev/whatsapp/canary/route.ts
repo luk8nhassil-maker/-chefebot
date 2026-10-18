@@ -52,9 +52,9 @@ export async function POST(req: NextRequest) {
   }
   let encerradosSemReenvio = 0;
   try {
-    encerradosSemReenvio = await encerrarCanariosExpiradosSemReenvio(destinoTeste.phone);
+    const canarioAnterior = await lerCanarioAtual();
+    encerradosSemReenvio = await encerrarCanariosExpiradosSemReenvio(destinoTeste.phone, canarioAnterior);
     if (encerradosSemReenvio === 0) {
-      const canarioAnterior = await lerCanarioAtual();
       encerradosSemReenvio = await encerrarCanarioVinculadoSemReenvio(destinoTeste.phone, canarioAnterior);
     }
     const fila = await resumoFilaWhatsapp();
