@@ -13,11 +13,15 @@ const PHONE = "5598999990691";
 const TOKEN = "CBTEST-X38F";
 const idempotencyKey = `canary:${TOKEN}`;
 const text = `Teste técnico do ChefeBot: ${TOKEN}\nResponda exatamente: ${TOKEN}`;
+const createdAt = Date.now() - 60 * 60_000;
+const canarioAntigo = {
+  token: TOKEN, createdAt, expiresAt: createdAt + 10 * 60_000, state: "expired",
+};
 
 function job(extra: Record<string, unknown> = {}) {
   return {
     id: "job-antigo", kind: "text", phone: PHONE, text, conversationId: "hash-conversa", priority: "critica",
-    state: "ambiguous", createdAt: Date.now() - 60 * 60_000,
+    state: "ambiguous", createdAt,
     idempotencyKey, result: { motivo: "lease_expired_without_provider_confirmation" },
     ...extra,
   };
@@ -32,7 +36,7 @@ describe("conciliação estritamente limitada ao canário expirado", () => {
   });
 
   it("encerra uma única vez por script atômico sem chamar provider", async () => {
-    expect(await encerrarCanariosExpiradosSemReenvio(PHONE)).toBe(1);
+    expect(await encerrarCanariosExpiradosSemReenvio(PHONE, canarioAntigo)).toBe(1);
     expect(mock.eval).toHaveBeenCalledTimes(1);
     const [script, keys, args] = mock.eval.mock.calls[0];
     expect(script).toContain("expired_technical_canary_closed_without_resend");
@@ -43,6 +47,9 @@ describe("conciliação estritamente limitada ao canário expirado", () => {
 
   it.each([
     ["outro número", { phone: "5598999990000" }],
+    ["chave errada explícita", { idempotencyKey: "pedido:42" }],
+    ["fora da janela do teste", { createdAt: createdAt - 600000 }],
+    ["prioridade de cliente", { priority: "normal" }],
     ["job de cliente", { idempotencyKey: "pedido:42" }],
     ["conteúdo adulterado", { text: "Outro conteúdo" }],
     ["resultado de transporte incerto", { result: { motivo: "timeout" } }],
@@ -50,18 +57,39 @@ describe("conciliação estritamente limitada ao canário expirado", () => {
     ["já entregue", { state: "delivered" }],
   ])("não encerra %s", async (_name, change) => {
     mock.get.mockResolvedValue(job(change));
-    expect(await encerrarCanariosExpiradosSemReenvio(PHONE)).toBe(0);
+    expect(await encerrarCanariosExpiradosSemReenvio(PHONE, canarioAntigo)).toBe(0);
     expect(mock.eval).not.toHaveBeenCalled();
+  });
+
+  it("encerra o registro legado sem idempotencyKey quando todas as evidências coincidem", async () => {
+    mock.get.mockResolvedValue(job({ idempotencyKey: undefined }));
+    expect(await encerrarCanariosExpiradosSemReenvio(PHONE, canarioAntigo)).toBe(1);
+    expect(mock.eval).toHaveBeenCalledTimes(1);
+    const [script, , args] = mock.eval.mock.calls[0];
+    expect(script).toContain("job.idempotencyKey and job.idempotencyKey ~= ''");
+    expect(args[1]).toBe(idempotencyKey);
+    expect(args[7]).toBe(String(canarioAntigo.createdAt));
+    expect(args[8]).toBe(String(canarioAntigo.expiresAt));
+  });
+
+  it("não tenta conciliar sem registro independente do canário", async () => {
+    expect(await encerrarCanariosExpiradosSemReenvio(PHONE, null)).toBe(0);
+    expect(mock.zrange).not.toHaveBeenCalled();
+  });
+
+  it("não altera mensagens se o canário ainda está ativo", async () => {
+    expect(await encerrarCanariosExpiradosSemReenvio(PHONE, { ...canarioAntigo, state: "outbound_sent" })).toBe(0);
+    expect(mock.zrange).not.toHaveBeenCalled();
   });
 
   it("não alega encerramento se Redis negar a transição", async () => {
     mock.eval.mockResolvedValue(0);
-    expect(await encerrarCanariosExpiradosSemReenvio(PHONE)).toBe(0);
+    expect(await encerrarCanariosExpiradosSemReenvio(PHONE, canarioAntigo)).toBe(0);
   });
 
   it("não varre nem apaga entradas quando a quarentena está vazia", async () => {
     mock.zrange.mockResolvedValue([]);
-    expect(await encerrarCanariosExpiradosSemReenvio(PHONE)).toBe(0);
+    expect(await encerrarCanariosExpiradosSemReenvio(PHONE, canarioAntigo)).toBe(0);
     expect(mock.get).not.toHaveBeenCalled();
     expect(mock.eval).not.toHaveBeenCalled();
   });
