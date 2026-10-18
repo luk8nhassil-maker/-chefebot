@@ -46,7 +46,7 @@ vi.mock("@/app/api/whatsapp/route", () => ({
 import { redis } from "@/lib/redis";
 import { POST as worker } from "@/app/api/interno/whatsapp-inbox/processar/route";
 import { enfileirarInboundWhatsapp, resumoInboxWhatsapp } from "@/lib/whatsappInbox";
-const NATIVE_FETCH = globalThis.fetch.bind(globalThis.fetch);
+const NATIVE_FETCH = globalThis.fetch.bind(globalThis);
 
 function msg(id: string, phone: string) {
   return { phone, messageId: id, payload: {
@@ -87,7 +87,7 @@ beforeAll(() => {
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input :
       input instanceof URL ? input.href : input.url;
-    if (!url.startsWith("http://srh:80/")) {
+    if (!["http://srh:80", "http://srh:80/"].includes(url) && !url.startsWith("http://srh:80/")) {
       throw new Error("external_network_forbidden");
     }
     return NATIVE_FETCH(input, init);
