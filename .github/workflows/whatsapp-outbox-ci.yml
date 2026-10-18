@@ -8,6 +8,7 @@ on:
       - "src/lib/whatsappOutbox.ts"
       - "src/lib/whatsappOutbox.test.ts"
       - "src/lib/whatsappOutbox.redis.integration.test.ts"
+      - "vitest.outbox-redis.config.mts"
       - "src/lib/whatsappCanary.ts"
       - ".github/workflows/whatsapp-outbox-ci.yml"
 
@@ -66,7 +67,7 @@ jobs:
           (async () => { for (let i = 0; i < 30; i++) { try { if (await redis.ping() === 'PONG') process.exit(0); } catch {} await new Promise(r => setTimeout(r, 1000)); } process.exit(1); })();
           "
       - name: Teste de integracao com Lua real e Evolution falsa
-        run: npm test -- src/lib/whatsappOutbox.redis.integration.test.ts
+        run: ./node_modules/.bin/vitest run --config vitest.outbox-redis.config.mts
       - name: Lint do patch
         run: npm run lint -- src/lib/whatsappOutbox.ts src/lib/whatsappOutbox.test.ts src/lib/whatsappOutbox.redis.integration.test.ts src/lib/whatsappCanary.ts
       - name: Typecheck
