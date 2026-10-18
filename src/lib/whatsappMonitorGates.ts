@@ -2,7 +2,7 @@
 export type MonitorMetrics = {
   pending: number; inFlight: number; ambiguous: number; unresolved: number;
   queued: number | null; accepted: number | null; failed: number | null;
-  recovered: number | null; oldestWaitingMs: number | null;
+  recovered: number | null; closedCanaryNoRetry?: number | null; oldestWaitingMs: number | null;
 };
 export type CanaryEvidence = { state: string | null; outboundHttpStatus: number | null; outboxAccepted: boolean | null };
 export type MonitorEvidence = {

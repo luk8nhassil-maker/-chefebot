@@ -98,6 +98,7 @@ export async function lerMonitorWhatsapp() {
     accepted: nonNegative(counters?.delivered),
     failed: nonNegative(counters?.failed),
     recovered: nonNegative(counters?.recovered),
+    closedCanaryNoRetry: nonNegative(counters?.closedCanaryNoRetry),
     oldestWaitingMs,
   };
   const workerAt = nonNegative(counters?.lastWorkerOkAt);
