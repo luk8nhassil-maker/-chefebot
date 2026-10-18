@@ -1,0 +1,89 @@
+name: whatsapp-outbox-ci
+
+# Gate hermetico e barato para a fila WhatsApp. Nao chama Evolution, QStash,
+# Redis de producao ou rotas de envio reais; somente mocks Vitest.
+on:
+  pull_request:
+    paths:
+      - "src/lib/whatsappOutbox.ts"
+      - "src/lib/whatsappOutbox.test.ts"
+      - "src/lib/whatsappOutbox.redis.integration.test.ts"
+      - "vitest.outbox-redis.config.mts"
+      - "src/lib/whatsappCanary.ts"
+      - "src/lib/whatsappCanary.test.ts"
+      - ".github/workflows/whatsapp-outbox-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-outbox-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    container: node:20
+    services:
+      redis:
+        image: redis:6.2.14
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+      srh:
+        image: hiett/serverless-redis-http:0.0.10
+        env:
+          SRH_MODE: env
+          SRH_CONNECTION_STRING: redis://redis:6379
+          SRH_TOKEN: "whatsapp-e2e-srh-only-local"
+    env:
+      KV_REST_API_URL: "http://srh:80"
+      KV_REST_API_TOKEN: "whatsapp-e2e-srh-only-local"
+      UPSTASH_DISABLE_TELEMETRY: "1"
+      CHEFEBOT_OUTBOX_REDIS_INTEGRATION: "1"
+      CHEFEBOT_E2E: "1"
+      CHEFEBOT_E2E_ALLOWED_HOSTS: "srh"
+    steps:
+      - name: Checkout do HEAD exato do PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Testes focados da fila WhatsApp
+        run: >-
+          npm test --
+          src/lib/whatsappOutbox.test.ts
+          src/lib/whatsappCanary.test.ts
+          src/lib/whatsappOutbox.qstash.test.ts
+          src/lib/whatsappMensagem.test.ts
+          src/lib/whatsappMonitorGates.test.ts
+          src/lib/whatsappMonitoramento.test.ts
+          src/app/api/dev/whatsapp/canary/route.test.ts
+      - name: Aguardar Redis descartavel via SRH
+        run: |
+          node -e "
+          const { Redis } = require('@upstash/redis');
+          const redis = new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+          (async () => { for (let i = 0; i < 30; i++) { try { if (await redis.ping() === 'PONG') process.exit(0); } catch {} await new Promise(r => setTimeout(r, 1000)); } process.exit(1); })();
+          "
+      - name: Teste de integracao com Lua real e Evolution falsa
+        run: ./node_modules/.bin/vitest run --config vitest.outbox-redis.config.mts
+      - name: Lint do patch
+        run: npm run lint -- src/lib/whatsappOutbox.ts src/lib/whatsappOutbox.test.ts src/lib/whatsappOutbox.redis.integration.test.ts src/lib/whatsappCanary.ts src/lib/whatsappCanary.test.ts
+      - name: Typecheck
+        run: ./node_modules/.bin/tsc --noEmit
+      - name: Suite completa de regressao
+        # A integração com Redis real já rodou no passo anterior, com config
+        # isolada; a suíte normal mantém a proteção global de rede.
+        env:
+          CHEFEBOT_OUTBOX_REDIS_INTEGRATION: "0"
+        run: npm test

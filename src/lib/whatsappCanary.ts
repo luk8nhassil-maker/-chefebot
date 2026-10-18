@@ -334,6 +334,7 @@ async function consolidarEvidenciaOutbound(
       outboundAttempts: recordEnvio.outboundAttempts,
       outboundHttpStatus: recordEnvio.outboundHttpStatus,
       outboundMessageIdMasked: recordEnvio.outboundMessageIdMasked,
+      outboundOutboxJobId: recordEnvio.outboundOutboxJobId,
       outboundError: recordEnvio.outboundError,
     };
     return consolidado;
@@ -410,7 +411,24 @@ export async function iniciarCanario(): Promise<IniciarCanarioResultado> {
   await salvarRegistro(record);
 
   const texto = montarMensagemInicio(token);
-  const envio = await enviarTextoWhatsApp(destino.phone, texto);
+  // Uma tentativa única por token fica rastreável mesmo se a função cair depois
+  // de gravar no Redis e antes de devolver o jobId.
+  const dedupeKey = `canary:${token}`;
+  let jobIdEmFalha: string | undefined;
+  // A fila pode reservar um job e falhar antes de devolver a resposta.
+  // Não repita o envio: persista a incerteza e deixe o diagnóstico visível.
+  let envio: Awaited<ReturnType<typeof enviarTextoWhatsApp>>;
+  try {
+    envio = await enviarTextoWhatsApp(destino.phone, texto, { idempotencyKey: dedupeKey });
+  } catch (error) {
+    // Leitura apenas; nenhum retry nem tentativa adicional de envio.
+    try {
+      const storedId = await redis.get<string>(`whatsapp:outbox:dedupe:${dedupeKey}`);
+      if (typeof storedId === "string" && storedId.length > 0) jobIdEmFalha = storedId;
+    } catch { /* falha de Redis não pode induzir um reenvio */ }
+    await log("erro", "Canário WhatsApp: transporte inconclusivo", sanitizeErrorMessage(error)).catch(() => {});
+    envio = { ok: false, motivo: "transport_exception_unconfirmed", latenciaMs: Date.now() - agora, tentativas: 0 };
+  }
 
   const outboundAt = Date.now();
   const revisaoAntesEnvio = obterRevisao(record);
@@ -421,7 +439,7 @@ export async function iniciarCanario(): Promise<IniciarCanarioResultado> {
     outboundAttempts: envio.tentativas,
     outboundHttpStatus: envio.statusHttp,
     outboundMessageIdMasked: envio.messageIdMascarado || undefined,
-    outboundOutboxJobId: envio.jobId,
+    outboundOutboxJobId: envio.jobId ?? jobIdEmFalha,
     outboundError: envio.motivo,
   };
   const consolidado = await consolidarEvidenciaOutbound(recordEnvio, revisaoAntesEnvio);

@@ -299,7 +299,18 @@ async function claimProximo(): Promise<JobOutboxWhatsapp | null> {
   const raw = await redis.eval(CLAIM_LUA,
     [CHAVE_LEASES, chaveFila("critica"), chaveFila("normal"), chaveFila("promocional"), CHAVE_VELOCIDADE, CHAVE_CONVERSAS_POR_JOB, CHAVE_INCONSISTENCIAS],
     [String(now), String(now + LEASE_MS), String(limiteGlobal()), randomUUID(), `${PREFIX}job:`, `${PREFIX}conversation:`, `${PREFIX}conversation-queue:`, String(LEASE_MS), String(TTL_SEGUNDOS), String(limiteVelocidadePorMinuto())]);
-  return raw ? JSON.parse(String(raw)) as JobOutboxWhatsapp : null;
+  if (raw == null) return null;
+  // O SDK da Upstash pode devolver o JSON do Lua já desserializado.
+  // JSON.parse(String(objeto)) causava HTTP 500 depois de reservar o lease,
+  // antes de qualquer envio à Evolution.
+  const parsed: unknown = typeof raw === "string" ? JSON.parse(raw) : raw;
+  if (
+    !parsed || typeof parsed !== "object" || Array.isArray(parsed) ||
+    typeof (parsed as JobOutboxWhatsapp).id !== "string" ||
+    (parsed as JobOutboxWhatsapp).state !== "leased" ||
+    typeof (parsed as JobOutboxWhatsapp).leaseToken !== "string"
+  ) throw new Error("outbox_claim_invalid_response");
+  return parsed as JobOutboxWhatsapp;
 }
 
 async function finalizar(job: JobOutboxWhatsapp, estado: "delivered" | "failed" | "ambiguous" | "suppressed" | "expired", result: ResultadoTransporteWhatsapp | { motivo: string }): Promise<boolean> {

@@ -127,6 +127,28 @@ describe("5. outbound confirmado", () => {
   });
 });
 
+describe("6A. falha inesperada na outbox sem reenvio", () => {
+  it("guarda resultado inconclusivo em vez de deixar teste preso em criado", async () => {
+    // Em NODE_ENV=test o transporte antigo tem fallback de mocks; a excecao
+    // precisa ser reproduzida na mesma configuracao de producao.
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("WHATSAPP_OUTBOX_ROLLOUT", "canary");
+    redisMock.eval.mockImplementationOnce(async (_script: string, keys: string[]) => {
+      // Reproduz queda depois que a dedupe do job foi gravada, sem chamar Evolution.
+      store.set(keys[0], "job-reservado-no-redis");
+      throw new Error("falha_transitoria_de_claim_simulada");
+    });
+    const r = await iniciarCanario();
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.record.state).toBe("outbound_failed");
+    expect(r.record.outboundError).toBe("transport_exception_unconfirmed");
+    expect(r.record.outboundOutboxJobId).toBe("job-reservado-no-redis");
+    expect((await lerCanarioAtual())?.state).toBe("outbound_failed");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
 describe("6. outbound HTTP failure", () => {
   it("marca outbound_failed sem lançar", async () => {
     vi.mocked(fetch).mockResolvedValue({ ok: false, status: 500, json: async () => ({}) } as Response);
