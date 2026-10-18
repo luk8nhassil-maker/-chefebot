@@ -1,9 +1,29 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // Integração opt-in com Redis/SRH descartáveis no GitHub Actions.
 // Nenhum dado, token ou serviço de produção entra neste teste.
 const enabled = process.env.CHEFEBOT_OUTBOX_REDIS_INTEGRATION === "1";
 const PHONE = "5511900000666";
+const nativeFetch = globalThis.fetch.bind(globalThis);
+let evolutionCalls = 0;
+
+beforeEach(() => {
+  // Falhe fechado se alguem apontar acidentalmente o teste para a producao.
+  if (process.env.KV_REST_API_URL !== "http://srh:80" ||
+      process.env.KV_REST_API_TOKEN !== "whatsapp-e2e-srh-only-local") {
+    throw new Error("isolated_redis_required");
+  }
+  evolutionCalls = 0;
+  vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (url.startsWith("http://srh:80/")) return nativeFetch(input, init);
+    if (url.startsWith("https://evolution.invalid/message/sendText/")) {
+      evolutionCalls++;
+      return { ok: true, status: 200, json: async () => ({ key: { id: "fake-provider-ack" } }) } as Response;
+    }
+    throw new Error("external_request_blocked_in_hermetic_test");
+  });
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -42,14 +62,6 @@ describe.skipIf(!enabled)("outbox + canário com Redis real isolado e Evolution 
     vi.stubEnv("EVOLUTION_API_KEY", "fake-local-not-a-secret");
     vi.stubEnv("WHATSAPP_CANARY_PHONE", PHONE);
     vi.stubEnv("WHATSAPP_OUTBOX_ROLLOUT", "canary");
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      if (!url.startsWith("https://evolution.invalid/message/sendText/")) {
-        throw new Error("external_request_blocked_in_hermetic_test");
-      }
-      return { ok: true, status: 200, json: async () => ({ key: { id: "fake-provider-ack" } }) } as Response;
-    });
-    vi.stubGlobal("fetch", fetchMock);
     const { iniciarCanario, processarPossivelInboundCanario, lerCanarioAtual } = await import("./whatsappCanary");
     const { obterJobWhatsapp } = await import("./whatsappOutbox");
 
@@ -64,6 +76,6 @@ describe.skipIf(!enabled)("outbox + canário com Redis real isolado e Evolution 
     const done = await lerCanarioAtual();
     expect(done?.state).toBe("roundtrip_ok");
     expect(done?.outboundOutboxJobId).toBe(started.record.outboundOutboxJobId);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(evolutionCalls).toBe(2);
   });
 });
