@@ -106,6 +106,47 @@ export async function GET(req: NextRequest) {
     ? await redis.get<boolean>(`manual:${destino.phone}`).catch(() => null)
     : null;
 
+  // Diagnóstico restrito, só leitura. Não retorna IDs, telefone, texto,
+  // token, conteúdo de pedido nem referência reversível.
+  // Mostra por que um canário antigo NÃO pôde ser reconciliado com segurança.
+  const quarantine: {
+    total: number;
+    lastCanaryHasJobId: boolean;
+    items: Array<{
+      hasJob: boolean; state: string; leaseRecovery: boolean;
+      linkedToLastCanary: boolean; sameAuthorizedPhone: boolean;
+      exactCanaryText: boolean; canaryDedupe: boolean;
+      withinLastTestWindow: boolean; olderThan20Min: boolean;
+    }>;
+  } = { total: 0, lastCanaryHasJobId: !!canary?.outboundOutboxJobId, items: [] };
+  try {
+    const ids = await redis.zrange<string[]>("whatsapp:outbox:reconciliation", 0, 9);
+    quarantine.total = Number(await redis.zcard("whatsapp:outbox:reconciliation"));
+    for (const id of ids) {
+      if (typeof id !== "string") continue;
+      const job = await redis.get<import("@/lib/whatsappOutbox").JobOutboxWhatsapp>(`whatsapp:outbox:job:${id}`);
+      const validTime = !!job && !!canary && job.createdAt >= canary.createdAt - 30_000 &&
+        job.createdAt <= canary.expiresAt;
+      const expected = canary ? `Teste técnico do ChefeBot: ${canary.token}\nResponda exatamente: ${canary.token}` : "";
+      quarantine.items.push({
+        hasJob: !!job,
+        state: job?.state ?? "missing",
+        leaseRecovery: job?.result?.motivo === "lease_expired_without_provider_confirmation",
+        linkedToLastCanary: !!canary?.outboundOutboxJobId && id === canary.outboundOutboxJobId,
+        sameAuthorizedPhone: !!job && destino.configured && job.phone === destino.phone,
+        exactCanaryText: !!job && !!canary && job.text === expected,
+        canaryDedupe: !!job && !!canary && job.idempotencyKey === `canary:${canary.token}`,
+        withinLastTestWindow: validTime,
+        olderThan20Min: !!job && Date.now() - job.createdAt >= 20 * 60000,
+      });
+    }
+  } catch {
+    // Dados desconhecidos não devem ser confundidos com fila vazia.
+    quarantine.total = -1;
+    quarantine.items = [];
+  }
+
+
   let connectionState: { erro?: string; estado?: unknown } = { erro: "provider_not_configured" };
   let webhookConfigured: { erro?: string; urlConfigurada?: string; apontaParaProducao?: boolean; eventosOk?: boolean } = {
     erro: "provider_not_configured",
@@ -144,6 +185,7 @@ export async function GET(req: NextRequest) {
     canaryPhoneConfigured: destino.configured,
     canaryPhoneMascarado: destino.configured ? maskPhone(destino.phone) : null,
     manualConversation: manualConversation === true,
+    quarantine,
     canary,
   });
 }
