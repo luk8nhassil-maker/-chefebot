@@ -47,6 +47,7 @@ import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import { registrarContatoPesquisaConfirmado } from "@/lib/pesquisaPreferenciaContatosRedis";
 import { consumirRespostaPesquisaPendente } from "@/lib/pesquisaPreferenciaRespostaRedis";
 import { consumirOptOutConviteRankingWhatsapp } from "@/lib/rankingConviteWhatsapp";
+import { adquirirMutexConversaWhatsapp, liberarMutexConversaWhatsapp, type MutexConversaWhatsapp } from "@/lib/whatsappInboundMutex";
 
 export const maxDuration = 30;
 
@@ -1036,6 +1037,7 @@ export async function POST(req: NextRequest) {
   // claim de idempotência quando o processamento falha depois da gravação
   // (ver comentário na chave `msg_processed:` mais abaixo).
   let msgId: string | undefined;
+  let mutexConversa: MutexConversaWhatsapp | null = null;
   try {
     const body = await req.json();
 
@@ -1173,6 +1175,20 @@ export async function POST(req: NextRequest) {
         );
       }
       console.error("[ChefeBot] Erro ao avaliar canário (sanitizado):", sanitizeErrorMessage(err));
+    }
+
+    // Sob rajadas, só uma mensagem por cliente pode ler/alterar a sessão
+    // por vez. Conversas de clientes diferentes permanecem paralelas.
+    // Se o processamento anterior não terminar a tempo, devolvemos 503
+    // (sem claim de msgId) em vez de afirmar que a mensagem foi processada.
+    try {
+      mutexConversa = await adquirirMutexConversaWhatsapp(phone);
+    } catch {
+      console.warn("[whatsapp] conversa ocupada ou indisponível; processamento não confirmado");
+      return NextResponse.json(
+        { ok: false, retry: true },
+        { status: 503, headers: { "Retry-After": "3" } },
+      );
     }
 
     // Idempotência global: ignora mensagens já processadas (Evolution pode reenviar webhooks).
@@ -1989,5 +2005,7 @@ export async function POST(req: NextRequest) {
       await redis.del(`msg_processed:${msgId}`).catch(() => {});
     }
     return NextResponse.json({ ok: true });
+  } finally {
+    if (mutexConversa) await liberarMutexConversaWhatsapp(mutexConversa);
   }
 }
