@@ -412,6 +412,70 @@ redis.pcall('HINCRBY', KEYS[6], 'closedCanaryNoRetry', 1)
 return 1
 `;
 
+
+/**
+ * Rota de contingência para um canário LEGADO cujo registro da última execução
+ * guarda o jobId exato. Não tenta identificar jobs apenas por horários ou por
+ * falta de recebimento no telefone: exige vínculo persistido e prova atômica.
+ */
+const ENCERRAR_CANARIO_VINCULADO_LUA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw or not redis.call('ZSCORE', KEYS[2], ARGV[1]) then return 0 end
+local job = cjson.decode(raw)
+if job.id ~= ARGV[1] or job.state ~= 'ambiguous' then return 0 end
+if job.phone ~= ARGV[2] or job.kind ~= 'text' or job.priority ~= 'critica' then return 0 end
+if job.conversationId ~= ARGV[9] then return 0 end
+if not job.result or job.result.motivo ~= 'lease_expired_without_provider_confirmation' then return 0 end
+local created = tonumber(job.createdAt) or 0
+if created < tonumber(ARGV[5]) - 30000 or created > tonumber(ARGV[6]) then return 0 end
+if created > tonumber(ARGV[7]) - 1200000 then return 0 end
+if job.text ~= ARGV[3] and job.idempotencyKey ~= ARGV[4] then return 0 end
+job.state = 'suppressed'
+job.updatedAt = tonumber(ARGV[7])
+job.result = { motivo = 'expired_technical_canary_closed_without_resend' }
+redis.call('SET', KEYS[1], cjson.encode(job), 'EX', tonumber(ARGV[8]))
+redis.call('ZREM', KEYS[2], job.id)
+if redis.call('GET', KEYS[3]) == job.id then redis.call('DEL', KEYS[3]) end
+redis.call('ZREM', KEYS[4], job.id)
+redis.call('HDEL', KEYS[5], job.id)
+redis.pcall('HINCRBY', KEYS[6], 'closedCanaryNoRetry', 1)
+return 1
+`;
+
+export type VinculoCanarioExpirado = {
+  token: string;
+  outboundOutboxJobId?: string;
+  createdAt: number;
+  expiresAt: number;
+  state: string;
+};
+
+export async function encerrarCanarioVinculadoSemReenvio(
+  telefoneAutorizado: string, canario: VinculoCanarioExpirado | null
+): Promise<number> {
+  const agora = Date.now();
+  if (!canario || !canario.outboundOutboxJobId || canario.state !== 'expired' ||
+    !/^CBTEST-[A-Z0-9]{4}$/.test(canario.token) ||
+    !Number.isFinite(canario.createdAt) || !Number.isFinite(canario.expiresAt) ||
+    canario.expiresAt > agora || canario.createdAt > agora - 20 * 60000) return 0;
+  const job = await obterJobWhatsapp(canario.outboundOutboxJobId);
+  if (!job || job.id !== canario.outboundOutboxJobId || job.state !== 'ambiguous' ||
+    job.phone !== telefoneAutorizado || job.kind !== 'text' ||
+    job.priority !== 'critica' ||
+    job.result?.motivo !== 'lease_expired_without_provider_confirmation' ||
+    job.createdAt < canario.createdAt - 30000 || job.createdAt > canario.expiresAt ||
+    job.createdAt > agora - 20 * 60000) return 0;
+  const esperado = `Teste técnico do ChefeBot: ${canario.token}\nResponda exatamente: ${canario.token}`;
+  const dedupe = `canary:${canario.token}`;
+  if (job.text !== esperado && job.idempotencyKey !== dedupe) return 0;
+  const changed = await redis.eval(ENCERRAR_CANARIO_VINCULADO_LUA,
+    [chaveJob(job.id), CHAVE_RECONCILIACAO, chaveConversa(job.conversationId),
+      chaveSequenciaConversa(job.conversationId), CHAVE_CONVERSAS_POR_JOB, CHAVE_METRICAS],
+    [job.id, telefoneAutorizado, esperado, dedupe, String(canario.createdAt),
+      String(canario.expiresAt), String(agora), String(TTL_SEGUNDOS), job.conversationId]);
+  return Number(changed) === 1 ? 1 : 0;
+}
+
 export async function encerrarCanariosExpiradosSemReenvio(telefoneAutorizado: string): Promise<number> {
   const ids = await redis.zrange<string[]>(CHAVE_RECONCILIACAO, 0, 99);
   let encerrados = 0;
