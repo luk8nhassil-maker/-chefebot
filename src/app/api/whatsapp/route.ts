@@ -1228,14 +1228,16 @@ export async function POST(req: NextRequest) {
     // por vez. Conversas de clientes diferentes permanecem paralelas.
     // Se o processamento anterior não terminar a tempo, devolvemos 503
     // (sem claim de msgId) em vez de afirmar que a mensagem foi processada.
-    try {
-      mutexConversa = await adquirirMutexConversaWhatsapp(phone);
-    } catch {
-      console.warn("[whatsapp] conversa ocupada ou indisponível; processamento não confirmado");
-      return NextResponse.json(
-        { ok: false, retry: true },
-        { status: 503, headers: { "Retry-After": "3" } },
-      );
+    // Não introduzir 503 no caminho legado! O retry da Evolution Node
+    // não está comprovado. Mutex somente quando o evento JÁ FOI salvo na
+    // inbox, e o worker pode preservá-lo em quarentena caso haja falha.
+    if (executandoWorkerInbox()) {
+      try {
+        mutexConversa = await adquirirMutexConversaWhatsapp(phone);
+      } catch {
+        console.warn("[whatsapp] worker_inbox_conversa_ocupada");
+        return NextResponse.json({ ok: false }, { status: 503 });
+      }
     }
 
     // Idempotência global: ignora mensagens já processadas (Evolution pode reenviar webhooks).
