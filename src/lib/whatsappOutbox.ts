@@ -377,6 +377,66 @@ export async function obterJobWhatsapp(id: string): Promise<JobOutboxWhatsapp | 
   return await redis.get<JobOutboxWhatsapp>(chaveJob(id));
 }
 
+
+/**
+ * Encerra APENAS canários antigos com lease vencido sem confirmação.
+ *
+ * Uma execução anterior podia falhar no parse do retorno Redis depois de
+ * reservar o lease e ANTES de chamar a Evolution. Seu job ficava ambíguo.
+ * Nunca inferir que foi entregue; abandonar o teste sem reenvio. Não tocar
+ * em jobs de clientes ou em outros tipos de resultado incerto.
+ *
+ * Chamado apenas por POST autenticado de início de novo teste. Leituras GET
+ * do monitor permanecem estritamente sem efeitos colaterais.
+ */
+const ENCERRAR_CANARIO_EXPIRADO_LUA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+if not redis.call('ZSCORE', KEYS[2], ARGV[1]) then return 0 end
+local job = cjson.decode(raw)
+if job.id ~= ARGV[1] or job.state ~= 'ambiguous' then return 0 end
+if job.idempotencyKey ~= ARGV[2] or job.phone ~= ARGV[3] then return 0 end
+if job.kind ~= 'text' or job.text ~= ARGV[4] then return 0 end
+if job.conversationId ~= ARGV[7] then return 0 end
+if not job.result or job.result.motivo ~= 'lease_expired_without_provider_confirmation' then return 0 end
+if (tonumber(job.createdAt) or 0) > tonumber(ARGV[5]) - 1200000 then return 0 end
+job.state = 'suppressed'
+job.updatedAt = tonumber(ARGV[5])
+job.result = { motivo = 'expired_technical_canary_closed_without_resend' }
+redis.call('SET', KEYS[1], cjson.encode(job), 'EX', tonumber(ARGV[6]))
+redis.call('ZREM', KEYS[2], job.id)
+if redis.call('GET', KEYS[3]) == job.id then redis.call('DEL', KEYS[3]) end
+redis.call('ZREM', KEYS[4], job.id)
+redis.call('HDEL', KEYS[5], job.id)
+redis.pcall('HINCRBY', KEYS[6], 'closedCanaryNoRetry', 1)
+return 1
+`;
+
+export async function encerrarCanariosExpiradosSemReenvio(telefoneAutorizado: string): Promise<number> {
+  const ids = await redis.zrange<string[]>(CHAVE_RECONCILIACAO, 0, 99);
+  let encerrados = 0;
+  const agora = Date.now();
+  for (const id of ids) {
+    if (typeof id !== 'string') continue;
+    const job = await obterJobWhatsapp(id);
+    if (!job || job.kind !== 'text' || job.phone !== telefoneAutorizado ||
+      job.state !== 'ambiguous' || job.result?.motivo !== 'lease_expired_without_provider_confirmation' ||
+      agora - job.createdAt < 20 * 60_000) continue;
+    const token = job.idempotencyKey?.startsWith('canary:')
+      ? job.idempotencyKey.slice('canary:'.length) : '';
+    if (!/^CBTEST-[A-Z0-9]{4}$/.test(token)) continue;
+    const textoEsperado = `Teste técnico do ChefeBot: ${token}\nResponda exatamente: ${token}`;
+    if (job.text !== textoEsperado) continue;
+    const changed = await redis.eval(ENCERRAR_CANARIO_EXPIRADO_LUA,
+      [chaveJob(id), CHAVE_RECONCILIACAO, chaveConversa(job.conversationId),
+        chaveSequenciaConversa(job.conversationId), CHAVE_CONVERSAS_POR_JOB, CHAVE_METRICAS],
+      [id, job.idempotencyKey!, telefoneAutorizado, textoEsperado, String(agora),
+        String(TTL_SEGUNDOS), job.conversationId]);
+    if (Number(changed) === 1) encerrados++;
+  }
+  return encerrados;
+}
+
 export async function resumoFilaWhatsapp(): Promise<{ pending: number; inFlight: number; ambiguous: number; unresolved: number }> {
   const [critica, normal, promocional, inFlight, ambiguous, unresolved] = await Promise.all([
     redis.zcard(chaveFila("critica")), redis.zcard(chaveFila("normal")), redis.zcard(chaveFila("promocional")), redis.zcard(CHAVE_LEASES),
