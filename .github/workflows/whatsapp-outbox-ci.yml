@@ -10,6 +10,7 @@ on:
       - "src/lib/whatsappOutbox.redis.integration.test.ts"
       - "vitest.outbox-redis.config.mts"
       - "src/lib/whatsappCanary.ts"
+      - "src/lib/whatsappCanary.test.ts"
       - ".github/workflows/whatsapp-outbox-ci.yml"
 
 permissions:
@@ -58,7 +59,15 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
       - name: Testes focados da fila WhatsApp
-        run: npm test -- src/lib/whatsappOutbox.test.ts
+        run: >-
+          npm test --
+          src/lib/whatsappOutbox.test.ts
+          src/lib/whatsappCanary.test.ts
+          src/lib/whatsappOutbox.qstash.test.ts
+          src/lib/whatsappMensagem.test.ts
+          src/lib/whatsappMonitorGates.test.ts
+          src/lib/whatsappMonitoramento.test.ts
+          src/app/api/dev/whatsapp/canary/route.test.ts
       - name: Aguardar Redis descartavel via SRH
         run: |
           node -e "
@@ -69,6 +78,8 @@ jobs:
       - name: Teste de integracao com Lua real e Evolution falsa
         run: ./node_modules/.bin/vitest run --config vitest.outbox-redis.config.mts
       - name: Lint do patch
-        run: npm run lint -- src/lib/whatsappOutbox.ts src/lib/whatsappOutbox.test.ts src/lib/whatsappOutbox.redis.integration.test.ts src/lib/whatsappCanary.ts
+        run: npm run lint -- src/lib/whatsappOutbox.ts src/lib/whatsappOutbox.test.ts src/lib/whatsappOutbox.redis.integration.test.ts src/lib/whatsappCanary.ts src/lib/whatsappCanary.test.ts
       - name: Typecheck
         run: ./node_modules/.bin/tsc --noEmit
+      - name: Suite completa de regressao
+        run: npm test
