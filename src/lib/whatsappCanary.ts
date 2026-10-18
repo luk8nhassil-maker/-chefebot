@@ -411,7 +411,15 @@ export async function iniciarCanario(): Promise<IniciarCanarioResultado> {
   await salvarRegistro(record);
 
   const texto = montarMensagemInicio(token);
-  const envio = await enviarTextoWhatsApp(destino.phone, texto);
+  // A fila pode reservar um job e falhar antes de devolver a resposta.
+  // Não repita o envio: persista a incerteza e deixe o diagnóstico visível.
+  let envio: Awaited<ReturnType<typeof enviarTextoWhatsApp>>;
+  try {
+    envio = await enviarTextoWhatsApp(destino.phone, texto);
+  } catch (error) {
+    await log("erro", "Canário WhatsApp: transporte inconclusivo", sanitizeErrorMessage(error)).catch(() => {});
+    envio = { ok: false, motivo: "transport_exception_unconfirmed", latenciaMs: Date.now() - agora, tentativas: 0 };
+  }
 
   const outboundAt = Date.now();
   const revisaoAntesEnvio = obterRevisao(record);
