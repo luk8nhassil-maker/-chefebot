@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
 import { redis } from "@/lib/redis";
-import { encerrarCanariosExpiradosSemReenvio, resumoFilaWhatsapp } from "@/lib/whatsappOutbox";
+import { encerrarCanarioVinculadoSemReenvio, encerrarCanariosExpiradosSemReenvio, resumoFilaWhatsapp } from "@/lib/whatsappOutbox";
 import { lerDiagnosticoWhatsapp } from "@/lib/whatsappDiag";
 import { iniciarCanario, lerCanarioAtual, obterTelefoneCanario } from "@/lib/whatsappCanary";
 import { maskPhone } from "@/lib/sanitizeLog";
@@ -53,13 +53,21 @@ export async function POST(req: NextRequest) {
   let encerradosSemReenvio = 0;
   try {
     encerradosSemReenvio = await encerrarCanariosExpiradosSemReenvio(destinoTeste.phone);
+    if (encerradosSemReenvio === 0) {
+      const canarioAnterior = await lerCanarioAtual();
+      encerradosSemReenvio = await encerrarCanarioVinculadoSemReenvio(destinoTeste.phone, canarioAnterior);
+    }
     const fila = await resumoFilaWhatsapp();
     if (fila.ambiguous > 0 || fila.unresolved > 0) {
+      console.warn("[whatsapp-canary] quarentena bloqueia novo teste", {
+        ambiguous: fila.ambiguous, unresolved: fila.unresolved, closedCanary: encerradosSemReenvio,
+      });
       return NextResponse.json({
         ok: false,
-        error: "Há outra mensagem com resultado incerto. Teste bloqueado por segurança.",
+        error: "A fila ainda contém um resultado incerto. Nenhuma mensagem foi enviada. Reenvio proibido até reconciliação.",
       }, { status: 409 });
     }
+    console.info("[whatsapp-canary] fila liberada para teste restrito", { closedCanary: encerradosSemReenvio });
   } catch {
     return NextResponse.json({ ok: false, error: "Não foi possível conferir a quarentena; nenhum teste iniciado." }, { status: 503 });
   }
