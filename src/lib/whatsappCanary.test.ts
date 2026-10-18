@@ -127,6 +127,20 @@ describe("5. outbound confirmado", () => {
   });
 });
 
+describe("6A. falha inesperada na outbox sem reenvio", () => {
+  it("guarda resultado inconclusivo em vez de deixar teste preso em criado", async () => {
+    vi.stubEnv("WHATSAPP_OUTBOX_ROLLOUT", "canary");
+    redisMock.eval.mockRejectedValueOnce(new Error("falha_transitoria_de_claim_simulada"));
+    const r = await iniciarCanario();
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.record.state).toBe("outbound_failed");
+    expect(r.record.outboundError).toBe("transport_exception_unconfirmed");
+    expect((await lerCanarioAtual())?.state).toBe("outbound_failed");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
 describe("6. outbound HTTP failure", () => {
   it("marca outbound_failed sem lançar", async () => {
     vi.mocked(fetch).mockResolvedValue({ ok: false, status: 500, json: async () => ({}) } as Response);
