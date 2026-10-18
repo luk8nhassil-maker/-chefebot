@@ -334,6 +334,7 @@ async function consolidarEvidenciaOutbound(
       outboundAttempts: recordEnvio.outboundAttempts,
       outboundHttpStatus: recordEnvio.outboundHttpStatus,
       outboundMessageIdMasked: recordEnvio.outboundMessageIdMasked,
+      outboundOutboxJobId: recordEnvio.outboundOutboxJobId,
       outboundError: recordEnvio.outboundError,
     };
     return consolidado;
