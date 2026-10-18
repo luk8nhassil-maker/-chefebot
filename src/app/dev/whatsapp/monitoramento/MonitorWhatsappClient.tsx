@@ -10,7 +10,7 @@ type Snapshot = {
   metrics: null | {
     pending: number; inFlight: number; ambiguous: number; unresolved: number
     queued: number | null; accepted: number | null; failed: number | null
-    recovered: number | null; oldestWaitingMs: number | null
+    recovered: number | null; closedCanaryNoRetry?: number | null; oldestWaitingMs: number | null
   }
   canary: { state: string | null; testedAt: number | null }
   incidents: Incident[]
@@ -125,6 +125,7 @@ export default function MonitorWhatsappClient() {
             <Metric label="Enfileiradas" value={count(m?.queued)} detail="Desde o início da medição" />
             <Metric label="Em processamento" value={count(m?.inFlight)} />
             <Metric label="Leases recuperados" value={count(m?.recovered)} detail="Movidos para revisão; sem reenvio" />
+            <Metric label="Testes antigos encerrados" value={count(m?.closedCanaryNoRetry)} detail="Encerrados sem reenvio, não comprovados como entregues" />
             <Metric label="Maior espera observada" value={duration(m?.oldestWaitingMs)} detail="Amostra por prioridade" />
           </section>
         </details>
