@@ -137,7 +137,15 @@ export default function WhatsappDiagPage() {
           setAvisoInicio(body?.error ?? `HTTP ${r.status}`)
           return
         }
-        setAvisoInicio('Teste iniciado — verifique o WhatsApp do número autorizado e clique em "Atualizar" após responder.')
+        if (body?.canary?.state === 'outbound_failed') {
+          setErro('O envio NÃO foi confirmado pela Evolution. Motivo: ' + String(body?.canary?.outboundError ?? 'transporte sem confirmação') + '. Não repita o teste.')
+          return
+        }
+        if (body?.canary?.state !== 'outbound_sent' && body?.canary?.state !== 'roundtrip_ok') {
+          setErro('O teste não comprovou envio. Estado: ' + String(body?.canary?.state ?? 'desconhecido') + '. Não repita o botão.')
+          return
+        }
+        setAvisoInicio('A Evolution aceitou o envio; isso ainda não comprova recebimento no aparelho. Confira uma única vez o número autorizado e responda com o código se a mensagem chegar.')
       })
       .catch((e) => setErro(e instanceof Error ? e.message : 'Erro desconhecido'))
       .finally(() => {
