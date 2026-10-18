@@ -129,6 +129,9 @@ describe("5. outbound confirmado", () => {
 
 describe("6A. falha inesperada na outbox sem reenvio", () => {
   it("guarda resultado inconclusivo em vez de deixar teste preso em criado", async () => {
+    // Em NODE_ENV=test o transporte antigo tem fallback de mocks; a excecao
+    // precisa ser reproduzida na mesma configuracao de producao.
+    vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("WHATSAPP_OUTBOX_ROLLOUT", "canary");
     redisMock.eval.mockRejectedValueOnce(new Error("falha_transitoria_de_claim_simulada"));
     const r = await iniciarCanario();
