@@ -93,8 +93,8 @@ vi.mock("./redis", () => ({
     eval: vi.fn(async (script: string, keys: string[], args: string[]) => {
       if (script.includes("local previous = redis.call")) return state.enqueue(keys, args);
       if (script.includes("local convs = redis.call")) return state.claim(args);
-      if (script.includes("local raw = redis.call") && script.includes("job.leaseToken = nil")) return state.finish(keys, args);
       if (script.includes("local ids = redis.call")) return state.recover(args);
+      if (script.includes("local raw = redis.call") && script.includes("job.leaseToken = nil")) return state.finish(keys, args);
       throw new Error("script_desconhecido");
     }),
     get: vi.fn(async () => state.getPending()),
