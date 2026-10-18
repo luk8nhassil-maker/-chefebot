@@ -82,7 +82,8 @@ beforeAll(async () => {
   vi.stubGlobal("fetch", async (request: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof request === "string" ? request :
       request instanceof URL ? request.href : request.url;
-    if (!url.startsWith("http://srh:80/") && !url.startsWith("http://127.0.0.1:")) {
+    if (!["http://srh:80", "http://srh:80/"].includes(url) &&
+        !url.startsWith("http://srh:80/") && !url.startsWith("http://127.0.0.1:")) {
       throw new Error("external_network_forbidden_in_load_test");
     }
     return NATIVE_FETCH(request, init);
