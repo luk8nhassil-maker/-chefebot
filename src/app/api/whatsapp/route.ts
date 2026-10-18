@@ -47,6 +47,11 @@ import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import { registrarContatoPesquisaConfirmado } from "@/lib/pesquisaPreferenciaContatosRedis";
 import { consumirRespostaPesquisaPendente } from "@/lib/pesquisaPreferenciaRespostaRedis";
 import { consumirOptOutConviteRankingWhatsapp } from "@/lib/rankingConviteWhatsapp";
+import {
+  agendarInboxWhatsapp, configuracaoInboxWhatsapp, enfileirarInboundWhatsapp,
+  executandoWorkerInbox, inboxAtivaParaClientes,
+} from "@/lib/whatsappInbox";
+import { obterTelefoneCanario } from "@/lib/whatsappCanary";
 import { adquirirMutexConversaWhatsapp, liberarMutexConversaWhatsapp, type MutexConversaWhatsapp } from "@/lib/whatsappInboundMutex";
 
 export const maxDuration = 30;
@@ -1033,6 +1038,48 @@ async function atualizarRascunhoVivo(phone: string, messageText: string) {
 }
 
 export async function POST(req: NextRequest) {
+  // O transporte Evolution não tem retry 503 comprovado: persistir antes do 200.
+  // Desligado por padrão; o worker executa a lógica original no mesmo módulo.
+  if (inboxAtivaParaClientes() && !executandoWorkerInbox()) {
+    let body: {
+      event?: string;
+      data?: { key?: { id?: unknown; fromMe?: boolean; remoteJid?: string; remoteJidAlt?: string };
+                 message?: { conversation?: string; extendedTextMessage?: { text?: string } } };
+    } | null = null;
+    try { body = await req.clone().json(); } catch { /* caminho antigo responde ao evento inválido */ }
+    if (body?.event === "messages.upsert") {
+      const phone = extrairTelefoneIndividualDaChave(body.data?.key);
+      const msgId = validarMessageId(body.data?.key?.id);
+      const texto = body.data?.message?.conversation || body.data?.message?.extendedTextMessage?.text || "";
+      const canary = obterTelefoneCanario();
+      const mensagemCanario = canary.configured && phone &&
+        telefonesCorrespondem(phone, canary.phone) && /^CBTEST-[A-Z0-9]{4}$/i.test(texto.trim());
+      if (phone && msgId && !mensagemCanario) {
+        if (!configuracaoInboxWhatsapp().ready) {
+          // Sem QStash seguro, preservar atendimento legado, sem alegar inbox ativa.
+          console.error("[whatsapp-inbox] configuracao_incompleta_fallback_legado");
+        } else {
+          try {
+            const resultado = await enfileirarInboundWhatsapp({ phone, messageId: msgId, payload: body });
+            if (resultado.status === "full") {
+              console.error("[whatsapp-inbox] limite_de_fila_excedido");
+              return NextResponse.json({ ok: false, retry: true }, { status: 503 });
+            }
+            // A fila está salva. Mesmo se o QStash oscilar, o job permanece
+            // persistido e a recuperação periódica pode encontrá-lo.
+            if (resultado.status === "queued") {
+              const wake = await agendarInboxWhatsapp();
+              if (!wake) console.error("[whatsapp-inbox] aviso_falha_ao_despertar_worker");
+            }
+            return NextResponse.json({ ok: true, inbox: resultado.status });
+          } catch {
+            console.error("[whatsapp-inbox] erro_ao_salvar_mensagem");
+            return NextResponse.json({ ok: false, retry: true }, { status: 503 });
+          }
+        }
+      }
+    }
+  }
   // Hoisted para fora do try: o catch abaixo precisa dele para reverter o
   // claim de idempotência quando o processamento falha depois da gravação
   // (ver comentário na chave `msg_processed:` mais abaixo).
@@ -2003,6 +2050,11 @@ export async function POST(req: NextRequest) {
     // Redis estiver indisponível aqui, o TTL de 24h ainda expira sozinho.
     if (msgId) {
       await redis.del(`msg_processed:${msgId}`).catch(() => {});
+    }
+    // A inbox deve detectar falha real e colocar o job em quarentena,
+    // em vez de confirmar 200 e perder silenciosamente o evento.
+    if (executandoWorkerInbox()) {
+      return NextResponse.json({ ok: false, motivo: "inbound_processing_failed" }, { status: 500 });
     }
     return NextResponse.json({ ok: true });
   } finally {
