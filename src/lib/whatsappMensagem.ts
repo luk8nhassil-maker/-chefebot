@@ -79,6 +79,36 @@ export function normalizarLinksPublicosWhatsApp(text: string) {
   return text.replace(LINK_CARDAPIO_LEGADO, LINK_CARDAPIO_OFICIAL);
 }
 
+/**
+ * A Evolution responde HTTP 400 com um motivo no JSON, mas nunca devemos
+ * colocar a resposta crua (que pode conter números/chaves/dados de cliente)
+ * em logs, UI ou no Redis. Retornamos apenas categorias predefinidas.
+ * Sem categoria conhecida, mantemos o motivo genérico de sempre.
+ */
+export function classificarFalhaEvolution400(data: unknown): string {
+  let mensagem = "";
+  try {
+    // Stringify é somente para classificar; nunca enviar o payload aos logs.
+    mensagem = JSON.stringify(data ?? {}).slice(0, 2000).toLowerCase();
+  } catch {
+    return "http_400";
+  }
+  if (/not[ -]?acceptable|não aceitável|nao aceitavel/.test(mensagem)) return "http_400_nao_aceitavel";
+  if (/not registered|not on whatsapp|number.*not exist|numero.*nao existe|número.*não existe/.test(mensagem)) {
+    return "http_400_numero_nao_registrado";
+  }
+  if (/no sessions|sessionerror|disconnected|instance not connected|connection closed/.test(mensagem)) {
+    return "http_400_sessao_indisponivel";
+  }
+  if (/invalid number|invalid phone|phone.*invalid|numero invalido|número inválido/.test(mensagem)) {
+    return "http_400_numero_invalido";
+  }
+  if (/requires property|must have required property|validation.*text|text is required/.test(mensagem)) {
+    return "http_400_formato_invalido";
+  }
+  return "http_400";
+}
+
 function extrairMessageId(data: unknown): string | undefined {
   const d = data as Record<string, unknown> | null | undefined;
   if (!d) return undefined;
@@ -254,7 +284,7 @@ export async function executarEnvioTexto(
       // 4xx, 5xx e respostas incompletas não são retentados. Em especial, um
       // 5xx pode ter sido devolvido depois de a Evolution aceitar o envio.
       if (!(status >= 500) || tentativa === maxTentativas) {
-        return { ok: false, motivo: `http_${status}`, statusHttp: status, latenciaMs: Date.now() - inicio, tentativas };
+        return { ok: false, motivo: status === 400 ? classificarFalhaEvolution400(data) : `http_${status}`, statusHttp: status, latenciaMs: Date.now() - inicio, tentativas };
       }
     } else {
       // Falha de rede/timeout é ambígua e também não recebe retry automático.

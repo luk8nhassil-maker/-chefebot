@@ -17,7 +17,7 @@ vi.mock("./whatsappOutbox", () => ({
   }),
   obterJobWhatsapp: vi.fn(async (id: string) => jobs.get(id) ?? null),
 }));
-import { executarJobWhatsapp, enviarImagemWhatsApp, enviarTextoWhatsApp, normalizarLinksPublicosWhatsApp } from "./whatsappMensagem";
+import { executarJobWhatsapp, enviarImagemWhatsApp, enviarTextoWhatsApp, normalizarLinksPublicosWhatsApp, classificarFalhaEvolution400 } from "./whatsappMensagem";
 
 const ENV_KEYS = ["EVOLUTION_API_URL", "EVOLUTION_API_KEY", "EVOLUTION_INSTANCE_NAME", "VERCEL_ENV", "WHATSAPP_OUTBOX_ROLLOUT", "WHATSAPP_CANARY_PHONE"] as const;
 const originais: Record<string, string | undefined> = {};
@@ -319,4 +319,33 @@ describe("enviarTextoWhatsApp", () => {
     expect(resultado.motivo).toBe("timeout");
     expect(resultado.tentativas).toBe(1);
   }, 10_000);
+});
+
+
+describe("resposta 400 da Evolution classificada sem vazar dados", () => {
+  test.each([
+    [{ response: { message: ["Error: not-acceptable"] } }, "http_400_nao_aceitavel"],
+    [{ response: { message: ["The number is not registered on WhatsApp"] } }, "http_400_numero_nao_registrado"],
+    [{ response: { message: ["SessionError: No sessions"] } }, "http_400_sessao_indisponivel"],
+    [{ response: { message: ["Invalid number"] } }, "http_400_numero_invalido"],
+    [{ response: { message: [['instance requires property "text"']] } }, "http_400_formato_invalido"],
+    [{ response: { message: ["Unknown", "5511999998888"] } }, "http_400"],
+    [{}, "http_400"],
+  ])("categoria segura para resposta", (body, esperado) => {
+    const motivo = classificarFalhaEvolution400(body);
+    expect(motivo).toBe(esperado);
+    expect(motivo).not.toMatch(/5511|apikey|messageId/i);
+  });
+
+  test("transporte retorna categoria segura na primeira recusa, sem retry", async () => {
+    process.env.WHATSAPP_OUTBOX_ROLLOUT = "off";
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false, status: 400,
+      json: async () => ({ response: { message: ["Error: not-acceptable"] } }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await enviarTextoWhatsApp("5511999998888", "teste controlado");
+    expect(r).toMatchObject({ ok: false, motivo: "http_400_nao_aceitavel", statusHttp: 400, tentativas: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

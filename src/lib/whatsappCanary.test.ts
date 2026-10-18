@@ -51,6 +51,7 @@ import {
   iniciarCanario,
   processarPossivelInboundCanario,
   lerCanarioAtual,
+  obterTelefoneCanario,
 } from "./whatsappCanary";
 
 const PHONE_AUTORIZADO = "5511900000000";
@@ -757,4 +758,24 @@ describe("20. logs sem telefone/texto/segredo", () => {
       expect(textoCompleto.includes("chave-teste")).toBe(false);
     }
   });
+});
+
+
+describe("formato seguro do destino técnico na Evolution", () => {
+  it.each([
+    ["+55 (11) 99999-8888", "5511999998888"],
+    ["(11) 99999-8888", "5511999998888"],
+    ["5511999998888", "5511999998888"],
+    ["11 99999 8888", "5511999998888"],
+  ])("normaliza %s para %s", (configurado, normalizado) => {
+    vi.stubEnv("WHATSAPP_CANARY_PHONE", configurado);
+    expect(obterTelefoneCanario()).toEqual({ configured: true, phone: normalizado });
+  });
+
+  it.each(["", "0691", "+55", "55 11 123", "005511999998888", "invalido", "351999999999"])(
+    "bloqueia número ausente ou inválido: %s", (invalido) => {
+      vi.stubEnv("WHATSAPP_CANARY_PHONE", invalido);
+      expect(obterTelefoneCanario()).toEqual({ configured: false });
+    }
+  );
 });
