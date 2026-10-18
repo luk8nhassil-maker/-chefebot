@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
 import { redis } from "@/lib/redis";
+import { encerrarCanariosExpiradosSemReenvio, resumoFilaWhatsapp } from "@/lib/whatsappOutbox";
 import { lerDiagnosticoWhatsapp } from "@/lib/whatsappDiag";
 import { iniciarCanario, lerCanarioAtual, obterTelefoneCanario } from "@/lib/whatsappCanary";
 import { maskPhone } from "@/lib/sanitizeLog";
@@ -42,6 +43,27 @@ export async function POST(req: NextRequest) {
   if (auth.status === 401) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
   if (auth.status === 403) return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
 
+  // Somente no POST, após autenticação: abandonar canários técnicos antigos
+  // comprovadamente expirados, sem alegar entrega e sem repetir o provider.
+  // Nunca libera jobs ambíguos de clientes nem inicia teste com fila incerta.
+  const destinoTeste = obterTelefoneCanario();
+  if (!destinoTeste.configured) {
+    return NextResponse.json({ ok: false, error: "Número de teste não configurado." }, { status: 503 });
+  }
+  let encerradosSemReenvio = 0;
+  try {
+    encerradosSemReenvio = await encerrarCanariosExpiradosSemReenvio(destinoTeste.phone);
+    const fila = await resumoFilaWhatsapp();
+    if (fila.ambiguous > 0 || fila.unresolved > 0) {
+      return NextResponse.json({
+        ok: false,
+        error: "Há outra mensagem com resultado incerto. Teste bloqueado por segurança.",
+      }, { status: 409 });
+    }
+  } catch {
+    return NextResponse.json({ ok: false, error: "Não foi possível conferir a quarentena; nenhum teste iniciado." }, { status: 503 });
+  }
+
   const resultado = await iniciarCanario();
   if (!resultado.ok) {
     if (resultado.motivo === "provider_not_configured") {
@@ -55,7 +77,7 @@ export async function POST(req: NextRequest) {
       { status: 429 }
     );
   }
-  return NextResponse.json({ ok: true, canary: resultado.record });
+  return NextResponse.json({ ok: true, canary: resultado.record, encerradosSemReenvio });
 }
 
 export async function GET(req: NextRequest) {
