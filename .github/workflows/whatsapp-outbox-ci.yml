@@ -82,4 +82,8 @@ jobs:
       - name: Typecheck
         run: ./node_modules/.bin/tsc --noEmit
       - name: Suite completa de regressao
+        # A integração com Redis real já rodou no passo anterior, com config
+        # isolada; a suíte normal mantém a proteção global de rede.
+        env:
+          CHEFEBOT_OUTBOX_REDIS_INTEGRATION: "0"
         run: npm test
