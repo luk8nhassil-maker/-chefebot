@@ -40,6 +40,16 @@ type Diagnostico = {
   canaryPhoneMascarado: string | null
   manualConversation: boolean
   canary: CanaryRecord | null
+  quarantine?: {
+    total: number
+    lastCanaryHasJobId: boolean
+    items: Array<{
+      hasJob: boolean; state: string; leaseRecovery: boolean
+      linkedToLastCanary: boolean; sameAuthorizedPhone: boolean
+      exactCanaryText: boolean; canaryDedupe: boolean
+      withinLastTestWindow: boolean; olderThan20Min: boolean
+    }>
+  }
 }
 
 function getUserRole(): string | null {
@@ -248,6 +258,18 @@ export default function WhatsappDiagPage() {
                 </div>
               )}
             </div>
+            {data.quarantine && data.quarantine.total !== 0 && (
+              <section style={{ background: 'rgba(var(--overlay-rgb), 0.035)', border: '1px solid rgba(var(--overlay-rgb), 0.12)', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+                <strong style={{ fontSize: 14 }}>Diagnóstico da quarentena — somente leitura</strong>
+                <p style={{ fontSize: 12 }}>Registros aguardando análise: {data.quarantine.total < 0 ? 'indisponível' : data.quarantine.total}. Identificador do teste preservado: {data.quarantine.lastCanaryHasJobId ? 'sim' : 'não'}.</p>
+                {data.quarantine.items.map((item, i) => (
+                  <p key={i} style={{ fontSize: 12, lineHeight: 1.65 }}>
+                    Registro {i + 1}: existe={String(item.hasJob)}, estado={item.state}, lease antigo={String(item.leaseRecovery)}, vínculo com teste={String(item.linkedToLastCanary)}, número autorizado={String(item.sameAuthorizedPhone)}, texto técnico exato={String(item.exactCanaryText)}, chave de teste={String(item.canaryDedupe)}, horário compatível={String(item.withinLastTestWindow)}, expirado há 20min={String(item.olderThan20Min)}.
+                  </p>
+                ))}
+                <p style={{ fontSize: 11, color: 'var(--foreground-muted)' }}>Nenhum envio ou alteração é realizado neste diagnóstico. Dados pessoais não são exibidos.</p>
+              </section>
+            )}
           </>
         )}
       </div>
