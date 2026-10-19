@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { performance } from "node:perf_hooks";
+import { createHash, createHmac } from "node:crypto";
 import { NextRequest } from "next/server";
 
 // REAL: worker route, QStash authorization gate, inbox Lua, Redis real disposable.
@@ -11,16 +12,12 @@ const state = vi.hoisted(() => ({
   publish: vi.fn(async () => ({ messageId: "wake-fake" })),
   schedule: vi.fn(async () => ({ scheduleId: "schedule-fake" })),
 }));
-vi.mock("@upstash/qstash", () => ({
-  Client: vi.fn().mockImplementation(() => ({
-    schedules: { create: state.schedule },
-    publishJSON: state.publish,
-  })),
-  Receiver: vi.fn().mockImplementation(() => ({
-    verify: vi.fn(async (opts: { signature: string; url: string; body: string }) =>
-      opts.signature === "signed-local-test" &&
-      opts.url === "https://chefedapizza.com.br/api/interno/whatsapp-inbox/processar"),
-  })),
+vi.mock("@upstash/qstash", async importOriginal => ({
+  ...(await importOriginal<typeof import("@upstash/qstash")>()),
+  Client: class {
+    schedules = { create: state.schedule };
+    publishJSON = state.publish;
+  },
 }));
 vi.mock("@/app/api/whatsapp/route", () => ({
   POST: vi.fn(async (req: Request) => {
@@ -47,6 +44,7 @@ import { redis } from "@/lib/redis";
 import { POST as worker } from "@/app/api/interno/whatsapp-inbox/processar/route";
 import { enfileirarInboundWhatsapp, resumoInboxWhatsapp } from "@/lib/whatsappInbox";
 const NATIVE_FETCH = globalThis.fetch.bind(globalThis);
+const TEST_SIGNING_KEY = "local-test-key-upstash-jwt-not-for-production-2026";
 
 function msg(id: string, phone: string) {
   return { phone, messageId: id, payload: {
@@ -57,12 +55,24 @@ function msg(id: string, phone: string) {
   } };
 }
 function signed() {
-  return new NextRequest("https://chefedapizza.com.br/api/interno/whatsapp-inbox/processar", {
+  const endpoint = "https://chefedapizza.com.br/api/interno/whatsapp-inbox/processar";
+  const body = "{}";
+  const now = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const claims = {
+    iss: "Upstash", sub: endpoint, iat: now, nbf: now - 1, exp: now + 300,
+    body: createHash("sha256").update(body).digest("base64url"),
+  };
+  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  const signature = createHmac("sha256", TEST_SIGNING_KEY)
+    .update(header + "." + payload).digest("base64url");
+  const token = header + "." + payload + "." + signature;
+  return new NextRequest(endpoint, {
     method: "POST", headers: {
-      "upstash-signature": "signed-local-test",
+      "upstash-signature": token,
       "content-type": "application/json",
     },
-    body: "{}",
+    body,
   });
 }
 function unsigned() {
@@ -80,8 +90,8 @@ beforeAll(() => {
   vi.stubEnv("VERCEL_ENV", "production");
   vi.stubEnv("QSTASH_TOKEN", "somente-ci-falso");
   vi.stubEnv("QSTASH_URL", "https://qstash-us-east-1.upstash.io");
-  vi.stubEnv("QSTASH_CURRENT_SIGNING_KEY", "somente-ci-falso");
-  vi.stubEnv("QSTASH_NEXT_SIGNING_KEY", "somente-ci-falso");
+  vi.stubEnv("QSTASH_CURRENT_SIGNING_KEY", TEST_SIGNING_KEY);
+  vi.stubEnv("QSTASH_NEXT_SIGNING_KEY", TEST_SIGNING_KEY);
   vi.stubEnv("WHATSAPP_OUTBOX_CALLBACK_URL",
     "https://chefedapizza.com.br/api/interno/whatsapp-outbox/processar");
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
