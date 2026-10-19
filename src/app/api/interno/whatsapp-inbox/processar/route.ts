@@ -4,6 +4,7 @@ import { POST as processarWebhook } from "@/app/api/whatsapp/route";
 import {
   agendarInboxWhatsapp,
   comEscopoWorkerInbox,
+  liberarDespertadorEContarPendentes,
   processarLoteInbox,
   urlWorkerInboxAssinada,
 } from "@/lib/whatsappInbox";
@@ -50,9 +51,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, motivo: "worker_inbox_indisponivel" }, { status: 503 });
   }
 
-  // Continua drenando em novo callback, sem manter a função aberta. Quando
-  // só há jobs ambíguos, o próximo lote processa 0 e não cria loop infinito.
-  if (result.queue.pending > 0 && result.processed > 0) {
+  // Atomico: libera a reserva do despertador E olha o saldo pendente.
+  // Se o cliente chegou antes da liberacao, este worker agenda a continuacao.
+  // Se chegou depois, o cliente pode adquirir a reserva e despertar a fila.
+  // Jobs apenas ambiguos nao criam loop infinito de callbacks.
+  let pendentesDepois: number;
+  try {
+    pendentesDepois = await liberarDespertadorEContarPendentes();
+  } catch {
+    return NextResponse.json({ ok: false, motivo: "wake_reconciliation_unavailable" }, { status: 503 });
+  }
+  if (pendentesDepois > 0 && result.processed > 0) {
     await agendarInboxWhatsapp(true);
   }
   return NextResponse.json({ ok: true, ...result });
