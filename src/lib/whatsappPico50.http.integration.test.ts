@@ -10,11 +10,12 @@ const calls = vi.hoisted(() => {
   const schedule = vi.fn(async () => ({ scheduleId: "fake-qstash" }));
   return { publish, schedule };
 });
-vi.mock("@upstash/qstash", () => ({
-  Client: vi.fn().mockImplementation(() => ({
-    schedules: { create: calls.schedule }, publishJSON: calls.publish,
-  })),
-  Receiver: vi.fn().mockImplementation(() => ({ verify: async () => true })),
+vi.mock("@upstash/qstash", async importOriginal => ({
+  ...(await importOriginal<typeof import("@upstash/qstash")>()),
+  Client: class {
+    schedules = { create: calls.schedule };
+    publishJSON = calls.publish;
+  },
 }));
 
 import { redis } from "@/lib/redis";
