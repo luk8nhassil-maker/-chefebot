@@ -53,6 +53,7 @@ import {
 } from "@/lib/whatsappInbox";
 import { obterTelefoneCanario } from "@/lib/whatsappCanary";
 import { inboxWhatsappHabilitadaPara } from "@/lib/whatsappInboxRollout";
+import { EVOLUTION_WEBHOOK_AUTH_HEADER, verificarWebhookEvolution } from "@/lib/evolutionWebhookAuth";
 import { adquirirMutexConversaWhatsapp, liberarMutexConversaWhatsapp, type MutexConversaWhatsapp } from "@/lib/whatsappInboundMutex";
 
 export const maxDuration = 30;
@@ -1039,6 +1040,16 @@ async function atualizarRascunhoVivo(phone: string, messageText: string) {
 }
 
 export async function POST(req: NextRequest) {
+  // Autenticação opt-in para a Evolution: sem variável, não altera o atendimento legado.
+  // O worker QStash tem autenticação própria e executa o handler em escopo interno.
+  if (!executandoWorkerInbox()) {
+    const auth = verificarWebhookEvolution(req.headers.get(EVOLUTION_WEBHOOK_AUTH_HEADER));
+    if (auth === "invalid_configuration") {
+      console.error("[whatsapp-evolution] segredo_de_ingresso_invalido");
+      return NextResponse.json({ ok: false }, { status: 503 });
+    }
+    if (auth === "unauthorized") return NextResponse.json({ ok: false }, { status: 401 });
+  }
   // O transporte Evolution não tem retry 503 comprovado: persistir antes do 200.
   // Desligado por padrão; o worker executa a lógica original no mesmo módulo.
   if (inboxAtivaParaClientes() && !executandoWorkerInbox()) {
