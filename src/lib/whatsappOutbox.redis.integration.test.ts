@@ -16,7 +16,9 @@ beforeEach(() => {
   evolutionCalls = 0;
   vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    if (url.startsWith("http://srh:80/")) return nativeFetch(input, init);
+    // Comandos individuais usam a raiz sem barra; pipelines usam /pipeline.
+    // Compare a origem, sem liberar prefixos parecidos nem hosts externos.
+    if (new URL(url).origin === "http://srh") return nativeFetch(input, init);
     if (url.startsWith("https://evolution.invalid/message/sendText/")) {
       evolutionCalls++;
       return { ok: true, status: 200, json: async () => ({ key: { id: "fake-provider-ack" } }) } as Response;
@@ -76,6 +78,19 @@ describe.skipIf(!enabled)("outbox + canário com Redis real isolado e Evolution 
     const done = await lerCanarioAtual();
     expect(done?.state).toBe("roundtrip_ok");
     expect(done?.outboundOutboxJobId).toBe(started.record.outboundOutboxJobId);
+    expect(evolutionCalls).toBe(2);
+
+    // Evidência ponta a ponta: a aceitação registrada pelo Lua deve ser
+    // legível pelo monitor e continuar vinculada ao canário, sem novo envio.
+    const { lerMonitorWhatsapp } = await import("./whatsappMonitoramento");
+    const { redis } = await import("./redis");
+    expect((await redis.hgetall<{ delivered: number }>("whatsapp:outbox:monitor:metrics"))?.delivered).toBeGreaterThanOrEqual(1);
+    const snapshot = await lerMonitorWhatsapp();
+    expect(snapshot.health.redis).toBe("ok");
+    expect(snapshot.diagnostics).toEqual({ acceptedCounter: "available", canaryOutbox: "delivered" });
+    expect(snapshot.metrics?.accepted).toBeGreaterThanOrEqual(1);
+    expect(snapshot.canary.state).toBe("roundtrip_ok");
+    expect(snapshot.stages[0].passed).toBe(false); // Evolution/agenda reais não verificados
     expect(evolutionCalls).toBe(2);
   });
 });

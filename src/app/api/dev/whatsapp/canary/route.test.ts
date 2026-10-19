@@ -49,25 +49,20 @@ const { store, redisMock } = vi.hoisted(() => {
 });
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 vi.mock("@/lib/logger", () => ({ log: vi.fn(async () => {}) }));
-// Este teste isola autenticação, rate limit e respostas HTTP do canário.
-// A reconciliação da outbox tem testes próprios; aqui simulamos fila sem
-// pendências para não exigir ZCARD/ZRANGE de um Redis falso incompleto.
-vi.mock("@/lib/whatsappOutbox", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/whatsappOutbox")>();
-  return {
-    ...actual,
-    encerrarCanariosExpiradosSemReenvio: vi.fn(async () => 0),
-    encerrarCanarioVinculadoSemReenvio: vi.fn(async () => 0),
-    resumoFilaWhatsapp: vi.fn(async () => ({
-      pending: 0, inFlight: 0, ambiguous: 0, unresolved: 0,
-    })),
-  };
-});
-
+// O POST tem um preflight de quarentena e reconciliação. Estes testes de API
+// simulam só essa leitura operacional; o processamento real Redis/Lua está
+// coberto pela suíte isolada whatsappOutbox.redis.integration.test.ts.
+vi.mock("@/lib/whatsappOutbox", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/whatsappOutbox")>()),
+  encerrarCanariosExpiradosSemReenvio: vi.fn(async () => 0),
+  encerrarCanarioVinculadoSemReenvio: vi.fn(async () => 0),
+  resumoFilaWhatsapp: vi.fn(async () => ({ pending: 0, inFlight: 0, ambiguous: 0, unresolved: 0 })),
+}));
 
 vi.stubGlobal("fetch", vi.fn());
 
 import { GET, POST } from "./route";
+import { encerrarCanariosExpiradosSemReenvio, resumoFilaWhatsapp } from "@/lib/whatsappOutbox";
 
 const PHONE_AUTORIZADO = "5511900000000";
 
@@ -80,10 +75,17 @@ function req(token?: string, method: "GET" | "POST" = "GET") {
 beforeEach(() => {
   store.clear();
   vi.mocked(fetch).mockReset();
+  vi.mocked(encerrarCanariosExpiradosSemReenvio).mockReset();
+  vi.mocked(encerrarCanariosExpiradosSemReenvio).mockResolvedValue(0);
+  vi.mocked(resumoFilaWhatsapp).mockReset();
+  vi.mocked(resumoFilaWhatsapp).mockResolvedValue({ pending: 0, inFlight: 0, ambiguous: 0, unresolved: 0 });
   vi.unstubAllEnvs();
   vi.stubEnv("EVOLUTION_API_URL", "https://evolution.exemplo.com");
   vi.stubEnv("EVOLUTION_API_KEY", "chave-teste");
   vi.stubEnv("WHATSAPP_CANARY_PHONE", PHONE_AUTORIZADO);
+  // Rotas usam transporte direto neste harness, sem acionar QStash.
+  // O rollout canary é testado por whatsappMensagem.test.ts.
+  vi.stubEnv("WHATSAPP_OUTBOX_ROLLOUT", "off");
   vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, json: async () => ({}) } as Response);
 });
 
@@ -157,6 +159,31 @@ describe("2. telefone vem apenas da env (nunca do body)", () => {
     await POST(request);
     const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
     expect(body.number).toBe(PHONE_AUTORIZADO);
+  });
+});
+
+describe("preflight de segurança da quarentena", () => {
+  test("resultado ambíguo bloqueia o disparo e devolve 409", async () => {
+    vi.mocked(resumoFilaWhatsapp).mockResolvedValueOnce({ pending: 0, inFlight: 0, ambiguous: 1, unresolved: 0 });
+    const res = await POST(req("token-dev", "POST"));
+    expect(res.status).toBe(409);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  test("falha na consulta da fila devolve 503 sem enviar mensagem", async () => {
+    vi.mocked(resumoFilaWhatsapp).mockRejectedValueOnce(new Error("redis_unavailable_test"));
+    const res = await POST(req("token-dev", "POST"));
+    expect(res.status).toBe(503);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  test("registra conciliação antiga sem disparar repetição do job encerrado", async () => {
+    vi.mocked(encerrarCanariosExpiradosSemReenvio).mockResolvedValueOnce(1);
+    const res = await POST(req("token-dev", "POST"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.encerradosSemReenvio).toBe(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
 
