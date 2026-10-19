@@ -131,7 +131,7 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 });
 
-describe("pico HTTP com handler Next real e Redis EVAL real (Evolution falsa)", () => {
+describe.skipIf(process.env.CHEFEBOT_INBOX_HTTP_TEST !== "1")("pico HTTP com handler Next real e Redis EVAL real (Evolution falsa)", () => {
   it.each([50, 100, 200])("aceita %i webhooks HTTP simultaneos, processa uma vez e zera fila", async total => {
     const started = performance.now();
     const received = await Promise.all(Array.from({ length: total }, (_, i) =>
