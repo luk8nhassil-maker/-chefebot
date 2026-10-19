@@ -1,4 +1,6 @@
 // Política de seleção no servidor. Preparar esta capacidade não ativa nenhum número.
+import { telefonesCorrespondem } from "./telefone";
+
 export const INBOX_GRADUAL_SUPPORTED = true;
 type Environment = Record<string, string | undefined>;
 type Mode = "off" | "allowlist" | "all";
@@ -24,5 +26,10 @@ export function configuracaoRolloutInboxWhatsapp(env: Environment = process.env)
 
 export function inboxWhatsappHabilitadaPara(phone: string, env: Environment = process.env): boolean {
   const config = configuracaoRolloutInboxWhatsapp(env);
-  return config.enabled && (config.mode === "all" || config.phones.includes(phone));
+  if (!config.enabled) return false;
+  if (config.mode === "all") return true;
+  // A Evolution pode entregar o mesmo celular brasileiro com ou sem o 9 inicial.
+  // Continuamos exigindo o país 55 e um número completo explicitamente autorizado.
+  if (!PHONE.test(phone)) return false;
+  return config.phones.some(allowed => allowed === phone || telefonesCorrespondem(allowed, phone));
 }
