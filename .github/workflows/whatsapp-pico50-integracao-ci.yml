@@ -5,6 +5,9 @@ on:
   pull_request:
     paths:
       - "src/lib/whatsappPico50.http.integration.test.ts"
+      - "src/lib/whatsappInbox*.ts"
+      - "src/app/api/whatsapp/route.ts"
+      - "src/app/api/dev/whatsapp/inbox-status/route.ts"
       - "src/lib/whatsappPico50.worker.integration.test.ts"
       - "vitest.inbox-redis.config.mts"
       - ".github/workflows/whatsapp-pico50-integracao-ci.yml"

@@ -8,7 +8,7 @@ export type CanaryEvidence = { state: string | null; outboundHttpStatus: number 
 export type MonitorEvidence = {
   stage: number; mode: string; qstashConfigured: boolean; workerRecentlyConfirmed: boolean | null;
   redisOk: boolean; evolutionConnected: boolean | null;
-  canary: CanaryEvidence; metrics: MonitorMetrics;
+  canary: CanaryEvidence; metrics: MonitorMetrics; inboxGradualSupported?: boolean;
 };
 export type GateResult = { step: number; title: string; passed: boolean; checks: Array<{ text: string; ok: boolean | null }> };
 
@@ -31,7 +31,7 @@ export function avaliarGatesWhatsApp(e: MonitorEvidence): GateResult[] {
     { text: "Agenda periódica de 5 minutos comprovada (pendente de integração de leitura do QStash)", ok: null },
   ];
   const step3 = [
-    { text: "Mecanismo gradual entre canário e todos implementado", ok: false },
+    { text: "Mecanismo gradual por lista explícita implementado (não autoriza ativação)", ok: e.inboxGradualSupported === true },
     { text: "Histórico por período para comprovar estabilidade", ok: null },
     { text: "Aprovação humana registrada para ampliação", ok: null },
   ];

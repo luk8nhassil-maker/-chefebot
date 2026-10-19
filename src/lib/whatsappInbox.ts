@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { Client } from "@upstash/qstash";
 import { redis } from "./redis";
+import { configuracaoRolloutInboxWhatsapp } from "./whatsappInboxRollout";
 
 /**
  * Inbox durável para o evento messages.upsert.
@@ -44,8 +45,7 @@ const K_DEDUPE = (id: string) => PREFIX + "dedupe:" + id;
 const workerScope = new AsyncLocalStorage<boolean>();
 export const executandoWorkerInbox = () => workerScope.getStore() === true;
 export const comEscopoWorkerInbox = <T>(fn: () => Promise<T>) => workerScope.run(true, fn);
-export const inboxAtivaParaClientes = () =>
-  process.env.VERCEL_ENV !== "preview" && process.env.WHATSAPP_INBOX_ROLLOUT === "all";
+export const inboxAtivaParaClientes = () => configuracaoRolloutInboxWhatsapp().enabled;
 
 export type InboxJob = {
   id: string;
