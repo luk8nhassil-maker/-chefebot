@@ -52,6 +52,7 @@ import {
   executandoWorkerInbox, inboxAtivaParaClientes,
 } from "@/lib/whatsappInbox";
 import { obterTelefoneCanario } from "@/lib/whatsappCanary";
+import { inboxWhatsappHabilitadaPara } from "@/lib/whatsappInboxRollout";
 import { adquirirMutexConversaWhatsapp, liberarMutexConversaWhatsapp, type MutexConversaWhatsapp } from "@/lib/whatsappInboundMutex";
 
 export const maxDuration = 30;
@@ -1054,7 +1055,7 @@ export async function POST(req: NextRequest) {
       const canary = obterTelefoneCanario();
       const mensagemCanario = canary.configured && phone &&
         telefonesCorrespondem(phone, canary.phone) && /^CBTEST-[A-Z0-9]{4}$/i.test(texto.trim());
-      if (phone && msgId && !mensagemCanario) {
+      if (phone && msgId && !mensagemCanario && inboxWhatsappHabilitadaPara(phone)) {
         if (!configuracaoInboxWhatsapp().ready) {
           // Sem QStash seguro, preservar atendimento legado, sem alegar inbox ativa.
           console.error("[whatsapp-inbox] configuracao_incompleta_fallback_legado");

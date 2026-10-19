@@ -1,4 +1,5 @@
 import { redis } from "./redis";
+import { INBOX_GRADUAL_SUPPORTED } from "./whatsappInboxRollout";
 import { checkRedisHealth } from "./healthChecks";
 import { obterConfigEvolution } from "./evolutionApi";
 import { lerCanarioAtual } from "./whatsappCanary";
@@ -120,7 +121,7 @@ export async function lerMonitorWhatsapp() {
   const stage = getStage();
   const evidence: MonitorEvidence = {
     stage, mode, redisOk: redisOk && queue !== null, evolutionConnected: evolution, workerRecentlyConfirmed,
-    qstashConfigured: outboxConfig.ready,
+    qstashConfigured: outboxConfig.ready, inboxGradualSupported: INBOX_GRADUAL_SUPPORTED,
     canary: { state: canary?.state ?? null, outboundHttpStatus: canary?.outboundHttpStatus ?? null, outboxAccepted: canaryOutboxAccepted },
     metrics,
   };

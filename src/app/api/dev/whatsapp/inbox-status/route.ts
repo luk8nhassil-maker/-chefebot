@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { configuracaoRolloutInboxWhatsapp } from "@/lib/whatsappInboxRollout";
 import { autenticarRequisicao, exigirRole } from "@/lib/apiAuth";
 import {
   configuracaoInboxWhatsapp, inboxAtivaParaClientes, resumoInboxWhatsapp,
@@ -12,11 +13,15 @@ export async function GET(req: NextRequest) {
   const denied = exigirRole(user, ["dev"]);
   if (denied) return denied;
   const config = configuracaoInboxWhatsapp();
+  const rollout = configuracaoRolloutInboxWhatsapp();
   try {
     const data = await resumoInboxWhatsapp();
     return NextResponse.json({
       checkedAt: Date.now(),
-      rollout: process.env.WHATSAPP_INBOX_ROLLOUT === "all" ? "all" : "off",
+      rollout: rollout.mode,
+      rolloutValid: rollout.valid,
+      allowedPhoneCount: rollout.phones.length,
+      gradualSupported: true,
       active: inboxAtivaParaClientes() && config.ready,
       configuration: config,
       queue: data,

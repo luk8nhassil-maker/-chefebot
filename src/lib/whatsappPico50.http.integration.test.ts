@@ -118,6 +118,8 @@ beforeAll(async () => {
 }, 15000);
 
 beforeEach(async () => {
+  vi.stubEnv("WHATSAPP_INBOX_ROLLOUT", "all");
+  vi.stubEnv("WHATSAPP_INBOX_ALLOWED_PHONES", "");
   await redis.flushdb();
   calls.publish.mockClear();
   calls.schedule.mockClear();
@@ -133,6 +135,33 @@ afterAll(async () => {
 });
 
 describe.skipIf(process.env.CHEFEBOT_INBOX_HTTP_TEST !== "1")("pico HTTP com handler Next real e Redis EVAL real (Evolution falsa)", () => {
+  it("allowlist aceita apenas o remetente selecionado e preserva o caminho legado dos demais", async () => {
+    const selected = phone(9900), outside = phone(9901);
+    vi.stubEnv("WHATSAPP_INBOX_ROLLOUT", "allowlist");
+    vi.stubEnv("WHATSAPP_INBOX_ALLOWED_PHONES", selected);
+    const accepted = await publish(evento(selected, "allowlisted"));
+    const legacyEvent = evento(outside, "outside-list");
+    legacyEvent.data.key.fromMe = true; // Caminho legado sem efeitos comerciais.
+    const legacy = await publish(legacyEvent);
+    expect(accepted.body.inbox).toBe("queued");
+    expect(legacy.status).toBe(200);
+    expect(legacy.body.inbox).toBeUndefined();
+    expect((await resumoInboxWhatsapp()).queuedTotal).toBe(1);
+    expect((await drain(async () => true)).queue.pending).toBe(0);
+  });
+
+  it("lista inválida não enfileira evento nem desperta QStash", async () => {
+    vi.stubEnv("WHATSAPP_INBOX_ROLLOUT", "allowlist");
+    vi.stubEnv("WHATSAPP_INBOX_ALLOWED_PHONES", phone(9900) + ",*");
+    const payload = evento(phone(9900), "invalid-list");
+    payload.data.key.fromMe = true;
+    const result = await publish(payload);
+    expect(result.status).toBe(200);
+    expect(result.body.inbox).toBeUndefined();
+    expect((await resumoInboxWhatsapp()).queuedTotal).toBe(0);
+    expect(calls.publish).not.toHaveBeenCalled();
+  });
+
   it("duas instancias compartilham o teto de quatro leases", async () => {
     await Promise.all(Array.from({ length: 12 }, (_, i) =>
       enfileirarInboundWhatsapp({ phone: phone(10000 + i), messageId: "global-" + i, payload: {} })));

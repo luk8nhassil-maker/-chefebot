@@ -34,4 +34,10 @@ describe("painel DEV WhatsApp: critérios conservadores", () => {
   test("modo all antes da liberação gera alerta explícito", () => {
     expect(recomendarAcaoWhatsApp({ ...base, mode: "all" })).toMatch(/Alerta/);
   });
+  test("capacidade gradual não aprova janela, etapa ou liberação de clientes", () => {
+    const steps = avaliarGatesWhatsApp({ ...base, inboxGradualSupported: true });
+    expect(steps[2].checks[0].ok).toBe(true);
+    expect(steps[2].passed).toBe(false);
+    expect(steps[3].passed).toBe(false);
+  });
 });
