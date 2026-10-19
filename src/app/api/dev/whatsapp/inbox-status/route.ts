@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
       active: inboxAtivaParaClientes() && config.ready,
       configuration: config,
       queue: data,
-      warning: data.ambiguousTotal > 0
+      warning: data.ambiguousTotal > 0 || data.unresolved > 0
         ? "Existem jobs em quarentena; não reenvie sem reconciliação individual"
         : null,
       note: "Contadores desde o início da inbox. done significa processamento local, não entrega no aparelho.",

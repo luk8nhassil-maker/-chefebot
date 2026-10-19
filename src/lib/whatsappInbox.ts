@@ -20,6 +20,7 @@ const K_CONVERSAS = PREFIX + "conversations";
 const K_SEQUENCIA = PREFIX + "sequence";
 const K_PENDING = PREFIX + "pending-count";
 const K_LEASES = PREFIX + "leases";
+const K_UNRESOLVED = PREFIX + "unresolved";
 const K_METRICAS = PREFIX + "metrics";
 const K_WAKE = PREFIX + "wake:reserved";
 const WAKE_TTL_SEGUNDOS = 60;
@@ -78,7 +79,12 @@ return {"queued", ARGV[1]}
 `;
 
 const CLAIM = `
-local convs = redis.call("ZRANGE", KEYS[1], 0, 249)
+-- O teto vale entre instancias, inclusive callbacks assinados concorrentes.
+-- Leases vencidos so liberam capacidade depois da recuperacao explicita.
+if redis.call("ZCARD", KEYS[2]) >= tonumber(ARGV[8]) then return nil end
+-- A fila e limitada a 1000 jobs no enqueue. Uma janela fixa de 250 conversas
+-- deixava uma conversa apta invisivel atras de cabecas em quarentena.
+local convs = redis.call("ZRANGE", KEYS[1], 0, -1)
 for _, conv in ipairs(convs) do
   local queue = ARGV[1] .. conv
   local first = redis.call("ZRANGE", queue, 0, 0)[1]
@@ -91,7 +97,7 @@ for _, conv in ipairs(convs) do
       local raw = redis.call("GET", jobKey)
       if raw then
         local ok, job = pcall(cjson.decode, raw)
-        if ok and job.state == "pending" then
+        if ok and type(job) == "table" and job.state == "pending" then
           local token = ARGV[4]
           local untilMs = tonumber(ARGV[5]) + tonumber(ARGV[6])
           redis.call("SET", lockKey, token, "PX", tonumber(ARGV[6]))
@@ -145,9 +151,10 @@ local recovered = 0
 for _, id in ipairs(ids) do
   local key = ARGV[2] .. id
   local raw = redis.call("GET", key)
+  local reconciled = false
   if raw then
     local ok, job = pcall(cjson.decode, raw)
-    if ok and job.state == "leased" then
+    if ok and type(job) == "table" and job.state == "leased" then
       job.state = "ambiguous"
       job.motivo = "inbox_lease_expired_unknown_business_effects"
       job.updatedAt = tonumber(ARGV[1])
@@ -155,7 +162,15 @@ for _, id in ipairs(ids) do
       redis.call("SET", key, cjson.encode(job), "EX", tonumber(ARGV[3]))
       redis.call("HINCRBY", KEYS[2], "ambiguous", 1)
       recovered = recovered + 1
+      reconciled = true
+    elseif ok and type(job) == "table" and (job.state == "done" or job.state == "ambiguous") then
+      reconciled = true
     end
+  end
+  -- Nunca apagar o ultimo indice de um registro ausente/corrompido. Guardar
+  -- a referencia antes de liberar capacidade, sem pular a conversa ou reenviar.
+  if not reconciled then
+    redis.call("ZADD", KEYS[3], tonumber(ARGV[1]), id)
   end
   redis.call("ZREM", KEYS[1], id)
 end
@@ -200,7 +215,7 @@ export async function claimInboundWhatsapp(): Promise<InboxJob | null> {
   const now = Date.now();
   const raw = await redis.eval(CLAIM,
     [K_CONVERSAS, K_LEASES, K_METRICAS],
-    [PREFIX + "queue:", PREFIX + "lock:", PREFIX + "job:", randomUUID(), String(now), String(LEASE_MS), String(TTL)]);
+    [PREFIX + "queue:", PREFIX + "lock:", PREFIX + "job:", randomUUID(), String(now), String(LEASE_MS), String(TTL), String(CONCURRENCY)]);
   if (!raw) return null;
   const job: unknown = typeof raw === "string" ? JSON.parse(raw) : raw;
   if (!job || typeof job !== "object" ||
@@ -220,20 +235,22 @@ export async function finalizarInboundWhatsapp(job: InboxJob, ok: boolean, motiv
 }
 
 export async function recuperarInboundWhatsapp(): Promise<number> {
-  return Number(await redis.eval(RECOVER, [K_LEASES, K_METRICAS],
+  return Number(await redis.eval(RECOVER, [K_LEASES, K_METRICAS, K_UNRESOLVED],
     [String(Date.now()), PREFIX + "job:", String(TTL)])) || 0;
 }
 
 export async function resumoInboxWhatsapp() {
-  const [pending, conversationCount, leaseCount, counts] = await Promise.all([
+  const [pending, conversationCount, leaseCount, counts, unresolved] = await Promise.all([
     redis.get<number>(K_PENDING), redis.zcard(K_CONVERSAS),
     redis.zcard(K_LEASES), redis.hgetall<Record<string, unknown>>(K_METRICAS),
+    redis.zcard(K_UNRESOLVED),
   ]);
   const n = (v: unknown) => Number(v ?? 0) || 0;
   return {
     pending: n(pending), conversations: n(conversationCount),
     inFlight: n(leaseCount), queuedTotal: n(counts?.queued),
     doneTotal: n(counts?.done), ambiguousTotal: n(counts?.ambiguous),
+    unresolved: n(unresolved),
     lastWorkerAt: n(counts?.lastWorkerAt),
   };
 }

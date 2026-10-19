@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { InboxJob } from "./whatsappInbox";
 
 // Simulador hermético: nenhuma chamada a Redis, Evolution ou QStash reais.
 const state = vi.hoisted(() => {
-  const jobs = new Map<string, any>();
+  const jobs = new Map<string, InboxJob>();
   const dedupe = new Map<string, string>();
   const conversations = new Map<string, number>();
   const queues = new Map<string, { id: string; seq: number }[]>();
@@ -39,7 +40,8 @@ const state = vi.hoisted(() => {
       return ["queued", args[0]];
     },
     claim(args: string[]) {
-      const all = [...conversations].sort((a, b) => a[1] - b[1]).slice(0, 250);
+      if (leases.size >= Number(args[7])) return null;
+      const all = [...conversations].sort((a, b) => a[1] - b[1]);
       for (const [conv] of all) {
         const queue = queues.get(conv) || [];
         const first = queue[0];
@@ -98,7 +100,7 @@ vi.mock("./redis", () => ({
       throw new Error("script_desconhecido");
     }),
     get: vi.fn(async () => state.getPending()),
-    zcard: vi.fn(async (key: string) => key.endsWith("leases") ? state.leases.size : state.conversations.size),
+    zcard: vi.fn(async (key: string) => key.endsWith("unresolved") ? 0 : key.endsWith("leases") ? state.leases.size : state.conversations.size),
     hgetall: vi.fn(async () => Object.fromEntries(state.metrics)),
     hset: vi.fn(async (_key: string, kv: Record<string, unknown>) => {
       for (const [k, v] of Object.entries(kv)) state.metrics.set(k, Number(v));
@@ -200,7 +202,7 @@ describe("inbox WhatsApp: carga e falhas sem clientes reais", () => {
     const effect = vi.fn(async () => true);
     await processarLoteInbox(effect);
     expect(effect).not.toHaveBeenCalled();
-    expect(state.jobs.get(job.id).state).toBe("ambiguous");
+    expect(state.jobs.get(job.id)?.state).toBe("ambiguous");
     expect(await finalizarInboundWhatsapp(job, true, "late")).toBe(false);
   });
 

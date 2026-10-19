@@ -22,7 +22,8 @@ import { redis } from "@/lib/redis";
 import { POST as webhook } from "@/app/api/whatsapp/route";
 import {
   processarLoteInbox, resumoInboxWhatsapp, chaveConversaInbound,
-  liberarDespertadorEContarPendentes,
+  liberarDespertadorEContarPendentes, enfileirarInboundWhatsapp,
+  claimInboundWhatsapp, recuperarInboundWhatsapp, finalizarInboundWhatsapp,
 } from "@/lib/whatsappInbox";
 
 const NATIVE_FETCH = globalThis.fetch.bind(globalThis);
@@ -132,6 +133,83 @@ afterAll(async () => {
 });
 
 describe.skipIf(process.env.CHEFEBOT_INBOX_HTTP_TEST !== "1")("pico HTTP com handler Next real e Redis EVAL real (Evolution falsa)", () => {
+  it("duas instancias compartilham o teto de quatro leases", async () => {
+    await Promise.all(Array.from({ length: 12 }, (_, i) =>
+      enfileirarInboundWhatsapp({ phone: phone(10000 + i), messageId: "global-" + i, payload: {} })));
+    let active = 0, peak = 0;
+    let release!: () => void;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    const executor = async () => {
+      active++; peak = Math.max(peak, active);
+      await barrier;
+      active--;
+      return true;
+    };
+    const a = processarLoteInbox(executor, 4, 4);
+    const b = processarLoteInbox(executor, 4, 4);
+    try {
+      for (let i = 0; i < 50 && active < 4; i++) await wait(5);
+      await wait(50);
+      expect(peak).toBe(4);
+      expect((await resumoInboxWhatsapp()).inFlight).toBe(4);
+    } finally {
+      release();
+      await Promise.all([a, b]);
+    }
+  });
+
+  it("250 conversas em quarentena nao escondem outra conversa apta", async () => {
+    for (let i = 0; i < 250; i++) {
+      const entry = await enfileirarInboundWhatsapp({ phone: phone(11000 + i), messageId: "blocked-" + i, payload: {} });
+      const key = "whatsapp:inbox:v1:job:" + entry.jobId;
+      const job = await redis.get<Record<string, unknown>>(key);
+      await redis.set(key, { ...job, state: "ambiguous" });
+    }
+    const healthy = await enfileirarInboundWhatsapp({ phone: phone(12000), messageId: "healthy-after-250", payload: {} });
+    expect((await claimInboundWhatsapp())?.id).toBe(healthy.jobId);
+  });
+
+  it.each(["missing", "corrupt", "scalar"])("lease com registro %s conserva evidencia duravel de inconsistencia", async kind => {
+    await enfileirarInboundWhatsapp({ phone: phone(13000), messageId: "orphan-lease", payload: {} });
+    const claimed = await claimInboundWhatsapp();
+    expect(claimed).not.toBeNull();
+    if (!claimed) throw new Error("claim_missing");
+    const jobKey = "whatsapp:inbox:v1:job:" + claimed.id;
+    if (kind === "missing") await redis.del(jobKey);
+    else await redis.set(jobKey, kind === "scalar" ? 42 : "malformed-json");
+    await redis.zadd("whatsapp:inbox:v1:leases", { score: Date.now() - 1, member: claimed.id });
+    await recuperarInboundWhatsapp();
+    expect(await redis.zscore("whatsapp:inbox:v1:unresolved", claimed.id)).not.toBeNull();
+    expect((await resumoInboxWhatsapp()).unresolved).toBe(1);
+    expect(await claimInboundWhatsapp()).toBeNull();
+  });
+
+  it("erro Redis ao registrar inconsistencia nao apaga lease sem evidencia", async () => {
+    await enfileirarInboundWhatsapp({ phone: phone(13500), messageId: "orphan-index-failure", payload: {} });
+    const claimed = await claimInboundWhatsapp();
+    if (!claimed) throw new Error("claim_missing");
+    await redis.del("whatsapp:inbox:v1:job:" + claimed.id);
+    await redis.zadd("whatsapp:inbox:v1:leases", { score: Date.now() - 1, member: claimed.id });
+    await redis.set("whatsapp:inbox:v1:unresolved", "synthetic-wrongtype");
+    await expect(recuperarInboundWhatsapp()).rejects.toThrow();
+    expect(await redis.zscore("whatsapp:inbox:v1:leases", claimed.id)).not.toBeNull();
+    await redis.del("whatsapp:inbox:v1:unresolved");
+    await recuperarInboundWhatsapp();
+    expect(await redis.zscore("whatsapp:inbox:v1:unresolved", claimed.id)).not.toBeNull();
+    expect(await redis.zscore("whatsapp:inbox:v1:leases", claimed.id)).toBeNull();
+  });
+
+  it("lease expirado fica ambiguo e rejeita conclusao tardia sem reexecutar", async () => {
+    await enfileirarInboundWhatsapp({ phone: phone(14000), messageId: "expired-real-lua", payload: {} });
+    const claimed = await claimInboundWhatsapp();
+    if (!claimed) throw new Error("claim_missing");
+    await redis.zadd("whatsapp:inbox:v1:leases", { score: Date.now() - 1, member: claimed.id });
+    expect(await recuperarInboundWhatsapp()).toBe(1);
+    expect(await finalizarInboundWhatsapp(claimed, true, "late")).toBe(false);
+    expect(await claimInboundWhatsapp()).toBeNull();
+    expect((await resumoInboxWhatsapp()).ambiguousTotal).toBe(1);
+  });
+
   it.each([50, 100, 200])("aceita %i webhooks HTTP simultaneos, processa uma vez e zera fila", async total => {
     const started = performance.now();
     const received = await Promise.all(Array.from({ length: total }, (_, i) =>
