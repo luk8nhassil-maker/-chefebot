@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { Client } from "@upstash/qstash";
 import { redis } from "./redis";
 import { configuracaoRolloutInboxWhatsapp } from "./whatsappInboxRollout";
+import { webhookEvolutionProtegido } from "./evolutionWebhookAuth";
 
 /**
  * Inbox durável para o evento messages.upsert.
@@ -45,7 +46,8 @@ const K_DEDUPE = (id: string) => PREFIX + "dedupe:" + id;
 const workerScope = new AsyncLocalStorage<boolean>();
 export const executandoWorkerInbox = () => workerScope.getStore() === true;
 export const comEscopoWorkerInbox = <T>(fn: () => Promise<T>) => workerScope.run(true, fn);
-export const inboxAtivaParaClientes = () => configuracaoRolloutInboxWhatsapp().enabled;
+// Não permitir habilitar inbox sem proteção de origem configurada. Legado permanece intacto.
+export const inboxAtivaParaClientes = () => configuracaoRolloutInboxWhatsapp().enabled && webhookEvolutionProtegido();
 
 export type InboxJob = {
   id: string;
