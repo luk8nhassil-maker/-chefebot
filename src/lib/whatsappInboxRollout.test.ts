@@ -21,6 +21,17 @@ describe("seleção gradual da inbox no servidor", () => {
     expect(config.valid).toBe(false);
     expect(inboxWhatsappHabilitadaPara(A, { ...env, WHATSAPP_INBOX_ALLOWED_PHONES: raw })).toBe(false);
   });
+  test("cobre equivalência brasileira com e sem nono dígito, sem abrir outros números", () => {
+    const comNove = "5599987654321";
+    const semNove = "559987654321";
+    const apenasUm = { ...env, WHATSAPP_INBOX_ALLOWED_PHONES: comNove };
+    expect(inboxWhatsappHabilitadaPara(semNove, apenasUm)).toBe(true);
+    expect(inboxWhatsappHabilitadaPara(comNove, { ...env, WHATSAPP_INBOX_ALLOWED_PHONES: semNove })).toBe(true);
+    expect(inboxWhatsappHabilitadaPara("559887654321", apenasUm)).toBe(false);
+    expect(inboxWhatsappHabilitadaPara("559987654322", apenasUm)).toBe(false);
+    expect(inboxWhatsappHabilitadaPara(semNove.slice(2), apenasUm)).toBe(false);
+    expect(inboxWhatsappHabilitadaPara("invalid", apenasUm)).toBe(false);
+  });
   test("espaços entre entradas e duplicatas não ampliam o grupo", () => {
     const config = configuracaoRolloutInboxWhatsapp({ ...env, WHATSAPP_INBOX_ALLOWED_PHONES: " " + A + " , " + A });
     expect(config.phones).toEqual([A]);
