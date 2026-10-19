@@ -1,0 +1,66 @@
+name: whatsapp-pico50-integracao-ci
+
+# Executa somente quando os testes de carga mudam. Nao gera preview/deploy.
+on:
+  pull_request:
+    paths:
+      - "src/lib/whatsappPico50.http.integration.test.ts"
+      - "src/lib/whatsappPico50.worker.integration.test.ts"
+      - "vitest.inbox-redis.config.mts"
+      - ".github/workflows/whatsapp-pico50-integracao-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-pico50-integracao-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  teste-carga-integrado:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    container: node:22
+    services:
+      redis:
+        image: redis:6.2.14
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+      srh:
+        image: hiett/serverless-redis-http:0.0.10
+        env:
+          SRH_MODE: env
+          SRH_CONNECTION_STRING: redis://redis:6379
+          SRH_TOKEN: "whatsapp-e2e-srh-only-local"
+    env:
+      KV_REST_API_URL: "http://srh:80"
+      KV_REST_API_TOKEN: "whatsapp-e2e-srh-only-local"
+      CHEFEBOT_INBOX_HTTP_TEST: "1"
+      UPSTASH_DISABLE_TELEMETRY: "1"
+      CI: "1"
+    steps:
+      - name: Checkout imutavel do PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Dependencias
+        run: npm ci
+      - name: Redis descartavel pronto
+        run: |
+          node -e "
+          const {Redis}=require('@upstash/redis');
+          const r=new Redis({url:process.env.KV_REST_API_URL, token:process.env.KV_REST_API_TOKEN});
+          (async()=>{for(let i=0;i<30;i++){try{if(await r.ping()==='PONG')process.exit(0)}catch(e){} await new Promise(f=>setTimeout(f,1000))}process.exit(1)})()"
+      - name: Teste de carga HTTP 50/100/200 + worker QStash com Redis Lua real
+        run: ./node_modules/.bin/vitest run --config vitest.inbox-redis.config.mts
+      - name: Typecheck
+        run: ./node_modules/.bin/tsc --noEmit
+      - name: Evidencia
+        if: always()
+        run: |
+          echo "Ambiente: Docker Redis + SRH isolados; sem Evolution, QStash ou Vercel reais."
+          echo "Criterio: 0 mensagens perdidas, 0 duplicatas, fila final 0 e concorrencia ate 4."
