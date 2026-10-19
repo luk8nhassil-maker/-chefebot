@@ -22,6 +22,7 @@ import { redis } from "@/lib/redis";
 import { POST as webhook } from "@/app/api/whatsapp/route";
 import {
   processarLoteInbox, resumoInboxWhatsapp, chaveConversaInbound,
+  liberarDespertadorEContarPendentes,
 } from "@/lib/whatsappInbox";
 
 const NATIVE_FETCH = globalThis.fetch.bind(globalThis);
@@ -138,6 +139,7 @@ describe("pico HTTP com handler Next real e Redis EVAL real (Evolution falsa)", 
     const inbox = await resumoInboxWhatsapp();
     expect(received.every(r => r.status === 200 && r.body?.inbox === "queued")).toBe(true);
     expect(inbox.pending).toBe(total);
+    expect(calls.publish).toHaveBeenCalledTimes(1); // coalescencia economica QStash
     let maxConcurrency = 0;
     let inFlight = 0;
     const events: string[] = [];
@@ -201,6 +203,19 @@ describe("pico HTTP com handler Next real e Redis EVAL real (Evolution falsa)", 
       sameConversation: 20, maxSameInFlight: peakSame, remaining: result.queue.pending,
     }));
   }, 120000);
+
+  it("apos worker limpar o despertador, mensagem nova agenda outro callback", async () => {
+    const a = await publish(evento(phone(8850), "wake-A"));
+    expect(a.status).toBe(200);
+    expect(calls.publish).toHaveBeenCalledTimes(1);
+    await drain(async () => true);
+    expect(await liberarDespertadorEContarPendentes()).toBe(0);
+    const b = await publish(evento(phone(8851), "wake-B"));
+    expect(b.status).toBe(200);
+    expect(calls.publish).toHaveBeenCalledTimes(2);
+    const result = await drain(async () => true);
+    expect(result.queue.pending).toBe(0);
+  });
 
   it("20 repeticoes HTTP do mesmo messageId geram um unico efeito de pedido/PIX simulado", async () => {
     const payload = evento(phone(9000), "same-id", "PIX pago");
