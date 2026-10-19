@@ -111,7 +111,7 @@ beforeEach(async () => {
 });
 afterAll(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
-describe("worker QStash + Redis descartavel de ponta a ponta", () => {
+describe.skipIf(process.env.CHEFEBOT_INBOX_HTTP_TEST !== "1")("worker QStash + Redis descartavel de ponta a ponta", () => {
   it("rejeita callback nao assinado sem consumir mensagem", async () => {
     await enfileirarInboundWhatsapp(msg("unsigned", "5599888880001"));
     const response = await worker(unsigned());
