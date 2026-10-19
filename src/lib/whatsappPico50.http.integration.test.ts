@@ -295,7 +295,7 @@ describe.skipIf(process.env.CHEFEBOT_INBOX_HTTP_TEST !== "1")("pico HTTP com han
       ...Array.from({ length: 20 }, (_, i) => evento(targetPhone, "ord-" + i)),
       ...Array.from({ length: 30 }, (_, i) => evento(phone(4000 + i), "out-" + i)),
     ];
-    const responses = await Promise.all(input.map(publish));
+    const responses = await Promise.all(input.map(payload => publish(payload)));
     expect(responses.every(r => r.status === 200)).toBe(true);
     const conversation = chaveConversaInbound(targetPhone);
     const ids = await redis.zrange<string[]>("whatsapp:inbox:v1:queue:" + conversation, 0, -1);
