@@ -1,5 +1,6 @@
 import { redis } from "./redis";
 import { enviarTextoWhatsApp } from "./whatsappMensagem";
+import { normalizarTelefoneCanarioWhatsapp } from "./whatsappCanaryPhone";
 import { maskMessageId, maskPhone, sanitizeErrorMessage } from "./sanitizeLog";
 import { telefonesCorrespondem } from "./telefone";
 import { log } from "./logger";
@@ -87,12 +88,8 @@ export class CanaryInboundRetryableError extends Error {
 
 /** Único destino permitido — nunca aceita telefone vindo do corpo da requisição. */
 export function obterTelefoneCanario(): CanaryPhoneStatus {
-  const configurado = process.env.WHATSAPP_CANARY_PHONE?.trim() ?? "";
-  const digitos = configurado.replace(/\D/g, "");
-  // A Evolution v2.3.7 espera apenas DDI+DDD+número, sem espaços, + ou
-  // pontuação. Aceita também o telefone brasileiro local configurado sem DDI.
-  const phone = digitos.length === 10 || digitos.length === 11 ? `55${digitos}` : digitos;
-  if (!/^55[1-9]\d{9,10}$/.test(phone)) return { configured: false };
+  const phone = normalizarTelefoneCanarioWhatsapp(process.env.WHATSAPP_CANARY_PHONE);
+  if (!phone) return { configured: false };
   return { configured: true, phone };
 }
 

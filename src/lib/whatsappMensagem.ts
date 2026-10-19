@@ -1,5 +1,6 @@
 import { deveSilenciarNovoAtendimentoWhatsapp } from "./assinaturaWhatsappGuard";
 import { obterConfigEvolution } from "./evolutionApi";
+import { normalizarTelefoneCanarioWhatsapp } from "./whatsappCanaryPhone";
 import { maskMessageId } from "./sanitizeLog";
 import { marcarTentativaEnvio } from "./whatsappDiag";
 import {
@@ -66,9 +67,11 @@ export function outboxWhatsappHabilitadaPara(phone: string): boolean {
     (process.env.NODE_ENV === "test" ? "all" : "canary");
   if (rollout === "all") return true;
   if (rollout !== "canary") return false;
-  const canary = process.env.WHATSAPP_CANARY_PHONE?.replace(/\D/g, "") ?? "";
+  // A origem normaliza DDI antes de enviar. Compare a mesma representação
+  // canônica, ou o canário local pode usar a rota direta e não a outbox.
+  const canary = normalizarTelefoneCanarioWhatsapp(process.env.WHATSAPP_CANARY_PHONE);
   const phoneDigits = phone.replace(/\D/g, "");
-  return canary.length >= 11 && phoneDigits === canary;
+  return canary !== null && phoneDigits === canary;
 }
 
 function resultadoPreviewBloqueado(): ResultadoEnvioWhatsApp {

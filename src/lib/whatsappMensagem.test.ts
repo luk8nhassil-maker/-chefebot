@@ -84,6 +84,37 @@ describe("rollout controlado da outbox", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  test.each([
+    ["(11) 99999-8888", "5511999998888"],
+    ["11 9999-8888", "551199998888"],
+    ["+55 (11) 99999-8888", "5511999998888"],
+  ])("canário local %s entra na outbox ao enviar para %s", async (configurado, normalizado) => {
+    process.env.WHATSAPP_OUTBOX_ROLLOUT = "canary";
+    process.env.WHATSAPP_CANARY_PHONE = configurado;
+    const fetchMock = vi.fn().mockResolvedValue(respostaOk({ key: { id: "EVO-CANARY" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const r = await enviarTextoWhatsApp(normalizado, "teste controlado", { idempotencyKey: "canary:test-case" });
+    expect(r).toMatchObject({ ok: true, statusHttp: 200, jobId: expect.any(String) });
+    expect(jobs.size).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [job] = [...jobs.values()];
+    expect(job.phone).toBe(normalizado);
+  });
+
+  test("número de cliente continua usando transporte direto, mesmo com canário local configurado", async () => {
+    process.env.WHATSAPP_OUTBOX_ROLLOUT = "canary";
+    process.env.WHATSAPP_CANARY_PHONE = "(11) 99999-8888";
+    const fetchMock = vi.fn().mockResolvedValue(respostaOk({ key: { id: "EVO-LEGADO" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const r = await enviarTextoWhatsApp("5511999997777", "mensagem comercial");
+    expect(r).toMatchObject({ ok: true, messageIdInterno: "EVO-LEGADO" });
+    expect(r.jobId).toBeUndefined();
+    expect(jobs.size).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   test("valor desconhecido e canário não configurado bloqueiam outbox sem bloquear envio legado", async () => {
     process.env.WHATSAPP_OUTBOX_ROLLOUT = "canary";
     delete process.env.WHATSAPP_CANARY_PHONE;
