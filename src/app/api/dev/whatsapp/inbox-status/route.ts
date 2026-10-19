@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { configuracaoRolloutInboxWhatsapp } from "@/lib/whatsappInboxRollout";
+import { webhookEvolutionProtegido } from "@/lib/evolutionWebhookAuth";
 import { autenticarRequisicao, exigirRole } from "@/lib/apiAuth";
 import {
   configuracaoInboxWhatsapp, inboxAtivaParaClientes, resumoInboxWhatsapp,
@@ -22,6 +23,7 @@ export async function GET(req: NextRequest) {
       rolloutValid: rollout.valid,
       allowedPhoneCount: rollout.phones.length,
       gradualSupported: true,
+      ingressGuardConfigured: webhookEvolutionProtegido(),
       active: inboxAtivaParaClientes() && config.ready,
       configuration: config,
       queue: data,

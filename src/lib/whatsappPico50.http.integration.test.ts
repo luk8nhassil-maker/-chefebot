@@ -30,6 +30,7 @@ const NATIVE_FETCH = globalThis.fetch.bind(globalThis);
 let server: Server;
 let baseUrl = "";
 const PHONE_PREFIX = "559988";
+const EVOLUTION_TEST_SECRET = "test_only_evolution_webhook_secret_1234567890";
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const phone = (n: number) => PHONE_PREFIX + String(n).padStart(7, "0");
 
@@ -46,11 +47,11 @@ function p95(values: number[]): number {
   const v = [...values].sort((a, b) => a - b);
   return Math.round(v[Math.max(0, Math.ceil(v.length * 0.95) - 1)] ?? 0);
 }
-async function publish(payload: unknown) {
+async function publish(payload: unknown, signed = true) {
   const begun = performance.now();
   const response = await fetch(baseUrl + "/api/whatsapp", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...(signed ? { "x-chefebot-evolution-secret": EVOLUTION_TEST_SECRET } : {}) },
     body: JSON.stringify(payload),
   });
   return { status: response.status, body: await response.json(), ms: performance.now() - begun };
@@ -75,6 +76,7 @@ beforeAll(async () => {
   vi.stubEnv("VERCEL_ENV", "production"); // habilita SOMENTE o handler sob teste local
   vi.stubEnv("WHATSAPP_INBOX_ROLLOUT", "all");
   vi.stubEnv("WHATSAPP_OUTBOX_ROLLOUT", "off");
+  vi.stubEnv("EVOLUTION_WEBHOOK_SHARED_SECRET", EVOLUTION_TEST_SECRET);
   vi.stubEnv("WHATSAPP_CANARY_PHONE", "5511900000666");
   vi.stubEnv("QSTASH_TOKEN", "qstash-falso-somente-ci");
   vi.stubEnv("QSTASH_URL", "https://qstash-us-east-1.upstash.io");
@@ -96,7 +98,8 @@ beforeAll(async () => {
       const chunks: Buffer[] = [];
       for await (const chunk of req) chunks.push(Buffer.from(chunk));
       const request = new NextRequest("http://127.0.0.1/api/whatsapp", {
-        method: "POST", headers: { "content-type": "application/json" },
+        method: "POST", headers: { "content-type": "application/json",
+          "x-chefebot-evolution-secret": String(req.headers["x-chefebot-evolution-secret"] || "") },
         body: Buffer.concat(chunks),
       });
       const result = await webhook(request);
@@ -120,6 +123,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   vi.stubEnv("WHATSAPP_INBOX_ROLLOUT", "all");
   vi.stubEnv("WHATSAPP_INBOX_ALLOWED_PHONES", "");
+  vi.stubEnv("EVOLUTION_WEBHOOK_SHARED_SECRET", EVOLUTION_TEST_SECRET);
   await redis.flushdb();
   calls.publish.mockClear();
   calls.schedule.mockClear();
@@ -135,6 +139,12 @@ afterAll(async () => {
 });
 
 describe.skipIf(process.env.CHEFEBOT_INBOX_HTTP_TEST !== "1")("pico HTTP com handler Next real e Redis EVAL real (Evolution falsa)", () => {
+  it("webhook sem cabeçalho autenticado é recusado antes da inbox", async () => {
+    const result = await publish(evento(phone(9905), "forged"), false);
+    expect(result.status).toBe(401);
+    expect((await resumoInboxWhatsapp()).queuedTotal).toBe(0);
+    expect(calls.publish).not.toHaveBeenCalled();
+  });
   it("allowlist aceita apenas o remetente selecionado e preserva o caminho legado dos demais", async () => {
     const selected = phone(9900), outside = phone(9901);
     vi.stubEnv("WHATSAPP_INBOX_ROLLOUT", "allowlist");
@@ -285,7 +295,7 @@ describe.skipIf(process.env.CHEFEBOT_INBOX_HTTP_TEST !== "1")("pico HTTP com han
       ...Array.from({ length: 20 }, (_, i) => evento(targetPhone, "ord-" + i)),
       ...Array.from({ length: 30 }, (_, i) => evento(phone(4000 + i), "out-" + i)),
     ];
-    const responses = await Promise.all(input.map(publish));
+    const responses = await Promise.all(input.map(payload => publish(payload)));
     expect(responses.every(r => r.status === 200)).toBe(true);
     const conversation = chaveConversaInbound(targetPhone);
     const ids = await redis.zrange<string[]>("whatsapp:inbox:v1:queue:" + conversation, 0, -1);
