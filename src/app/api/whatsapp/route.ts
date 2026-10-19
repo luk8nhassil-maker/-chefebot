@@ -1043,7 +1043,7 @@ export async function POST(req: NextRequest) {
   // Autenticação opt-in para a Evolution: sem variável, não altera o atendimento legado.
   // O worker QStash tem autenticação própria e executa o handler em escopo interno.
   if (!executandoWorkerInbox()) {
-    const auth = verificarWebhookEvolution(req.headers.get(EVOLUTION_WEBHOOK_AUTH_HEADER));
+    const auth = verificarWebhookEvolution(req.headers?.get(EVOLUTION_WEBHOOK_AUTH_HEADER) ?? null);
     if (auth === "invalid_configuration") {
       console.error("[whatsapp-evolution] segredo_de_ingresso_invalido");
       return NextResponse.json({ ok: false }, { status: 503 });
