@@ -32,6 +32,65 @@ beforeEach(() => {
 });
 
 describe("Centro DEV: leitura segura", () => {
+  test("erro lendo canário não é apresentado como ausência de vínculo", async () => {
+    fake.canary.mockRejectedValue(new Error("offline"));
+    expect((await lerMonitorWhatsapp()).diagnostics.canaryOutbox).toBe("read_failed");
+  });
+
+  test("erro no histórico de incidentes não apaga contadores ou fila", async () => {
+    fake.redis.zrange.mockRejectedValue(new Error("offline"));
+    const s = await lerMonitorWhatsapp();
+    expect(s.health.redis).toBe("ok");
+    expect(s.metrics).toMatchObject({ pending: 2, accepted: 5 });
+  });
+
+  test("erro lendo fila permanece bloqueante mesmo com contador válido", async () => {
+    fake.summary.mockRejectedValue(new Error("offline"));
+    const s = await lerMonitorWhatsapp();
+    expect(s.metrics).toBeNull();
+    expect(s.health.redis).toBe("down");
+    expect(s.stages[0].passed).toBe(false);
+  });
+
+  test("falha dos contadores não apaga leitura válida da fila nem declara Redis indisponível", async () => {
+    fake.redis.hgetall.mockRejectedValue(new Error("WRONGTYPE"));
+    const s = await lerMonitorWhatsapp();
+    expect(s.health.redis).toBe("ok");
+    expect(s.metrics).toMatchObject({ pending: 2, ambiguous: 1, accepted: null });
+    expect(s.diagnostics.acceptedCounter).toBe("read_failed");
+    expect(s.stages[0].passed).toBe(false);
+  });
+
+  test("roundtrip antigo sem vínculo não prova aceitação pela fila", async () => {
+    fake.canary.mockResolvedValue({ state: "roundtrip_ok", outboundHttpStatus: 201 });
+    fake.redis.hgetall.mockResolvedValue({ queued: 2, failed: 1, recovered: 1 });
+    const s = await lerMonitorWhatsapp();
+    expect(s.diagnostics).toMatchObject({ acceptedCounter: "not_recorded", canaryOutbox: "not_linked" });
+    expect(s.metrics?.accepted).toBeNull();
+    expect(s.stages[0].passed).toBe(false);
+  });
+
+  test.each(["pending", "ambiguous", "failed", "delivered"])("expõe estado %s sem divulgar jobId", async (state) => {
+    fake.getJob.mockResolvedValue({ id: "canary-id", state });
+    const s = await lerMonitorWhatsapp();
+    expect(s.diagnostics.canaryOutbox).toBe(state);
+    expect(JSON.stringify(s)).not.toContain("canary-id");
+  });
+
+  test("distingue job removido de erro de leitura", async () => {
+    fake.getJob.mockResolvedValue(null);
+    expect((await lerMonitorWhatsapp()).diagnostics.canaryOutbox).toBe("job_missing");
+    fake.getJob.mockRejectedValue(new Error("offline"));
+    expect((await lerMonitorWhatsapp()).diagnostics.canaryOutbox).toBe("read_failed");
+  });
+
+  test("estado inválido no Redis não vaza pelo novo diagnóstico", async () => {
+    fake.getJob.mockResolvedValue({ state: "conteudo-confidencial" });
+    const s = await lerMonitorWhatsapp();
+    expect(s.diagnostics.canaryOutbox).toBe("invalid_state");
+    expect(JSON.stringify(s)).not.toContain("conteudo-confidencial");
+  });
+
   test("retorna dados reais agregados e não envia mensagens ou altera etapa", async () => {
     const s = await lerMonitorWhatsapp();
     expect(s.metrics).toMatchObject({ pending: 2, queued: 8, accepted: 5, ambiguous: 1, recovered: 1 });

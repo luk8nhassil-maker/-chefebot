@@ -41,33 +41,47 @@ async function evolutionState(): Promise<boolean | null> {
 // Dados agregados e sem identificadores pessoais. Read-only: GET não reconcilia leases nem
 // altera estado, dispara QStash, executa worker ou inicia o canário.
 export async function lerMonitorWhatsapp() {
-  const [health, evolution, canary, outboxConfig] = await Promise.all([
-    checkRedisHealth(), evolutionState(), lerCanarioAtual().catch(() => null), Promise.resolve(configuracaoOutboxWhatsapp()),
+  const [health, evolution, canaryRead, outboxConfig] = await Promise.all([
+    checkRedisHealth(), evolutionState(),
+    lerCanarioAtual().then(record => ({ record, failed: false }), () => ({ record: null, failed: true })),
+    Promise.resolve(configuracaoOutboxWhatsapp()),
   ]);
+  const canary = canaryRead.record;
   const redisOk = health.status === "ok";
   let queue: Awaited<ReturnType<typeof resumoFilaWhatsapp>> | null = null;
   let canaryOutboxAccepted: boolean | null = null;
   let counters: Record<string, unknown> | null = null;
+  let acceptedCounter = redisOk ? "not_recorded" : "read_failed";
+  let canaryOutbox: string = redisOk && !canaryRead.failed ? "not_linked" : "read_failed";
   let oldestWaitingMs: number | null = null;
   let incidents: Array<{ state: string; at: number; reason: string; statusHttp: number | null }> = [];
   if (redisOk && canary?.outboundOutboxJobId) {
     try {
       const canaryJob = await obterJobWhatsapp(canary.outboundOutboxJobId);
       canaryOutboxAccepted = canaryJob ? canaryJob.state === "delivered" : null;
-    } catch { canaryOutboxAccepted = null; }
+      canaryOutbox = !canaryJob ? "job_missing" :
+        ["pending", "leased", "delivered", "failed", "ambiguous", "suppressed", "expired"].includes(canaryJob.state)
+          ? canaryJob.state : "invalid_state";
+    } catch { canaryOutboxAccepted = null; canaryOutbox = "read_failed"; }
   }
   if (redisOk) {
+    // Cada fonte pode falhar independentemente. Falha de telemetria não prova
+    // indisponibilidade da fila, nem ausência de envios.
+    const [queueRead, countersRead] = await Promise.allSettled([
+      resumoFilaWhatsapp(), redis.hgetall<Record<string, unknown>>(METRICS_KEY),
+    ]);
+    if (queueRead.status === "fulfilled") queue = queueRead.value;
+    if (countersRead.status === "fulfilled") {
+      counters = countersRead.value;
+      acceptedCounter = nonNegative(counters?.delivered) === null ? "not_recorded" : "available";
+    } else acceptedCounter = "read_failed";
     try {
-      const [q, c, ids, critical, normal, promo] = await Promise.all([
-        resumoFilaWhatsapp(),
-        redis.hgetall<Record<string, unknown>>(METRICS_KEY),
+      const [ids, critical, normal, promo] = await Promise.all([
         redis.zrange<string[]>(INCIDENTS_KEY, -15, -1),
         redis.zrange<string[]>(PREFIX + "due:critica", 0, 0),
         redis.zrange<string[]>(PREFIX + "due:normal", 0, 0),
         redis.zrange<string[]>(PREFIX + "due:promocional", 0, 0),
       ]);
-      queue = q;
-      counters = c;
       const candidates = [...critical, ...normal, ...promo].filter((id): id is string => typeof id === "string");
       const jobs = await Promise.all(candidates.map(id => obterJobWhatsapp(id)));
       for (const job of jobs) if (job?.state === "pending" && Number.isFinite(job.createdAt)) {
@@ -83,8 +97,6 @@ export async function lerMonitorWhatsapp() {
           return { state: j.state, at: j.updatedAt, reason, statusHttp: status !== null && status >= 400 && status <= 599 ? status : null };
         }).reverse();
     } catch {
-      queue = null;
-      counters = null;
       oldestWaitingMs = null;
       incidents = [];
     }
@@ -117,6 +129,7 @@ export async function lerMonitorWhatsapp() {
     metrics: queue ? metrics : null,
     since: nonNegative(counters?.since),
     incidents,
+    diagnostics: { acceptedCounter, canaryOutbox },
     canary: { state: canary?.state ?? null, testedAt: canary?.createdAt ?? null },
     health: {
       redis: queue !== null && redisOk ? "ok" : "down",

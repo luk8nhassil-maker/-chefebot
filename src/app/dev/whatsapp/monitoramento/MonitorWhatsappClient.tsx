@@ -13,6 +13,7 @@ type Snapshot = {
     recovered: number | null; closedCanaryNoRetry?: number | null; oldestWaitingMs: number | null
   }
   canary: { state: string | null; testedAt: number | null }
+  diagnostics?: { acceptedCounter: string; canaryOutbox: string }
   incidents: Incident[]
   health: { redis: string; evolution: string; qstash: string; qstashMissing: string[]; qstashScheduleVerified: boolean; lastSignedWorkerSuccessAt: number | null }
   stages: Stage[]
@@ -29,6 +30,20 @@ const panel: React.CSSProperties = { border, background: 'rgba(var(--overlay-rgb
 const dt = (v: number | null | undefined) => v ? new Date(v).toLocaleString('pt-BR') : 'Sem evidência'
 const count = (n: number | null | undefined) => n == null ? '—' : n.toLocaleString('pt-BR')
 const duration = (ms: number | null | undefined) => ms == null ? 'Sem medida' : ms < 60000 ? Math.ceil(ms / 1000) + ' s' : Math.ceil(ms / 60000) + ' min'
+const evidenceLabels: Record<string, string> = {
+  not_recorded: 'Contador ainda não registrado; não comprova ausência de envios.',
+  read_failed: 'Leitura indisponível; não é confirmação de falha de envio.',
+  not_linked: 'Canário sem vínculo com job da outbox; HTTP isolado não comprova passagem pela fila.',
+  job_missing: 'Job vinculado não encontrado; confirmação da outbox não disponível.',
+  invalid_state: 'Estado do job inconsistente; exige investigação, sem reenvio.',
+  pending: 'Job aguardando processamento.',
+  leased: 'Job reservado para processamento.',
+  delivered: 'Job aceito pela Evolution; não equivale a entrega no aparelho.',
+  failed: 'Job com falha definitiva.',
+  ambiguous: 'Resultado incerto em quarentena; não reenviar automaticamente.',
+  suppressed: 'Job suprimido pela política de envio.',
+  expired: 'Job expirado sem envio.',
+}
 
 function Status({ label, kind }: { label: string; kind: 'ok' | 'bad' | 'unknown' }) {
   const colors = { ok: 'var(--success)', bad: 'var(--danger)', unknown: 'var(--attention)' }
@@ -115,10 +130,11 @@ export default function MonitorWhatsappClient() {
         <h2 style={{ fontSize: 17, margin: '20px 0 12px' }}>Resumo da fila</h2>
         <section aria-label="Indicadores principais" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(145px,1fr))', gap: 10, marginBottom: 12 }}>
           <Metric label="Pendentes" value={count(m?.pending)} detail="Aguardando envio" />
-          <Metric label="Aceitas pela Evolution" value={count(m?.accepted)} detail="Confirmação HTTP; não é entrega no aparelho" />
+          <Metric label="Aceitas pela Evolution" value={count(m?.accepted)} detail={evidenceLabels[snapshot.diagnostics?.acceptedCounter ?? ''] ?? 'Confirmação HTTP; não é entrega no aparelho'} />
           <Metric label="Falhas definitivas" value={count(m?.failed)} detail="Acumuladas desde o início da medição" />
           <Metric label="Precisam de revisão" value={m ? count(m.ambiguous + m.unresolved) : '—'} detail="Resultados incertos e inconsistências" />
         </section>
+        {snapshot.diagnostics && <p style={{ color: muted, fontSize: 12 }}><strong>Evidência do canário na fila:</strong> {evidenceLabels[snapshot.diagnostics.canaryOutbox] ?? 'Estado não verificado.'}</p>}
         <details style={{ ...panel, marginBottom: 20, padding: '12px 16px' }}>
           <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>Ver outros indicadores da fila</summary>
           <section aria-label="Indicadores adicionais" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(145px,1fr))', gap: 10, marginTop: 14 }}>
