@@ -62,7 +62,7 @@ const state = vi.hoisted(() => {
       const job = jobs.get(id);
       if (!job || job.state !== "leased" || job.leaseToken !== args[0]) return 0;
       delete job.leaseToken; job.updatedAt = Number(args[1]);
-      job.state = args[2]; job.motivo = args[3];
+      job.state = args[2] as InboxJob["state"]; job.motivo = args[3];
       leases.delete(id);
       if (locks.get(job.conversationId) === args[0]) locks.delete(job.conversationId);
       if (args[2] === "done") {

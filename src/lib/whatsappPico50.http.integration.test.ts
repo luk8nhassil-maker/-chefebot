@@ -312,10 +312,13 @@ describe.skipIf(process.env.CHEFEBOT_INBOX_HTTP_TEST !== "1")("pico HTTP com han
 
   it("falha de processamento nao reenvia efeitos, quarentena bloqueia somente sua conversa", async () => {
     const a = phone(9200), b = phone(9201);
-    const answers = await Promise.all([
-      publish(evento(a, "risky-1")), publish(evento(a, "risky-2")),
+    // A ordem garantida e a de aceite Redis, nao a ordem de lancamento de
+    // sockets HTTP concorrentes. Estabelecer a primeira cabeca antes do pico.
+    const first = await publish(evento(a, "risky-1"));
+    const answers = [first, ...await Promise.all([
+      publish(evento(a, "risky-2")),
       publish(evento(b, "healthy-1")),
-    ]);
+    ])];
     expect(answers.every(x => x.status === 200)).toBe(true);
     const done: string[] = [];
     const result = await drain(async job => {
