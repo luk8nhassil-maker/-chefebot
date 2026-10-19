@@ -21,6 +21,18 @@ const K_SEQUENCIA = PREFIX + "sequence";
 const K_PENDING = PREFIX + "pending-count";
 const K_LEASES = PREFIX + "leases";
 const K_METRICAS = PREFIX + "metrics";
+const K_WAKE = PREFIX + "wake:reserved";
+const WAKE_TTL_SEGUNDOS = 60;
+const WAKE_RELEASE_OWNED = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+end
+return 0
+`;
+const WAKE_RELEASE_AND_PENDING = `
+redis.call("DEL", KEYS[1])
+return tonumber(redis.call("GET", KEYS[2]) or "0")
+`;
 const K_LOCK = (c: string) => PREFIX + "lock:" + c;
 const K_FILA = (c: string) => PREFIX + "queue:" + c;
 const K_JOB = (id: string) => PREFIX + "job:" + id;
@@ -294,11 +306,30 @@ export function configuracaoInboxWhatsapp() {
   return { ready: missing.length === 0, missing };
 }
 
+/**
+ * Acordador por rajada, reservado em Redis: 50 entradas concorrentes pedem
+ * um único callback QStash. O worker assinado libera o despertador e lê o
+ * saldo pendente na mesma operação Lua, eliminando a janela de perda entre
+ * "terminou lote" e "chegou mensagem nova".
+ */
+export async function liberarDespertadorEContarPendentes(): Promise<number> {
+  return Number(await redis.eval(WAKE_RELEASE_AND_PENDING, [K_WAKE, K_PENDING], [])) || 0;
+}
+
 /** Publicação não é uma confirmação de processamento. Redis é a fonte durável. */
 export async function agendarInboxWhatsapp(continuacao = false): Promise<boolean> {
   const url = workerUrl();
   const client = obterQStash();
   if (!client || !url || !configuracaoInboxWhatsapp().ready) return false;
+  let donoDespertador: string | null = null;
+  if (!continuacao) {
+    try {
+      const token = randomUUID();
+      const reservado = await redis.set(K_WAKE, token, { nx: true, ex: WAKE_TTL_SEGUNDOS });
+      if (!reservado) return true; // já existe um callback responsável pela rajada
+      donoDespertador = token;
+    } catch { return false; }
+  }
   try {
     if (scheduleUrl !== url) {
       await client.schedules.create({
@@ -318,5 +349,11 @@ export async function agendarInboxWhatsapp(continuacao = false): Promise<boolean
       redact: { body: true },
     });
     return true;
-  } catch { return false; }
+  } catch {
+    if (donoDespertador) {
+      // Não apagar a reserva de um callback mais novo se o primeiro falhou.
+      await redis.eval(WAKE_RELEASE_OWNED, [K_WAKE], [donoDespertador]).catch(() => {});
+    }
+    return false;
+  }
 }
