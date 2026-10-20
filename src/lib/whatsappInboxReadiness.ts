@@ -15,6 +15,20 @@ export type InboxQueueHealth = {
 export type InboxScheduleHealth = "ok" | "ausente" | "incorreta" | "indisponivel" | "nao_configurada";
 export type InboxHealthStatus = "saudavel" | "observando" | "problema";
 
+/**
+ * Confere o destino efetivo do QStash (URL calculada, nunca a referência da
+ * função que calcula a URL). Sem rede, efeitos colaterais ou segredo exposto.
+ */
+export function agendaRecuperacaoCorreta(
+  agenda: { destination?: unknown; cron?: unknown; isPaused?: unknown },
+  urlEsperada: string,
+): boolean {
+  return urlEsperada.startsWith("https://")
+    && agenda.destination === urlEsperada
+    && agenda.cron === "*/5 * * * *"
+    && agenda.isPaused !== true;
+}
+
 export function avaliarSaudeInbox(
   queue: InboxQueueHealth,
   schedule: InboxScheduleHealth,

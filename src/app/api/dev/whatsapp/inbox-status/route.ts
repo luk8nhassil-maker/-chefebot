@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerPicosTrafegoWhatsapp } from "@/lib/whatsappTrafficPeak";
-import { avaliarSaudeInbox, type InboxScheduleHealth } from "@/lib/whatsappInboxReadiness";
+import { agendaRecuperacaoCorreta, avaliarSaudeInbox, type InboxScheduleHealth } from "@/lib/whatsappInboxReadiness";
 import { urlWorkerInboxAssinada } from "@/lib/whatsappInbox";
 
 // Leitura autenticada e sem efeitos: não cria agenda, não envia mensagens.
@@ -8,7 +8,7 @@ import { urlWorkerInboxAssinada } from "@/lib/whatsappInbox";
 async function verificarAgendaRecuperacao(): Promise<InboxScheduleHealth> {
   const base = process.env.QSTASH_URL?.trim();
   const token = process.env.QSTASH_TOKEN?.trim();
-  const destino = urlWorkerInboxAssinada;
+  const destino = urlWorkerInboxAssinada();
   if (!base || !token || !destino) return "nao_configurada";
   try {
     const u = new URL(base);
@@ -28,7 +28,7 @@ async function verificarAgendaRecuperacao(): Promise<InboxScheduleHealth> {
     const schedule: unknown = await r.json();
     if (!schedule || typeof schedule !== "object") return "incorreta";
     const props = schedule as { destination?: unknown; cron?: unknown; isPaused?: unknown };
-    return props.destination === destino && props.cron === "*/5 * * * *" && props.isPaused !== true ? "ok" : "incorreta";
+    return agendaRecuperacaoCorreta(props, destino) ? "ok" : "incorreta";
   } catch {
     return "indisponivel";
   }
