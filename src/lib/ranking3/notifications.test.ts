@@ -39,7 +39,7 @@ vi.mock("../whatsappOutbox", () => ({
   configuracaoOutboxWhatsapp: () => ({ ready: true }), agendarDrenoWhatsapp: vi.fn(async () => true),
   enfileirarMensagemWhatsapp: m.enfileirar, obterJobWhatsapp: async (id: string) => m.jobs.get(id) ?? null,
 }));
-import { agendarAvisoExcepcionalPrimeiraTemporada, autorizarJobPremio, processarAvisosRanking3 } from "./notifications";
+import { agendarAvisoExcepcionalPrimeiraTemporada, autorizarJobPremio, premioAutorizadoNestaData, processarAvisosRanking3 } from "./notifications";
 import { VERCEL_PROJECT_CHEFEBOT_OFICIAL } from "../vercelProjeto";
 
 const agora = Date.parse("2026-11-19T21:00:00Z");
@@ -52,6 +52,24 @@ beforeEach(() => {
   m.dados.set("config:pizzaria", { horaAbertura: 18, horaFechamento: 23 });
   m.premios.set(inicial.id, { ...inicial });
   m.enfileirar.mockResolvedValue({ jobId: "job-sintetico" });
+});
+
+describe("Ranking3 — um único aviso autorizado hoje", () => {
+  it("libera só a exceção histórica em 20/10, sem atingir clientes de outras temporadas", () => {
+    vi.stubEnv("RANKING3_PRIZE_ONLY_ID_20261020", "r3-legado-t-1789830947840-liga-1");
+    const hoje = Date.parse("2026-10-20T21:00:00.000Z");
+    expect(premioAutorizadoNestaData("r3-legado-t-1789830947840-liga-1", hoje)).toBe(true);
+    expect(premioAutorizadoNestaData("r3-2026-10-21-0-liga-1", hoje)).toBe(false);
+    expect(premioAutorizadoNestaData("r3-2026-10-21-0-liga-1", Date.parse("2026-10-21T21:00:00Z"))).toBe(true);
+  });
+  it("nega configuração inválida e impede job de outro prêmio no worker", async () => {
+    const hoje = Date.parse("2026-10-20T21:00:00.000Z");
+    vi.stubEnv("RANKING3_PRIZE_ONLY_ID_20261020", "premio-desconhecido");
+    expect(premioAutorizadoNestaData(inicial.id, hoje)).toBe(false);
+    vi.stubEnv("RANKING3_PRIZE_ONLY_ID_20261020", "r3-legado-t-1789830947840-liga-1");
+    const job = { phone: "5511900000000", rankingPrize: { id: inicial.id, revisao: 0 } } as JobOutboxWhatsapp;
+    expect(await autorizarJobPremio(job, hoje)).toBe(false);
+  });
 });
 
 describe("Ranking3 — aviso da concessão excepcional antiga", () => {

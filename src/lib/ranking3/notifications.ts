@@ -36,6 +36,19 @@ export function notificacoesPermitidas() {
   return ranking3Ativo() && process.env.VERCEL_ENV === "production" && process.env.VERCEL_PROJECT_ID === VERCEL_PROJECT_CHEFEBOT_OFICIAL && process.env.RANKING3_PRIZE_NOTIFICATIONS_ENABLED === "true" && process.env.RANKING3_PROACTIVE_POLICY_APPROVED === "true";
 }
 
+// Em 20/10, liberar somente o aviso do prêmio excepcional autorizado.
+// Fora dessa data, a programação normal das próximas temporadas não muda.
+// O limite também é conferido no worker, evitando um job de outro direito.
+export function premioAutorizadoNestaData(premioId: string, agora: number): boolean {
+  const idAutorizado = process.env.RANKING3_PRIZE_ONLY_ID_20261020;
+  if (!idAutorizado) return true;
+  if (idAutorizado !== "r3-legado-t-1789830947840-liga-1") return false;
+  const dataBrasilia = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: FUSO, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(agora);
+  return dataBrasilia !== "2026-10-20" || premioId === idAutorizado;
+}
+
 function telefoneDestinoValido(valor: string | null | undefined): string | null {
   const digitos = String(valor ?? "").replace(/\D/g, "");
   const phone = digitos.length === 10 || digitos.length === 11 ? `55${digitos}` : digitos;
@@ -63,7 +76,7 @@ async function destinatarioPermitido(premio: Premio, phone: string, agora: numbe
 export async function autorizarJobPremio(job: JobOutboxWhatsapp, agora = Date.now()) {
   if (!notificacoesPermitidas() || !job.rankingPrize) return false;
   const premio = await ranking3().premio(job.rankingPrize.id);
-  return Boolean(premio && premio.revisao === job.rankingPrize.revisao && avisoDevido(premio, agora) && await destinatarioPermitido(premio, job.phone, agora));
+  return Boolean(premio && premioAutorizadoNestaData(premio.id, agora) && premio.revisao === job.rankingPrize.revisao && avisoDevido(premio, agora) && await destinatarioPermitido(premio, job.phone, agora));
 }
 
 // A concessão excepcional da primeira temporada foi criada sem aviso: a
@@ -154,7 +167,7 @@ export async function processarAvisosRanking3(agora = Date.now()) {
   const ids = await redis.zrange<string[]>(store.chave("avisos"), 0, agora, { byScore: true, offset: cursor, count: 50 });
   for (const id of ids) {
     const premio = await store.premio(id);
-    if (!premio || !avisoDevido(premio, agora)) continue;
+    if (!premio || !avisoDevido(premio, agora) || !premioAutorizadoNestaData(premio.id, agora)) continue;
     const chave = store.chave(`aviso:${id}:${premio.proximoAvisoEm}`);
     let aviso = await redis.get<Aviso>(chave);
     if (aviso?.estado === "enviado") continue;
