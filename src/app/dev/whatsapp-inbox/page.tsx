@@ -15,6 +15,17 @@ type Readiness = {
   capacidadeGeralComprovada: false;
   liberacaoGeralAutorizada: false;
 };
+type Traffic = {
+  total7d: number;
+  coberturaDias: number;
+  suficienteParaRepresentatividade: boolean;
+  desde: number | null;
+  fuso: string;
+  observacao: string;
+  picoHora: { data: string; hora: number; mensagens: number } | null;
+  picoMinuto: { quando: string; mensagens: number } | null;
+  dias: Array<{ data: string; total: number; picoMinuto: number; picoMinutoEm: string | null; horas: number[] }>;
+};
 type Monitor = {
   checkedAt: number;
   active: boolean;
@@ -22,6 +33,7 @@ type Monitor = {
   allowedPhoneCount: number;
   agendaRecuperacao: string;
   queue: Queue;
+  trafego: Traffic;
   avaliacao: Readiness;
   note: string;
 };
@@ -43,7 +55,7 @@ export default function MonitorFilaWhatsappDevPage() {
         ? "Acesso exclusivo para desenvolvedores autenticados."
         : "Não foi possível ler a fila com segurança.");
       const json: Monitor = await res.json();
-      if (!json.queue || !json.avaliacao) throw new Error("Diagnóstico incompleto.");
+      if (!json.queue || !json.avaliacao || !json.trafego) throw new Error("Diagnóstico incompleto.");
       setData(json);
       setError("");
       setUpdatedAt(Date.now());
@@ -60,6 +72,11 @@ export default function MonitorFilaWhatsappDevPage() {
 
   const queue = data?.queue;
   const readiness = data?.avaliacao;
+  const trafego = data?.trafego;
+  const horas = trafego ? Array.from({ length: 24 }, (_, hora) => ({
+    hora, quantidade: trafego.dias.reduce((total, dia) => total + (dia.horas[hora] || 0), 0),
+  })) : [];
+  const maiorHora = Math.max(1, ...horas.map(h => h.quantidade));
   const summary = !readiness ? "Sem dados confiáveis"
     : readiness.status === "saudavel" ? "Fila funcionando — capacidade geral ainda não comprovada"
     : readiness.status === "problema" ? "Problema identificado — não ampliar"
@@ -79,6 +96,41 @@ export default function MonitorFilaWhatsappDevPage() {
           <p>Capacidade para todos: <strong>Não comprovada; exige pico real, limite QStash e margem de recuperação.</strong></p>
         </>}
       </section>
+
+      {trafego && <section style={{ ...panel, marginTop: 16 }}>
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>Horários de pico reais</h2>
+        <p>Mensagens dos clientes nos últimos 7 dias: <strong>{toNumber(trafego.total7d)}</strong></p>
+        <p>Coleta: <strong>{trafego.coberturaDias} de 7 dias completos</strong>.
+          {" "}{trafego.suficienteParaRepresentatividade
+            ? "Janela mínima de observação atingida. Ainda é preciso avaliar quotas e dias de maior movimento."
+            : "Ainda não há uma semana completa de dados; não extrapolar a demanda."}
+        </p>
+        <p>Pico em uma hora: <strong>{trafego.picoHora
+          ? `${toNumber(trafego.picoHora.mensagens)} mensagens às ${String(trafego.picoHora.hora).padStart(2, "0")}h em ${trafego.picoHora.data}`
+          : "Sem dados"}</strong></p>
+        <p>Pico em um minuto: <strong>{trafego.picoMinuto
+          ? `${toNumber(trafego.picoMinuto.mensagens)} mensagens em ${trafego.picoMinuto.quando}`
+          : "Sem dados"}</strong></p>
+        <p style={{ fontSize: 12, opacity: .7 }}>Fuso: {trafego.fuso}. Horários abaixo somam os sete dias disponíveis.</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 7 }}>
+          {horas.map(({ hora, quantidade }) => <div key={hora} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+            <span style={{ width: 27 }}>{String(hora).padStart(2, "0")}h</span>
+            <div style={{ flex: 1, height: 10, background: "var(--border, #333)", borderRadius: 5, overflow: "hidden" }}>
+              <div style={{ width: `${quantidade / maiorHora * 100}%`, height: "100%", background: "var(--info, #60a5fa)" }} />
+            </div>
+            <span style={{ width: 24, textAlign: "right" }}>{quantidade}</span>
+          </div>)}
+        </div>
+        <p style={{ fontSize: 13, marginTop: 20, fontWeight: 650 }}>Movimento por dia</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {trafego.dias.map(d => <div key={d.data} style={{ border: "1px solid var(--border, #333)", borderRadius: 9, padding: 10, fontSize: 12 }}>
+            <div>{d.data}</div><strong>{toNumber(d.total)} mensagens</strong>
+          </div>)}
+        </div>
+        <p style={{ fontSize: 12, opacity: .7, marginTop: 14 }}>{trafego.observacao}</p>
+        <p style={{ fontSize: 12, opacity: .75 }}>Uso diário da cota QStash: <strong>não disponível nesta leitura</strong>.
+          {" "}Sem essa informação, o painel não autoriza liberar para todos.</p>
+      </section>}
       {queue && <>
         <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginTop: 16 }}>
           {[
