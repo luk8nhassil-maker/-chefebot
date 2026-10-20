@@ -39,7 +39,7 @@ vi.mock("../whatsappOutbox", () => ({
   configuracaoOutboxWhatsapp: () => ({ ready: true }), agendarDrenoWhatsapp: vi.fn(async () => true),
   enfileirarMensagemWhatsapp: m.enfileirar, obterJobWhatsapp: async (id: string) => m.jobs.get(id) ?? null,
 }));
-import { autorizarJobPremio, processarAvisosRanking3 } from "./notifications";
+import { agendarAvisoExcepcionalPrimeiraTemporada, autorizarJobPremio, processarAvisosRanking3 } from "./notifications";
 import { VERCEL_PROJECT_CHEFEBOT_OFICIAL } from "../vercelProjeto";
 
 const agora = Date.parse("2026-11-19T21:00:00Z");
@@ -52,6 +52,58 @@ beforeEach(() => {
   m.dados.set("config:pizzaria", { horaAbertura: 18, horaFechamento: 23 });
   m.premios.set(inicial.id, { ...inicial });
   m.enfileirar.mockResolvedValue({ jobId: "job-sintetico" });
+});
+
+describe("Ranking3 — aviso da concessão excepcional antiga", () => {
+  const premioId = "r3-legado-t-1789830947840-liga-1";
+  const temporadaId = "t-1789830947840";
+  const chaveMarcador = `r3:concessao-excepcional:${temporadaId}`;
+  function premioHistorico(estado: Premio["estado"] = "disponivel"): Premio {
+    return {
+      ...inicial, id: premioId, temporadaId, origem: "excecao_historica",
+      estado, proximoAvisoEm: Number.MAX_SAFE_INTEGER,
+    };
+  }
+  function configurar(premio = premioHistorico()) {
+    m.premios.clear();
+    m.premios.set(premioId, premio);
+    m.dados.set(chaveMarcador, {
+      versao: 1, motivo: "concessao_excepcional_primeira_temporada",
+      temporadaId, clienteId: "sintetico",
+    });
+  }
+  it("agenda e enfileira exatamente uma vez sem reatribuir o prêmio", async () => {
+    configurar();
+    expect((await processarAvisosRanking3(agora)).enfileirados).toBe(1);
+    expect(m.premios.get(premioId)).toMatchObject({ estado: "disponivel", revisao: 1, proximoAvisoEm: agora });
+    expect(m.enfileirar).toHaveBeenCalledWith(expect.objectContaining({
+      rankingPrize: { id: premioId, revisao: 1 },
+    }));
+    await processarAvisosRanking3(agora);
+    expect(m.enfileirar).toHaveBeenCalledTimes(1);
+  });
+  it("bloqueia sem marcador legítimo, em pedido ativo ou flag desligada", async () => {
+    configurar();
+    m.dados.delete(chaveMarcador);
+    expect(await agendarAvisoExcepcionalPrimeiraTemporada(agora)).toBe(false);
+    expect(m.premios.get(premioId)?.proximoAvisoEm).toBe(Number.MAX_SAFE_INTEGER);
+    configurar(premioHistorico("em_preparo"));
+    expect(await agendarAvisoExcepcionalPrimeiraTemporada(agora)).toBe(false);
+    configurar();
+    vi.stubEnv("RANKING3_PRIZE_NOTIFICATIONS_ENABLED", "");
+    expect(await agendarAvisoExcepcionalPrimeiraTemporada(agora)).toBe(false);
+    expect(m.enfileirar).not.toHaveBeenCalled();
+    expect(m.premios.get(premioId)?.proximoAvisoEm).toBe(Number.MAX_SAFE_INTEGER);
+  });
+  it("não reabre aviso com marcador associado ao cliente errado", async () => {
+    configurar();
+    m.dados.set(chaveMarcador, {
+      versao: 1, motivo: "concessao_excepcional_primeira_temporada",
+      temporadaId, clienteId: "outro-cliente",
+    });
+    expect(await agendarAvisoExcepcionalPrimeiraTemporada(agora)).toBe(false);
+    expect(m.enfileirar).not.toHaveBeenCalled();
+  });
 });
 
 describe("Ranking3 — avisos na outbox, sem transporte real", () => {
