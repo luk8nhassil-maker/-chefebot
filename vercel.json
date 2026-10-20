@@ -11,7 +11,7 @@
     },
     {
       "path": "/api/cron/ranking-podio",
-      "schedule": "0 * * * *"
+      "schedule": "0 21 * * *"
     },
     {
       "path": "/api/cron/ranking-autopilot",

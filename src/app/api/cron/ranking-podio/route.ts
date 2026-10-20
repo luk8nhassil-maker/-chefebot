@@ -24,16 +24,19 @@ export async function GET(req: Request) {
   }
 
   const agoraMs = Date.now();
+  // Vercel Cron usa UTC. O vercel.json chama 21:00 UTC (=18:00 no fuso
+  // operacional atual), mas a rota também valida a hora local para impedir
+  // disparo acidental/manual fora da janela.
+  if (!ehHorarioDisparoPodioWhatsapp(agoraMs)) {
+    return NextResponse.json({ ok: true, skipped: true, motivo: "fora_horario_18h" });
+  }
+
   try {
     if (ranking3Ativo()) {
-      // A rota roda de hora em hora; o motor só enfileira dentro do horário
-      // real configurado da pizzaria e revalida novamente no worker.
+      // Segundo ponto de recuperação, reaproveitando a invocação já existente.
+      // Não depende de WhatsApp habilitado nem de um cliente abrir o site.
       const recuperacao = await ranking3().recuperar(agoraMs, obterElegibilidadeRankingNoCorte, 1);
       return NextResponse.json({ recuperacao, ...await processarAvisosRanking3(agoraMs) });
-    }
-    // O Ranking antigo preserva sua cadência original de 18h.
-    if (!ehHorarioDisparoPodioWhatsapp(agoraMs)) {
-      return NextResponse.json({ ok: true, skipped: true, motivo: "fora_horario_18h" });
     }
     const resultado = await processarPodioWhatsapp18h({ tenantId: "default", agoraMs });
     // Contadores sem destinatário, texto ou credencial: permitem auditar a
