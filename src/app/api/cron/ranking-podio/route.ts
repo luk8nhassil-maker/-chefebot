@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { processarPodioWhatsapp18h, ehHorarioDisparoPodioWhatsapp } from "@/lib/rankingPodioWhatsapp";
 import { VERCEL_PROJECT_CHEFEBOT_OFICIAL } from "@/lib/vercelProjeto";
+import { processarAvisosRanking3 } from "@/lib/ranking3/notifications";
+import { ranking3, ranking3Ativo } from "@/lib/ranking3/server";
+import { obterElegibilidadeRankingNoCorte } from "@/lib/consentimentoRanking";
 
 export const maxDuration = 30;
 
@@ -29,6 +32,12 @@ export async function GET(req: Request) {
   }
 
   try {
+    if (ranking3Ativo()) {
+      // Segundo ponto de recuperação, reaproveitando a invocação já existente.
+      // Não depende de WhatsApp habilitado nem de um cliente abrir o site.
+      const recuperacao = await ranking3().recuperar(agoraMs, obterElegibilidadeRankingNoCorte, 1);
+      return NextResponse.json({ recuperacao, ...await processarAvisosRanking3(agoraMs) });
+    }
     const resultado = await processarPodioWhatsapp18h({ tenantId: "default", agoraMs });
     // Contadores sem destinatário, texto ou credencial: permitem auditar a
     // execução mesmo quando a plataforma não retém o corpo da resposta.

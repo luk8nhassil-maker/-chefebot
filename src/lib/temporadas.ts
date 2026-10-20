@@ -9,6 +9,12 @@
 // - Histórico da temporada anterior nunca é apagado.
 
 import { redis } from "./redis";
+import { Ranking3Store } from "./ranking3/store";
+import { janelaTemporada, type Janela } from "./ranking3/domain";
+
+function configVirtual(tenantId: string, janela: Janela): ConfigTemporada {
+  return { tenantId, temporadaId: janela.id, nome: "Ranking do Chefe", estado: Date.now() >= Date.parse(janela.fim) ? "encerrada" : "ativa", criadaEm: janela.inicio, ativadaEm: janela.inicio, fimEm: janela.fim, duracaoDias: 30 };
+}
 
 export type EstadoTemporada = "rascunho" | "ativa" | "encerrada";
 
@@ -60,6 +66,7 @@ export async function criarTemporada(
     "nome" | "metaCompras" | "metaIndicacoes" | "duracaoDias" | "premioDescricao" | "premioQuantidadePremiados" | "premioAprovado"
   >> = {}
 ): Promise<ConfigTemporada> {
+  if (temporadaId.startsWith("r3-")) throw new Error("ranking3_gestao_exclusivamente_automatica");
   const existente = await obterTemporada(tenantId, temporadaId);
   // Temporada ativa ou encerrada é imutável — apenas atualiza campos opcionais de rascunho
   if (existente && existente.estado !== "rascunho") {
@@ -82,11 +89,23 @@ export async function criarTemporada(
 
 export async function obterTemporada(tenantId: string, temporadaId: string): Promise<ConfigTemporada | null> {
   if (!tenantId || !temporadaId) return null;
+  if (temporadaId.startsWith("r3-")) {
+    const config = await new Ranking3Store(redis, tenantId).config();
+    const indice = Number(temporadaId.split("-")[4]);
+    if (!config || !Number.isSafeInteger(indice)) return null;
+    const janela = janelaTemporada(config.ancora, indice);
+    return janela.id === temporadaId ? configVirtual(tenantId, janela) : null;
+  }
   return redis.get<ConfigTemporada>(chaveTemporada(tenantId, temporadaId));
 }
 
 export async function obterTemporadaAtiva(tenantId: string): Promise<ConfigTemporada | null> {
   if (!tenantId) return null;
+  if (process.env.RANKING3_ENABLED === "true") {
+    const atual = await new Ranking3Store(redis, tenantId).atual();
+    // Não recai no legado se a migração ainda não foi autorizada/configurada.
+    return atual ? configVirtual(tenantId, atual) : null;
+  }
   const temporadaId = await redis.get<string>(chaveTemporadaAtiva(tenantId));
   if (!temporadaId) return null;
   const config = await obterTemporada(tenantId, temporadaId);
@@ -120,6 +139,7 @@ export async function ativarTemporada(
   tenantId: string,
   temporadaId: string
 ): Promise<ResultadoTransicaoTemporada> {
+  if (temporadaId.startsWith("r3-")) return { ok: false, erro: "ranking3_gestao_exclusivamente_automatica" };
   if (!tenantId || !temporadaId) return { ok: false, erro: "parametros_invalidos" };
   const config = await obterTemporada(tenantId, temporadaId);
   if (!config) return { ok: false, erro: "temporada_nao_encontrada" };
@@ -150,6 +170,7 @@ export async function encerrarTemporada(
   tenantId: string,
   temporadaId: string
 ): Promise<ResultadoTransicaoTemporada> {
+  if (temporadaId.startsWith("r3-")) return { ok: false, erro: "ranking3_gestao_exclusivamente_automatica" };
   if (!tenantId || !temporadaId) return { ok: false, erro: "parametros_invalidos" };
   const config = await obterTemporada(tenantId, temporadaId);
   if (!config) return { ok: false, erro: "temporada_nao_encontrada" };

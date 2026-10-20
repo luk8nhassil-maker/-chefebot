@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 const { store, redisMock, defaultSetImpl, defaultGetImpl } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
@@ -91,6 +91,10 @@ import { encryptMercadoPagoToken } from "@/lib/mercadoPagoIntegracao";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
 import { buildSimpleCatalog } from "@/lib/catalog/simpleProducts";
 import { MENU } from "@/lib/menu";
+import { criarTokenCliente } from "@/lib/clienteAuth";
+import { Ranking3Store } from "@/lib/ranking3/store";
+import { transicionarPremio, type Premio } from "@/lib/ranking3/domain";
+import { NextRequest } from "next/server";
 
 function postReq(body: unknown) {
   return {
@@ -149,6 +153,93 @@ beforeEach(() => {
     ticketUrl: "https://mp.test/ticket",
     idempotencyKey: "chefebot_pix_chefebot_123",
     statusOriginal: "pending",
+  });
+});
+
+describe("Ranking 3 — checkout real da rota, integrações simuladas", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const telefone = "11900000000";
+  const titular = `cli_${telefone}`;
+  const premioInicial: Premio = { id: "r3-2026-10-20-0-liga-1", temporadaId: "r3-2026-10-20-0", clienteId: titular, liga: 1, tetoCents: 4700, concedidoEm: "2026-11-19T06:00:00.000Z", estado: "disponivel", proximoAvisoEm: 0, revisao: 0 };
+  let premio: Premio;
+  beforeEach(() => {
+    premio = { ...premioInicial };
+    vi.stubEnv("RANKING3_ENABLED", "true");
+    store.set(`perfil-cliente:${telefone}`, { telefone, clienteId: titular, nome: "Sintético" });
+    vi.spyOn(Ranking3Store.prototype, "premio").mockImplementation(async () => premio);
+    vi.spyOn(Ranking3Store.prototype, "transicionar").mockImplementation(async (_id, clienteId, pedidoId, evento, agora = Date.now(), tentativa) => {
+      if (clienteId !== titular) throw new Error("titular incorreto");
+      premio = transicionarPremio(premio, pedidoId, evento, agora, tentativa); return premio;
+    });
+  });
+  const payload = () => ({ cliente: "Sintético", telefone, itens: [], tipoEntrega: "retirada", pagamento: "Cartao", clientRequestId: "ranking3-tentativa-sintetica-0001", premioRanking: { id: premioInicial.id, selecao: { sizeId: "size-f", flavorIds: ["flavor-presunto"] } } });
+  async function req(body: unknown, autenticado = true) {
+    const r = new NextRequest("http://localhost/api/pedido-app", { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
+    if (autenticado) r.cookies.set("cliente-token", await criarTokenCliente({ clienteId: titular, telefone }));
+    return r;
+  }
+  it("pizza grátis sozinha é válida; nenhum Pix real nem pontos extras", async () => {
+    vi.stubEnv("PIX_PROVIDER", "mercadopago");
+    const r = await POST(await req({ ...payload(), pagamento: "Pix" }));
+    expect(r.status).toBe(200);
+    const data = await r.json();
+    expect(data.total).toBe(0); expect(data.pix).toBeUndefined();
+    expect(criarCobrancaPixMercadoPagoMock).not.toHaveBeenCalled();
+    expect((store.get("pedidos") as { premioRankingId: string; itensDetalhados: { price: number; qty: number }[] }[])[0]).toMatchObject({ premioRankingId: premio.id, itensDetalhados: [{ price: 0, qty: 1 }] });
+    expect(premio.estado).toBe("associado");
+  });
+  it("retry da MESMA tentativa devolve o mesmo pedido sem duplicar", async () => {
+    const body = payload();
+    const a = await (await POST(await req(body))).json();
+    const b = await (await POST(await req(body))).json();
+    expect(a.ok).toBe(true); expect(b.pedidoId).toBe(a.pedidoId);
+    expect(store.get("pedidos")).toHaveLength(1);
+  });
+  it("segunda tentativa não pode consumir direito já associado", async () => {
+    expect((await POST(await req(payload()))).status).toBe(200);
+    expect((await POST(await req({ ...payload(), clientRequestId: "ranking3-outra-tentativa-0002" }))).status).toBe(409);
+    expect(store.get("pedidos")).toHaveLength(1);
+  });
+  it("delivery cobra só a taxa normal mais extras opcionais a preço oficial", async () => {
+    const body = { ...payload(), tipoEntrega: "delivery", bairro: "Centro", rua: "Rua Sintética", numero: "1", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 0, qty: 1 }] };
+    const r = await POST(await req(body));
+    expect(r.status).toBe(200);
+    const pedido = (store.get("pedidos") as PedidoSalvo[])[0];
+    expect(pedido.taxaEntrega).toBe(MENU.neighborhoods.find((n) => n.name === "Centro")!.fee);
+    expect(pedido.total).toBe(15 + pedido.taxaEntrega!);
+  });
+  it.each([
+    ["sem sessão", {}, false, 401],
+    ["telefone alheio", { telefone: "11900000001" }, true, 403],
+    ["sem idempotência", { clientRequestId: undefined }, true, 400],
+    ["tamanho adulterado", { premioRanking: { id: premioInicial.id, selecao: { sizeId: "size-g", flavorIds: ["flavor-presunto"] } } }, true, 400],
+    ["sabor acima do teto", { premioRanking: { id: premioInicial.id, selecao: { sizeId: "size-f", flavorIds: ["flavor-calabresa"] } } }, true, 400],
+    ["preço gratuito injetado", { itens: [{ kind: "pizza", price: 0, qty: 1, premioRankingId: premioInicial.id }] }, true, 400],
+  ])("bloqueia %s no servidor", async (_caso, extra, autenticado, status) => {
+    const resposta = await POST(await req({ ...payload(), ...(extra as object) }, autenticado as boolean));
+    expect(resposta.status).toBe(status); expect(store.get("pedidos")).toBeUndefined();
+  });
+  it("sabor esgotado mantém o prêmio disponível", async () => {
+    store.set("esgotados", ["Presunto"]);
+    expect((await POST(await req(payload()))).status).toBe(400);
+    expect(premio.estado).toBe("disponivel");
+  });
+  it("não aceita 'sem cobrança' para taxa ou extras pagos", async () => {
+    const r = await POST(await req({ ...payload(), tipoEntrega: "delivery", bairro: "Centro", rua: "Rua Sintética", numero: "1", pagamento: "Prêmio (sem cobrança)" }));
+    expect(r.status).toBe(400); expect(store.get("pedidos")).toBeUndefined(); expect(premio.estado).toBe("disponivel");
+  });
+  it("falha depois do vínculo preserva identidade e recupera sem outro pedido", async () => {
+    const body = payload();
+    let falhou = false;
+    redisMock.set.mockImplementation(async (key, value, opts) => {
+      if (key === "pedidos" && !falhou) { falhou = true; throw new Error("Redis indisponível na persistência"); }
+      return defaultSetImpl(key, value, opts);
+    });
+    const primeira = await POST(await req(body));
+    expect(primeira.status).toBe(500); expect(premio.estado).toBe("associado");
+    redisMock.set.mockImplementation(defaultSetImpl);
+    expect((await POST(await req(body))).status).toBe(200);
+    expect(store.get("pedidos")).toHaveLength(1);
   });
 });
 

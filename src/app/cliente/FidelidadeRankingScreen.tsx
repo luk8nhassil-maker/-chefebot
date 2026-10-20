@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { Star } from 'lucide-react'
+import { Ranking3Experience, type PainelRanking3 } from './Ranking3Experience'
 import {
   detectarConquistaRanking,
   mensagemAlvoRanking,
@@ -80,6 +81,7 @@ function seloSocialCompacto(status: PainelGamificacao['statusSocial'] | undefine
 }
 
 export type FidelidadeRankingScreenProps = {
+  ranking3?: PainelRanking3 | null
   ranking: NonNullable<PainelFidelidade['ranking']>
   temporada: PainelFidelidade['temporada']
   indicacao?: PainelFidelidade['indicacao']
@@ -115,7 +117,11 @@ export type FidelidadeRankingScreenProps = {
 
 /** Pódio detalhado: scores são reais; a identidade opcional ja chega como um
  * DTO minimo produzido pela protecao server-side. */
-export function FidelidadeRankingScreen({
+export function FidelidadeRankingScreen(props: FidelidadeRankingScreenProps) {
+  return props.ranking3 ? <Ranking3Experience painel={props.ranking3} onClose={props.onClose} /> : <FidelidadeRankingLegado {...props} />
+}
+
+function FidelidadeRankingLegado({
   ranking,
   temporada,
   indicacao,

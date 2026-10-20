@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHmac, randomUUID } from "crypto";
 import { redis } from "./redis";
+import { INVALIDAR_FONTE_LUA } from "./ranking3/source";
 
 export const FINALIDADES_CONSENTIMENTO_RANKING = [
   "ranking_primeiro_nome",
@@ -300,6 +301,29 @@ export async function obterParticipacaoRanking(clienteId: string): Promise<boole
   return (await obterParticipacaoRankingParaClientes([clienteId])).get(clienteId) ?? false;
 }
 
+/** V3: mesma elegibilidade oficial da main, no instante de corte. Identidade
+ * pública não é pré-requisito; retirar nome/foto não retira o prêmio. */
+export function elegibilidadeRankingNoCorte(registros: unknown[], corteMs: number): boolean {
+  if (!Number.isFinite(corteMs)) throw new Error("corte_invalido");
+  const ordenados = registros.filter(participacaoValida)
+    .filter((r) => Date.parse(r.registradoEm) < corteMs)
+    .sort((a, b) => Date.parse(b.registradoEm) - Date.parse(a.registradoEm));
+  // LPUSH mantém primeiro o evento mais recente também em empate de timestamp.
+  return ordenados[0]?.ativo === true && ordenados[0]?.aceitaRevelacao30d === true;
+}
+
+export async function obterElegibilidadeRankingNoCorte(clienteId: string, corteMs: number): Promise<boolean> {
+  const referencia = exigirReferencia(clienteId);
+  const [atual, historico] = await Promise.all([
+    redis.get<RegistroParticipacao>(chaveParticipacao(referencia)),
+    redis.lrange<RegistroParticipacao | string>(chaveHistoricoParticipacao(referencia), 0, 999),
+  ]);
+  const registros = historico.map((r) => typeof r === "string" ? JSON.parse(r) as unknown : r);
+  if (historico.length === 1000 && !registros.some((r) => participacaoValida(r) && Date.parse(r.registradoEm) < corteMs)) throw new Error("historico_participacao_insuficiente_no_corte");
+  // Histórico vem antes do estado atual para preservar a ordem em timestamps iguais.
+  return elegibilidadeRankingNoCorte([...registros, atual], corteMs);
+}
+
 export async function obterRegraJogoSecretoRanking(clienteId: string): Promise<{
   participa: boolean;
   aceitaRevelacao30d: boolean;
@@ -356,10 +380,11 @@ export async function registrarParticipacaoRanking(
     ativo ? (participacaoValida(anterior) ? anterior.eventoId : "primeira-entrada") : randomUUID(),
     ativo ? aceitaRevelacao30d : false,
   );
-  await redis.multi()
+  const transacao = redis.multi()
     .set(chaveParticipacao(referencia), registro)
-    .lpush(chaveHistoricoParticipacao(referencia), JSON.stringify(registro))
-    .exec();
+    .lpush(chaveHistoricoParticipacao(referencia), JSON.stringify(registro));
+  if (process.env.RANKING3_ENABLED === "true") transacao.eval(INVALIDAR_FONTE_LUA, ["ranking3:default:fonte", "ranking3:default:fechando"], [Date.parse(registro.registradoEm)]);
+  await transacao.exec();
 }
 
 function exigirReferencia(clienteId: string): string {
@@ -445,6 +470,7 @@ export async function revogarTodosConsentimentosRanking(clienteId: string): Prom
   const transacao = redis.multi();
   transacao.set(chaveParticipacao(referencia), participacao);
   transacao.lpush(chaveHistoricoParticipacao(referencia), JSON.stringify(participacao));
+  if (process.env.RANKING3_ENABLED === "true") transacao.eval(INVALIDAR_FONTE_LUA, ["ranking3:default:fonte", "ranking3:default:fechando"], [Date.parse(participacao.registradoEm)]);
   for (const registro of registros) {
     transacao.set(chaveEstado(referencia, registro.finalidade), registro);
     transacao.lpush(chaveHistorico(referencia), JSON.stringify(registro));

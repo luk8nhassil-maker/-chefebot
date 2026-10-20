@@ -31,6 +31,7 @@ export type JobOutboxWhatsapp = {
   humanSenderName?: string;
   /** Efeito de histórico que o worker conclui somente após entrega confirmada. */
   history?: { autor: "bot" | "atendente"; texto: string; markOutbound?: boolean };
+  rankingPrize?: { id: string; revisao: number };
   result?: ResultadoTransporteWhatsapp | { motivo: string };
 };
 
@@ -258,6 +259,7 @@ return { reconciled, unresolved }
 export async function enfileirarMensagemWhatsapp(input: {
   phone: string; text: string; priority?: PrioridadeWhatsapp;
   opts?: JobOutboxWhatsapp["opts"]; idempotencyKey?: string; humanSenderName?: string; expiresAt?: number; history?: JobOutboxWhatsapp["history"];
+  rankingPrize?: JobOutboxWhatsapp["rankingPrize"];
 }): Promise<{ jobId: string; deduplicated: boolean }> {
   const id = randomUUID();
   const now = Date.now();
@@ -268,6 +270,7 @@ export async function enfileirarMensagemWhatsapp(input: {
     humanSenderName: input.humanSenderName,
     expiresAt: input.expiresAt,
     history: input.history,
+    rankingPrize: input.rankingPrize,
   };
   const dedupe = input.idempotencyKey ? chaveDedupe(input.idempotencyKey) : "";
   const resultado = await redis.eval(ENFILEIRAR_LUA,
@@ -358,6 +361,13 @@ export async function processarFilaWhatsapp(
         if (job.priority === "promocional" && await redis.get<boolean>("bot_ativo") === false) {
           await finalizar(job, "suppressed", { motivo: "global_pause_promotional" });
           continue;
+        }
+        if (job.rankingPrize) {
+          const { autorizarJobPremio } = await import("./ranking3/notifications");
+          if (!await autorizarJobPremio(job)) {
+            await finalizar(job, "suppressed", { motivo: "ranking_prize_no_longer_eligible" });
+            continue;
+          }
         }
         const resultado = await executar(job);
         if (resultado.ok) { if (await finalizar(job, "delivered", resultado)) delivered++; }

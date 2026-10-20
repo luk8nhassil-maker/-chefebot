@@ -269,6 +269,7 @@ export function filtrarPedidosPorBusca(pedidos: PedidoClienteResumo[], termo: st
 const DESTINOS_NEXT_PERMITIDOS = ["/cliente/pedidos"] as const;
 
 export function destinoNextPermitido(next: string | null | undefined): string | null {
+  if (next === "/cliente/premios") return next;
   if (!next) return null;
   return (DESTINOS_NEXT_PERMITIDOS as readonly string[]).includes(next) ? next : null;
 }

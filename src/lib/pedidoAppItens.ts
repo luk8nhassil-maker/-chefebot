@@ -15,6 +15,8 @@ export type ItemApp = {
   // cliente), nunca soma pontos nem avança a trilha de novo (ver
   // contarPizzasElegiveisPedido em @/lib/jornadaChef).
   recompensaJornadaId?: string;
+  /** Somente o servidor materializa a pizza premiada. Não gera nova fidelidade. */
+  premioRankingId?: string;
   // Presente quando o item de pizza foi selecionado por ID estável do
   // catálogo oficial (Fase 2: @/lib/catalog/pizzas + @/lib/pricing/pizzaEngine)
   // em vez de name/detail em texto livre. Quando presente, o servidor
@@ -148,7 +150,7 @@ export function resolverFlavorsModeEfetivo(produto: { flavorsKey?: string; flavo
 export function contarPizzasPagasParaFidelidade(itens: ItemApp[] | undefined): number {
   if (!Array.isArray(itens)) return 0;
   return itens
-    .filter((item) => item?.kind === "pizza" && !item.recompensaJornadaId)
+    .filter((item) => item?.kind === "pizza" && !item.recompensaJornadaId && !item.premioRankingId)
     .reduce((soma, item) => soma + Math.max(0, Math.trunc(Number(item.qty)) || 0), 0);
 }
 

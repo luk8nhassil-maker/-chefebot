@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
+import { ranking3, ranking3Ativo } from "@/lib/ranking3/server";
+import { materializarPizza } from "@/lib/ranking3/domain";
 import { redis } from "@/lib/redis";
 import { obterEsgotadosEfetivos, obterEsgotadosLegado, obterEstoqueItens } from "@/lib/estoque";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
@@ -10,7 +12,7 @@ import { criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente,
 import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promocaoIndisponivel, type Promocao } from "@/lib/promocoes";
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 import { temDinheiroNoPagamento, valorDinheiroEsperado, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
-import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
+import { verificarTokenCliente, CLIENTE_COOKIE, lerSessaoCliente } from "@/lib/clienteAuth";
 import { registrarEventoServidorComportamento, validarVinculoCookieComportamento } from "@/lib/behaviorAnalytics";
 import type { BehaviorContext } from "@/lib/behaviorAnalyticsTypes";
 import { buscarClientePorId, sanitizeTelefoneCliente } from "@/lib/clientes";
@@ -90,6 +92,7 @@ type PedidoApp = {
    * servidor a partir do snapshot da própria recompensa — nunca confiado do
    * cliente (ver `materializarItensRecompensa` em @/lib/jornadaChef). */
   recompensaJornada?: { recompensaId: string; escolha?: EscolhaRecompensaJornada };
+  premioRanking?: { id: string; selecao: { sizeId: string; flavorIds: string[] } };
   /** Modo Sobrevivência (Etapa 1): identificador gerado uma vez pelo
    * navegador por tentativa de checkout, reaproveitado em retries. Só tem
    * efeito quando SURVIVAL_MODE_ENABLED=true; ausente/ignorado do
@@ -773,7 +776,7 @@ export async function POST(req: NextRequest) {
     // tenha passado desde a tentativa original.
     // =================================================================
 
-    if (!body.cliente || !body.itens || body.itens.length === 0) {
+    if (!body.cliente || !Array.isArray(body.itens) || (body.itens.length === 0 && !body.premioRanking)) {
       return NextResponse.json({ ok: false, error: "Pedido inválido" }, { status: 400 });
     }
     // 7ª revisão de segurança, ponto 2: a RESOLUÇÃO do vínculo com o
@@ -805,7 +808,7 @@ export async function POST(req: NextRequest) {
     // do cliente — só o servidor marca um item como presente da Jornada,
     // sempre a partir do snapshot da recompensa (ver FASE 3). Qualquer item
     // que chegue com este campo é rejeitado de imediato.
-    if (body.itens.some((item) => Boolean((item as ItemApp & { recompensaJornadaId?: unknown }).recompensaJornadaId))) {
+    if (body.itens.some((item) => Boolean(item.recompensaJornadaId || item.premioRankingId))) {
       return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
     }
 
@@ -814,6 +817,16 @@ export async function POST(req: NextRequest) {
     // feito acima. A validação de NEGÓCIO (sessão pertence ao telefone,
     // recompensa realmente disponível — `prepararResgateParaPedido`) é
     // adiada para a FASE 3, porque o status da recompensa é mutável.
+    const premioRankingId = body.premioRanking?.id;
+    let titularPremio: string | undefined;
+    if (body.premioRanking) {
+      if (!ranking3Ativo() || !premioRankingId || body.recompensaJornada || body.resgateId || !["delivery", "retirada"].includes(body.tipoEntrega)) return NextResponse.json({ ok: false, error: "Resgate indisponível" }, { status: 400 });
+      const sessao = await lerSessaoCliente(req);
+      const perfil = sessao ? await buscarClientePorId(sessao.clienteId) : null;
+      if (!perfil) return NextResponse.json({ ok: false, error: "Faça login para resgatar seu prêmio" }, { status: 401 });
+      if (sanitizeTelefoneCliente(telefoneDigitado) !== sanitizeTelefoneCliente(perfil.telefone) || body.whatsappToken) return NextResponse.json({ ok: false, error: "Use o telefone do seu perfil" }, { status: 403 });
+      titularPremio = derivarClienteIdPorTelefone(perfil.telefone) ?? perfil.clienteId;
+    }
     let recompensaJornadaId: string | undefined;
     let recompensaEscolha: EscolhaRecompensaJornada | undefined;
     if (body.recompensaJornada && typeof body.recompensaJornada === "object") {
@@ -863,7 +876,7 @@ export async function POST(req: NextRequest) {
     // Para o cardápio público nada muda: sem sessão, o comportamento continua
     // exatamente o de antes, governado só pela flag.
     const survivalAtivo = survivalModeEnabled();
-    const idempotenciaAtiva = survivalAtivo || sessaoAdmin !== null;
+    const idempotenciaAtiva = survivalAtivo || sessaoAdmin !== null || Boolean(premioRankingId);
     clientRequestId = idempotenciaAtiva ? sanitizeClientRequestId(body.clientRequestId) : null;
 
     // Numa sessão administrativa, o clientRequestId é OBRIGATÓRIO — nunca
@@ -874,7 +887,7 @@ export async function POST(req: NextRequest) {
     // campo), aqui não existe motivo legítimo para seguir sem proteção — e
     // seguir sem ela reabriria exatamente o pedido duplicado que este
     // caminho existe para evitar.
-    if (sessaoAdmin && !clientRequestId) {
+    if ((sessaoAdmin || premioRankingId) && !clientRequestId) {
       return NextResponse.json(
         {
           ok: false,
@@ -922,6 +935,7 @@ export async function POST(req: NextRequest) {
         troco: body.troco,
         resgateId: body.resgateId,
         recompensaJornadaId,
+        ...(body.premioRanking ? { premioRanking: body.premioRanking } : {}),
         recompensaEscolhaSabor: recompensaEscolha?.sabor,
       });
 
@@ -1059,7 +1073,7 @@ export async function POST(req: NextRequest) {
       // checkout — divergência aqui só seria possível por corrupção (o
       // fingerprint já deveria ter barrado antes), nunca prossegue às cegas.
       const checkout = attemptRecuperado.checkout;
-      if ((body.resgateId ?? undefined) !== checkout.resgateId || (recompensaJornadaId ?? undefined) !== checkout.recompensaJornadaId) {
+      if ((body.resgateId ?? undefined) !== checkout.resgateId || (recompensaJornadaId ?? undefined) !== checkout.recompensaJornadaId || premioRankingId !== checkout.premioRankingId) {
         logSurvivalErro("idempotencia_pedido", "recuperacao_attempt", "checkout_inconsistente_com_requisicao");
         return respostaClaimIncerto();
       }
@@ -1232,6 +1246,17 @@ export async function POST(req: NextRequest) {
       // (`confirmarReservaNoPedido`, primeiro efeito irreversível deste
       // fluxo) acontece na FASE 5, depois do claim de idempotência.
       let itensRecompensaMaterializados: ItemApp[] = [];
+      if (premioRankingId && titularPremio) {
+        const premio = await ranking3().premio(premioRankingId);
+        if (!premio || premio.clienteId !== titularPremio || premio.estado !== "disponivel") return NextResponse.json({ ok: false, error: "Prêmio indisponível ou já associado a um pedido" }, { status: 409 });
+        const [esgotados, estoque] = await Promise.all([obterEsgotadosLegado(), obterEstoqueItens()]);
+        try {
+          itensRecompensaMaterializados = [materializarPizza(premio, body.premioRanking!.selecao, buildPizzaCatalog(menu, esgotados, Object.values(estoque).filter((i) => i.esgotado).map((i) => i.id)))];
+        } catch {
+          return NextResponse.json({ ok: false, error: "Selecione até dois sabores Família disponíveis para seu prêmio" }, { status: 400 });
+        }
+        if (body.tipoEntrega === "delivery" && !menu.neighborhoods.some((n) => n.name.toLowerCase().trim() === body.bairro?.toLowerCase().trim() && Number.isFinite(n.fee) && n.fee >= 0)) return NextResponse.json({ ok: false, error: "Bairro não atendido" }, { status: 400 });
+      }
       if (recompensaJornadaId) {
         const tokenSessaoJornada = req.cookies.get(CLIENTE_COOKIE)?.value;
         const payloadSessaoJornada = tokenSessaoJornada ? await verificarTokenCliente(tokenSessaoJornada) : null;
@@ -1309,6 +1334,7 @@ export async function POST(req: NextRequest) {
 
       taxa = computeTaxaApp(body.tipoEntrega, body.bairro, menu.neighborhoods as Array<{ name: string; fee: number }>);
       total = subtotal - descontoFidelidade + taxa;
+      if (premioRankingId && total > 0 && /pr[eê]mio|cortesia|sem\s*cobran[cç]a/i.test(body.pagamento)) return NextResponse.json({ ok: false, error: "Selecione uma forma normal de pagamento para a taxa ou os extras" }, { status: 400 });
 
       // Fase 3 — snapshot oficial estruturado (aditivo): construído aqui
       // porque só aqui temos, item a item, o preço unitário oficial
@@ -1342,7 +1368,7 @@ export async function POST(req: NextRequest) {
         taxaReais: taxa,
         tipoEntrega: body.tipoEntrega,
         bairro: body.bairro,
-        pagamento: body.pagamento,
+        pagamento: premioRankingId && total === 0 ? "Prêmio (sem cobrança)" : body.pagamento,
         criadoEm: new Date().toISOString(),
       });
 
@@ -1462,6 +1488,7 @@ export async function POST(req: NextRequest) {
         itensDetalhados: itensDetalhadosFinais as ItemOficialAttempt[],
         ...(resgateAplicado ? { resgateId: resgateAplicado.resgateId } : {}),
         ...(recompensaJornadaId ? { recompensaJornadaId } : {}),
+        ...(premioRankingId ? { premioRankingId } : {}),
         checklistFingerprint: "",
       };
       checkoutCandidato.checklistFingerprint = calcularChecklistFingerprint(checkoutCandidato);
@@ -1520,6 +1547,13 @@ export async function POST(req: NextRequest) {
     // etc.), nenhum pedido chega a ser criado — nunca é preciso compensar
     // reescrevendo a lista inteira de "pedidos". `confirmarReservaNoPedido`
     // já é idempotente e protegida por lock por cliente.
+    if (premioRankingId && titularPremio) {
+      try {
+        await ranking3().transicionar(premioRankingId, titularPremio, pedidoId, "associado", Date.now(), clientRequestId ?? undefined);
+      } catch {
+        return NextResponse.json({ ok: false, error: "Prêmio já associado ou confirmação pendente. Consulte seus prêmios antes de tentar novamente." }, { status: 409 });
+      }
+    }
     if (recompensaJornadaId && clienteIdJornada) {
       try {
         await confirmarReservaNoPedido(clienteIdJornada, recompensaJornadaId, pedidoId);
@@ -1573,7 +1607,7 @@ export async function POST(req: NextRequest) {
     try {
       numeroPedido = await proximoNumeroPedido();
       statusToken = criarTokenPublicoAcompanhamento();
-      const pixBase = criarPixMetadata(pedidoId, body.pagamento, total);
+      const pixBase = premioRankingId && total === 0 ? undefined : criarPixMetadata(pedidoId, body.pagamento, total);
       pix = await prepararPixProviderMercadoPago({
         pedidoId,
         pix: pixBase,
@@ -1590,6 +1624,7 @@ export async function POST(req: NextRequest) {
         ...(pizzasCount > 0 ? { pizzasCount } : {}),
         ...(resgateAplicado ? { resgateId: resgateAplicado.resgateId, descontoFidelidade } : {}),
         ...(recompensaJornadaId ? { recompensaJornadaId } : {}),
+        ...(premioRankingId ? { premioRankingId } : {}),
         // Modo Sobrevivência: hash (nunca o valor bruto) do clientRequestId +
         // fingerprint da tentativa — única prova durável de idempotência
         // dentro do próprio pedido, usada quando :claim/:result expiram ou
@@ -1617,7 +1652,7 @@ export async function POST(req: NextRequest) {
         origem: origemDoPedido(sessaoAdmin),
         statusToken,
         ...(body.observacao ? { observacao: body.observacao } : {}),
-        pagamento: body.pagamento,
+        pagamento: premioRankingId && total === 0 ? "Prêmio (sem cobrança)" : body.pagamento,
         ...(pix ? { pix } : {}),
         ...(body.troco ? { troco: body.troco } : {}),
         ...(taxa ? { taxaEntrega: taxa } : {}),

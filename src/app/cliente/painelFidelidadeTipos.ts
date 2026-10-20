@@ -5,6 +5,7 @@
 import type { AlvoRankingAtual, DisputaRelativa } from "@/lib/rankingRetencao"
 
 export type PainelFidelidade = {
+  ranking3?: import('./Ranking3Experience').PainelRanking3 | null
   temporada: {
     nome: string | null
     diasRestantes: number | null

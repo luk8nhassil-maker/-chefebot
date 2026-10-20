@@ -723,7 +723,7 @@ export function itensJornadaDoPedidoApp(itens: ItemApp[] | undefined): ItemElegi
     .map((item) => ({
       categoria: nomeIndicaMiniPizza(item.name) ? ("outro" as const) : ("pizza" as const),
       quantidade: Math.max(0, Math.trunc(Number(item.qty) || 0)),
-      gratuito: Boolean((item as ItemApp & { recompensaJornadaId?: string }).recompensaJornadaId),
+      gratuito: Boolean(item.recompensaJornadaId || item.premioRankingId),
     }));
 }
 

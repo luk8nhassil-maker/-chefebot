@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import { timestampCriacaoPedido } from "@/lib/expedienteOperacional";
 import { ehProjetoVercelLegado } from "@/lib/vercelProjeto";
+import { ranking3 } from "@/lib/ranking3/server";
 
 type Pedido = {
   id: string;
@@ -34,8 +35,21 @@ export async function GET(req: Request) {
     const { total, removidos, mantidos } = await mutarPedidos<
       Pedido,
       { total: number; removidos: number; mantidos: number }
-    >((pedidosFrescos) => {
+    >(async (pedidosFrescos) => {
+      // Só consulta direitos de pedidos já candidatos à retenção. Lote pequeno
+      // sob o mesmo mutex; não conserva endereço/telefone indefinidamente após
+      // a prova de entrega/cancelamento ter sido reconciliada na carteira.
+      const ids = [...new Set(pedidosFrescos.filter((p) => {
+        const criado = timestampCriacaoPedido(p, agoraMs);
+        return p.premioRankingId && ["entregue", "cancelado"].includes(p.status) && criado !== null && agoraMs - criado >= SETE_DIAS_MS;
+      }).map((p) => String(p.premioRankingId)))].slice(0, 20);
+      const direitos = new Map(await Promise.all(ids.map(async (id) => [id, await ranking3().premio(id)] as const)));
       const limpo = pedidosFrescos.filter((p: Pedido) => {
+        if (p.premioRankingId) {
+          const direito = direitos.get(String(p.premioRankingId));
+          const reconciliado = direito && ((direito.estado === "entregue" && direito.pedidoId === p.id) || (p.status === "cancelado" && !p.premioRankingEntregueEm && direito.pedidoId !== p.id));
+          if (!reconciliado) return true;
+        }
         if (!["entregue", "cancelado"].includes(p.status)) return true;
 
         // Usa a mesma fonte temporal do expediente. Pedidos legados cujo

@@ -269,6 +269,7 @@ export type ItemOficialAttempt = {
   qty: number;
   promoId?: string;
   recompensaJornadaId?: string;
+  premioRankingId?: string;
 };
 
 /** Snapshot OFICIAL e SANITIZADO do checkout já validado — criado na
@@ -291,6 +292,7 @@ export type ChecklistOficialAttempt = {
   itensDetalhados: ItemOficialAttempt[];
   resgateId?: string;
   recompensaJornadaId?: string;
+  premioRankingId?: string;
   /** SHA-256 sobre os campos acima (serialização canônica) — mesma regra
    * do `pricingFingerprint`: RECALCULADO e comparado por igualdade exata no
    * retry, nunca só validado por formato. */
@@ -303,6 +305,7 @@ export function calcularChecklistFingerprint(checklist: Omit<ChecklistOficialAtt
     itensDetalhados: checklist.itensDetalhados,
     resgateId: checklist.resgateId ?? null,
     recompensaJornadaId: checklist.recompensaJornadaId ?? null,
+    ...(checklist.premioRankingId ? { premioRankingId: checklist.premioRankingId } : {}),
   });
   return createHash("sha256").update(canonico).digest("hex");
 }
@@ -322,7 +325,8 @@ function ehItemOficialValido(valor: unknown): valor is ItemOficialAttempt {
     Number.isFinite(v.qty) &&
     v.qty > 0 &&
     (v.promoId === undefined || typeof v.promoId === "string") &&
-    (v.recompensaJornadaId === undefined || typeof v.recompensaJornadaId === "string")
+    (v.recompensaJornadaId === undefined || typeof v.recompensaJornadaId === "string") &&
+    (v.premioRankingId === undefined || typeof v.premioRankingId === "string")
   );
 }
 
@@ -347,6 +351,7 @@ function ehChecklistOficialValido(valor: unknown): valor is ChecklistOficialAtte
     itensDetalhados: v.itensDetalhados as ItemOficialAttempt[],
     resgateId: v.resgateId,
     recompensaJornadaId: v.recompensaJornadaId,
+    ...(v.premioRankingId ? { premioRankingId: v.premioRankingId } : {}),
   });
   return fingerprintRecalculado === v.checklistFingerprint;
 }

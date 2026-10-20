@@ -11,6 +11,7 @@
 //   ledger inteiro fica auditável do início ao fim.
 import "server-only";
 import { redis } from "./redis";
+import { FONTE_DEVE_MUDAR_LUA, ultimaDataDaFonte } from "./ranking3/source";
 import { registrarFatoRankingGamificacao } from "./rankingGamificacaoFatos";
 
 export type TipoBonusCompeticao =
@@ -110,8 +111,20 @@ async function comBloqueioBonus<T>(
 // exatamente este `token` — verificação e escrita na MESMA operação Lua,
 // sem nenhuma janela entre "checar dono" e "gravar".
 const ESCREVER_BONUS_SE_DONO_SCRIPT = `
+${FONTE_DEVE_MUDAR_LUA}
 if redis.call("GET", KEYS[1]) == ARGV[1] then
+  local invalidarFonte = true
+  if KEYS[3] then
+    local tipo = redis.call('TYPE', KEYS[3]).ok
+    local versao = redis.call('GET', KEYS[4])
+    if (tipo ~= 'none' and tipo ~= 'set') or (versao and not string.match(versao, '^%d+$')) then return 0 end
+    invalidarFonte = fonteDeveMudar(KEYS[5], ARGV[4])
+  end
   redis.call("SET", KEYS[2], ARGV[2])
+  if KEYS[3] then
+    redis.call("SADD", KEYS[3], ARGV[3])
+    if invalidarFonte then redis.call("INCR", KEYS[4]) end
+  end
   return 1
 else
   return 0
@@ -127,8 +140,8 @@ async function escreverBonusSeDono(
 ): Promise<boolean> {
   const resultado = await redis.eval(
     ESCREVER_BONUS_SE_DONO_SCRIPT,
-    [chaveLock(tenantId, temporadaId, clienteId), chaveBonus(tenantId, temporadaId, clienteId)],
-    [token, JSON.stringify(estado)],
+    [chaveLock(tenantId, temporadaId, clienteId), chaveBonus(tenantId, temporadaId, clienteId), ...(process.env.RANKING3_ENABLED === "true" ? [`ranking3:${tenantId}:clientes`, `ranking3:${tenantId}:fonte`, `ranking3:${tenantId}:fechando`] : [])],
+    [token, JSON.stringify(estado), ...(process.env.RANKING3_ENABLED === "true" ? [clienteId, ultimaDataDaFonte(estado.movimentos)] : [])],
   );
   return resultado === 1;
 }

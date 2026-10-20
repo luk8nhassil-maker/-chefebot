@@ -23,12 +23,13 @@ describe("Vercel crons — modo economia seguro", () => {
     expect(paths).not.toContain("/api/cron/mcp-observer");
   });
 
-  it("mantém somente os quatro crons explicitamente aprovados", () => {
+  it("mantém os quatro crons legados e somente a virada diária aprovada do Ranking 3", () => {
     expect(paths.sort()).toEqual([
       "/api/cron",
       "/api/cron/pix-pendente",
       "/api/cron/ranking-autopilot",
       "/api/cron/ranking-podio",
+      "/api/cron/ranking-temporadas",
     ].sort());
   });
 
@@ -40,5 +41,14 @@ describe("Vercel crons — modo economia seguro", () => {
   it("agenda o robô em observação uma vez por dia", () => {
     const cron = (config.crons ?? []).find((item) => item.path === "/api/cron/ranking-autopilot");
     expect(cron).toEqual({ path: "/api/cron/ranking-autopilot", schedule: "30 4 * * *" });
+  });
+
+  it("vira temporadas às 03h de Brasília, inclusive se o UTC variar por DST", () => {
+    const cron = (config.crons ?? []).find((item) => item.path === "/api/cron/ranking-temporadas");
+    // Às 05 UTC a rota ainda aguarda quando São Paulo está em UTC-3; às 06
+    // ela fecha. Caso o horário legal mude para UTC-2, às 05 ela fecha e às
+    // 06 encontra a temporada já fechada. O corte civil permanece no domínio.
+    expect(cron).toEqual({ path: "/api/cron/ranking-temporadas", schedule: "0 5,6 * * *" });
+    expect((config.crons ?? []).filter((item) => item.path === "/api/cron")).toEqual([{ path: "/api/cron", schedule: "0 3 * * *" }]);
   });
 });

@@ -1,4 +1,5 @@
 import { redis } from "./redis";
+import { sincronizarPremioDoPedido } from "./ranking3/pedido";
 import {
   calcularPontosElegiveisPedido,
   construirEventoIdPontos,
@@ -52,6 +53,8 @@ export type PedidoParaEfeitosFidelidade = PedidoParaJornada & {
   pizzasCount?: number;
   resgateId?: string;
   recompensaJornadaId?: string;
+  premioRankingId?: string;
+  premioRankingEntregueEm?: string;
   itensDetalhados?: ItemApp[];
   statusAnterior?: string;
   tenantId?: string;
@@ -320,6 +323,7 @@ export async function processarEfeitosPedidoEntregue(pedido: PedidoParaEfeitosFi
       return;
     }
     estado = estado ?? (await novoEstado(pedido.id, "entregue", ["fidelidade_legada", "pontos", "gamificacao", "jornada", "indicacao", "analytics"]));
+    if (pedido.premioRankingId) await executarEfeito(chave, estado, "premio_ranking", () => sincronizarPremioDoPedido(pedido));
 
     await executarEfeito(chave, estado, "fidelidade_legada", async () => {
       await creditarFidelidadePedido({
@@ -602,6 +606,7 @@ export async function processarEfeitosPedidoCancelado(pedido: PedidoParaEfeitosF
       return;
     }
     estado = estado ?? (await novoEstado(pedido.id, "cancelado", ["pontos", "resgate", "gamificacao", "jornada", "analytics"]));
+    if (pedido.premioRankingId) await executarEfeito(chave, estado, "premio_ranking", () => sincronizarPremioDoPedido(pedido));
 
     await executarEfeito(chave, estado, "pontos", async () => {
       const clienteId = derivarClienteIdPorTelefone(pedido.telefone);

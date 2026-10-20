@@ -5,6 +5,7 @@ import type { PedidoSnapshotOficial } from "./pedidoSnapshot";
 import { obterRecomendacaoPresente, type RecomendacaoPresente } from "./recompensaInteligente";
 import { obterTemporadaAtiva } from "./temporadas";
 import { calcularScoreDaTemporada } from "./rankingClientes";
+import { FONTE_DEVE_MUDAR_LUA, ultimaDataDaFonte } from "./ranking3/source";
 import { projetarScoreRankingComBonus } from "./rankingScoreTemporada";
 import { comBloqueioGamificacao, chaveLockScoreRanking } from "./rankingGamificacaoLock";
 
@@ -564,8 +565,20 @@ export async function liberarLockPontosSeDono(clienteId: string, token: string):
 // TTL expirou ainda poderia escrever o estado depois que outro processo já
 // assumiu o mesmo cliente (a escrita em si não checava dono nenhum).
 const PERSISTIR_ESTADO_SE_DONO_SCRIPT = `
+${FONTE_DEVE_MUDAR_LUA}
 if redis.call("GET", KEYS[1]) == ARGV[1] then
+  local invalidarFonte = true
+  if KEYS[3] then
+    local tipo = redis.call('TYPE', KEYS[3]).ok
+    local versao = redis.call('GET', KEYS[4])
+    if (tipo ~= 'none' and tipo ~= 'set') or (versao and not string.match(versao, '^%d+$')) then return 0 end
+    invalidarFonte = fonteDeveMudar(KEYS[5], ARGV[4])
+  end
   redis.call("SET", KEYS[2], ARGV[2])
+  if KEYS[3] then
+    redis.call("SADD", KEYS[3], ARGV[3])
+    if invalidarFonte then redis.call("INCR", KEYS[4]) end
+  end
   return 1
 else
   return 0
@@ -589,8 +602,8 @@ export async function persistirEstadoPontosSeDono(
 ): Promise<boolean> {
   const resultado = await redis.eval(
     PERSISTIR_ESTADO_SE_DONO_SCRIPT,
-    [chaveLockPontos(clienteId), chaveEstadoPontos(clienteId)],
-    [token, JSON.stringify(estado)]
+    [chaveLockPontos(clienteId), chaveEstadoPontos(clienteId), ...(process.env.RANKING3_ENABLED === "true" ? ["ranking3:default:clientes", "ranking3:default:fonte", "ranking3:default:fechando"] : [])],
+    [token, JSON.stringify(estado), ...(process.env.RANKING3_ENABLED === "true" ? [clienteId, ultimaDataDaFonte(estado.extrato)] : [])]
   );
   return resultado === 1;
 }
@@ -808,7 +821,8 @@ async function sincronizarRankingCliente(clienteId: string): Promise<void> {
       const inicioMs = new Date(temporada.ativadaEm as string).getTime();
       const fimMs = temporada.fimEm ? new Date(temporada.fimEm).getTime() : Date.now();
       if (!Number.isFinite(inicioMs) || !Number.isFinite(fimMs)) return;
-      const resultado = calcularScoreDaTemporada(await obterExtratoPontos(clienteId), inicioMs, Math.min(fimMs, Date.now()));
+      const v3 = temporada.temporadaId.startsWith("r3-");
+      const resultado = calcularScoreDaTemporada(await obterExtratoPontos(clienteId), inicioMs, Math.min(fimMs, Date.now() + (v3 ? 1 : 0)), v3);
       await projetarScoreRankingComBonus(temporada.tenantId, temporada.temporadaId, clienteId, resultado.score, resultado.primeiroAtingidoEm ?? Date.now());
     });
   } catch (erro) {

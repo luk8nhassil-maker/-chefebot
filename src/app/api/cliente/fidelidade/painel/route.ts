@@ -10,7 +10,7 @@ import { buscarClientePorId } from "@/lib/clientes";
 import { classificarOrigemMovimentoPontos, derivarClienteIdPorTelefone, estrelasV1Ativa, obterConfigFidelidadePontos, obterExtratoPontos } from "@/lib/fidelidade";
 import { ESTRELAS_INDICACAO_PRIMEIRA_COMPRA } from "@/lib/estrelasIndicacao";
 import { obterTemporadaAtiva } from "@/lib/temporadas";
-import { posicaoClienteRanking, obterTopRanking, obterRankingCompleto, reindexarPorFiltro } from "@/lib/rankingClientes";
+import { posicaoClienteRanking, obterTopRanking, obterRankingCompleto, reindexarPorFiltro, type EntradaRanking } from "@/lib/rankingClientes";
 import { codinomeSecretoRanking } from "@/lib/rankingJogoSecreto";
 import { projetarIdentidadesPublicasRanking } from "@/lib/rankingPrivacidade";
 import { obterParticipacaoRanking, obterParticipacaoRankingParaClientes } from "@/lib/consentimentoRanking";
@@ -55,6 +55,7 @@ import { aplicarImpulsoPodioSeElegivel } from "@/lib/rankingImpulsoPodioEstado";
 import { sincronizarNivelChefCliente } from "@/lib/rankingNivelChefEstado";
 import { sincronizarMovimentoRecente, type MovimentoRecente } from "@/lib/rankingMovimentoRecenteEstado";
 import { obterReferenciaCoroaDinamica } from "@/lib/rankingCoroaDinamica";
+import { painelRanking3, mesmaLiga } from "@/lib/ranking3/server";
 
 const TENANT_PADRAO = "default";
 
@@ -91,7 +92,7 @@ export async function GET(req: NextRequest) {
   // auditoria do #446); a chamada por-cliente logo depois garante que o
   // PRÓPRIO cliente autenticado nesta requisição também fica em dia mesmo
   // que a reconciliação em lote já tenha rodado por outra pessoa.
-  if (temporada) {
+  if (temporada && !temporada.temporadaId.startsWith("r3-")) {
     // Invariante global: a transição da temporada precisa continuar sendo
     // reconciliada mesmo quando quem abriu o app ainda não participa. Isso
     // mantém status/carryover corretos para todos sem expor o Ranking.
@@ -146,12 +147,21 @@ export async function GET(req: NextRequest) {
     };
   } | null = null;
 
+  let projecaoRanking3: EntradaRanking[] = [];
   if (temporada && participaRanking) {
-    const [pos, top, completo] = await Promise.all([
+    let [pos, top, completo] = await Promise.all([
       posicaoClienteRanking(tenantId, temporada.temporadaId, clienteId),
       obterTopRanking(tenantId, temporada.temporadaId, 50),
       obterRankingCompleto(tenantId, temporada.temporadaId),
     ]);
+    if (temporada.temporadaId.startsWith("r3-")) {
+      projecaoRanking3 = completo;
+      try { completo = (await mesmaLiga(completo, temporada.temporadaId, clienteId, tenantId)).map((e, i) => ({ ...e, posicao: i + 1 })); }
+      catch (erro) { if (erro instanceof Error && erro.message === "fechamento_anterior_pendente") completo = []; else throw erro; }
+      top = completo.slice(0, 50);
+      const propria = completo.find((e) => e.clienteId === clienteId);
+      pos = propria ? { posicao: propria.posicao, score: propria.score } : null;
+    }
     if (pos) {
       const vizinhos = top.filter(
         (e) => e.posicao >= Math.max(1, pos.posicao - 1) && e.posicao <= pos.posicao + 1,
@@ -491,7 +501,14 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  const ranking3 = await painelRanking3(clienteId, Date.now(), projecaoRanking3);
+  if (ranking3 && participaRanking) {
+    const lista = ranking3.atualizando ? [] : ranking3.lista.map((e) => ({ ...e, participaCampanha: true as const }));
+    const posicao = ranking3.atualizando ? null : ranking3.posicao;
+    ranking = { posicao: posicao ?? 0, score: ranking3.atualizando ? 0 : ranking3.score, participaCampanha: true, lista, entorno: [], variacaoPosicao: null, participantes: { posicao, total: lista.length, lista, variacaoPosicao: null, alvo: null, disputa: null } };
+  }
   return NextResponse.json({
+    ranking3,
     temporada: temporada
       ? {
           nome: temporada.nome ?? null,

@@ -78,6 +78,8 @@ export async function garantirResultadoTemporada(
   temporadaId: string,
 ): Promise<ResultadoTemporada | null> {
   if (!tenantId || !temporadaId) return null;
+  // V3 só fecha pelo scheduler atômico; nunca materializar snapshot legado em GET.
+  if (temporadaId.startsWith("r3-")) return null;
   const config = await obterTemporada(tenantId, temporadaId);
   if (!config || config.estado !== "encerrada") return null;
 

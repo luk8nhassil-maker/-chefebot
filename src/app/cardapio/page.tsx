@@ -12,6 +12,7 @@ import PixPendenteBar, { usePixPendente, PIX_PENDENTE_BAR_HEIGHT_PX } from "@/co
 import PixPagamentoCard from "./PixPagamentoCard";
 import LayoutDebugPanel from "./LayoutDebugPanel";
 import { fetchCliente } from "@/lib/clienteSessaoFront";
+import { PREMIO_CARRINHO, validarReferenciaPremio, type ReferenciaPremio } from "@/lib/ranking3/cart";
 import { lerReferenciaRecompensa, limparReferenciaRecompensa, migrarReferenciaLegada } from "@/lib/recompensaJornadaCarrinho";
 import { extrairPagamentoComposto, montarPagamentoComposto, parseValorMonetario } from "@/lib/pagamentoComposto";
 import type { PizzaCatalog } from "@/lib/catalog/pizzas";
@@ -715,6 +716,7 @@ type CartItem = {
   // o servidor reconstrói o item de verdade a partir do snapshot da própria
   // recompensa no momento do pedido, nunca confia neste item do carrinho.
   recompensaJornadaId?: string;
+  premioRanking?: ReferenciaPremio;
   // Escolha do cliente (só sabor da pizza-presente, hoje) — transportada até
   // o pedido final; o servidor valida contra os sabores permitidos da
   // recompensa antes de aceitar.
@@ -1165,6 +1167,33 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [screen, setScreen] = useState("sc-start");
   const [previousStepBeforeCart, setPreviousStepBeforeCart] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const premioCarregado = useRef(false);
+  const premioMontado = useRef(false);
+  useEffect(() => {
+    premioMontado.current = true;
+    return () => { premioMontado.current = false; };
+  }, []);
+  useEffect(() => {
+    // Sem referência não há chamada adicional para clientes existentes.
+    let raw: string | null;
+    try { raw = localStorage.getItem(PREMIO_CARRINHO); } catch { return; }
+    if (!raw || !menu.pizzaCatalog || premioCarregado.current) return;
+    premioCarregado.current = true;
+    void (async () => {
+      try {
+        const ref = JSON.parse(raw) as ReferenciaPremio;
+        const resposta = await fetchCliente("/api/cliente/ranking3", { cache: "no-store" });
+        if (!resposta.ok || !premioMontado.current) return;
+        const dados = await resposta.json();
+        // Uma resposta 500 pode vir DEPOIS da reserva. Não apagar a tentativa
+        // estável: o mesmo carrinho pode recuperar o pedido sem novo resgate.
+        if (dados.premios.some((p: { id: string; estado: string }) => p.id === ref.id && p.estado === "associado")) return;
+        const item = validarReferenciaPremio(ref, dados.premios, menu.pizzaCatalog!);
+        if (!item) { localStorage.removeItem(PREMIO_CARRINHO); return; }
+        setCart((atual) => atual.some((i) => i.premioRanking?.id === ref.id) ? atual : [...atual.filter((i) => !i.premioRanking), { ...item, detail: item.detail ?? "", emoji: "🎁", premioRanking: ref }]);
+      } catch { /* Rede/storage: direito permanece no servidor. */ }
+    })();
+  }, [menu.pizzaCatalog]);
   const [sending, setSending] = useState(false);
   // Resgate de fidelidade (Etapa 5): reserva feita na Área do Cliente
   // (/cliente), repassada via sessionStorage. Só aplica o desconto se ainda
@@ -2323,6 +2352,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   function rmItem(idx: number) {
     const removido = cart[idx];
+    if (removido?.premioRanking) localStorage.removeItem(PREMIO_CARRINHO);
     trackBehavior("cart_remove", { source: "cardapio", screen, target: "cart", cartItems: Math.max(0, cartCount - (removido?.qty ?? 0)), cartDistinctItems: Math.max(0, cart.length - 1) });
     // Remover o presente da Jornada do Chef do carrinho NUNCA perde o prêmio —
     // só libera a reserva no servidor (volta a ficar "disponivel" no perfil)
@@ -2345,8 +2375,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // Desconto de fidelidade nunca ultrapassa o valor-base da reserva nem o
   // subtotal — mesma regra aplicada no servidor (POST /api/pedido-app), que
   // é quem de fato calcula e cobra o valor final.
-  const descontoResgate = resgatePontos ? Math.max(0, Math.min(resgatePontos.valorDescontoMaximo, cartTotal)) : 0;
+  const descontoResgate = resgatePontos && !cart.some((item) => item.premioRanking) ? Math.max(0, Math.min(resgatePontos.valorDescontoMaximo, cartTotal)) : 0;
   const finalTotal = Math.max(0, cartTotal - descontoResgate) + fee;
+  const premioSemCobranca = cart.some((item) => item.premioRanking) && finalTotal === 0;
   // Pagamento misto confirmado: re-parseado do próprio `payment` (fonte única
   // de verdade), então some sozinho se o cliente trocar para outro método.
   const hibridoAtual = extrairPagamentoComposto(payment);
@@ -2355,7 +2386,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const hibridoTrocoValido = !hibridoAtual || hibridoAtual.dinheiro <= 0 || (
     trocoOpcao === "nao" || (trocoOpcao === "sim" && !isNaN(parseValorInput(troco)) && parseValorInput(troco) > hibridoAtual.dinheiro)
   );
-  const hibridoBloqueado = isHibrido && (!hibridoSomaValida || !hibridoTrocoValido);
+  const hibridoBloqueado = !premioSemCobranca && isHibrido && (!hibridoSomaValida || !hibridoTrocoValido);
   const bairroSelecionado = bairroIdx !== "" ? (menu.neighborhoods || [])[+bairroIdx] : undefined;
   const bairrosFiltrados = filtrarBairros(menu.neighborhoods || [], bairroQuery);
   const ruaOk = rua.trim().length > 0;
@@ -2366,7 +2397,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const ruaErro = enderecoErroAtivo && !ruaOk;
   const numeroErro = enderecoErroAtivo && !numeroOk;
   const enderecoErroStyle = { borderColor: "var(--danger)", background: "color-mix(in srgb, var(--danger) 8%, transparent)", boxShadow: "0 0 0 1px color-mix(in srgb, var(--danger) 18%, transparent)" };
-  const payOk = !!nome.trim() && (telefoneValido(telefone) || vinculoWhatsappAtivo) && !!payment;
+  const payOk = !!nome.trim() && (telefoneValido(telefone) || vinculoWhatsappAtivo) && (!!payment || premioSemCobranca);
 
   const esgotadosKey = esgotados.join("|");
   const cartEsgotado = cart.some((c) => cartItemEsgotado(c.keys, esgotados));
@@ -2533,6 +2564,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
 
   async function finish() {
     if (sending) return;
+    try {
+      if (localStorage.getItem(PREMIO_CARRINHO) && !cart.some((item) => item.premioRanking)) {
+        showToast("Seu prêmio ainda não foi carregado. Volte a Meus prêmios e tente novamente; seu direito está preservado.");
+        return;
+      }
+    } catch { /* Storage indisponível não interfere no checkout sem prêmio. */ }
     if (cartEsgotado) { showToast("Um item do seu pedido ficou esgotado. Remova para continuar."); return; }
     if (delType === "delivery" && !delOk) { setErroEntrega(getEnderecoErro()); go("sc-delivery"); return; }
     let hasError = false;
@@ -2540,9 +2577,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     else { setErroNome(""); }
     if (!telefoneValido(telefone) && !vinculoWhatsappAtivo) { setErroTelefone("Coloca um WhatsApp válido pra pizzaria falar com você se precisar."); setEditandoIdentidade(true); if (!hasError) telefoneRef.current?.focus(); hasError = true; }
     else { setErroTelefone(""); }
-    if (!payment) { setErroPagamento("pagamento"); if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); hasError = true; }
+    if (!payment && !premioSemCobranca) { setErroPagamento("pagamento"); if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); hasError = true; }
     else { setErroPagamento(""); }
-    if (payment === "Dinheiro") {
+    if (payment === "Dinheiro" && !premioSemCobranca) {
       if (!trocoOpcao) {
         setErroTroco("Escolha se você precisa de troco.");
         if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -2556,7 +2593,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         if (isNaN(trocoNum) || trocoNum <= cartTotal + fee) { setErroTroco("O valor do troco precisa ser maior que o total do pedido."); if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); hasError = true; }
         else { setErroTroco(""); }
       } else { setErroTroco(""); }
-    } else if (isHibrido && hibridoAtual) {
+    } else if (isHibrido && hibridoAtual && !premioSemCobranca) {
       // Rechecagem defensiva: o carrinho pode ter mudado depois do modal confirmar o misto.
       if (!hibridoSomaValida) {
         setErroPagamento("A divisão do pagamento misto não bate mais com o total. Ajuste os valores.");
@@ -2586,11 +2623,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     // própria recompensa — o cliente só informa QUAL recompensa reservada
     // usar e (pizza) o sabor escolhido.
     const itemRecompensaJornada = cart.find((c) => c.recompensaJornadaId);
-    const itensSemRecompensa = cart.filter((c) => !c.recompensaJornadaId);
+    const itemPremioRanking = cart.find((c) => c.premioRanking);
+    const itensSemRecompensa = cart.filter((c) => !c.recompensaJornadaId && !c.premioRanking);
     const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, behaviorSessionId: getBehaviorSessionId() || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}), ...(c.simpleSelection ? { simpleSelection: c.simpleSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > agoraEmMs() ? resgatePontos.resgateId : undefined };
     try {
-      const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const payloadFinal = itemPremioRanking?.premioRanking ? { ...payload, pagamento: premioSemCobranca ? "Prêmio (sem cobrança)" : payload.pagamento, premioRanking: { id: itemPremioRanking.premioRanking.id, selecao: itemPremioRanking.premioRanking.selecao }, clientRequestId: itemPremioRanking.premioRanking.clientRequestId, whatsappToken: undefined, resgateId: undefined } : payload;
+      const r = await (itemPremioRanking ? fetchCliente : fetch)("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payloadFinal) });
       const data = await r.json();
+      if (data.ok && itemPremioRanking) localStorage.removeItem(PREMIO_CARRINHO);
       if (data.ok) { trackBehavior("action_result", { source: "checkout", screen: "sc-pay", target: "checkout", action: "checkout_submit", outcome: "success" }); try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} if (itemRecompensaJornada) limparReferenciaRecompensa(localStorage); try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: agoraEmMs(), statusToken: typeof data.statusToken === "string" ? data.statusToken : undefined }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } const pagamentoRanking: RankingProspeccaoStatusPagamento = payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"; setConviteRankingPedido(false); go("sc-done"); if (pagamentoRanking === "nao_pix") void avaliarConviteRankingPosPedido(pagamentoRanking); } else { trackBehavior("action_result", { source: "checkout", screen: "sc-pay", target: "checkout", action: "checkout_submit", outcome: "failure", failureCode: r.status >= 500 ? "service_unavailable" : "request_rejected" }); if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
     } catch { trackBehavior("action_result", { source: "checkout", screen: "sc-pay", target: "checkout", action: "checkout_submit", outcome: "failure", failureCode: "network_error" }); showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
@@ -2618,7 +2658,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   else if (plan.total > 0) { ctxBadge = `Pizza ${plan.current} de ${plan.total}`; ctxTxt = `Montando a pizza ${plan.current}`; for (let i = 1; i <= plan.total; i++) ctxDots.push({ cls: i < plan.current ? "done" : i === plan.current ? "cur" : "" }); }
 
   const pixPedido = pedidoConfirmado?.pix;
-  const isPagamentoPix = (!!payment && payment.toLowerCase().includes("pix")) || !!pixPedido;
+  const isPagamentoPix = !premioSemCobranca && ((!!payment && payment.toLowerCase().includes("pix")) || !!pixPedido);
   const pixCodigoCopiaECola = (pixPedido?.copiaECola || pixPedido?.qrCode || "").trim();
   const temPixCopiaECola = pixCodigoCopiaECola.length > 0;
   // Resumo da tela final (sc-done): reaproveita os mesmos estados/helpers já
@@ -3219,7 +3259,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           {screen === "sc-pay" && (
             <section className="screen active pay-screen">
               <TopBack onClick={() => go("sc-delivery")} title="Pagamento" />
-              <div className="screen-head pay-head"><div className="eyebrow">Último passo</div><h2>Escolha o pagamento</h2><p>Depois confira seus dados e finalize.</p></div>
+              <div className="screen-head pay-head"><div className="eyebrow">Último passo</div><h2>{premioSemCobranca ? "Confirme seu prêmio" : "Escolha o pagamento"}</h2><p>Depois confira seus dados e finalize.</p></div>
 
               <details className="order-summary-compact">
                 <summary><span>{cartCount} {cartCount === 1 ? "item" : "itens"}</span><strong>{money(finalTotal)}</strong></summary>
@@ -3236,15 +3276,15 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               </details>
 
               <div ref={pagamentoRef} className="pay-section-card payment-choice">
-                <div className="pay-section-title">Escolha o pagamento</div>
-                <div className="payment-grid">
+                <div className="pay-section-title">{premioSemCobranca ? "Seu prêmio cobre esta pizza — sem cobrança" : "Escolha o pagamento"}</div>
+                {!premioSemCobranca && <div className="payment-grid">
                   {[...(menu.payments || []), "Misto"].map((p) => (
                     <button key={p} type="button" className={`payment-card ${(p === "Misto" ? isHibrido : payment === p) ? "sel" : ""}`} onClick={() => openPaymentConfig(p)}>
                       <span className="payment-icon">{paymentIcon(p)}</span>
                       <span className="payment-card-text"><strong>{paymentLabel(p)}</strong><small>{paymentSummary(p)}</small></span>
                     </button>
                   ))}
-                </div>
+                </div>}
                 {erroPagamento && <div className="pay-error">{erroPagamento === "pagamento" ? "Falta escolher como voce vai pagar." : erroPagamento}</div>}
                 {!erroPagamento && hibridoBloqueado && (
                   <div className="pay-error">
@@ -3268,7 +3308,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                         : <span className="identidade-tel">{telefone}</span>}
                     </div>
                   </div>
-                  <p className="identidade-explicacao">Vamos usar esses dados neste pedido.<br />Se estiver tudo certo, é só escolher o pagamento.</p>
+                  <p className="identidade-explicacao">Vamos usar esses dados neste pedido.<br />{premioSemCobranca ? "Se estiver tudo certo, é só finalizar seu prêmio." : "Se estiver tudo certo, é só escolher o pagamento."}</p>
                   <div className="pay-divider" />
                   <div className="pay-actions-row">
                     <button type="button" className="pay-action-link" onClick={() => setEditandoIdentidade(true)}>{vinculoWhatsappAtivo ? "Alterar nome" : "Alterar dados"}</button>

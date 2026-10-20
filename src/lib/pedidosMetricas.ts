@@ -5,6 +5,7 @@ export type PedidoParaMetricas = {
     kind?: string
     qty?: number
     recompensaJornadaId?: string
+    premioRankingId?: string
   }>
   snapshotOficial?: {
     itens?: Array<{
@@ -26,7 +27,7 @@ function contarPizzasPagasEstruturadas(
 ): number | null {
   if (!Array.isArray(itens)) return null
   return itens.reduce((soma, item) => {
-    if (item?.kind !== "pizza" || item.recompensaJornadaId) return soma
+    if (item?.kind !== "pizza" || item.recompensaJornadaId || item.premioRankingId) return soma
     return soma + (inteiroNaoNegativo(item.qty) ?? 0)
   }, 0)
 }
