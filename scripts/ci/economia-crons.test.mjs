@@ -43,9 +43,12 @@ describe("Vercel crons — modo economia seguro", () => {
     expect(cron).toEqual({ path: "/api/cron/ranking-autopilot", schedule: "30 4 * * *" });
   });
 
-  it("vira temporadas às 03h BRT sem polling por cliente nem cron por minuto", () => {
+  it("vira temporadas às 03h de Brasília, inclusive se o UTC variar por DST", () => {
     const cron = (config.crons ?? []).find((item) => item.path === "/api/cron/ranking-temporadas");
-    expect(cron).toEqual({ path: "/api/cron/ranking-temporadas", schedule: "0 6 * * *" });
+    // Às 05 UTC a rota ainda aguarda quando São Paulo está em UTC-3; às 06
+    // ela fecha. Caso o horário legal mude para UTC-2, às 05 ela fecha e às
+    // 06 encontra a temporada já fechada. O corte civil permanece no domínio.
+    expect(cron).toEqual({ path: "/api/cron/ranking-temporadas", schedule: "0 5,6 * * *" });
     expect((config.crons ?? []).filter((item) => item.path === "/api/cron")).toEqual([{ path: "/api/cron", schedule: "0 3 * * *" }]);
   });
 });

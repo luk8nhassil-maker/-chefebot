@@ -22,6 +22,8 @@ export type Premio = {
   estado: "disponivel" | "associado" | "em_preparo" | "saiu_entrega" | "entregue";
   pedidoId?: string; tentativaId?: string; ultimoCancelamentoPedidoId?: string;
   proximoAvisoEm: number; revisao: number;
+  /** Concessão excepcional não reescreve nem transforma o snapshot legado. */
+  origem?: "temporada" | "excecao_historica";
 };
 
 function partes(ms: number) {

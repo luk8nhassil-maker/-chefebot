@@ -67,6 +67,26 @@ end
 return 1
 `;
 
+// A primeira temporada legada não possui snapshot nem prêmio configurado.
+// Esta concessão é deliberadamente separada do resultado histórico: uma só
+// chave-marcador impede duplicidade e preserva a configuração original.
+export const CONCEDER_EXCECAO_HISTORICA_LUA = `
+local marcador = redis.call('GET', KEYS[1])
+if marcador then
+  if redis.call('GET', KEYS[2]) then return 'existente' end
+  return 'marcador_inconsistente'
+end
+if redis.call('EXISTS', KEYS[2]) == 1 then return 'premio_inconsistente' end
+local carteira = redis.call('TYPE', KEYS[3]).ok
+local indice = redis.call('TYPE', KEYS[4]).ok
+if (carteira ~= 'none' and carteira ~= 'set') or (indice ~= 'none' and indice ~= 'set') then return 'indice_inconsistente' end
+redis.call('SET', KEYS[1], ARGV[1])
+redis.call('SET', KEYS[2], ARGV[2])
+redis.call('SADD', KEYS[3], ARGV[3])
+redis.call('SADD', KEYS[4], ARGV[3])
+return 'concedido'
+`;
+
 export class Ranking3Store {
   constructor(readonly banco: BancoRanking3, readonly tenant = "default") {
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(tenant)) throw new Error("tenant_invalido");
@@ -151,7 +171,7 @@ export class Ranking3Store {
     return { fechados, pendentes: Date.parse(janelaTemporada(config.ancora, checkpoint + 1).fim) <= agora };
   }
   async premio(id: string) {
-    if (!/^r3-\d{4}-\d{2}-\d{2}-\d+-liga-[12]$/.test(id)) throw new Error("premio_invalido");
+    if (!/^(?:r3-\d{4}-\d{2}-\d{2}-\d+|r3-legado-t-\d+)-liga-[12]$/.test(id)) throw new Error("premio_invalido");
     return this.banco.get<Premio>(this.chave(`premio:${id}`));
   }
   async carteira(clienteId: string): Promise<Premio[]> {
@@ -168,5 +188,50 @@ export class Ranking3Store {
       if (await this.banco.eval(PREMIO_CAS_LUA, [this.chave(`premio:${id}`), this.chave("avisos"), this.chave("vinculos")], [atual.revisao, JSON.stringify(novo)]) === 1) return novo;
     }
     throw new Error("premio_concorrencia_tente_novamente");
+  }
+
+  async concederExcecaoHistorica(input: {
+    temporadaId: string;
+    clienteId: string;
+    posicao: number;
+    score: number;
+    corteEm: string;
+    concedidoEm?: string;
+  }): Promise<{ premio: Premio; jaExistia: boolean }> {
+    if (!/^t-\d+$/.test(input.temporadaId) || !input.clienteId || !Number.isSafeInteger(input.posicao) || input.posicao < 1 || !Number.isFinite(input.score) || !Number.isFinite(Date.parse(input.corteEm))) {
+      throw new Error("concessao_historica_invalida");
+    }
+    const id = `r3-legado-${input.temporadaId}-liga-1`;
+    const concedidoEm = input.concedidoEm ?? new Date().toISOString();
+    const premio: Premio = {
+      id, temporadaId: input.temporadaId, clienteId: input.clienteId, liga: 1,
+      tetoCents: 4700, concedidoEm, estado: "disponivel",
+      // Não agenda WhatsApp para uma exceção histórica. O direito fica
+      // disponível no site quando o Ranking 3 for ativado.
+      proximoAvisoEm: Number.MAX_SAFE_INTEGER, revisao: 0, origem: "excecao_historica",
+    };
+    const marcador = {
+      versao: 1, motivo: "concessao_excepcional_primeira_temporada",
+      temporadaId: input.temporadaId, clienteId: input.clienteId,
+      posicao: input.posicao, score: input.score, corteEm: input.corteEm,
+      concedidoEm,
+    };
+    const resultado = String(await this.banco.eval(
+      CONCEDER_EXCECAO_HISTORICA_LUA,
+      [
+        this.chave(`concessao-excepcional:${input.temporadaId}`),
+        this.chave(`premio:${id}`),
+        this.chave(`carteira:${input.clienteId}`),
+        this.chave("premios"),
+      ],
+      [JSON.stringify(marcador), JSON.stringify(premio), id],
+    ));
+    if (resultado === "concedido") return { premio, jaExistia: false };
+    if (resultado === "existente") {
+      const existente = await this.premio(id);
+      if (!existente || existente.clienteId !== input.clienteId || existente.origem !== "excecao_historica") throw new Error("concessao_historica_inconsistente");
+      return { premio: existente, jaExistia: true };
+    }
+    throw new Error(`concessao_historica_${resultado}`);
   }
 }
