@@ -53,6 +53,7 @@ import {
 } from "@/lib/whatsappInbox";
 import { obterTelefoneCanario } from "@/lib/whatsappCanary";
 import { inboxWhatsappHabilitadaPara } from "@/lib/whatsappInboxRollout";
+import { registrarTrafegoWhatsapp } from "@/lib/whatsappTrafficPeak";
 import { EVOLUTION_WEBHOOK_AUTH_HEADER, verificarWebhookEvolution } from "@/lib/evolutionWebhookAuth";
 import { adquirirMutexConversaWhatsapp, liberarMutexConversaWhatsapp, type MutexConversaWhatsapp } from "@/lib/whatsappInboundMutex";
 
@@ -1062,6 +1063,9 @@ export async function POST(req: NextRequest) {
     if (body?.event === "messages.upsert") {
       const phone = extrairTelefoneIndividualDaChave(body.data?.key);
       const msgId = validarMessageId(body.data?.key?.id);
+      if (phone && msgId && !body.data?.key?.fromMe) {
+        await registrarTrafegoWhatsapp(phone, msgId);
+      }
       const texto = body.data?.message?.conversation || body.data?.message?.extendedTextMessage?.text || "";
       const canary = obterTelefoneCanario();
       const mensagemCanario = canary.configured && phone &&
@@ -1210,6 +1214,10 @@ export async function POST(req: NextRequest) {
     }
 
     msgId = data?.key?.id as string | undefined;
+    // Observa todas as mensagens reais (inclusive atendimento legado).
+    // O mesmo evento enfileirado também pode ser visto pelo worker; a chave
+    // anônima com SET NX impede contagem dupla.
+    if (msgId) await registrarTrafegoWhatsapp(phone, msgId);
 
     // Sinal de saúde best-effort (nunca gate), inclusive para o inbound do
     // canário que retorna antes do fluxo comercial normal.
