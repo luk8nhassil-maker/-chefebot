@@ -77,25 +77,29 @@ export type ResumoTrafego = {
 };
 
 export function resumirTrafegoWhatsapp(raw: Array<{ data: string; hash: Record<string, unknown> | null }>, desde: number | null, now: number): ResumoTrafego {
-  let picoHora: ResumoTrafego["picoHora"] = null;
-  let picoMinuto: ResumoTrafego["picoMinuto"] = null;
   let total7d = 0;
   const dias: DiaTrafego[] = raw.map(({ data, hash }) => {
     const h = hash ?? {};
     const horas = Array.from({ length: 24 }, (_, hora) => {
       const v = Math.max(0, Number(h["h:" + String(hora).padStart(2, "0")]) || 0);
-      if (!picoHora || v > picoHora.mensagens) picoHora = { data, hora, mensagens: v };
       return v;
     });
     const total = horas.reduce((a, b) => a + b, 0);
     const valorPico = Math.max(0, Number(h.peakMinute) || 0);
     const when = typeof h.peakMinuteAt === "string" ? h.peakMinuteAt : null;
-    if (when && (!picoMinuto || valorPico > picoMinuto.mensagens)) {
-      picoMinuto = { quando: when, mensagens: valorPico };
-    }
     total7d += total;
     return { data, total, picoMinuto: valorPico, picoMinutoEm: when, horas };
   });
+  const picoHora = dias
+    .flatMap(dia => dia.horas.map((mensagens, hora) => ({ data: dia.data, hora, mensagens })))
+    .reduce<ResumoTrafego["picoHora"]>((anterior, atual) =>
+      !anterior || atual.mensagens > anterior.mensagens ? atual : anterior, null);
+  const picoMinuto = dias
+    .filter(d => d.picoMinutoEm !== null)
+    .reduce<ResumoTrafego["picoMinuto"]>((anterior, atual) =>
+      !anterior || atual.picoMinuto > anterior.mensagens
+        ? { quando: atual.picoMinutoEm!, mensagens: atual.picoMinuto }
+        : anterior, null);
   const coberturaDias = desde === null || !Number.isFinite(desde) || desde > now
     ? 0 : Math.max(0, Math.min(7, Math.floor((now - desde) / 86_400_000)));
   // Sete dias de coleta, por si só, não prova o pico máximo futuro.
