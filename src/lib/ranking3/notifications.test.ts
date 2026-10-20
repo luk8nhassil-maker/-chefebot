@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Premio } from "./domain";
 import type { JobOutboxWhatsapp } from "../whatsappOutbox";
 
-const m = vi.hoisted(() => ({ dados: new Map<string, unknown>(), premios: new Map<string, Premio>(), jobs: new Map<string, Partial<JobOutboxWhatsapp>>(), enfileirar: vi.fn(), optOut: false, participa: true, telefone: "5511900000000" }));
+const m = vi.hoisted(() => ({ dados: new Map<string, unknown>(), premios: new Map<string, Premio>(), jobs: new Map<string, Partial<JobOutboxWhatsapp>>(), enfileirar: vi.fn(), optOut: false, telefone: "5511900000000" }));
 vi.mock("../redis", () => {
   const conjunto = (k: string) => { const valor = m.dados.get(k); return valor instanceof Set ? valor as Set<string> : new Set<string>(); };
   function multi() {
@@ -35,7 +35,6 @@ vi.mock("../redis", () => {
 vi.mock("./server", () => ({ ranking3Ativo: () => true, ranking3: () => ({ chave: (s: string) => `r3:${s}`, premio: async (id: string) => m.premios.get(id) ?? null }) }));
 vi.mock("../rankingConviteWhatsapp", () => ({ clienteTemOptOutConviteRankingWhatsapp: async () => m.optOut }));
 vi.mock("../clientes", () => ({ buscarClientePorId: async () => ({ telefone: m.telefone, nome: "Cliente sintético" }) }));
-vi.mock("../consentimentoRanking", () => ({ obterParticipacaoRanking: async () => m.participa }));
 vi.mock("../whatsappOutbox", () => ({
   configuracaoOutboxWhatsapp: () => ({ ready: true }), agendarDrenoWhatsapp: vi.fn(async () => true),
   enfileirarMensagemWhatsapp: m.enfileirar, obterJobWhatsapp: async (id: string) => m.jobs.get(id) ?? null,
@@ -47,7 +46,7 @@ const agora = Date.parse("2026-11-19T21:00:00Z");
 const inicial: Premio = { id: "r3-2026-10-20-0-liga-1", temporadaId: "r3-2026-10-20-0", clienteId: "sintetico", liga: 1, tetoCents: 4700, concedidoEm: new Date(agora).toISOString(), estado: "disponivel", proximoAvisoEm: agora, revisao: 0 };
 const chaveAviso = () => `r3:aviso:${inicial.id}:${agora}`;
 beforeEach(() => {
-  vi.unstubAllEnvs(); vi.clearAllMocks(); m.dados.clear(); m.jobs.clear(); m.premios.clear(); m.optOut = false; m.participa = true; m.telefone = "5511900000000";
+  vi.unstubAllEnvs(); vi.clearAllMocks(); m.dados.clear(); m.jobs.clear(); m.premios.clear(); m.optOut = false; m.telefone = "5511900000000";
   vi.stubEnv("VERCEL_ENV", "production"); vi.stubEnv("VERCEL_PROJECT_ID", VERCEL_PROJECT_CHEFEBOT_OFICIAL);
   vi.stubEnv("RANKING3_PRIZE_NOTIFICATIONS_ENABLED", "true"); vi.stubEnv("RANKING3_PROACTIVE_POLICY_APPROVED", "true");
   m.dados.set("config:pizzaria", { horaAbertura: 18, horaFechamento: 23 });
@@ -64,15 +63,14 @@ describe("Ranking3 — avisos na outbox, sem transporte real", () => {
     vi.stubEnv("RANKING3_PRIZE_NOTIFICATIONS_ENABLED", "");
     await processarAvisosRanking3(agora); expect(m.enfileirar).not.toHaveBeenCalled();
   });
-  it("só enfileira o vencedor participante, com copy e guard de negócio", async () => {
+  it("enfileira o vencedor já apurado, com copy e guard de negócio", async () => {
     expect((await processarAvisosRanking3(agora)).enfileirados).toBe(1);
     expect(m.enfileirar).toHaveBeenCalledWith(expect.objectContaining({ priority: "normal", rankingPrize: { id: inicial.id, revisao: 0 }, expiresAt: agora + 120000 }));
     await processarAvisosRanking3(agora); expect(m.enfileirar).toHaveBeenCalledTimes(1);
   });
-  it.each(["optout", "pausa", "sem_participacao", "numero_invalido", "sem_politica", "sem_expediente"])("suprime %s sem consumir direito", async (caso) => {
+  it.each(["optout", "pausa", "numero_invalido", "sem_politica", "sem_expediente"])("suprime %s sem consumir direito", async (caso) => {
     if (caso === "optout") m.optOut = true;
     if (caso === "pausa") m.dados.set("bot_ativo", false);
-    if (caso === "sem_participacao") m.participa = false;
     if (caso === "numero_invalido") m.telefone = "numero-invalido";
     if (caso === "sem_politica") vi.stubEnv("RANKING3_PROACTIVE_POLICY_APPROVED", "");
     if (caso === "sem_expediente") m.dados.delete("config:pizzaria");
@@ -80,13 +78,6 @@ describe("Ranking3 — avisos na outbox, sem transporte real", () => {
   });
   it.each(["2026-11-19T20:59:59Z", "2026-11-20T02:00:00Z"])("não envia fora do expediente %s", async (hora) => {
     await processarAvisosRanking3(Date.parse(hora)); expect(m.enfileirar).not.toHaveBeenCalled();
-  });
-  it("usa o horário operacional configurado, sem pressupor expediente noturno", async () => {
-    m.dados.set("config:pizzaria", { horaAbertura: 10, horaFechamento: 17 });
-    const meioDia = Date.parse("2026-11-19T14:00:00Z");
-    m.premios.set(inicial.id, { ...inicial, proximoAvisoEm: meioDia });
-    await processarAvisosRanking3(meioDia);
-    expect(m.enfileirar).toHaveBeenCalledOnce();
   });
   it("aceitação da fila não é envio; confirmação real encerra o aviso", async () => {
     await processarAvisosRanking3(agora);

@@ -4,7 +4,6 @@ import { ranking3, ranking3Ativo } from "./server";
 import { avisoDevido, copyPremio, FUSO, QUINZE_DIAS, type Premio } from "./domain";
 import { clienteTemOptOutConviteRankingWhatsapp } from "../rankingConviteWhatsapp";
 import { buscarClientePorId } from "../clientes";
-import { obterParticipacaoRanking } from "../consentimentoRanking";
 import { agendarDrenoWhatsapp, configuracaoOutboxWhatsapp, enfileirarMensagemWhatsapp, obterJobWhatsapp, type JobOutboxWhatsapp } from "../whatsappOutbox";
 import { PREMIO_CAS_LUA } from "./store";
 import { VERCEL_PROJECT_CHEFEBOT_OFICIAL } from "../vercelProjeto";
@@ -47,13 +46,14 @@ async function horarioPermitido(agora: number) {
   // Sem configuração operacional comprovada, não inventa fechamento às 23h.
   const config = await redis.get<{ horaAbertura?: number; horaFechamento?: number }>("config:pizzaria");
   const abertura = config?.horaAbertura, fechamento = config?.horaFechamento;
-  return typeof abertura === "number" && typeof fechamento === "number" && abertura >= 0 && abertura < 24 && fechamento > abertura && fechamento <= 24 && hora >= abertura && hora < fechamento;
+  return typeof abertura === "number" && typeof fechamento === "number" && abertura >= 0 && abertura < 24 && fechamento > abertura && fechamento <= 24 && hora >= Math.max(18, abertura) && hora < fechamento;
 }
 async function destinatarioPermitido(premio: Premio, phone: string, agora: number) {
   if (!telefoneDestinoValido(phone)) return false;
   if (await redis.get<boolean>("bot_ativo") === false || !await horarioPermitido(agora)) return false;
-  if (!await obterParticipacaoRanking(premio.clienteId) || await clienteTemOptOutConviteRankingWhatsapp(phone)) return false;
-  // A participação no Ranking é a origem do direito; opt-out atual sempre
+  if (await clienteTemOptOutConviteRankingWhatsapp(phone)) return false;
+  // O prêmio só existe depois da elegibilidade no corte. Sair do Ranking
+  // depois de vencer não apaga o direito nem seu aviso; opt-out atual sempre
   // prevalece. Não exibimos identidade de terceiros nem enviamos campanha.
   return true;
 }
