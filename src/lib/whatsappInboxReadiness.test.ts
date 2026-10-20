@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { avaliarSaudeInbox, type InboxQueueHealth } from "./whatsappInboxReadiness";
+import { agendaRecuperacaoCorreta, avaliarSaudeInbox, type InboxQueueHealth } from "./whatsappInboxReadiness";
 
 const NOW = Date.parse("2026-10-19T22:00:00.000Z");
 const normal: InboxQueueHealth = {
@@ -42,5 +42,22 @@ describe("monitor técnico da inbox sem alegar capacidade falsa", () => {
   });
   test("rollout desligado não é operação saudável", () => {
     expect(avaliarSaudeInbox(normal, "ok", false, NOW).status).toBe("problema");
+  });
+});
+
+describe("conferência real da recuperação QStash", () => {
+  const destino = "https://chefedapizza.com.br/api/interno/whatsapp-inbox/processar";
+  const esperado = { destination: destino, cron: "*/5 * * * *", isPaused: false };
+  test("aceita agenda correta com URL calculada", () => {
+    expect(agendaRecuperacaoCorreta(esperado, destino)).toBe(true);
+  });
+  test("nega destino incorreto, cron diferente e agenda pausada", () => {
+    expect(agendaRecuperacaoCorreta({ ...esperado, destination: destino + "-outro" }, destino)).toBe(false);
+    expect(agendaRecuperacaoCorreta({ ...esperado, cron: "*/10 * * * *" }, destino)).toBe(false);
+    expect(agendaRecuperacaoCorreta({ ...esperado, isPaused: true }, destino)).toBe(false);
+  });
+  test("nega callback ausente ou malformado sem aprovar erroneamente", () => {
+    expect(agendaRecuperacaoCorreta(esperado, "")).toBe(false);
+    expect(agendaRecuperacaoCorreta({ ...esperado, destination: "http://wrong.example" }, destino)).toBe(false);
   });
 });
