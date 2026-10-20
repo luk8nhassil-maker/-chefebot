@@ -8,6 +8,8 @@ export default defineConfig({
     include: [
       "src/lib/whatsappPico50.http.integration.test.ts",
       "src/lib/whatsappPico50.worker.integration.test.ts",
+      "src/lib/whatsappInboxReadiness.test.ts",
+      "src/lib/whatsappTrafficPeak.test.ts",
     ],
     environment: "node",
     fileParallelism: false,
