@@ -21,20 +21,33 @@ describe("assinatura ChefeBot — regras comerciais", () => {
     expect(avaliarAssinaturaChefeBot(estado, "2026-08-19")).toMatchObject({ status: "blocked", blocked: true });
   });
 
-  it("nos ciclos seguintes avisa 3 dias antes, vence no dia 20 e bloqueia no 3º dia de atraso", () => {
+  it("avisa três dias antes e bloqueia no próprio vencimento sem carência", () => {
     const estado: EstadoAssinaturaChefeBot = {
       activePlanId: "basic",
-      nextDueDate: "2026-09-20",
+      nextDueDate: "2026-10-20",
       paidThroughDate: null,
       pendingDowngradePlanId: null,
     };
 
-    expect(avaliarAssinaturaChefeBot(estado, "2026-09-16").status).toBe("regular");
-    expect(avaliarAssinaturaChefeBot(estado, "2026-09-17").status).toBe("warning");
-    expect(avaliarAssinaturaChefeBot(estado, "2026-09-20").status).toBe("due");
-    expect(avaliarAssinaturaChefeBot(estado, "2026-09-21").status).toBe("grace");
-    expect(avaliarAssinaturaChefeBot(estado, "2026-09-22").status).toBe("grace");
-    expect(avaliarAssinaturaChefeBot(estado, "2026-09-23")).toMatchObject({ status: "blocked", blocked: true });
+    expect(avaliarAssinaturaChefeBot(estado, "2026-10-16")).toMatchObject({ status: "regular", blocked: false });
+    expect(avaliarAssinaturaChefeBot(estado, "2026-10-17")).toMatchObject({ status: "warning", blocked: false });
+    expect(avaliarAssinaturaChefeBot(estado, "2026-10-19")).toMatchObject({ status: "warning", blocked: false });
+    expect(avaliarAssinaturaChefeBot(estado, "2026-10-20")).toMatchObject({ status: "blocked", blocked: true, daysLate: 0 });
+    expect(avaliarAssinaturaChefeBot(estado, "2026-10-21")).toMatchObject({ status: "blocked", blocked: true, daysLate: 1 });
+    expect(avaliarAssinaturaChefeBot(estado, "2026-10-22")).toMatchObject({ status: "blocked", blocked: true, daysLate: 2 });
+    expect(avaliarAssinaturaChefeBot(estado, "2026-10-23")).toMatchObject({ status: "blocked", blocked: true, daysLate: 3 });
+  });
+
+  it("libera após confirmação real que avança o próximo vencimento no estado", () => {
+    const quitada: EstadoAssinaturaChefeBot = {
+      activePlanId: "basic",
+      nextDueDate: "2026-11-20",
+      paidThroughDate: "2026-11-20",
+      pendingDowngradePlanId: null,
+    };
+    expect(avaliarAssinaturaChefeBot(quitada, "2026-10-20")).toMatchObject({ status: "regular", blocked: false });
+    expect(avaliarAssinaturaChefeBot(quitada, "2026-11-17")).toMatchObject({ status: "warning", blocked: false });
+    expect(avaliarAssinaturaChefeBot(quitada, "2026-11-20")).toMatchObject({ status: "blocked", blocked: true });
   });
 
   it("avança o vencimento mensal sempre para o dia 20", () => {
