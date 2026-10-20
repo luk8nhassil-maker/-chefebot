@@ -39,7 +39,7 @@ type Monitor = {
 };
 
 const panel: React.CSSProperties = {
-  background: "var(--card, #171717)", border: "1px solid var(--border, #414141)",
+  background: "#ffffff", color: "#152238", border: "1px solid #d9e2ef",
   borderRadius: 14, padding: 20,
 };
 const toNumber = (n: number) => Number.isFinite(n) ? n.toLocaleString("pt-BR") : "—";
@@ -82,13 +82,13 @@ export default function MonitorFilaWhatsappDevPage() {
     : readiness.status === "problema" ? "Problema identificado — não ampliar"
     : "Em observação — não ampliar";
   return (
-    <main style={{ maxWidth: 1000, margin: "0 auto", minHeight: "100vh", padding: "24px 16px", color: "var(--foreground, #f5f5f5)" }}>
-      <nav style={{ marginBottom: 20 }}><Link href="/dev" style={{ color: "var(--info, #60a5fa)" }}>← Voltar ao DEV</Link></nav>
+    <main style={{ maxWidth: 1000, margin: "0 auto", minHeight: "100vh", padding: "24px 16px", background: "#f8fafc", color: "#152238" }}>
+      <nav style={{ marginBottom: 20 }}><Link href="/dev" style={{ color: "#175cd3" }}>← Voltar ao DEV</Link></nav>
       <h1 style={{ fontSize: 25, marginBottom: 6 }}>Saúde da fila do WhatsApp</h1>
       <p style={{ opacity: .7, marginTop: 0 }}>Somente leitura, sem mensagens de teste. Atualiza automaticamente a cada minuto.</p>
       <section style={panel} aria-live="polite">
         <h2 style={{ fontSize: 18, marginTop: 0 }}>{summary}</h2>
-        {error && <p role="alert" style={{ color: "var(--danger, #f87171)" }}>{error}</p>}
+        {error && <p role="alert" style={{ color: "#b42318" }}>{error}</p>}
         {data && <>
           <p>Nova fila: <strong>{data.active ? "Ativa" : "Inativa"}</strong> · Alcance: <strong>{data.rollout === "all" ? "Todos" : data.rollout === "allowlist" ? "Somente números autorizados" : "Desligada"}</strong></p>
           <p>Agenda de recuperação: <strong>{data.agendaRecuperacao === "ok" ? "Confirmada no QStash" : "Não confirmada (" + data.agendaRecuperacao + ")"}</strong></p>
@@ -115,15 +115,15 @@ export default function MonitorFilaWhatsappDevPage() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 7 }}>
           {horas.map(({ hora, quantidade }) => <div key={hora} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
             <span style={{ width: 27 }}>{String(hora).padStart(2, "0")}h</span>
-            <div style={{ flex: 1, height: 10, background: "var(--border, #333)", borderRadius: 5, overflow: "hidden" }}>
-              <div style={{ width: `${quantidade / maiorHora * 100}%`, height: "100%", background: "var(--info, #60a5fa)" }} />
+            <div style={{ flex: 1, height: 10, background: "#e3eaf3", borderRadius: 5, overflow: "hidden" }}>
+              <div style={{ width: `${quantidade / maiorHora * 100}%`, height: "100%", background: "#2563eb" }} />
             </div>
             <span style={{ width: 24, textAlign: "right" }}>{quantidade}</span>
           </div>)}
         </div>
         <p style={{ fontSize: 13, marginTop: 20, fontWeight: 650 }}>Movimento por dia</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {trafego.dias.map(d => <div key={d.data} style={{ border: "1px solid var(--border, #333)", borderRadius: 9, padding: 10, fontSize: 12 }}>
+          {trafego.dias.map(d => <div key={d.data} style={{ border: "1px solid #d9e2ef", borderRadius: 9, padding: 10, fontSize: 12 }}>
             <div>{d.data}</div><strong>{toNumber(d.total)} mensagens</strong>
           </div>)}
         </div>
