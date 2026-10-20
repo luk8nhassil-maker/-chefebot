@@ -19,7 +19,7 @@ export const ASSINATURA_CHEFEBOT_DIA_VENCIMENTO = 20;
 export const ASSINATURA_CHEFEBOT_PRIMEIRO_VENCIMENTO = "2026-08-20";
 export const ASSINATURA_CHEFEBOT_COBRANCA_INICIAL_IMEDIATA_EM = "2026-08-19";
 export const ASSINATURA_CHEFEBOT_DIAS_AVISO = 3;
-export const ASSINATURA_CHEFEBOT_DIAS_CARENCIA = 2;
+export const ASSINATURA_CHEFEBOT_DIAS_CARENCIA = 0;
 export const ASSINATURA_CHEFEBOT_FUSO = "America/Sao_Paulo";
 
 export type EstadoAssinaturaChefeBot = {
@@ -124,11 +124,11 @@ export function avaliarAssinaturaChefeBot(
   const daysLate = Math.max(0, -daysUntilDue);
   let status: StatusAssinaturaChefeBot = "regular";
 
+  // Regra aprovada em 20/10/2026: sem carência. Venceu sem quitação,
+  // bloqueia a operação no próprio dia 20; aviso permanece até confirmação.
   if (primeiraCobrancaImediataPendente(estado, hoje)) status = "blocked";
-  else if (daysUntilDue > 0 && daysUntilDue <= ASSINATURA_CHEFEBOT_DIAS_AVISO) status = "warning";
-  else if (daysUntilDue === 0) status = "due";
-  else if (daysLate > 0 && daysLate <= ASSINATURA_CHEFEBOT_DIAS_CARENCIA) status = "grace";
-  else if (daysLate > ASSINATURA_CHEFEBOT_DIAS_CARENCIA) status = "blocked";
+  else if (daysUntilDue <= 0) status = "blocked";
+  else if (daysUntilDue <= ASSINATURA_CHEFEBOT_DIAS_AVISO) status = "warning";
 
   return {
     status,

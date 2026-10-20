@@ -98,9 +98,10 @@ export async function prepararMudancaPlanoChefeBot(targetPlanId: PlanoAssinatura
   const estado = await lerEstadoAssinaturaChefeBot();
   const current = PLANOS_ASSINATURA_CHEFEBOT[estado.activePlanId];
   const cicloAtualPago = Boolean(estado.paidThroughDate && estado.paidThroughDate > hoje);
-  const mensalidadeVencida = hoje > estado.nextDueDate;
   const cobrancaInicialImediata = primeiraCobrancaImediataPendente(estado, hoje);
-  const pagamentoDoCicloObrigatorio = mensalidadeVencida || cobrancaInicialImediata;
+  // O vencimento já bloqueia no próprio dia, sem possibilidade de trocar de
+  // plano para contornar o pagamento da mensalidade do ciclo vigente.
+  const pagamentoDoCicloObrigatorio = hoje >= estado.nextDueDate || cobrancaInicialImediata;
 
   // A dívida do ciclo fica congelada no plano que a originou.
   if (!cicloAtualPago && pagamentoDoCicloObrigatorio && targetPlanId !== current.id) {
