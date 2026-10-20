@@ -66,6 +66,33 @@ export async function autorizarJobPremio(job: JobOutboxWhatsapp, agora = Date.no
   return Boolean(premio && premio.revisao === job.rankingPrize.revisao && avisoDevido(premio, agora) && await destinatarioPermitido(premio, job.phone, agora));
 }
 
+// A concessão excepcional da primeira temporada foi criada sem aviso: a
+// agenda inicial usa MAX_SAFE_INTEGER para impedir notificações sem autorização.
+// Quando o envio individual estiver autorizado, agende exatamente UMA vez,
+// conferindo o marcador atômico da concessão antes de tocar a agenda. Nenhum
+// resultado/configuração da temporada legada é regravado.
+export async function agendarAvisoExcepcionalPrimeiraTemporada(agora = Date.now()): Promise<boolean> {
+  if (!notificacoesPermitidas()) return false;
+  const store = ranking3();
+  const temporadaId = "t-1789830947840";
+  const premioId = `r3-legado-${temporadaId}-liga-1`;
+  const [premio, marcador] = await Promise.all([
+    store.premio(premioId),
+    redis.get<{ versao?: number; motivo?: string; temporadaId?: string; clienteId?: string }>(store.chave(`concessao-excepcional:${temporadaId}`)),
+  ]);
+  if (!premio || !marcador || marcador.versao !== 1 ||
+      marcador.motivo !== "concessao_excepcional_primeira_temporada" ||
+      marcador.temporadaId !== temporadaId || marcador.clienteId !== premio.clienteId ||
+      premio.origem !== "excecao_historica" || premio.temporadaId !== temporadaId ||
+      premio.estado !== "disponivel" || premio.proximoAvisoEm !== Number.MAX_SAFE_INTEGER) return false;
+  const novo = { ...premio, proximoAvisoEm: agora, revisao: premio.revisao + 1 };
+  const gravou = await redis.eval(PREMIO_CAS_LUA,
+    [store.chave(`premio:${premioId}`), store.chave("avisos"), store.chave("vinculos")],
+    [premio.revisao, JSON.stringify(novo)]);
+  if (gravou === -1) throw new Error("indice_premio_inconsistente");
+  return gravou === 1;
+}
+
 // Índice separado da agenda de novos envios. Continua reconciliando após
 // checkout/cancelamento, quando o direito já saiu do índice de avisos devidos.
 export async function reconciliarAvisosPendentes(agora = Date.now()) {
@@ -119,6 +146,9 @@ export async function reconciliarAvisosPendentes(agora = Date.now()) {
 export async function processarAvisosRanking3(agora = Date.now()) {
   const contadores = { enfileirados: 0, ...await reconciliarAvisosPendentes(agora), desativado: false };
   if (!notificacoesPermitidas() || !configuracaoOutboxWhatsapp().ready) return { ...contadores, desativado: true };
+  // A única exceção histórica continua idempotente, usando a fila normal.
+  // Não executa no Preview nem com as flags de aviso desligadas.
+  await agendarAvisoExcepcionalPrimeiraTemporada(agora);
   const store = ranking3();
   const cursor = await redis.get<number>(store.chave("avisos-cursor")) ?? 0;
   const ids = await redis.zrange<string[]>(store.chave("avisos"), 0, agora, { byScore: true, offset: cursor, count: 50 });
