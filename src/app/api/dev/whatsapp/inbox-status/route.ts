@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { lerPicosTrafegoWhatsapp } from "@/lib/whatsappTrafficPeak";
 import { avaliarSaudeInbox, type InboxScheduleHealth } from "@/lib/whatsappInboxReadiness";
 import { urlWorkerInboxAssinada } from "@/lib/whatsappInbox";
 
@@ -26,8 +27,8 @@ async function verificarAgendaRecuperacao(): Promise<InboxScheduleHealth> {
     if (!r.ok) return "indisponivel";
     const schedule: unknown = await r.json();
     if (!schedule || typeof schedule !== "object") return "incorreta";
-    const props = schedule as { destination?: unknown; cron?: unknown };
-    return props.destination === destino && props.cron === "*/5 * * * *" ? "ok" : "incorreta";
+    const props = schedule as { destination?: unknown; cron?: unknown; isPaused?: unknown };
+    return props.destination === destino && props.cron === "*/5 * * * *" && props.isPaused !== true ? "ok" : "incorreta";
   } catch {
     return "indisponivel";
   }
@@ -50,7 +51,7 @@ export async function GET(req: NextRequest) {
   const config = configuracaoInboxWhatsapp();
   const rollout = configuracaoRolloutInboxWhatsapp();
   try {
-    const [data, agendaRecuperacao] = await Promise.all([resumoInboxWhatsapp(), verificarAgendaRecuperacao()]);
+    const [data, agendaRecuperacao, trafego] = await Promise.all([resumoInboxWhatsapp(), verificarAgendaRecuperacao(), lerPicosTrafegoWhatsapp()]);
     const active = inboxAtivaParaClientes() && config.ready;
     const avaliacao = avaliarSaudeInbox(data, agendaRecuperacao, active);
     return NextResponse.json({
@@ -63,6 +64,7 @@ export async function GET(req: NextRequest) {
       active,
       agendaRecuperacao,
       avaliacao,
+      trafego,
       configuration: config,
       queue: data,
       warning: data.ambiguousTotal > 0 || data.unresolved > 0
