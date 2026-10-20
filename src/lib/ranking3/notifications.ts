@@ -5,7 +5,6 @@ import { avisoDevido, copyPremio, FUSO, QUINZE_DIAS, type Premio } from "./domai
 import { clienteTemOptOutConviteRankingWhatsapp } from "../rankingConviteWhatsapp";
 import { buscarClientePorId } from "../clientes";
 import { obterParticipacaoRanking } from "../consentimentoRanking";
-import { normalizarTelefoneCanarioWhatsapp } from "../whatsappCanaryPhone";
 import { agendarDrenoWhatsapp, configuracaoOutboxWhatsapp, enfileirarMensagemWhatsapp, obterJobWhatsapp, type JobOutboxWhatsapp } from "../whatsappOutbox";
 import { PREMIO_CAS_LUA } from "./store";
 import { VERCEL_PROJECT_CHEFEBOT_OFICIAL } from "../vercelProjeto";
@@ -33,23 +32,30 @@ async function quarentena(premio: Premio, chave: string, aviso: Aviso) {
   if (resultado !== 1) throw new Error("indice_revisao_indisponivel");
 }
 export function notificacoesPermitidas() {
-  // Não existe caminho que habilite público geral nesta entrega.
-  return ranking3Ativo() && process.env.VERCEL_ENV === "production" && process.env.VERCEL_PROJECT_ID === VERCEL_PROJECT_CHEFEBOT_OFICIAL && process.env.RANKING3_WHATSAPP_CANARY_ENABLED === "true" && process.env.RANKING3_PROACTIVE_POLICY_APPROVED === "true";
+  // O direito já foi concedido antes desta etapa. Este flag libera apenas o
+  // aviso individual do vencedor, no projeto oficial e em produção.
+  return ranking3Ativo() && process.env.VERCEL_ENV === "production" && process.env.VERCEL_PROJECT_ID === VERCEL_PROJECT_CHEFEBOT_OFICIAL && process.env.RANKING3_PRIZE_NOTIFICATIONS_ENABLED === "true" && process.env.RANKING3_PROACTIVE_POLICY_APPROVED === "true";
+}
+
+function telefoneDestinoValido(valor: string | null | undefined): string | null {
+  const digitos = String(valor ?? "").replace(/\D/g, "");
+  const phone = digitos.length === 10 || digitos.length === 11 ? `55${digitos}` : digitos;
+  return /^55[1-9]\d{9,10}$/.test(phone) ? phone : null;
 }
 async function horarioPermitido(agora: number) {
   const hora = Number(new Intl.DateTimeFormat("en", { timeZone: FUSO, hour: "2-digit", hourCycle: "h23" }).format(agora));
   // Sem configuração operacional comprovada, não inventa fechamento às 23h.
   const config = await redis.get<{ horaAbertura?: number; horaFechamento?: number }>("config:pizzaria");
   const abertura = config?.horaAbertura, fechamento = config?.horaFechamento;
-  return typeof abertura === "number" && typeof fechamento === "number" && abertura >= 0 && abertura < 24 && fechamento > abertura && fechamento <= 24 && hora >= Math.max(18, abertura) && hora < fechamento;
+  return typeof abertura === "number" && typeof fechamento === "number" && abertura >= 0 && abertura < 24 && fechamento > abertura && fechamento <= 24 && hora >= abertura && hora < fechamento;
 }
 async function destinatarioPermitido(premio: Premio, phone: string, agora: number) {
-  const canario = normalizarTelefoneCanarioWhatsapp(process.env.WHATSAPP_CANARY_PHONE);
-  if (!canario || normalizarTelefoneCanarioWhatsapp(phone) !== canario) return false;
+  if (!telefoneDestinoValido(phone)) return false;
   if (await redis.get<boolean>("bot_ativo") === false || !await horarioPermitido(agora)) return false;
   if (!await obterParticipacaoRanking(premio.clienteId) || await clienteTemOptOutConviteRankingWhatsapp(phone)) return false;
-  const consentimento = await redis.get<{ aprovado?: boolean; evidencia?: string }>(ranking3().chave(`consentimento-proativo:${premio.clienteId}`));
-  return consentimento?.aprovado === true && Boolean(consentimento.evidencia?.trim());
+  // A participação no Ranking é a origem do direito; opt-out atual sempre
+  // prevalece. Não exibimos identidade de terceiros nem enviamos campanha.
+  return true;
 }
 
 // Revalidação no WORKER: pausa, opt-out, expediente e pedido ativo podem mudar
@@ -85,7 +91,9 @@ export async function reconciliarAvisosPendentes(agora = Date.now()) {
     const mesmoDireito = premio.revisao === aviso.revisao && premio.proximoAvisoEm === aviso.devidoEm && premio.estado === "disponivel";
     if (job.state === "delivered") {
       if (mesmoDireito) {
-        const novo = { ...premio, revisao: premio.revisao + 1, proximoAvisoEm: Math.max(job.updatedAt, aviso.devidoEm) + QUINZE_DIAS };
+        // Entrega confirmada encerra este aviso. Um resultado ambíguo nunca
+        // é repetido; nova tentativa só ocorre se falhou antes do provedor.
+        const novo = { ...premio, revisao: premio.revisao + 1, proximoAvisoEm: Number.MAX_SAFE_INTEGER };
         // Se houver corrida com o checkout, a confirmação continua verdadeira,
         // mas a agenda do direito mais novo nunca é sobrescrita.
         const atualizado = await redis.eval(PREMIO_CAS_LUA, [store.chave(`premio:${premio.id}`), store.chave("avisos"), store.chave("vinculos")], [premio.revisao, JSON.stringify(novo)]);
@@ -128,7 +136,8 @@ export async function processarAvisosRanking3(agora = Date.now()) {
       await quarentena(premio, chave, { ...aviso, estado: "ambiguo" }); contadores.ambiguos++; continue;
     }
     const perfil = await buscarClientePorId(premio.clienteId);
-    if (!perfil || !await destinatarioPermitido(premio, perfil.telefone, agora)) { contadores.suprimidos++; continue; }
+    const phone = telefoneDestinoValido(perfil?.telefone);
+    if (!perfil || !phone || !await destinatarioPermitido(premio, phone, agora)) { contadores.suprimidos++; continue; }
     // Um contato por pessoa/janela, mesmo com vários prêmios legítimos.
     const contato = store.chave(`contato:${premio.clienteId}`);
     await redis.set(contato, chave, { nx: true, px: QUINZE_DIAS });
@@ -138,7 +147,7 @@ export async function processarAvisosRanking3(agora = Date.now()) {
       aviso = await redis.get<Aviso>(chave);
     }
     if (!aviso || aviso.estado !== "preparado") continue;
-    const job = await enfileirarMensagemWhatsapp({ phone: perfil.telefone, text: copyPremio(perfil.nome ?? "cliente", "https://chefedapizza.com.br/cliente/premios"), priority: "promocional", idempotencyKey: chave, expiresAt: agora + 120_000, rankingPrize: { id, revisao: premio.revisao } });
+    const job = await enfileirarMensagemWhatsapp({ phone, text: copyPremio(perfil.nome ?? "cliente", "https://chefedapizza.com.br/cliente/premios"), priority: "normal", idempotencyKey: chave, expiresAt: agora + 120_000, rankingPrize: { id, revisao: premio.revisao } });
     await redis.set(chave, { ...aviso, estado: "enfileirado", jobId: job.jobId } satisfies Aviso);
     await agendarDrenoWhatsapp();
     contadores.enfileirados++;

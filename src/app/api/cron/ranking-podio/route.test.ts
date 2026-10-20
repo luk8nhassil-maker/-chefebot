@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
   horario: true,
+  ranking3Ativo: false,
+  recuperar: vi.fn(async () => ({ fechados: 0, pendentes: false })),
+  avisos: vi.fn(async () => ({ enfileirados: 0 })),
   processar: vi.fn(async () => ({
     ok: true,
     temporadaId: "temp_1",
@@ -18,6 +21,9 @@ vi.mock("@/lib/rankingPodioWhatsapp", () => ({
   ehHorarioDisparoPodioWhatsapp: vi.fn(() => h.horario),
   processarPodioWhatsapp18h: h.processar,
 }));
+vi.mock("@/lib/ranking3/server", () => ({ ranking3Ativo: () => h.ranking3Ativo, ranking3: () => ({ recuperar: h.recuperar }) }));
+vi.mock("@/lib/consentimentoRanking", () => ({ obterElegibilidadeRankingNoCorte: vi.fn() }));
+vi.mock("@/lib/ranking3/notifications", () => ({ processarAvisosRanking3: h.avisos }));
 
 import { GET } from "./route";
 import { VERCEL_PROJECT_CHEFEBOT_OFICIAL } from "@/lib/vercelProjeto";
@@ -34,17 +40,20 @@ beforeEach(() => {
   vi.stubEnv("VERCEL_ENV", "production");
   vi.stubEnv("VERCEL_PROJECT_ID", VERCEL_PROJECT_CHEFEBOT_OFICIAL);
   h.horario = true;
+  h.ranking3Ativo = false;
   h.processar.mockClear();
+  h.recuperar.mockClear();
+  h.avisos.mockClear();
 });
 
 describe("agendamento do Pódio", () => {
-  test("Vercel chama a rota diariamente às 21:00 UTC, equivalente a 18h no fuso operacional atual", () => {
+  test("Vercel chama a rota a cada hora para respeitar o horário operacional configurado", () => {
     const config = JSON.parse(readFileSync("vercel.json", "utf8")) as {
       crons?: Array<{ path: string; schedule: string }>;
     };
     expect(config.crons).toContainEqual({
       path: "/api/cron/ranking-podio",
-      schedule: "0 21 * * *",
+      schedule: "0 * * * *",
     });
   });
 });
@@ -81,6 +90,16 @@ describe("GET /api/cron/ranking-podio", () => {
     const body = await res.json();
 
     expect(body).toMatchObject({ skipped: true, motivo: "fora_horario_18h" });
+    expect(h.processar).not.toHaveBeenCalled();
+  });
+
+  test("Ranking 3 verifica avisos no cron, mas o motor ainda decide o horário e o destinatário", async () => {
+    h.ranking3Ativo = true;
+    h.horario = false;
+    const res = await GET(req("Bearer cron-seguro"));
+    expect(res.status).toBe(200);
+    expect(h.recuperar).toHaveBeenCalledOnce();
+    expect(h.avisos).toHaveBeenCalledOnce();
     expect(h.processar).not.toHaveBeenCalled();
   });
 
