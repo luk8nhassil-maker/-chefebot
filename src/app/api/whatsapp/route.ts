@@ -60,6 +60,8 @@ import { adquirirMutexConversaWhatsapp, liberarMutexConversaWhatsapp, type Mutex
 export const maxDuration = 30;
 
 type Pedido = {
+  premioRankingId?: string;
+  premioRankingEntregueEm?: string;
   id: string;
   numero?: number;
   cliente: string;
@@ -374,7 +376,7 @@ async function fecharEscalonamento(phone: string) {
   await mutarPedidos<Pedido, void>((pedidosFrescos) => ({
     persistir: true,
     pedidos: pedidosFrescos.map(p =>
-      p.telefone === phone && p.escalonado === true && p.status === "novo"
+      p.telefone === phone && p.escalonado === true && p.status === "novo" && !p.premioRankingId
         ? { ...p, status: "entregue" as const, escalonado: false }
         : p
     ),
@@ -1419,7 +1421,7 @@ export async function POST(req: NextRequest) {
             return { persistir: false, resultado: null }
           }
           const atualizados = [...pedidosFrescos]
-          atualizados[index] = { ...atualizados[index], status: 'entregue' }
+          atualizados[index] = { ...atualizados[index], status: 'entregue', ...(atualizados[index].premioRankingId ? { premioRankingEntregueEm: new Date().toISOString() } : {}) }
           return { persistir: true, pedidos: atualizados, resultado: { pedido: atualizados[index], pedidosAtualizados: atualizados } }
         })
         if (resultadoEntrega) {

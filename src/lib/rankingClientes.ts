@@ -5,6 +5,7 @@
 import { redis } from "./redis";
 import { REGRA_ESTRELAS_V1 } from "./estrelas";
 import type { MovimentoPontos } from "./fidelidade";
+import { scoreCompetitivo } from "./ranking3/domain";
 
 const TAMANHO_MAXIMO = 50;
 
@@ -134,7 +135,12 @@ export function calcularScoreDaTemporada(
   movimentos: MovimentoPontos[],
   inicioMs: number,
   fimMs: number,
+  competicaoV3 = false,
 ): { score: number; primeiroAtingidoEm: number | null } {
+  if (competicaoV3) {
+    const resultado = scoreCompetitivo(movimentos, [], { id: "projecao", indice: 0, inicio: new Date(inicioMs).toISOString(), fim: new Date(fimMs).toISOString() });
+    return { score: resultado.score, primeiroAtingidoEm: resultado.atingidoEm };
+  }
   const elegiveis = movimentos
     .filter((m) => m.regraVersao === REGRA_ESTRELAS_V1)
     .map((m) => ({ movimento: m, ms: new Date(m.createdAt).getTime() }))

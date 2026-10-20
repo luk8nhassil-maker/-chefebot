@@ -22,6 +22,8 @@ type PedidoMain = {
   snapshotOficial?: PedidoSnapshotOficial;
   itensJornada?: ItemElegibilidadeJornada[];
   recompensaJornadaId?: string;
+  premioRankingId?: string;
+  premioRankingEntregueEm?: string;
 };
 
 const ACAO_PATTERN = /^(iniciar|entregar)$/;
@@ -81,7 +83,7 @@ async function concluirEntregaAtomico(
     const filaAtualizada = [...fila];
     filaAtualizada[indexFila] = { ...pedidoFila, status: "entregue" };
     const principaisAtualizados = [...principais];
-    principaisAtualizados[indexMain] = { ...pedidoMain, status: "entregue" };
+    principaisAtualizados[indexMain] = { ...pedidoMain, status: "entregue", ...(pedidoMain.premioRankingId ? { premioRankingEntregueEm: new Date().toISOString() } : {}) };
 
     // As duas representações do pedido mudam no mesmo comando Redis: nunca
     // fica fila entregue com pedido principal ainda em rota (ou vice-versa).

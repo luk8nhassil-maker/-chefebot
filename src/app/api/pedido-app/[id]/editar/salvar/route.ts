@@ -131,6 +131,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       });
     }
 
+    if (pedido.premioRankingId || body.itens?.some((item) => item.premioRankingId)) {
+      return NextResponse.json({ ok: false, error: "Pedido com prêmio não pode ser editado. Cancele antes da entrega para restaurar o mesmo direito." }, { status: 409 });
+    }
     if (!pedidoAguardandoAceite(pedido)) {
       return NextResponse.json(
         { ok: false, error: "Este pedido já foi aceito pela loja e não pode mais ser alterado." },

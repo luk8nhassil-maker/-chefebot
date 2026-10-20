@@ -35,7 +35,8 @@ export async function sincronizarScoreTemporadaComBonus(
       const fimMs = temporada.fimEm ? new Date(temporada.fimEm).getTime() : Date.now();
       if (!Number.isFinite(inicioMs) || !Number.isFinite(fimMs)) return;
       const extrato = await obterExtratoPontos(clienteId);
-      const base = calcularScoreDaTemporada(extrato, inicioMs, Math.min(fimMs, Date.now()));
+      const v3 = temporadaId.startsWith("r3-");
+      const base = calcularScoreDaTemporada(extrato, inicioMs, Math.min(fimMs, Date.now() + (v3 ? 1 : 0)), v3);
       await projetarScoreRankingComBonus(tenantId, temporadaId, clienteId, base.score, base.primeiroAtingidoEm ?? Date.now());
     });
   } catch (erro) {

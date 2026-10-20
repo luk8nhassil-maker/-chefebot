@@ -38,6 +38,8 @@ export type PedidoRedis = PedidoComEdicao & {
   // identifica qual presente da Jornada foi usado neste pedido (rule 13/14).
   itensJornada?: ItemElegibilidadeJornada[];
   recompensaJornadaId?: string;
+  premioRankingId?: string;
+  premioRankingEntregueEm?: string;
   whatsappVinculado?: boolean;
   pix?: PixMetadata;
   pixConfirmado?: boolean;

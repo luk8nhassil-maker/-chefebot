@@ -30,6 +30,7 @@ export type PedidoFingerprintInput = {
   troco?: string;
   resgateId?: string;
   recompensaJornadaId?: string;
+  premioRanking?: { id: string; selecao: unknown };
   /** Sabor escolhido para o presente da Jornada do Chef (quando a recompensa
    * for uma pizza) — falta disso no fingerprint permitiria reaproveitar o
    * mesmo clientRequestId trocando só o sabor do presente sem detecção. */
@@ -84,6 +85,7 @@ function chaveCanonica(input: PedidoFingerprintInput): string {
     troco: input.troco,
     resgateId: input.resgateId,
     recompensaJornadaId: input.recompensaJornadaId,
+    ...(input.premioRanking ? { premioRanking: input.premioRanking } : {}),
     recompensaEscolhaSabor: input.recompensaEscolhaSabor,
   };
   return JSON.stringify(normalizarRecursivo(objetoCanonico));

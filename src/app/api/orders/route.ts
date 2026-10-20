@@ -5,6 +5,7 @@ import { gerarIdPedidoUnico, proximoNumeroPedido } from '@/lib/numeracao'
 import { criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
 import type { EntregadorCadastro, PedidoEntregador } from '@/types/entregador'
 import { processarEfeitosPedidoEntregue, processarEfeitosPedidoCancelado } from '@/lib/fidelidadeEfeitos'
+import { sincronizarPremioDoPedido } from '@/lib/ranking3/pedido'
 import type { ItemElegibilidadeJornada } from '@/lib/jornadaChef'
 import type { ItemApp } from '@/lib/pedidoAppItens'
 import type { PedidoSnapshotOficial } from '@/lib/pedidoSnapshot'
@@ -78,6 +79,8 @@ type Pedido = PedidoComEdicao & {
   snapshotOficial?: PedidoSnapshotOficial
   itensJornada?: ItemElegibilidadeJornada[]
   recompensaJornadaId?: string
+  premioRankingId?: string
+  premioRankingEntregueEm?: string
   // Campos de arquivamento
   isArchived?: boolean
   archivedAt?: string
@@ -594,6 +597,7 @@ async function aplicarMudancaDeStatus(
       ...pedidos[index],
       status,
       statusAtualizadoEm: agoraIso,
+      ...(pedidos[index].premioRankingId && (status === 'entregue' || statusAnterior === 'entregue') ? { premioRankingEntregueEm: pedidos[index].premioRankingEntregueEm ?? agoraIso } : {}),
       ...(status === 'cancelado' ? { cancelamentoSolicitado: false } : {}),
       ...(status === 'em_preparo' && !pedidos[index].horarioInicio ? { horarioInicio: agora } : {}),
       ...(iniciouPreparoAgora ? { preparoIniciadoEm: agoraIso, preparoConcluidoEm: undefined } : {}),
@@ -841,6 +845,9 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
+    if (pedidos[index].premioRankingId) {
+      await sincronizarPremioDoPedido({ ...pedidos[index], statusAnterior })
+    }
     const resposta = sanitizarPedidoPixResposta(pedidos[index])
     return NextResponse.json({
       ...resposta,

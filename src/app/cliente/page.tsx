@@ -2029,6 +2029,7 @@ export default function ClientePage() {
             {fidelidade && !fidelidade.ativo && <div className="cf-mobile-empty">O programa de pontos ainda não está ativo por aqui. Volte em breve!</div>}
             {fidelidade && fidelidade.ativo && mobilePanel === 'ranking' && painel?.ranking && (
               <FidelidadeRankingScreen
+                ranking3={painel.ranking3}
                 ranking={painel.ranking}
                 temporada={painel.temporada}
                 indicacao={painel.indicacao}

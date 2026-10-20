@@ -1,0 +1,58 @@
+name: ranking3-ci
+on:
+  pull_request:
+    paths:
+      - "src/lib/ranking3/**"
+      - "src/app/cliente/Ranking3*"
+      - "src/app/cliente/premios/**"
+      - "src/app/api/cliente/ranking3/**"
+      - "src/app/api/cron/ranking-temporadas/**"
+      - "src/app/api/pedido-app/**"
+      - "src/lib/consentimentoRanking.ts"
+      - "vercel.json"
+      - ".github/workflows/ranking3-ci.yml"
+permissions:
+  contents: read
+concurrency:
+  group: ranking3-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      redis:
+        image: redis:6.2.14
+      srh:
+        image: hiett/serverless-redis-http:0.0.10
+        ports: ["8379:80"]
+        env:
+          SRH_MODE: env
+          SRH_CONNECTION_STRING: redis://redis:6379
+          SRH_TOKEN: ranking3-isolated
+    env:
+      RANKING3_TEST_REDIS_URL: http://127.0.0.1:8379
+      KV_REST_API_URL: http://127.0.0.1:8379
+      KV_REST_API_TOKEN: ranking3-isolated
+      CHEFEBOT_E2E: "1"
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Aguardar somente Redis descartável
+        run: |
+          node -e "const {Redis}=require('@upstash/redis'); const r=new Redis({url:process.env.KV_REST_API_URL, token:process.env.KV_REST_API_TOKEN}); (async()=>{for(let i=0;i<30;i++){try{if(await r.ping()==='PONG')process.exit(0)}catch{}await new Promise(f=>setTimeout(f,1000))}process.exit(1)})()"
+      - name: Domínio, Redis Lua real, checkout e segurança
+        run: npm test -- src/lib/ranking3 src/app/cliente/Ranking3Experience.test.tsx src/app/api/pedido-app/route.test.ts src/app/api/cliente/ranking3 src/app/api/cron/ranking-temporadas src/lib/consentimentoRanking.test.ts scripts/ci/economia-crons.test.mjs
+      - name: Typecheck canônico
+        run: npx next typegen && npx tsc --noEmit --incremental false
+      - name: Build sem efeitos reais
+        env:
+          VERCEL_ENV: preview
+        run: npm run build

@@ -27,6 +27,7 @@ export async function obterTemporadaAnteriorEncerrada(
   tenantId: string,
   temporadaAtual: ConfigTemporada,
 ): Promise<ConfigTemporada | null> {
+  if (temporadaAtual.temporadaId.startsWith("r3-")) return null;
   if (!tenantId || !temporadaAtual.ativadaEm) return null;
   const ativadaEmMs = new Date(temporadaAtual.ativadaEm).getTime();
   if (!Number.isFinite(ativadaEmMs)) return null;

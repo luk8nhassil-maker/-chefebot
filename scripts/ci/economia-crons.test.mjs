@@ -23,12 +23,13 @@ describe("Vercel crons — modo economia seguro", () => {
     expect(paths).not.toContain("/api/cron/mcp-observer");
   });
 
-  it("mantém somente os quatro crons explicitamente aprovados", () => {
+  it("mantém os quatro crons legados e somente a virada diária aprovada do Ranking 3", () => {
     expect(paths.sort()).toEqual([
       "/api/cron",
       "/api/cron/pix-pendente",
       "/api/cron/ranking-autopilot",
       "/api/cron/ranking-podio",
+      "/api/cron/ranking-temporadas",
     ].sort());
   });
 
@@ -40,5 +41,11 @@ describe("Vercel crons — modo economia seguro", () => {
   it("agenda o robô em observação uma vez por dia", () => {
     const cron = (config.crons ?? []).find((item) => item.path === "/api/cron/ranking-autopilot");
     expect(cron).toEqual({ path: "/api/cron/ranking-autopilot", schedule: "30 4 * * *" });
+  });
+
+  it("vira temporadas às 03h BRT sem polling por cliente nem cron por minuto", () => {
+    const cron = (config.crons ?? []).find((item) => item.path === "/api/cron/ranking-temporadas");
+    expect(cron).toEqual({ path: "/api/cron/ranking-temporadas", schedule: "0 6 * * *" });
+    expect((config.crons ?? []).filter((item) => item.path === "/api/cron")).toEqual([{ path: "/api/cron", schedule: "0 3 * * *" }]);
   });
 });
