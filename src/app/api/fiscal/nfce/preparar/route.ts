@@ -41,7 +41,9 @@ export async function GET(req: NextRequest) {
     );
 
     const emissorConfigurado = Boolean(
-      process.env.FOCUS_NFCE_TOKEN?.trim() &&
+      process.env.WLG_FISCAL_CLIENT_ID?.trim() &&
+      process.env.WLG_FISCAL_CLIENT_SECRET?.trim() &&
+      process.env.WLG_FISCAL_EMPRESA_ID?.trim() &&
       /^\d{14}$/.test(process.env.FISCAL_EMITENTE_CNPJ ?? ""),
     );
     return NextResponse.json(
