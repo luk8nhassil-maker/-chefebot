@@ -43,6 +43,11 @@ export function resolverVinculoWlg(
   if (encontrados.length === 0) return { ok: false, codigo: "vinculo_ausente" };
   if (encontrados.length !== 1) return { ok: false, codigo: "ambiguo" };
   const v = encontrados[0];
+  // Uma mesma empresa fiscal não pode ser vinculada a dois tenants sem
+  // revisão expressa. Evita compartilhamento acidental de credenciais/notas.
+  if (vinculosServidor.some(outro => outro.tenantId !== tenantAutenticado &&
+      (outro.empresaId === v.empresaId || outro.cnpj === v.cnpj)))
+    return { ok: false, codigo: "ambiguo" };
   if (!EMPRESA_ID_VALIDO.test(v.empresaId) || !cnpjValido(v.cnpj))
     return { ok: false, codigo: "dados_invalidos" };
   if (!v.habilitado || !v.homologacaoConcluida)
