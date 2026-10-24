@@ -42,3 +42,34 @@ export function payloadInicioAutomaticoSalao(pedidoId: string) {
 export function urlImpressaoAutomaticaSalao(pedidoId: string): string {
   return `/pedidos/${encodeURIComponent(pedidoId)}/imprimir?auto=1&embedded=1`;
 }
+
+export type ResultadoFilaImpressaoSalao = {
+  concluidos: string[];
+  falhas: string[];
+};
+
+/**
+ * Serializa cupons do Salão. Navegadores não garantem várias chamadas de
+ * window.print() concorrentes; ao aguardar o término de cada cupom antes de
+ * abrir o próximo, nenhum pedido da mesma rodada é engolido pela fila nativa
+ * de impressão. IDs repetidos são ignorados defensivamente.
+ */
+export async function processarFilaImpressaoSalao(
+  pedidoIds: readonly string[],
+  imprimir: (pedidoId: string) => Promise<void>,
+): Promise<ResultadoFilaImpressaoSalao> {
+  const concluidos: string[] = [];
+  const falhas: string[] = [];
+
+  for (const pedidoId of new Set(pedidoIds)) {
+    try {
+      await imprimir(pedidoId);
+      concluidos.push(pedidoId);
+    } catch {
+      // Uma falha isolada não pode impedir os cupons seguintes de sair.
+      falhas.push(pedidoId);
+    }
+  }
+
+  return { concluidos, falhas };
+}

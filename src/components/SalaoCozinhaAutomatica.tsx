@@ -5,42 +5,71 @@ import { usePathname } from "next/navigation";
 import {
   ehPedidoSalaoParaInicioAutomatico,
   payloadInicioAutomaticoSalao,
+  processarFilaImpressaoSalao,
   urlImpressaoAutomaticaSalao,
   type PedidoMinimoSalaoCozinha,
 } from "@/lib/salaoCozinhaAutomatica";
 
 const INTERVALO_VERIFICACAO_MS = 2_000;
+const TIMEOUT_IMPRESSAO_MS = 30_000;
 
 type PedidoPainelSalao = PedidoMinimoSalaoCozinha & {
   id: string;
 };
 
-function imprimirPedidoSilencioso(pedidoId: string) {
-  if (typeof window === "undefined") return;
+function imprimirPedidoSilencioso(pedidoId: string): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
 
-  const iframe = document.createElement("iframe");
-  iframe.src = urlImpressaoAutomaticaSalao(pedidoId);
-  iframe.style.position = "fixed";
-  iframe.style.right = "0";
-  iframe.style.bottom = "0";
-  iframe.style.width = "0";
-  iframe.style.height = "0";
-  iframe.style.border = "0";
-  iframe.style.opacity = "0";
-  iframe.setAttribute("aria-hidden", "true");
-  document.body.appendChild(iframe);
+  return new Promise((resolve, reject) => {
+    const iframe = document.createElement("iframe");
+    iframe.src = urlImpressaoAutomaticaSalao(pedidoId);
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    iframe.style.opacity = "0";
+    iframe.setAttribute("aria-hidden", "true");
 
-  const remover = () => {
-    window.setTimeout(() => {
-      try { iframe.remove(); } catch {}
-    }, 1_000);
-  };
+    let finalizado = false;
 
-  iframe.onload = () => {
-    try { iframe.contentWindow?.addEventListener("afterprint", remover); } catch {}
-  };
+    const remover = () => {
+      window.setTimeout(() => {
+        try { iframe.remove(); } catch {}
+      }, 1_000);
+    };
 
-  window.setTimeout(remover, 30_000);
+    const finalizar = (erro?: Error) => {
+      if (finalizado) return;
+      finalizado = true;
+      window.clearTimeout(timeoutId);
+      remover();
+      if (erro) reject(erro);
+      else resolve();
+    };
+
+    iframe.onload = () => {
+      try {
+        const conteudo = iframe.contentWindow;
+        if (!conteudo) {
+          finalizar(new Error("iframe_de_impressao_indisponivel"));
+          return;
+        }
+        conteudo.addEventListener("afterprint", () => finalizar(), { once: true });
+      } catch {
+        finalizar(new Error("falha_ao_monitorar_impressao"));
+      }
+    };
+
+    iframe.onerror = () => finalizar(new Error("falha_ao_carregar_cupom"));
+    const timeoutId = window.setTimeout(
+      () => finalizar(new Error("timeout_de_impressao")),
+      TIMEOUT_IMPRESSAO_MS,
+    );
+
+    document.body.appendChild(iframe);
+  });
 }
 
 /**
@@ -53,6 +82,11 @@ function imprimirPedidoSilencioso(pedidoId: string) {
  * autoridade do status e do claim Redis de impressão; só quem recebe
  * `podeImprimirAutomaticamente` dispara o cupom, evitando duplicação entre
  * abas/dispositivos concorrentes.
+ *
+ * Quando há vários pedidos pendentes, cada claim + impressão é processado em
+ * série. Isso evita chamadas concorrentes de window.print(), que o navegador
+ * pode descartar, e mantém pedidos ainda não processados em "novo" caso a aba
+ * seja fechada no meio da fila.
  */
 export default function SalaoCozinhaAutomatica({ enabled }: { enabled: boolean }) {
   const pathname = usePathname();
@@ -77,24 +111,27 @@ export default function SalaoCozinhaAutomatica({ enabled }: { enabled: boolean }
         if (!Array.isArray(dados)) return;
 
         const pendentes = (dados as PedidoPainelSalao[]).filter(ehPedidoSalaoParaInicioAutomatico);
-        for (const pedido of pendentes) {
-          if (cancelado || processandoRef.current.has(pedido.id)) continue;
-          processandoRef.current.add(pedido.id);
-          try {
-            const aceite = await fetch("/api/orders", {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              credentials: "same-origin",
-              body: JSON.stringify(payloadInicioAutomaticoSalao(pedido.id)),
-            });
-            const resultado = await aceite.json().catch(() => null);
-            if (aceite.ok && resultado?.podeImprimirAutomaticamente === true) {
-              imprimirPedidoSilencioso(pedido.id);
+        await processarFilaImpressaoSalao(
+          pendentes.map((pedido) => pedido.id),
+          async (pedidoId) => {
+            if (cancelado || processandoRef.current.has(pedidoId)) return;
+            processandoRef.current.add(pedidoId);
+            try {
+              const aceite = await fetch("/api/orders", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
+                body: JSON.stringify(payloadInicioAutomaticoSalao(pedidoId)),
+              });
+              const resultado = await aceite.json().catch(() => null);
+              if (aceite.ok && resultado?.podeImprimirAutomaticamente === true) {
+                await imprimirPedidoSilencioso(pedidoId);
+              }
+            } finally {
+              processandoRef.current.delete(pedidoId);
             }
-          } finally {
-            processandoRef.current.delete(pedido.id);
-          }
-        }
+          },
+        );
       } catch {
         // Best-effort: uma falha desta automação nunca derruba o painel.
         // O pedido permanece em "novo" e continua recuperável manualmente.
