@@ -78,6 +78,10 @@ describe("gate fiscal seguro (testes estruturais)", () => {
   test("API exige autenticação e não escreve pedidos nem emite", () => {
     expect(route).toContain('exigirRole(usuario, ["admin", "atendente", "dev"])');
     expect(route).toContain('redis.get<PedidoParaNfce[]>("pedidos")');
+    expect(route).toContain("WLG_FISCAL_CLIENT_ID");
+    expect(route).toContain("WLG_FISCAL_CLIENT_SECRET");
+    expect(route).toContain("WLG_FISCAL_EMPRESA_ID");
+    expect(route).not.toContain("FOCUS_NFCE_TOKEN");
     expect(route).not.toMatch(/redis\.(set|eval|del|incr|hset|lpush|rpush)\s*\(/);
     expect(route).not.toContain("fetch(");
   });
