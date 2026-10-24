@@ -3,6 +3,7 @@ import { autenticarRequisicao, exigirRole } from "@/lib/apiAuth";
 import { emPreviewVercel } from "@/lib/previewSafety";
 import { redis } from "@/lib/redis";
 import { prepararNfce, type PedidoParaNfce } from "@/lib/fiscal/nfcePreflight";
+import { resolverVinculoWlg } from "@/lib/fiscal/wlgVinculos";
 
 export const dynamic = "force-dynamic";
 
@@ -40,12 +41,18 @@ export async function GET(req: NextRequest) {
       { status: 404, headers: SEM_CACHE },
     );
 
-    const emissorConfigurado = Boolean(
+    // O login atual não traz tenantId assinado: não deduzir empresa
+    // pelo pedido, domínio, query ou WLG_FISCAL_EMPRESA_ID global.
+    // Até introduzirmos autorização por estabelecimento no servidor,
+    // NENHUMA credencial habilita a emissão multiempresa.
+    const vinculo = resolverVinculoWlg(null, []);
+    const credenciaisDisponiveis = Boolean(
       process.env.WLG_FISCAL_CLIENT_ID?.trim() &&
       process.env.WLG_FISCAL_CLIENT_SECRET?.trim() &&
       process.env.WLG_FISCAL_EMPRESA_ID?.trim() &&
       /^\d{14}$/.test(process.env.FISCAL_EMITENTE_CNPJ ?? ""),
     );
+    const emissorConfigurado = credenciaisDisponiveis && vinculo.ok;
     return NextResponse.json(
       { ok: true, ...prepararNfce(pedido, emissorConfigurado) },
       { headers: SEM_CACHE },
