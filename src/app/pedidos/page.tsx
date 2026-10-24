@@ -11,6 +11,7 @@ import {
 } from "@/lib/pixAutoCheckConfig"
 import LimpezaOperacionalGate, { limpezaOperacionalAtiva } from "@/components/LimpezaOperacionalPainel"
 import NovoPedidoManual from "./NovoPedidoManual"
+import FiscalNfcePreflight from "@/components/FiscalNfcePreflight"
 import { adaptarCardapioParaMontagem, type MenuManual } from "@/lib/montagemManual"
 import {
   LIMIAR_ENTREGA_MIN,
@@ -1897,6 +1898,11 @@ export default function PedidosPage() {
           <button onClick={() => cancelarPedido(p.id)} disabled={cancelandoId === p.id} style={{ height: 46, border: "1px solid color-mix(in srgb, var(--danger) 35%, transparent)", borderRadius: 14, background: "color-mix(in srgb, var(--danger) 6%, transparent)", color: "var(--danger)", fontSize: 14, fontWeight: 800, flexShrink: 0, opacity: cancelandoId === p.id ? 0.6 : 1 }}>
             {cancelandoId === p.id ? "Cancelando..." : "Cancelar pedido"}
           </button>
+        )}
+
+        {/* Módulo fiscal isolado: flag desativada por padrão, sem emissão em produção. */}
+        {process.env.NEXT_PUBLIC_FISCAL_NFCE_UI === "true" && isDone && !emEdicaoDetail && (
+          <FiscalNfcePreflight pedidoId={p.id} />
         )}
 
         {/* Imprimir pedido — bloqueado antes do aceite enquanto o cliente edita, para nunca imprimir uma versão desatualizada */}
