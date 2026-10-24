@@ -39,7 +39,7 @@ export function validarEnvelopeHomologacaoWlg(
     dados.emitente.cnpj === cnpjEmitenteValidado &&
     typeof dados.totais === "object" && !!dados.totais &&
     typeof dados.pagamento === "object" && !!dados.pagamento &&
-    correspondeEmpresaVinculada(vinculo, dados.empresaId, cnpjEmitenteValidado);
+    correspondeEmpresaEmHomologacao(vinculo, dados.empresaId, cnpjEmitenteValidado);
 }
 
 /**
