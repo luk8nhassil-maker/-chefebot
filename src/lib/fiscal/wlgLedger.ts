@@ -15,6 +15,7 @@ export type RegistroFiscal = Readonly<{
   situacao: SituacaoFiscal;
   operationId?: string;
   chaveNfe?: string;
+  autorizadaEm?: string;
 }>;
 
 const ID = /^[A-Za-z0-9_-]{1,100}$/;
@@ -66,7 +67,10 @@ export function aplicarResultadoConsulta(
   if (registro.situacao !== "processando") return registro; // nunca reverter autorizada
   switch (resultado.situacao) {
     case "autorizada":
-      return { ...registro, situacao: "autorizada", chaveNfe: resultado.chave };
+      if (!/^\d{44}$/.test(resultado.chave) ||
+          !Number.isFinite(Date.parse(resultado.autorizadaEm))) return registro;
+      return { ...registro, situacao: "autorizada",
+        chaveNfe: resultado.chave, autorizadaEm: resultado.autorizadaEm };
     case "rejeitada":
       return { ...registro, situacao: "rejeitada" };
     case "processando":
