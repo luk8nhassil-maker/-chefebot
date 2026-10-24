@@ -17,7 +17,7 @@ export type PedidoParaNfce = {
 
 export type PreparoNfce = {
   documento: "NFC-e";
-  emissor: "Focus NFe";
+  emissor: "WLG Sistemas";
   podeEmitir: false;
   motivos: string[];
   resumo: {
@@ -99,5 +99,5 @@ export function prepararNfce(
   motivos.push("Classificação fiscal e credenciamento precisam ser validados pelo contador e SEFAZ/MA.");
   motivos.push("Emissão real permanecerá desativada até homologação fiscal e autorização de operação.");
 
-  return { documento: "NFC-e", emissor: "Focus NFe", podeEmitir: false, motivos, resumo };
+  return { documento: "NFC-e", emissor: "WLG Sistemas", podeEmitir: false, motivos, resumo };
 }
