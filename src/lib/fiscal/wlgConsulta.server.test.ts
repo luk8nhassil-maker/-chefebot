@@ -49,7 +49,7 @@ describe("adapter WLG: consulta sem qualquer emissão", () => {
     });
   });
   test("SUCESSO, variação linguística, ainda exige chave e data", async () => {
-    const { mock } = httpFake({ status: "SUCESSO", chaveNfe: chave, dataAutorizacao: "autorizado" });
+    const { mock } = httpFake({ status: "SUCESSO", chaveNfe: chave, dataAutorizacao: "2026-10-24T16:00:00Z" });
     expect((await consultarOperacaoWlg(operationId, credenciais, mock)).situacao).toBe("autorizada");
   });
   test("SUCESSO sem chave correta fica indeterminada, não emitida", async () => {
