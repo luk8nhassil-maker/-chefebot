@@ -46,6 +46,7 @@ describe("WLG — ledger fiscal sem duplicidade", () => {
       chave: "1".repeat(44), autorizadaEm: "2026-10-24T22:00:00Z",
     });
     expect(autorizada.situacao).toBe("autorizada");
+    expect(autorizada.autorizadaEm).toBe("2026-10-24T22:00:00Z");
     expect(podeIniciarEmissao(autorizada)).toBe(false);
     expect(aplicarResultadoConsulta(autorizada, { situacao: "processando", operationId: op })).toBe(autorizada);
   });
