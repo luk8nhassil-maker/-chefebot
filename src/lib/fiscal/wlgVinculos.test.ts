@@ -33,6 +33,14 @@ describe("WLG — isolamento de empresas", () => {
       ok: false, codigo: "ambiguo",
     });
   });
+  it("recusa a mesma empresaId ou CNPJ vinculados a tenants distintos", () => {
+    expect(resolverVinculoWlg("pizza-a", [
+      empresaA, { ...empresaB, empresaId: empresaA.empresaId },
+    ])).toEqual({ ok: false, codigo: "ambiguo" });
+    expect(resolverVinculoWlg("pizza-a", [
+      empresaA, { ...empresaB, cnpj: empresaA.cnpj },
+    ])).toEqual({ ok: false, codigo: "ambiguo" });
+  });
   it("não libera empresa antes de homologação individual", () => {
     expect(resolverVinculoWlg("pizza-a", [{ ...empresaA, homologacaoConcluida: false }])).toEqual({
       ok: false, codigo: "nao_homologado",
