@@ -26,7 +26,13 @@ const { store, redisMock } = vi.hoisted(() => {
   return { store, redisMock, defaultSetImpl, defaultGetImpl };
 });
 
+const { verifyTokenMock } = vi.hoisted(() => ({ verifyTokenMock: vi.fn() }));
+
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
+vi.mock("@/lib/auth", async (original) => ({
+  ...(await original<typeof import("@/lib/auth")>()),
+  verifyToken: verifyTokenMock,
+}));
 vi.mock("@/lib/mercadoPagoPix", () => ({ criarCobrancaPixMercadoPago: vi.fn() }));
 
 const CARDAPIO_TESTE = { sizes: [], saltyFlavors: [], sweetFlavors: [], borders: [], bebidas: [{ name: "Refrigerante 2L", price: 12 }], sucos: [], neighborhoods: [] };
@@ -39,11 +45,24 @@ import { POST as abrir } from "../../route";
 import { PATCH as atualizarComanda } from "../../[id]/route";
 import { SALAO_COOKIE, criarTokenSalao } from "@/lib/salaoAuth";
 import { buscarComanda } from "@/lib/comandas";
+import { COOKIE_AUTH } from "@/lib/sessaoAdministrativa";
 
 function reqSalao(body: unknown, token: string) {
   return { json: async () => body, cookies: { get: (n: string) => (n === SALAO_COOKIE ? { value: token } : undefined) } } as never;
 }
 function paramsFor(id: string) { return { params: Promise.resolve({ id }) }; }
+
+// Simula Salão com sessão administrativa válida no mesmo navegador.
+function reqSalaoComAdmin(body: unknown, salaoToken: string) {
+  return {
+    json: async () => body,
+    cookies: {
+      get: (name: string) => name === SALAO_COOKIE
+        ? { value: salaoToken }
+        : name === COOKIE_AUTH ? { value: "admin-valido" } : undefined,
+    },
+  } as never;
+}
 
 async function abrirEComItens(token: string, mesa = "5", cliente = "Ana") {
   const aberta = await (await abrir(reqSalao({ cliente, mesa }, token))).json();
@@ -54,6 +73,7 @@ async function abrirEComItens(token: string, mesa = "5", cliente = "Ana") {
 beforeEach(() => {
   store.clear(); vi.clearAllMocks(); store.set("cardapio", CARDAPIO_TESTE);
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }));
+  verifyTokenMock.mockResolvedValue(null);
 });
 
 describe("POST /api/salao/comandas/[id]/enviar", () => {
@@ -197,6 +217,25 @@ describe("POST /api/salao/comandas/[id]/enviar", () => {
       expect(pedidos[0].pagamento).toBe("Comanda em aberto");
       expect(pedidos[0].pix).toBeUndefined();
       expect(pedidos[0].telefone).toBeFalsy();
+    });
+  });
+
+  describe("Salão + cookie administrativo válido no mesmo navegador", () => {
+    it("não transforma pedido de comanda em administrativo", async () => {
+      verifyTokenMock.mockResolvedValue({ username: "admin", name: "Admin", role: "admin" });
+      const token = await criarTokenSalao();
+      const aberta = await (await abrir(reqSalaoComAdmin({ cliente: "Ana", mesa: "5" }, token))).json();
+      await atualizarComanda(
+        reqSalaoComAdmin({ itens: [{ kind: "simple", name: "Refrigerante 2L", qty: 1 }] }, token),
+        paramsFor(aberta.comanda.id)
+      );
+      const resultado = await enviar(reqSalaoComAdmin({}, token), paramsFor(aberta.comanda.id));
+      expect(resultado.status).toBe(200);
+      const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+      expect(pedidos).toHaveLength(1);
+      expect(pedidos[0].pagamento).toBe("Comanda em aberto");
+      expect(pedidos[0].telefone).toBeFalsy();
+      expect(pedidos[0].origem).toBe("site");
     });
   });
 });
