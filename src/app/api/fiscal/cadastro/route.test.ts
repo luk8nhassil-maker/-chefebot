@@ -48,6 +48,7 @@ const url = "http://localhost/api/fiscal/cadastro";
 function req(method: "GET" | "PUT", token?: string, body?: unknown, origin?: string) {
   return new NextRequest(url, {
     method, headers: {
+      host: "localhost", // o servidor exige Host real para conferir a origem
       ...(token ? { cookie: "auth-token=" + token } : {}),
       ...(method === "PUT" ? { "content-type": "application/json", ...(origin === undefined
         ? { origin: "http://localhost" } : origin ? { origin } : {}) } : {}),
