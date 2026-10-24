@@ -70,7 +70,7 @@ export function avaliarSaudeInbox(
       : schedule === "incorreta" ? "Agenda de recuperação diferente da esperada."
       : schedule === "nao_configurada" ? "QStash não configurado para consulta."
       : "Não foi possível confirmar a agenda de recuperação no QStash.");
-  const processamentoLocalConfirmado = active && queue.doneTotal > 0 && !anomalias;
+  const processamentoLocalConfirmado = active && queue.doneTotal > 0 && !anomalias && contadoresConsistentes;
   const recuperacaoConfigurada = schedule === "ok" && workerRecente;
   const status: InboxHealthStatus = !active || anomalias || !contadoresConsistentes || schedule === "ausente" || schedule === "incorreta"
     ? "problema"
