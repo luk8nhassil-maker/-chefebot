@@ -70,3 +70,34 @@ A branch contém `src/lib/fiscal/wlgConsulta.server.ts` e `wlgConsulta.server.te
 **NÃO homologado:** a especificação completa do Swagger em `https://fiscal.wlgsistemas.com.br/swagger` não pôde ser acessada para verificação do schema nesta execução. O estado `SUCCESSO` foi reproduzido conforme exemplo público do fornecedor, mas o JSON completo e os casos de rejeição devem ser confirmados no ambiente de homologação antes de produção. Nunca inferir campos tributários.
 
 **Requisito de prova de idempotência:** a API do fornecedor é assíncrona; uma queda de rede após o POST pode gerar nota sem retornarmos `operationId`. A futura emissão precisa de vínculo e consulta fiscal confiável antes de qualquer reenvio. Enquanto não existir esse mecanismo, **não implementar nem expor POST de emissão** (a rota do ChefeBot continuará respondendo 423).
+
+
+## Preparação multiempresa — auditoria e implementação 24/10/2026
+
+### Documentação externa pesquisada
+Fonte oficial WLG: https://wlgsistemas.com.br/api-emissao-nfe
+Fonte oficial WLG multiempresa: https://wlgsistemas.com.br/emissor-nfe-multiempresas
+Tela real autenticada da conta do integrador foi fornecida pelo usuário e transcrita em um documento do Drive: https://docs.google.com/document/d/1U1Bvz0OnuNUCqnMYRl1A0t3UduVrCiUove6DppoZwHg/edit
+A WLG anuncia API REST gratuita, suporte a múltiplas empresas, `empresaId`, ambiente 2 de homologação, resposta assíncrona HTTP 202/`operationId`, consulta da operação e downloads.
+A documentação pública de POST usa campos superiores `empresaId`, `tipoAmbiente`, `ide`, `emitente`, `destinatario`, `itens`, `totais` e `pagamento`. A tela de "Primeiros passos" mostra `nfe` aninhado como exemplo simplificado — **contrato COMPLETO permanece sem verificação**, não assumir mapeamento fiscal nem enviar.
+O Swagger https://fiscal.wlgsistemas.com.br/swagger e o JSON não ficaram acessíveis pelas ferramentas públicas nesta execução, portanto não presumir schema completo.
+Avisos e permissões comerciais ainda aguardam resposta da WLG; "várias empresas" publicamente descrito NÃO prova que uma pessoa física pode oferecer a API como serviço SaaS a terceiros, e custo total R$0 não inclui necessariamente certificados.
+
+### Nova fronteira de segurança descoberta
+O `src/lib/auth.ts` atual em produção autentica apenas `username/name/role` e NÃO inclui ID de estabelecimento no token. O ChefeBot é hoje uma única operação em diversos módulos, não um SaaS multi-tenant comprovado. Logo **não basta criar um empresaId global em env e chamar a API**, isso permitiria confundir quem emite. A rota fiscal GET em PR #527 foi ajustada para falhar fechada em `resolverVinculoWlg(null, [])`: enquanto não houver tenant assinado e vínculo cadastrado no servidor, configurações globais da WLG não liberam a emissão.
+
+### Código criado nesta etapa no PR draft #527
+- `src/lib/fiscal/wlgVinculos.ts`: contrato de vínculo entre tenant do ChefeBot, empresaId da WLG e CNPJ validado com dígitos verificadores; nega sem tenant, com duplicidade, sem homologação ou com dados inválidos. Apenas funções puras; NÃO há provisionamento de tenants nem manipulação de certificado.
+- `src/lib/fiscal/wlgLedger.ts`: máquina pura de estados para registrar a reserva por RESTAURANTE+CONTA FINAL, marcar envio incerto, acompanhar operationId, receber autorização/rejeição e não reemitir automaticamente após timeout/erro. **Não é ledger persistido/atômico em Redis**: exigência de implementação futura, sujeita a testes de concorrência antes da primeira nota.
+- `src/lib/fiscal/wlgHomologacao.server.ts`: transporte de envelope modelo 65 destinado SOMENTE a homologação; valida vínculo, CNPJ, ambiente 2 e contrato explicitamente aprovado no módulo servidor; rejeita operação na Vercel Preview/Produção. Ainda **não referenciado por endpoint HTTP**, sem interação real. A origem do envelope fiscal deve ser exclusivamente dados validados no backend (os campos fiscais não podem vir do browser).
+- Testes com fetch mock, IDs e valores sintéticos para isolamento multiempresa, operação assíncrona, timeout, 202 vs autorizado, 409, 500 e não reenvio. Testes simulados não substituem homologação na WLG.
+
+### Passos pendentes antes de emissão funcional
+1. Confirmar contrato integrador/terceiros, limites e custos da API WLG, e baixar OpenAPI completo/autenticado em canal seguro.
+2. Com uma pizzaria real, obter `empresaId`, credenciamento NFC-e, A1 e CSC e mapa tributário do contador. As credenciais vão para cofre/variáveis criptografadas, não o código/chat/Drive.
+3. Criar autenticação/escopo por tenant assinados em **TODOS** os acessos fiscais e suporte a configuração por tenant, sem reutilizar usuário/cookie global entre pizzarias. Provar isolamento.
+4. Com contrato real da WLG, construir payload fiscal completo a partir de snapshot do pedido + classificação por ID aprovada. Validar descontos, entrega, refeição no Salão, pagamento híbrido e CPF opcional segundo legislação.
+5. Implementar ledger **atômico e durável** (incluindo reserva NX, conciliação de timeout, transições CAS), retenção dos XMLs, consulta segura, cancelamento e auditoria; testar 2 requisições simultâneas.
+6. Provar execução de emissão NFC-e modelo 65 em homologação, verificar resultado e arquivo fiscal; somente depois definir a ativação real com aprovação.
+
+Nenhuma chave real, CNPJ operacional ou segredo foi adicionada. A rota POST pública continua sempre com HTTP 423. Não dar merge neste PR como nota fiscal funcional; não alterar Vercel/produção nem criar Preview conectado ao Redis verdadeiro.
