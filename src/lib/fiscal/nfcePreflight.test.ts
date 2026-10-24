@@ -81,6 +81,8 @@ describe("gate fiscal seguro (testes estruturais)", () => {
     expect(route).toContain("WLG_FISCAL_CLIENT_ID");
     expect(route).toContain("WLG_FISCAL_CLIENT_SECRET");
     expect(route).toContain("WLG_FISCAL_EMPRESA_ID");
+    expect(route).toContain("resolverVinculoWlg(null, [])");
+    expect(route).toContain("credenciaisDisponiveis && vinculo.ok");
     expect(route).not.toContain("FOCUS_NFCE_TOKEN");
     expect(route).not.toMatch(/redis\.(set|eval|del|incr|hset|lpush|rpush)\s*\(/);
     expect(route).not.toContain("fetch(");
