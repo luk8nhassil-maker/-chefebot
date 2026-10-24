@@ -81,7 +81,8 @@ describe("cadastro fiscal do próprio empresário — sem chamadas WLG", () => {
     expect(saved.cadastro.empresaId).toBeUndefined();
     expect(saved.cadastro.podeEmitir).toBeUndefined();
     expect((await GET(req("GET", "admin-a"))).status).toBe(200);
-    expect((await (await GET(req("GET", "admin-b"))).json()).toMatchObject({
+    const consultaOutroDono = await (await GET(req("GET", "admin-b"))).json();
+    expect(consultaOutroDono).toMatchObject({
       situacao: "nao_iniciado", cadastro: null,
     });
     expect(mock.db.size).toBe(1);
