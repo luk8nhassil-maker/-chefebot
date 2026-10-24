@@ -30,6 +30,9 @@ describe("WLG — transporte de homologação sem execução real", () => {
   it("exige empresa/CNPJ vinculados e modelo 65, somente ambiente 2", () => {
     expect(validarEnvelopeHomologacaoWlg(envelope, vinculo, vinculo.cnpj)).toBe(true);
     expect(validarEnvelopeHomologacaoWlg({ ...envelope, empresaId: "outro" }, vinculo, vinculo.cnpj)).toBe(false);
+    expect(validarEnvelopeHomologacaoWlg({
+      ...envelope, emitente: { cnpj: "12345678000195" },
+    }, vinculo, vinculo.cnpj)).toBe(false);
     expect(validarEnvelopeHomologacaoWlg({ ...envelope, tipoAmbiente: 1 as 2 }, vinculo, vinculo.cnpj)).toBe(false);
     expect(validarEnvelopeHomologacaoWlg({ ...envelope, ide: { modelo: 55 as 65 } }, vinculo, vinculo.cnpj)).toBe(false);
   });
