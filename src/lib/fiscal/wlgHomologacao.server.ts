@@ -36,6 +36,7 @@ export function validarEnvelopeHomologacaoWlg(
   return dados.tipoAmbiente === 2 && dados.ide?.modelo === 65 &&
     Array.isArray(dados.itens) && dados.itens.length > 0 &&
     typeof dados.emitente === "object" && !!dados.emitente &&
+    dados.emitente.cnpj === cnpjEmitenteValidado &&
     typeof dados.totais === "object" && !!dados.totais &&
     typeof dados.pagamento === "object" && !!dados.pagamento &&
     correspondeEmpresaVinculada(vinculo, dados.empresaId, cnpjEmitenteValidado);
