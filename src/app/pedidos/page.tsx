@@ -1009,7 +1009,7 @@ export default function PedidosPage() {
 
   const alternarBot = async () => {
     setSalvandoBot(true)
-    try { const novo = !botAtivo; const r = await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ativo: novo }) }); if (r.ok) setBotAtivo(novo) } catch {}
+    try { const novo = !botAtivo; const r = await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ativo: novo, source: "painel_toggle" }) }); if (r.ok) setBotAtivo(novo) } catch {}
     setSalvandoBot(false)
   }
 
@@ -1424,11 +1424,9 @@ export default function PedidosPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const filtroParam = params.get("filtro");
-    const acaoParam = params.get("acao");
     if (isFiltroPedidos(filtroParam)) queueMicrotask(() => setFiltro(filtroParam));
-    if (acaoParam === "pausar") {
-      fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ativo: false }) }).then(() => setBotAtivo(false));
-    }
+    // Navegar para /pedidos?acao=pausar nunca pode executar uma ação sensível.
+    // Somente o botão explícito alternarBot envia o POST autenticado.
   }, [])
 
   const toastSegs = toast ? Math.max(0, Math.ceil((toast.expires - now) / 1000)) : 0

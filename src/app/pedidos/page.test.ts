@@ -275,3 +275,17 @@ describe("/pedidos — comanda do Salão como uma unidade operacional visual", (
     expect(fonte).toContain("{timerMins}m")
   })
 })
+
+
+describe("/pedidos — controle do WhatsApp exige interação explícita", () => {
+  test("parâmetro de URL não causa pausa automática", () => {
+    expect(fonte).not.toContain('params.get("acao")');
+    expect(fonte).not.toContain('acaoParam === "pausar"');
+  });
+
+  test("toggle envia a origem identificada sem perder o botão operacional", () => {
+    expect(fonte).toContain('source: "painel_toggle"');
+    expect(fonte).toContain("const novo = !botAtivo");
+    expect(fonte).toContain("onClick={alternarBot}");
+  });
+});
