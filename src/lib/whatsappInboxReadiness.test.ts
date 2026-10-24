@@ -16,6 +16,21 @@ describe("monitor técnico da inbox sem alegar capacidade falsa", () => {
     expect(result.capacidadeGeralComprovada).toBe(false);
     expect(result.liberacaoGeralAutorizada).toBe(false);
   });
+  test("contadores divergentes não podem ser classificados como saudáveis", () => {
+    const result = avaliarSaudeInbox({ ...normal, queuedTotal: 50, doneTotal: 1, pending: 0 }, "ok", true, NOW);
+    expect(result.status).toBe("problema");
+    expect(result.motivos.join(" ")).toContain("Contadores da fila divergentes");
+    expect(result.liberacaoGeralAutorizada).toBe(false);
+  });
+  test("mais jobs em processamento que pendentes também é inconsistência", () => {
+    const result = avaliarSaudeInbox({ ...normal, inFlight: 2, pending: 1, queuedTotal: 3 }, "ok", true, NOW);
+    expect(result.status).toBe("problema");
+  });
+  test("fila parcialmente concluída com saldo correto permanece em observação", () => {
+    const result = avaliarSaudeInbox({ ...normal, queuedTotal: 3, doneTotal: 2, pending: 1 }, "ok", true, NOW);
+    expect(result.status).toBe("observando");
+    expect(result.motivos.join(" ")).not.toContain("Contadores da fila divergentes");
+  });
   test("zero mensagens não vira sinal de saúde nem autorização geral", () => {
     const result = avaliarSaudeInbox({ ...normal, queuedTotal: 0, doneTotal: 0 }, "ok", true, NOW);
     expect(result.status).toBe("observando");

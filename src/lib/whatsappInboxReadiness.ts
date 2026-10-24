@@ -47,6 +47,13 @@ export function avaliarSaudeInbox(
     && queue.lastWorkerAt <= now
     && now - queue.lastWorkerAt <= 15 * 60 * 1000;
   const anomalias = queue.ambiguousTotal > 0 || queue.unresolved > 0;
+  // INVARIANTE: todo evento aceito está concluído ou ainda é pendente.
+  // Sem isso, o painel poderia marcar "saudável" mesmo com jobs perdidos.
+  const contadoresConsistentes =
+    [queue.queuedTotal, queue.doneTotal, queue.pending, queue.inFlight]
+      .every(n => Number.isSafeInteger(n) && n >= 0)
+    && queue.doneTotal + queue.pending === queue.queuedTotal
+    && queue.inFlight <= queue.pending;
   if (!active) motivos.push("Nova fila desativada ou configuração incompleta.");
   if (queue.queuedTotal === 0) motivos.push("Nenhuma mensagem real entrou nesta fila ainda.");
   if (queue.queuedTotal > 0 && queue.doneTotal === 0)
@@ -55,6 +62,8 @@ export function avaliarSaudeInbox(
     motivos.push("Há mensagens aguardando ou em processamento.");
   if (anomalias)
     motivos.push("Há mensagens de resultado incerto: precisam de reconciliação individual, nunca reenvio cego.");
+  if (!contadoresConsistentes)
+    motivos.push("Contadores da fila divergentes: verificar jobs individualmente, sem reenviar em massa.");
   if (!workerRecente) motivos.push("Não há execução recente confirmada do processador (últimos 15 minutos).");
   if (schedule !== "ok")
     motivos.push(schedule === "ausente" ? "Agenda de recuperação não encontrada no QStash."
@@ -63,7 +72,7 @@ export function avaliarSaudeInbox(
       : "Não foi possível confirmar a agenda de recuperação no QStash.");
   const processamentoLocalConfirmado = active && queue.doneTotal > 0 && !anomalias;
   const recuperacaoConfigurada = schedule === "ok" && workerRecente;
-  const status: InboxHealthStatus = !active || anomalias || schedule === "ausente" || schedule === "incorreta"
+  const status: InboxHealthStatus = !active || anomalias || !contadoresConsistentes || schedule === "ausente" || schedule === "incorreta"
     ? "problema"
     : queue.queuedTotal === 0 || queue.doneTotal === 0 || !workerRecente || schedule !== "ok"
       || queue.pending > 0 || queue.inFlight > 0 ? "observando" : "saudavel";
