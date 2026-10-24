@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import PanelShell from "@/components/PanelShell";
 
@@ -86,7 +86,7 @@ export default function CadastroFiscalForm() {
     return () => { ativo = false; };
   }, []);
 
-  async function salvar(e: React.FormEvent<HTMLFormElement>) {
+  async function salvar(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (salvandoRef.current) return;
     salvandoRef.current = true;
@@ -181,7 +181,7 @@ export default function CadastroFiscalForm() {
             </label>
             {erro && <p role="alert" style={{ margin: 0, padding: 12, borderRadius: 8, color: "var(--danger)", border: "1px solid var(--danger)", fontSize: 13 }}>{erro}</p>}
             {mensagem && <p role="status" style={{ margin: 0, padding: 12, borderRadius: 8, color: "var(--success)", border: "1px solid var(--success)", fontSize: 13 }}>{mensagem}</p>}
-            <button type="submit" disabled={carregando || salvando || !!erro && carregando}
+            <button type="submit" disabled={carregando || salvando}
               style={{
                 background: "var(--primary)", color: "var(--primary-foreground)",
                 border: 0, borderRadius: 12, padding: 15, fontWeight: 800,
