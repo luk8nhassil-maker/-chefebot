@@ -6,6 +6,7 @@ on:
       - "src/proxy.ts"
       - "src/proxy.legacy-login.test.ts"
       - "middleware.assinatura-alias.test.ts"
+      - "vitest.config.mts"
       - "src/lib/auth.ts"
       - "src/lib/auth.test.ts"
       - "src/app/login/**"
@@ -14,6 +15,7 @@ on:
       - "src/app/api/bot-status/route.test.ts"
       - "src/app/pedidos/page.tsx"
       - "src/app/pedidos/page.test.ts"
+      - "scripts/ci/release-gate.test.mjs"
       - ".github/workflows/admin-auth-ci.yml"
   workflow_dispatch:
 
@@ -68,6 +70,9 @@ jobs:
 
       - name: Typecheck
         run: npx tsc --noEmit
+
+      - name: Validador nativo de release
+        run: node --test scripts/ci/release-gate.test.mjs
 
       - name: Suíte completa
         run: npm test
