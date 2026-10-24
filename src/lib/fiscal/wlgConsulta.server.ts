@@ -111,7 +111,8 @@ export async function consultarOperacaoWlg(
   // Nunca concluir autorização só pelo nome do estado.
   if (estado === "SUCCESSO" || estado === "SUCESSO") {
     if (typeof data.chaveNfe !== "string" || !CHAVE_NFE.test(data.chaveNfe) ||
-        typeof data.dataAutorizacao !== "string" || !data.dataAutorizacao.trim())
+        typeof data.dataAutorizacao !== "string" ||
+        !Number.isFinite(Date.parse(data.dataAutorizacao)))
       return { situacao: "indeterminada", operationId };
     return {
       situacao: "autorizada",
