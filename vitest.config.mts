@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 
 // Config mínima do Vitest. Objetivo: resolver o alias "@/..." usado pelas
@@ -9,6 +9,9 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   test: {
     setupFiles: ["./vitest.setup.ts"],
+    // O validador de release usa "node:test" nativo, não Vitest.
+    // Mantemos o próprio teste via "node --test"; não importar como suíte Vitest.
+    exclude: [...configDefaults.exclude, "scripts/ci/release-gate.test.mjs"],
   },
   resolve: {
     alias: {
