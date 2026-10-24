@@ -53,3 +53,20 @@ Qualquer dúvida de estado -> consultar, nunca emitir de novo cegamente.
 
 ## Critério de conclusão
 Esta branch entrega apenas **preparação técnica e UX isolada**, não "nota fiscal pronta". A funcionalidade NÃO está concluída até credenciamento, classificação aprovada, integração real, testes de homologação e verificação fiscal. Não fazer merge como se a NFC-e estivesse pronta, não alterar variáveis de produção e não fazer deploy por mera conveniência.
+
+
+## Consulta de operações WLG — preparação posterior (sem emissão)
+
+A branch contém `src/lib/fiscal/wlgConsulta.server.ts` e `wlgConsulta.server.test.ts`:
+- autentica exclusivamente em `https://fiscal.wlgsistemas.com.br/api/v1/auth/token` com credenciais de servidor;
+- consulta operação EXISTENTE em `GET /api/v1/operacoes/{operationId}`;
+- normaliza as situações `processando`, `autorizada`, `rejeitada` e `indeterminada`;
+- só marca `autorizada` com status de sucesso + chave numérica de 44 dígitos + data de autorização;
+- erros HTTP, timeout, payload malformado e mudanças no contrato são tratados como incertos, jamais como sucesso;
+- nunca envia pedido de emissão, cancelamento ou consulta de XML.
+- todos os testes são mocks locais, não acessam credenciais ou a API da WLG.
+- não existe API pública para consultar `operationId` arbitrário; a consulta precisa ser vinculada a registro fiscal durável do pedido.
+
+**NÃO homologado:** a especificação completa do Swagger em `https://fiscal.wlgsistemas.com.br/swagger` não pôde ser acessada para verificação do schema nesta execução. O estado `SUCCESSO` foi reproduzido conforme exemplo público do fornecedor, mas o JSON completo e os casos de rejeição devem ser confirmados no ambiente de homologação antes de produção. Nunca inferir campos tributários.
+
+**Requisito de prova de idempotência:** a API do fornecedor é assíncrona; uma queda de rede após o POST pode gerar nota sem retornarmos `operationId`. A futura emissão precisa de vínculo e consulta fiscal confiável antes de qualquer reenvio. Enquanto não existir esse mecanismo, **não implementar nem expor POST de emissão** (a rota do ChefeBot continuará respondendo 423).
