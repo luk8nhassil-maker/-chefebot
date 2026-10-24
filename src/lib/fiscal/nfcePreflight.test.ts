@@ -22,7 +22,7 @@ const pedido: PedidoParaNfce = {
 describe("pré-conferência NFC-e: nenhum valor fiscal é inventado", () => {
   test("confere composição e valor, mas nunca declara emissão liberada", () => {
     const resposta = prepararNfce(pedido, true);
-    expect(resposta.emissor).toBe("Focus NFe");
+    expect(resposta.emissor).toBe("WLG Sistemas");
     expect(resposta.resumo?.totalCentavos).toBe(2500);
     expect(resposta.resumo?.itens).toHaveLength(1);
     expect(resposta.podeEmitir).toBe(false);
