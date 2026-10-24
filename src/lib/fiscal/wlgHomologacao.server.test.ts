@@ -29,6 +29,9 @@ function fake(statusEmissao = 202, bodyEmissao: unknown = { operationId: op, sta
 describe("WLG — transporte de homologação sem execução real", () => {
   it("exige empresa/CNPJ vinculados e modelo 65, somente ambiente 2", () => {
     expect(validarEnvelopeHomologacaoWlg(envelope, vinculo, vinculo.cnpj)).toBe(true);
+    expect(validarEnvelopeHomologacaoWlg(envelope, {
+      ...vinculo, habilitado: false, homologacaoConcluida: false,
+    }, vinculo.cnpj)).toBe(true); // deve permitir preparar testes antes de habilitar produção
     expect(validarEnvelopeHomologacaoWlg({ ...envelope, empresaId: "outro" }, vinculo, vinculo.cnpj)).toBe(false);
     expect(validarEnvelopeHomologacaoWlg({
       ...envelope, emitente: { cnpj: "12345678000195" },
