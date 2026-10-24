@@ -20,6 +20,7 @@ describe("monitor técnico da inbox sem alegar capacidade falsa", () => {
     const result = avaliarSaudeInbox({ ...normal, queuedTotal: 50, doneTotal: 1, pending: 0 }, "ok", true, NOW);
     expect(result.status).toBe("problema");
     expect(result.motivos.join(" ")).toContain("Contadores da fila divergentes");
+    expect(result.processamentoLocalConfirmado).toBe(false);
     expect(result.liberacaoGeralAutorizada).toBe(false);
   });
   test("mais jobs em processamento que pendentes também é inconsistência", () => {
