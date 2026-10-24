@@ -1508,6 +1508,44 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
     // clientRequestIds diferentes NUNCA recebem o mesmo pedidoId, e cada um
     // continua endereçável e recuperável (retry) pelo seu próprio id — nunca
     // pelo do outro.
+    it("dois clientes em requisições simultâneas conservam ambos os pedidos sem sobrescrita", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clock = vi.spyOn(Date, "now").mockReturnValue(1732000000456);
+      try {
+        const payloadA = {
+          ...basePayload,
+          cliente: "Cliente A (concorrência)",
+          telefone: "(99) 99999-1111",
+          clientRequestId: "concorrencia-cliente-diferente-A",
+        };
+        const payloadB = {
+          ...basePayload,
+          cliente: "Cliente B (concorrência)",
+          telefone: "(99) 99999-2222",
+          clientRequestId: "concorrencia-cliente-diferente-B",
+        };
+        const [resA, resB] = await Promise.all([
+          POST(postReq(payloadA)),
+          POST(postReq(payloadB)),
+        ]);
+        expect(resA.status).toBe(200);
+        expect(resB.status).toBe(200);
+        const a = await resA.json();
+        const b = await resB.json();
+        expect(a.pedidoId).toBeTruthy();
+        expect(b.pedidoId).toBeTruthy();
+        expect(a.pedidoId).not.toBe(b.pedidoId);
+        const pedidos = store.get("pedidos") as Array<{ id: string; cliente: string }>;
+        expect(pedidos).toHaveLength(2);
+        expect(new Set(pedidos.map(p => p.id)).size).toBe(2);
+        expect(new Set(pedidos.map(p => p.cliente))).toEqual(
+          new Set(["Cliente A (concorrência)", "Cliente B (concorrência)"]),
+        );
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
     it("dois pedidos criados no MESMO milissegundo (clientRequestIds diferentes) recebem ids DIFERENTES; cada um permanece endereçável só pelo próprio id", async () => {
       vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
 
