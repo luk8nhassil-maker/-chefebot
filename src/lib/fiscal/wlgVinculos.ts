@@ -55,6 +55,15 @@ export function resolverVinculoWlg(
   return { ok: true, vinculo: v };
 }
 
+/** Homologação ainda NÃO pode exigir "homologacaoConcluida": seria circular. */
+export function correspondeEmpresaEmHomologacao(
+  vinculo: VinculoWlg, empresaId: string, cnpj: string,
+): boolean {
+  return EMPRESA_ID_VALIDO.test(vinculo.empresaId) &&
+    vinculo.empresaId === empresaId &&
+    vinculo.cnpj === cnpj && cnpjValido(cnpj);
+}
+
 /** O vínculo jamais será determinado pelo pedido, CPF do consumidor, body ou querystring. */
 export function correspondeEmpresaVinculada(
   vinculo: VinculoWlg,
