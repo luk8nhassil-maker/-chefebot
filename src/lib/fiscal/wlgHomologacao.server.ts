@@ -8,7 +8,7 @@
  * nunca a partir de JSON enviado pelo navegador.
  */
 import { autenticarWlgSomenteServidor, WLG_ORIGEM, type WlgCredenciais } from "./wlgConsulta.server";
-import { correspondeEmpresaVinculada, type VinculoWlg } from "./wlgVinculos";
+import { correspondeEmpresaEmHomologacao, type VinculoWlg } from "./wlgVinculos";
 
 export type EnvelopeHomologacaoWlg = Readonly<{
   empresaId: string;
