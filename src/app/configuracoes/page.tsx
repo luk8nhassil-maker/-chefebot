@@ -465,6 +465,23 @@ export default function ConfiguracoesPage() {
             {aba === 'geral' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
+                {/* Cadastro fiscal: apenas o proprietário, validado novamente no servidor. */}
+                {getUserRole() === 'admin' && (
+                  <SectionCard>
+                    <h2 style={{ fontSize: 16, margin: 0, color: TEXT }}>Nota fiscal da sua empresa</h2>
+                    <p style={{ fontSize: 13, margin: 0, color: TEXT2, lineHeight: 1.6 }}>
+                      Cadastre os dados da sua pizzaria. A emissão fica desligada até a aprovação fiscal e a conexão segura com a WLG.
+                    </p>
+                    <a href="/configuracoes/nota-fiscal" style={{
+                      background: ACCENT, color: 'var(--primary-foreground)', borderRadius: 10,
+                      padding: '13px 16px', textAlign: 'center', textDecoration: 'none',
+                      fontWeight: 800, fontSize: 14, minHeight: 46, boxSizing: 'border-box',
+                    }}>
+                      Cadastrar dados fiscais
+                    </a>
+                  </SectionCard>
+                )}
+
                 {/* Aparência (tema Light / Dark) */}
                 <SectionCard>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
