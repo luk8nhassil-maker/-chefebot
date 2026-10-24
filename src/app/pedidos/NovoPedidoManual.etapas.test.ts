@@ -466,8 +466,13 @@ describe("NovoPedidoManual — não duplica catálogo, preço ou payload já exi
     expect(fonte).toContain("construirItemManual");
   });
 
-  test("continua enviando para a mesma rota central de criação de pedido", () => {
-    expect(fonte).toContain('fetch("/api/pedido-app"');
+  // Hotfix "cardápio público vira pedido administrativo": o painel envia para
+  // a rota dedicada /api/admin/pedido-app, que exige sessão administrativa
+  // real e reaproveita o MESMO motor de POST /api/pedido-app internamente
+  // (processarPedidoApp) — ver src/app/api/pedido-app/route.ts e
+  // src/app/api/admin/pedido-app/route.ts. Nunca mais /api/pedido-app direto.
+  test("continua enviando para a rota administrativa dedicada, que reaproveita o mesmo motor central", () => {
+    expect(fonte).toContain('fetch("/api/admin/pedido-app"');
     expect(fonte).toContain("clientRequestId");
   });
 

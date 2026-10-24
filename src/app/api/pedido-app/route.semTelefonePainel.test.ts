@@ -37,6 +37,7 @@ vi.mock("@/lib/auth", async (original) => ({
 }));
 
 import { POST } from "./route";
+import { POST as POST_ADMIN } from "../admin/pedido-app/route";
 
 function postReq(body: unknown, comSessaoAdmin = false) {
   return {
@@ -69,7 +70,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }));
 });
 
-describe("POST /api/pedido-app — semTelefonePainel", () => {
+describe("POST /api/pedido-app (cardápio público) — semTelefonePainel NUNCA é honrado, mesmo com cookie admin", () => {
   it("rejeita pedido sem telefone quando NÃO há sessão administrativa, mesmo com a flag no body", async () => {
     const res = await POST(postReq(basePayloadSemTelefone, false));
     expect(res.status).toBe(400);
@@ -83,15 +84,48 @@ describe("POST /api/pedido-app — semTelefonePainel", () => {
     expect(res.status).toBe(400);
   });
 
-  it("aceita pedido sem telefone com sessão administrativa real e a flag explícita", async () => {
+  // REGRESSÃO DO INCIDENTE (hotfix): antes, um cookie `auth-token`
+  // administrativo válido no MESMO navegador do cardápio público fazia
+  // POST /api/pedido-app honrar `semTelefonePainel` — bastava um
+  // atendente/admin ter o painel aberto na mesma sessão do navegador para o
+  // pedido público burlar o telefone obrigatório. Rota pública agora NUNCA
+  // lê a sessão administrativa, então nem chega a considerar a flag.
+  it("cookie admin válido em rota PÚBLICA NÃO permite semTelefonePainel — continua exigindo telefone", async () => {
     const res = await POST(postReq(basePayloadSemTelefone, true));
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toBe("Telefone obrigatório");
+  });
+
+  it("continua exigindo telefone quando a flag não foi enviada (rota pública, sem sessão)", async () => {
+    const { semTelefonePainel, ...semFlag } = basePayloadSemTelefone;
+    void semTelefonePainel;
+    const res = await POST(postReq(semFlag, false));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/admin/pedido-app (painel) — único lugar onde semTelefonePainel funciona", () => {
+  it("aceita pedido sem telefone com sessão administrativa real e a flag explícita", async () => {
+    const res = await POST_ADMIN(postReq(basePayloadSemTelefone, true));
     expect(res.status).toBe(200);
   });
 
   it("continua exigindo telefone quando a flag não foi enviada, mesmo com sessão administrativa", async () => {
     const { semTelefonePainel, ...semFlag } = basePayloadSemTelefone;
     void semTelefonePainel;
-    const res = await POST(postReq(semFlag, true));
+    const res = await POST_ADMIN(postReq(semFlag, true));
     expect(res.status).toBe(400);
+  });
+
+  it("rejeita com 401 quando não há sessão administrativa (nunca cai para comportamento público)", async () => {
+    const res = await POST_ADMIN(postReq(basePayloadSemTelefone, false));
+    expect(res.status).toBe(401);
+  });
+
+  it("rejeita com 401 quando a sessão do cookie não é administrativa (papel não autorizado)", async () => {
+    verifyTokenMock.mockResolvedValue({ username: "x", name: "X", role: "entregador" });
+    const res = await POST_ADMIN(postReq(basePayloadSemTelefone, true));
+    expect(res.status).toBe(401);
   });
 });
