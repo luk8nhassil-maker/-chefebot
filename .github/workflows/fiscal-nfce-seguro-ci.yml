@@ -1,0 +1,37 @@
+name: fiscal-nfce-seguro-ci
+
+# CI hermético: não usa credenciais fiscais, QStash, WhatsApp, Redis ou Vercel.
+# Não cria Preview e não transmite documentos fiscais.
+on:
+  pull_request:
+    paths:
+      - "src/lib/fiscal/**"
+      - "src/app/api/fiscal/**"
+      - "src/components/FiscalNfcePreflight.tsx"
+      - "docs/architecture/NOTA_FISCAL_CHEFEBOT_20261024.md"
+      - ".github/workflows/fiscal-nfce-seguro-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fiscal-nfce-seguro-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validar-preparacao:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Instalar dependências
+        run: npm ci
+      - name: Testes fiscais sem rede e sem efeitos reais
+        run: npm test -- src/lib/fiscal/nfcePreflight.test.ts
+      - name: Lint focado
+        run: npx eslint src/lib/fiscal/nfcePreflight.ts src/lib/fiscal/nfcePreflight.test.ts src/app/api/fiscal/nfce/preparar/route.ts src/components/FiscalNfcePreflight.tsx
+      - name: TypeScript
+        run: npx tsc --noEmit --incremental false
