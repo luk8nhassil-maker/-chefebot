@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import PanelShell from "@/components/PanelShell";
@@ -27,7 +28,7 @@ const mutedStyle = {
   margin: 0,
 } as const;
 
-function Etapa({ numero, titulo, children }: { numero: number; titulo: string; children: React.ReactNode }) {
+function Etapa({ numero, titulo, children }: { numero: number; titulo: string; children: ReactNode }) {
   return (
     <section aria-label={`Etapa ${numero}: ${titulo}`} style={cardStyle}>
       <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
