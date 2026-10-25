@@ -99,7 +99,7 @@ export async function transicionarFiscalAtomico(
       proximoRegistro.empresaId !== atual.registro.empresaId)
     throw new Error("Tentativa de alterar vínculo fiscal");
   const novo = { versao: atual.versao + 1, registro: proximoRegistro };
-  const confirmado = await redis.eval<number>(
+  const confirmado = await redis.eval(
     LUA_CAS, [atual.registro.chave], [atual.versao, JSON.stringify(novo)],
   );
   // null = outro trabalhador ganhou a corrida; não devolver sucesso.
