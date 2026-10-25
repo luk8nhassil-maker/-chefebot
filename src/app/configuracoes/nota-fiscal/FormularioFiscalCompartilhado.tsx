@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import Link from "next/link";
 import { CAMPOS_FISCAIS, VAZIO, type CampoFiscal, type RespostasFiscais } from "@/lib/fiscal/questionario";
 
@@ -35,14 +35,14 @@ const options: Partial<Record<CampoFiscal, [string,string][]>> = {
   credenciamentoNfce: [["","Ainda não sei"], ["pendente","Pendente"], ["habilitado","Já credenciado"], ["nao_informado","Não informado"]],
   certificadoNaWlg: [["","Ainda não sei"], ["sim","Sim"], ["nao","Não"], ["nao_informado","Não informado"]],
 };
-const fieldStyle = {
+const fieldStyle: CSSProperties = {
   width:"100%",padding:"11px 12px",minHeight:44,
   border:"1px solid var(--border)",borderRadius:10,
   background:"var(--background)",color:"var(--foreground)",
   boxSizing:"border-box" as const,font:"inherit",fontSize:14,
 };
-const textMuted = { fontSize:13, lineHeight:1.6, color:"var(--foreground-secondary)", margin:0 };
-const acaoStyle = {padding:"12px 14px",borderRadius:10,border:"1px solid var(--border)",fontSize:14,fontWeight:750,cursor:"pointer",background:"var(--surface)",color:"var(--foreground)"};
+const textMuted: CSSProperties = { fontSize:13, lineHeight:1.6, color:"var(--foreground-secondary)", margin:0 };
+const acaoStyle: CSSProperties = {padding:"12px 14px",borderRadius:10,border:"1px solid var(--border)",fontSize:14,fontWeight:750,cursor:"pointer",background:"var(--surface)",color:"var(--foreground)"};
 
 export default function FormularioFiscalCompartilhado({ modo }: { modo: Modo }) {
   const [respostas, setRespostas] = useState<RespostasFiscais>({ ...VAZIO });
@@ -170,7 +170,7 @@ export default function FormularioFiscalCompartilhado({ modo }: { modo: Modo }) 
                   <textarea rows={campo.id === "orientacoesProdutos" ? 4 : 3} value={respostas[campo.id]} maxLength={campo.id === "orientacoesProdutos" ? 1200 : 800}
                     onChange={e=>atualizar(campo.id,e.target.value)} placeholder={campo.dica || "Pode deixar em branco"} style={{...fieldStyle,resize:"vertical"}}/> :
                   <input value={respostas[campo.id]} onChange={e=>atualizar(campo.id,e.target.value)}
-                    placeholder={campo.dica||"Pode deixar em branco"} maxLength={campo.id === "cnpj" ? 18 : campo.id === "razaoSocial" || campo.id === "nomeFantasia" || campo.id === "logradouro" ? 150 : 100}
+                    placeholder={campo.dica||"Pode deixar em branco"} maxLength={({cnpj:18,razaoSocial:150,nomeFantasia:150,inscricaoEstadual:20,uf:2,municipio:100,codigoIBGE:7,cep:9,logradouro:150,numero:20,bairro:100} as Partial<Record<CampoFiscal,number>>)[campo.id] ?? 100}
                     autoComplete="off" style={fieldStyle}/>}
               </label>)}
             </section>)}
