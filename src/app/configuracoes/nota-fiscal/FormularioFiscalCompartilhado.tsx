@@ -48,6 +48,7 @@ export default function FormularioFiscalCompartilhado({ modo }: { modo: Modo }) 
   const [respostas, setRespostas] = useState<RespostasFiscais>({ ...VAZIO });
   const [versao, setVersao] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [pronto, setPronto] = useState(false);
   const [busy, setBusy] = useState(false);
   const [erro, setErro] = useState("");
   const [info, setInfo] = useState("");
@@ -81,6 +82,7 @@ export default function FormularioFiscalCompartilhado({ modo }: { modo: Modo }) 
       setRespostas({ ...VAZIO, ...json.respostas });
       setVersao(json.versao);
       setConviteAtivo(json.conviteAtivo === true);
+      setPronto(true);
     }).catch(e => { if(live) setErro(e instanceof Error ? e.message : "Convite indisponível."); })
       .finally(() => {if(live) setLoading(false);});
     return () => { live = false; };
@@ -151,7 +153,7 @@ export default function FormularioFiscalCompartilhado({ modo }: { modo: Modo }) 
           </div>}
           <p style={{...textMuted,fontSize:12}}>O convite expira em 72 horas. Criar outro link cancela o anterior. Não envie senhas ou certificados.</p>
         </section>}
-        {loading ? <p role="status">Carregando formulário…</p> : (modo !== "contador" || token) && <>
+        {loading ? <p role="status">Carregando formulário…</p> : pronto && <>
           <div role="status" style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:13,color:"var(--foreground-secondary)"}}>
             <span>{preenchidos} de {CAMPOS_FISCAIS.length} campos preenchidos</span>
             <span>Rascunho · sem emissão</span>
@@ -182,7 +184,7 @@ export default function FormularioFiscalCompartilhado({ modo }: { modo: Modo }) 
             </button>
           </form>
         </>}
-        {!loading && erro && (modo === "contador" && !token) && <p role="alert" style={{color:"var(--danger)",fontSize:14}}>{erro}</p>}
+        {!loading && !pronto && erro && <p role="alert" style={{color:"var(--danger)",fontSize:14}}>{erro}</p>}
       </div>
     </main>
   );
