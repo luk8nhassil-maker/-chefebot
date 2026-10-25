@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { executarGuardiaoMock } = vi.hoisted(() => ({
+const { executarGuardiaoMock, processarTimeoutsMock } = vi.hoisted(() => ({
   executarGuardiaoMock: vi.fn(),
+  processarTimeoutsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/pixGuardiao", () => ({
   executarGuardiaoPix: (...args: unknown[]) => executarGuardiaoMock(...args),
+}));
+
+vi.mock("@/lib/pixPagamentoTimeout", () => ({
+  processarTimeoutsPixPendentesEmLote: (...args: unknown[]) => processarTimeoutsMock(...args),
 }));
 
 import { createToken } from "@/lib/auth";
@@ -28,8 +33,12 @@ const resultadoPadrao = {
   ambiguos: 0,
 };
 
+const timeoutPadrao = { avaliados: 0, avisos: 0, cancelados: 0, pendentesRetry: 0 };
+
 beforeEach(() => {
   executarGuardiaoMock.mockClear();
+  processarTimeoutsMock.mockClear();
+  processarTimeoutsMock.mockResolvedValue(timeoutPadrao);
 });
 
 describe("POST /api/admin/mercadopago/guardiao-pix — autorização", () => {
@@ -37,12 +46,14 @@ describe("POST /api/admin/mercadopago/guardiao-pix — autorização", () => {
     const res = await POST(req());
     expect(res.status).toBe(401);
     expect(executarGuardiaoMock).not.toHaveBeenCalled();
+    expect(processarTimeoutsMock).not.toHaveBeenCalled();
   });
 
   it("token inválido retorna 401", async () => {
     const res = await POST(req("token-lixo"));
     expect(res.status).toBe(401);
     expect(executarGuardiaoMock).not.toHaveBeenCalled();
+    expect(processarTimeoutsMock).not.toHaveBeenCalled();
   });
 
   it("role sem permissão (atendente) retorna 403", async () => {
@@ -50,11 +61,12 @@ describe("POST /api/admin/mercadopago/guardiao-pix — autorização", () => {
     const res = await POST(req(token));
     expect(res.status).toBe(403);
     expect(executarGuardiaoMock).not.toHaveBeenCalled();
+    expect(processarTimeoutsMock).not.toHaveBeenCalled();
   });
 });
 
 describe("POST /api/admin/mercadopago/guardiao-pix — execução autorizada", () => {
-  it("admin autenticado: executa o Guardião e retorna o resultado", async () => {
+  it("admin autenticado: executa Guardião + fallback 6/13 e retorna ambos", async () => {
     executarGuardiaoMock.mockResolvedValue(resultadoPadrao);
     const token = await createToken({ username: "kellyne", name: "Kellyne", role: "admin" });
 
@@ -63,7 +75,8 @@ describe("POST /api/admin/mercadopago/guardiao-pix — execução autorizada", (
 
     expect(res.status).toBe(200);
     expect(executarGuardiaoMock).toHaveBeenCalledTimes(1);
-    expect(body).toMatchObject({ ok: true, ...resultadoPadrao });
+    expect(processarTimeoutsMock).toHaveBeenCalledTimes(1);
+    expect(body).toMatchObject({ ok: true, ...resultadoPadrao, timeoutPagamento: timeoutPadrao });
   });
 
   it("dev autenticado também consegue disparar o Guardião", async () => {
@@ -73,5 +86,6 @@ describe("POST /api/admin/mercadopago/guardiao-pix — execução autorizada", (
     const res = await POST(req(token));
     expect(res.status).toBe(200);
     expect(executarGuardiaoMock).toHaveBeenCalledTimes(1);
+    expect(processarTimeoutsMock).toHaveBeenCalledTimes(1);
   });
 });

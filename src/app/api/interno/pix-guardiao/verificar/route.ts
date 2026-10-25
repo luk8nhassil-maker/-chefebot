@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { Receiver } from "@upstash/qstash";
 import { redis } from "@/lib/redis";
 import { agendarProximaVerificacaoPixGuardiao } from "@/lib/pixGuardiaoScheduler";
-import { calcularIntervaloPorIdade } from "@/lib/pixAutoCheckConfig";
+import {
+  calcularDelayAteProximoMarcoPagamentoPix,
+  calcularIntervaloPorIdade,
+  PIX_PAGAMENTO_AVISO_PENDENTE_MS,
+} from "@/lib/pixAutoCheckConfig";
+import { processarPoliticaTimeoutPagamentoPix } from "@/lib/pixPagamentoTimeout";
 import { incrementarContadorPix } from "@/lib/pixMetricas";
 import { solicitarVerificacaoOficialPix, carregarEstadoSentinela } from "@/lib/pixSentinela";
 
@@ -12,12 +17,9 @@ import { solicitarVerificacaoOficialPix, carregarEstadoSentinela } from "@/lib/p
 // de admin: quem entrega a requisição é o QStash, não um usuário logado.
 //
 // Fluxo: QStash → este endpoint → Sentinela Pix → conciliador central
-// (reconciliarPixMercadoPago) → Mercado Pago. Este endpoint NUNCA consulta
-// o Mercado Pago diretamente — sempre delega ao Sentinela
-// (solicitarVerificacaoOficialPix), que decide se a consulta é realmente
-// necessária (cadência, geração da cadeia, lock, cooldown, rate limit) antes
-// de chamar o mecanismo central. Nunca confirma nada por si mesmo, nunca
-// inventa paymentId, nunca cria um segundo caminho de confirmação.
+// (reconciliarPixMercadoPago) → Mercado Pago. O timeout comercial de 6/13
+// minutos é uma política separada: consulta/cancela a cobrança pelo adaptador
+// oficial e nunca confirma pagamento por relógio.
 //
 // Retorno HTTP: mensagens antigas (geração superada), pagamentos já
 // finalizados e payload permanentemente inválido retornam 200 — não há
@@ -107,16 +109,38 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, encerrado: true, motivo: resultado.motivoEncerramento || resultado.motivo });
   }
 
-  // Chain segue ativa: agenda o próximo tick usando o horário decidido pelo
-  // Sentinela (proximaConsultaMercadoPagoEm), que já reflete cadência normal,
-  // backoff por falha ou cooldown de rate limit — nunca um número mágico
-  // local. Se por algum motivo o Sentinela não expôs esse horário (ex.:
-  // consulta evitada sem estado ainda gravado), cai no cálculo padrão de
-  // cadência a partir da idade do pedido.
   const estadoAtual = await carregarEstadoSentinela(pedidoId);
-  const idadeMs = estadoAtual?.criadoEm ? agora - estadoAtual.criadoEm : 0;
+  const idadeMs = estadoAtual?.criadoEm ? Math.max(0, Date.now() - estadoAtual.criadoEm) : 0;
+
+  // Política de expiração do pagamento só entra a partir do marco de aviso.
+  // Aos 13 minutos ela tenta antes encerrar a cobrança pendente no próprio
+  // Mercado Pago; erro/ambiguidade nunca cancela o pedido local às cegas.
+  const politicaTimeout = idadeMs >= PIX_PAGAMENTO_AVISO_PENDENTE_MS
+    ? await processarPoliticaTimeoutPagamentoPix({ pedidoId, agora: Date.now() })
+    : { encerrado: false, motivo: "antes_do_aviso" };
+
+  if (politicaTimeout.encerrado) {
+    await incrementarContadorPix("guardiao_cadeia_finalizada");
+    return NextResponse.json({
+      ok: true,
+      encerrado: true,
+      motivo: politicaTimeout.motivo,
+      timeoutPagamento: true,
+    });
+  }
+
+  // Chain segue ativa. Nunca agenda um tick para depois do próximo marco de
+  // 6/13 minutos, mesmo quando a cadência normal está na faixa de 60s.
   const proximaConsultaEm = resultado.proximaConsultaMercadoPagoEm ?? estadoAtual?.proximaConsultaMercadoPagoEm;
-  const proximoDelayMs = proximaConsultaEm ? Math.max(1000, proximaConsultaEm - agora) : calcularIntervaloPorIdade(idadeMs);
+  let proximoDelayMs = proximaConsultaEm
+    ? Math.max(1_000, proximaConsultaEm - Date.now())
+    : calcularIntervaloPorIdade(idadeMs);
+
+  const delayMarco = calcularDelayAteProximoMarcoPagamentoPix(idadeMs);
+  if (delayMarco !== null) proximoDelayMs = Math.min(proximoDelayMs, Math.max(1_000, delayMarco));
+  if (typeof politicaTimeout.proximoDelayMs === "number") {
+    proximoDelayMs = Math.min(proximoDelayMs, Math.max(1_000, politicaTimeout.proximoDelayMs));
+  }
 
   const agendado = await agendarProximaVerificacaoPixGuardiao({
     pedidoId,
