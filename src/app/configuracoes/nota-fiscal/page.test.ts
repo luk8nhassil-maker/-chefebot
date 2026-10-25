@@ -29,6 +29,20 @@ describe("cadastro fiscal — UI do próprio empresário, sem emissão", () => {
     expect(form).not.toContain('name="certificado"');
     expect(form).not.toContain('name="clientSecret"');
   });
+  it("orienta o próprio empresário a cadastrar a empresa diretamente na WLG", () => {
+    expect(form).toContain("O cadastro é feito pelo próprio dono da pizzaria.");
+    expect(form).toContain('href="https://wlgsistemas.com.br/api-emissao-nfe"');
+    expect(form).toContain('href="https://app.wlgsistemas.com.br/portal-cliente/fiscal-api/credenciais"');
+    expect(form).toContain('rel="noopener noreferrer"');
+    expect(form).toContain("Não compartilhe esses dados por WhatsApp");
+  });
+  it("não promete conexão nem emissão ao abrir links externos", () => {
+    expect(form).toContain("Situação: emissão ainda bloqueada");
+    expect(form).toContain("abrir a WLG não conecta os sistemas");
+    expect(form).toContain("Ainda não existe uma conexão automática disponível nesta tela.");
+    expect(form).not.toContain("window.localStorage.setItem");
+    expect(form).not.toContain('fetch("https://fiscal.wlgsistemas.com.br');
+  });
   it("não deixa operador clicar em nota fiscal sem vínculo", () => {
     expect(form).not.toContain("Emitir NFC-e");
     expect(form).not.toContain("Emitir NF");
