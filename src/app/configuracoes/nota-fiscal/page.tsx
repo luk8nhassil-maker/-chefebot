@@ -112,6 +112,17 @@ export default async function NotaFiscalCadastroProprio() {
               <li><strong>E-mail e telefone</strong> de contato.</li>
               <li><strong>Dados fiscais dos produtos</strong> orientados pelo contador.</li>
             </ul>
+            <Link href="/configuracoes/nota-fiscal/dados" style={{
+              display: "inline-block", width: "fit-content", textDecoration: "none",
+              fontSize: 13, fontWeight: 800, color: "var(--foreground)",
+              border: "1px solid var(--border)", borderRadius: 10, padding: "11px 14px",
+              background: "var(--background)",
+            }}>
+              Preparar meus dados no ChefeBot
+            </Link>
+            <p style={{ ...mutedStyle, fontSize: 12 }}>
+              Salve um rascunho para revisar com seu contador. Isso não cria cadastro na WLG nem ativa notas.
+            </p>
           </Etapa>
 
           <Etapa numero={3} titulo="Depois do cadastro">
