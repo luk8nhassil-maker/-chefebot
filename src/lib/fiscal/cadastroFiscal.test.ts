@@ -20,6 +20,12 @@ describe("cadastro fiscal declaratório — estritamente seguro", () => {
       ...entrada, cnpj: "11222333000181", uf: "MA",
     });
   });
+  it("aceita CNPJ alfanumérico oficial sem eliminar letras e ainda valida os dígitos", () => {
+    const novo = validarCadastroFiscal({ ...entrada, cnpj: "00.000.000/E08G-12" });
+    expect(novo.cnpj).toBe("00000000E08G12");
+    expect(() => validarCadastroFiscal({ ...entrada, cnpj: "00.000.000/E08G-13" })).toThrow();
+    expect(() => validarCadastroFiscal({ ...entrada, cnpj: "00.000.000/E08G-1X" })).toThrow();
+  });
   it("rejeita CNPJ inválido, repetido e com dígito trocado", () => {
     for (const cnpj of ["00000000000000", "11222333000182", "123"]) {
       expect(() => validarCadastroFiscal({ ...entrada, cnpj })).toThrow(CadastroFiscalInvalido);
