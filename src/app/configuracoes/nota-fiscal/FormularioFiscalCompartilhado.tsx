@@ -8,12 +8,16 @@ type Modo = "dono" | "contador";
 type Dados = { respostas: RespostasFiscais; versao: number; atualizadoEm?: string; conviteAtivo?: boolean };
 const grupos: { titulo: string; descricao: string; campos: { id: CampoFiscal; rotulo: string; dica?: string }[] }[] = [
   { titulo: "Dados da empresa", descricao: "Preencha apenas o que souber.", campos: [
-    { id: "cnpj", rotulo: "CNPJ", dica: "00.000.000/0000-00" },
+    { id: "cnpj", rotulo: "CNPJ do estabelecimento que emitirá a nota", dica: "Numérico ou alfanumérico" },
     { id: "razaoSocial", rotulo: "Razão social" },
     { id: "nomeFantasia", rotulo: "Nome fantasia (opcional)" },
     { id: "inscricaoEstadual", rotulo: "Inscrição estadual", dica: "Número ou ISENTO, quando aplicável" },
+    { id: "porteEmpresa", rotulo: "Porte da empresa" },
+    { id: "tipoEstabelecimento", rotulo: "Este CNPJ é matriz ou filial?" },
+    { id: "vendaOutroEndereco", rotulo: "A pizzaria funciona em endereço diferente do CNPJ informado?" },
+    { id: "cnaePrincipal", rotulo: "CNAE principal", dica: "Ex.: 5611-2/01 (preenchimento pelo contador)" },
   ] },
-  { titulo: "Endereço fiscal", descricao: "Use o endereço da empresa, não o do contador.", campos: [
+  { titulo: "Endereço fiscal do CNPJ", descricao: "Endereço cadastrado do estabelecimento emissor. Se a pizzaria está em outro local, informe acima.", campos: [
     { id: "uf", rotulo: "UF", dica: "Ex.: MA" },
     { id: "municipio", rotulo: "Cidade" },
     { id: "codigoIBGE", rotulo: "Código IBGE do município" },
@@ -31,7 +35,10 @@ const grupos: { titulo: string; descricao: string; campos: { id: CampoFiscal; ro
   ] },
 ];
 const options: Partial<Record<CampoFiscal, [string,string][]>> = {
-  regimeTributario: [["", "Ainda não sei"], ["simples_nacional","Simples Nacional"], ["lucro_presumido","Lucro Presumido"], ["lucro_real","Lucro Real"]],
+  porteEmpresa: [["", "Ainda não sei"], ["mei","MEI"], ["me","Microempresa (ME)"], ["epp","Empresa de pequeno porte (EPP)"], ["demais","Média, grande ou outro porte"], ["nao_informado","Não informado"]],
+  tipoEstabelecimento: [["", "Ainda não sei"], ["matriz","Matriz"], ["filial","Filial"], ["nao_informado","Não informado"]],
+  vendaOutroEndereco: [["", "Ainda não sei"], ["sim","Sim, a pizzaria fica em outro endereço"], ["nao","Não, funciona no endereço do CNPJ"], ["nao_informado","Não informado"]],
+  regimeTributario: [["", "Ainda não sei"], ["simei","SIMEI (MEI)"], ["simples_nacional","Simples Nacional"], ["lucro_presumido","Lucro Presumido"], ["lucro_real","Lucro Real"], ["outro","Outro / regime especial"], ["nao_informado","Não informado"]],
   credenciamentoNfce: [["","Ainda não sei"], ["pendente","Pendente"], ["habilitado","Já credenciado"], ["nao_informado","Não informado"]],
   certificadoNaWlg: [["","Ainda não sei"], ["sim","Sim"], ["nao","Não"], ["nao_informado","Não informado"]],
 };
@@ -158,6 +165,12 @@ export default function FormularioFiscalCompartilhado({ modo }: { modo: Modo }) 
             <span>{preenchidos} de {CAMPOS_FISCAIS.length} campos preenchidos</span>
             <span>Rascunho · sem emissão</span>
           </div>
+          {(respostas.vendaOutroEndereco === "sim" ||
+            (respostas.porteEmpresa === "mei" && respostas.tipoEstabelecimento === "filial")) &&
+            <aside role="alert" style={{border:"1px solid var(--border)",background:"var(--surface)",borderRadius:12,padding:15,display:"grid",gap:6}}>
+              <strong style={{fontSize:14}}>Atenção: o contador precisa conferir o estabelecimento emissor</strong>
+              <p style={textMuted}>O endereço da venda pode exigir regularização e CNPJ próprio do estabelecimento (filial, quando cabível). MEI não pode manter mais de um estabelecimento. Não use o CNPJ de outro local sem orientação contábil. O ChefeBot não ativará notas com base apenas neste formulário.</p>
+            </aside>}
           <form onSubmit={salvar} style={{display:"grid",gap:14}}>
             {grupos.map(grupo => <section key={grupo.titulo} style={{border:"1px solid var(--border)",borderRadius:16,background:"var(--surface)",padding:"19px 16px",display:"grid",gap:15}}>
               <div style={{display:"grid",gap:3}}>
@@ -172,7 +185,7 @@ export default function FormularioFiscalCompartilhado({ modo }: { modo: Modo }) 
                   <textarea rows={campo.id === "orientacoesProdutos" ? 4 : 3} value={respostas[campo.id]} maxLength={campo.id === "orientacoesProdutos" ? 1200 : 800}
                     onChange={e=>atualizar(campo.id,e.target.value)} placeholder={campo.dica || "Pode deixar em branco"} style={{...fieldStyle,resize:"vertical"}}/> :
                   <input value={respostas[campo.id]} onChange={e=>atualizar(campo.id,e.target.value)}
-                    placeholder={campo.dica||"Pode deixar em branco"} maxLength={({cnpj:18,razaoSocial:150,nomeFantasia:150,inscricaoEstadual:20,uf:2,municipio:100,codigoIBGE:7,cep:9,logradouro:150,numero:20,bairro:100} as Partial<Record<CampoFiscal,number>>)[campo.id] ?? 100}
+                    placeholder={campo.dica||"Pode deixar em branco"} maxLength={({cnpj:18,razaoSocial:150,nomeFantasia:150,inscricaoEstadual:20,cnaePrincipal:10,uf:2,municipio:100,codigoIBGE:7,cep:9,logradouro:150,numero:20,bairro:100} as Partial<Record<CampoFiscal,number>>)[campo.id] ?? 100}
                     autoComplete="off" style={fieldStyle}/>}
               </label>)}
             </section>)}

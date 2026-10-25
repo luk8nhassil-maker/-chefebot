@@ -2,7 +2,8 @@ import { cnpjValido } from "./cnpj";
 
 /** Dados informativos. Não representam autorização fiscal nem configuram o emissor. */
 export const CAMPOS_FISCAIS = [
-  "cnpj", "razaoSocial", "nomeFantasia", "inscricaoEstadual", "regimeTributario",
+  "cnpj", "razaoSocial", "nomeFantasia", "inscricaoEstadual", "porteEmpresa", "regimeTributario",
+  "tipoEstabelecimento", "vendaOutroEndereco", "cnaePrincipal",
   "uf", "municipio", "codigoIBGE", "cep", "logradouro", "numero", "bairro",
   "credenciamentoNfce", "certificadoNaWlg", "orientacoesProdutos", "observacoes",
 ] as const;
@@ -22,13 +23,18 @@ export type QuestionarioFiscal = {
 };
 const maximos: Record<CampoFiscal, number> = {
   cnpj: 18, razaoSocial: 150, nomeFantasia: 150,
-  inscricaoEstadual: 20, regimeTributario: 40, uf: 2, municipio: 100,
+  inscricaoEstadual: 20, porteEmpresa: 30, regimeTributario: 40,
+  tipoEstabelecimento: 25, vendaOutroEndereco: 25, cnaePrincipal: 10,
+  uf: 2, municipio: 100,
   codigoIBGE: 7, cep: 9, logradouro: 150, numero: 20, bairro: 100,
   credenciamentoNfce: 40, certificadoNaWlg: 40,
   orientacoesProdutos: 1200, observacoes: 800,
 };
 const ufs = new Set(["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"]);
-const regimes = new Set(["", "nao_informado", "simples_nacional", "lucro_presumido", "lucro_real"]);
+const regimes = new Set(["", "nao_informado", "simei", "simples_nacional", "lucro_presumido", "lucro_real", "outro"]);
+const portes = new Set(["", "nao_informado", "mei", "me", "epp", "demais"]);
+const estabelecimentos = new Set(["", "nao_informado", "matriz", "filial"]);
+const enderecos = new Set(["", "nao_informado", "sim", "nao"]);
 const nfce = new Set(["", "nao_informado", "pendente", "habilitado"]);
 const a1 = new Set(["", "nao_informado", "nao", "sim"]);
 
@@ -62,7 +68,17 @@ export function validarRespostas(input: unknown): RespostasFiscais {
     throw new QuestionarioInvalido("CEP inválido.");
   if (out.codigoIBGE && !/^\d{7}$/.test(out.codigoIBGE))
     throw new QuestionarioInvalido("Código IBGE inválido.");
-  if (!regimes.has(out.regimeTributario) ||
+  if (out.cnaePrincipal) {
+    const cnae = out.cnaePrincipal.replace(/[-.\/\s]/g, "");
+    if (!/^\d{7}$/.test(cnae)) throw new QuestionarioInvalido("Confira o CNAE principal.");
+    out.cnaePrincipal = cnae;
+  }
+  // Porte, regime e tipo de estabelecimento são declarações independentes;
+  // não deduzir tributação nem habilitar emissão por estas respostas.
+  if (!portes.has(out.porteEmpresa) ||
+      !estabelecimentos.has(out.tipoEstabelecimento) ||
+      !enderecos.has(out.vendaOutroEndereco) ||
+      !regimes.has(out.regimeTributario) ||
       !nfce.has(out.credenciamentoNfce) || !a1.has(out.certificadoNaWlg))
     throw new QuestionarioInvalido("Escolha uma opção válida.");
   if (/-----BEGIN (?:RSA |EC )?PRIVATE KEY-----|BEGIN CERTIFICATE|client[_-]?secret\s*[:=]|senha\s*[:=]/i.test(out.orientacoesProdutos+" "+out.observacoes))
