@@ -53,7 +53,8 @@ export function registrarOperationId(
   registro: RegistroFiscal,
   operationId: string,
 ): RegistroFiscal {
-  if (registro.situacao !== "reservada" || !/^[A-Za-z0-9_-]{8,100}$/.test(operationId))
+  if ((registro.situacao !== "reservada" && registro.situacao !== "envio_incerto") ||
+      !/^[A-Za-z0-9_-]{8,100}$/.test(operationId))
     throw new Error("Transição fiscal inválida");
   return { ...registro, situacao: "processando", operationId };
 }
