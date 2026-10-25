@@ -1,0 +1,41 @@
+name: fiscal-wlg-autocadastro-ui-ci
+
+on:
+  pull_request:
+    paths:
+      - "src/app/configuracoes/page.tsx"
+      - "src/app/configuracoes/nota-fiscal/**"
+      - ".github/workflows/fiscal-wlg-autocadastro-ui-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fiscal-wlg-autocadastro-ui-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validar-autocadastro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout do HEAD validado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Instalar dependências
+        run: npm ci
+      - name: Testar fluxo de autocadastro (sem rede WLG)
+        run: npm test -- src/app/configuracoes/nota-fiscal/page.test.ts
+      - name: Lint dos arquivos alterados
+        run: npx eslint src/app/configuracoes/page.tsx src/app/configuracoes/nota-fiscal/page.tsx src/app/configuracoes/nota-fiscal/page.test.ts
+      - name: Checar TypeScript
+        run: npx tsc --noEmit --incremental false
+      - name: Build de produção sem credenciais
+        run: npm run build
