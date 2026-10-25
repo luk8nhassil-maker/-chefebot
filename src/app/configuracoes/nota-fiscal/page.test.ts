@@ -39,6 +39,11 @@ describe("Nota fiscal: autoatendimento do dono, sem liberar emissões", () => {
     expect(page).toContain("O cadastro no site da WLG não ativa a emissão");
     expect(page).not.toContain("fetch(");
   });
+  it("oferece formulário fiscal separado sem ativar emissão", () => {
+    expect(page).toContain('href="/configuracoes/nota-fiscal/dados"');
+    expect(page).toContain("Preparar meus dados no ChefeBot");
+    expect(page).toContain("Isso não cria cadastro na WLG nem ativa notas");
+  });
   it("mostra Nota fiscal na sidebar Gestão somente para admin, com destaque na rota", () => {
     expect(shell).toContain('admin = JSON.parse(decoded)?.role === "admin"');
     expect(shell).toContain("{mostrarNotaFiscal && (");
