@@ -15,7 +15,7 @@ describe("Nota fiscal: autoatendimento do dono, sem liberar emissões", () => {
   });
   it("oferece cadastro pelo site oficial da WLG, nunca coleta certificados", () => {
     expect(page).toContain("https://wlgsistemas.com.br/api-emissao-nfe");
-    expect(page).toContain("Cadastrar minha empresa na WLG");
+    expect(page).toContain("Começar cadastro na WLG");
     expect(page).toContain('rel="noopener noreferrer"');
     expect(page).toContain("Certificado digital A1");
     expect(page).not.toContain('type="file"');
@@ -26,6 +26,18 @@ describe("Nota fiscal: autoatendimento do dono, sem liberar emissões", () => {
     expect(page).toContain("O sistema não confirmou uma empresa conectada à WLG");
     expect(page).toContain("O botão de cadastro permanecerá disponível");
     expect(page).not.toContain("Emitir NFC-e");
+  });
+  it("apresenta jornada curta em ordem e preserva o aviso de segurança", () => {
+    const etapa1 = page.indexOf('titulo="Cadastre sua empresa na WLG"');
+    const etapa2 = page.indexOf('titulo="Separe os dados necessários"');
+    const etapa3 = page.indexOf('titulo="Depois do cadastro"');
+    expect(etapa1).toBeGreaterThan(0);
+    expect(etapa2).toBeGreaterThan(etapa1);
+    expect(etapa3).toBeGreaterThan(etapa2);
+    expect(page).toContain('aria-label="Situação da nota fiscal"');
+    expect(page).toContain("Não envie certificado, senha, CSC, ClientSecret");
+    expect(page).toContain("O cadastro no site da WLG não ativa a emissão");
+    expect(page).not.toContain("fetch(");
   });
   it("mostra Nota fiscal na sidebar Gestão somente para admin, com destaque na rota", () => {
     expect(shell).toContain('admin = JSON.parse(decoded)?.role === "admin"');
