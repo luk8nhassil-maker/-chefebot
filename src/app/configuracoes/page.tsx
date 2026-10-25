@@ -465,6 +465,27 @@ export default function ConfiguracoesPage() {
             {aba === 'geral' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
+                {/* Autoatendimento fiscal — sem enviar certificados ao ChefeBot */}
+                {getUserRole() === 'admin' && (
+                  <SectionCard>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span aria-hidden="true" style={{ fontSize: 23 }}>📄</span>
+                      <div>
+                        <strong style={{ display: 'block', fontSize: 15, color: TEXT }}>Nota fiscal da pizzaria</strong>
+                        <span style={{ display: 'block', fontSize: 12, color: TEXT2, lineHeight: 1.5 }}>
+                          Cadastre sua empresa na WLG e acompanhe o que falta para emitir.
+                        </span>
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => router.push('/configuracoes/nota-fiscal')}
+                      style={{ minHeight: 48, borderRadius: 12, background: ACCENT,
+                        color: 'var(--primary-foreground)', border: 'none',
+                        fontWeight: 800, fontSize: 14, cursor: 'pointer', fontFamily: FONT }}>
+                      Configurar nota fiscal
+                    </button>
+                  </SectionCard>
+                )}
+
                 {/* Aparência (tema Light / Dark) */}
                 <SectionCard>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
