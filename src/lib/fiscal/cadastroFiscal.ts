@@ -48,7 +48,7 @@ export function validarCadastroFiscal(body: unknown): CadastroFiscalDeclarado {
   // Sem aceitar campos arbitrários, sobretudo certificados, tokens ou secrets.
   if (Object.keys(registro).some(k => !CAMPOS.has(k)))
     throw new CadastroFiscalInvalido("O formulário contém informações não permitidas. Não envie certificados ou senhas.");
-  const cnpj = typeof registro.cnpj === "string" ? registro.cnpj.replace(/\D/g, "") : "";
+  const cnpj = typeof registro.cnpj === "string" ? registro.cnpj.replace(/[.\/\-\s]/g, "").toUpperCase() : "";
   if (!cnpjValido(cnpj)) throw new CadastroFiscalInvalido("Confira o CNPJ informado.");
   const razaoSocial = texto(registro.razaoSocial, 150);
   const nomeFantasia = texto(registro.nomeFantasia, 150);
