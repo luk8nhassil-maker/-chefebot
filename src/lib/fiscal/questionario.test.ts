@@ -65,7 +65,7 @@ describe("formulário fiscal do dono e contador", () => {
   });
   it("bloqueia dados fiscais inválidos e respostas gigantes", () => {
     expect(() => validarRespostas({ uf:"XX" })).toThrow();
-    expect(() => validarRespostas({ regimeTributario:"outro" })).toThrow();
+    expect(() => validarRespostas({ regimeTributario:"invalido" })).toThrow();
     expect(() => validarRespostas({ codigoIBGE:"abc" })).toThrow();
     expect(() => validarRespostas({ inscricaoEstadual:"foo" })).toThrow();
     expect(() => validarRespostas({ observacoes:"x".repeat(999) })).toThrow();
