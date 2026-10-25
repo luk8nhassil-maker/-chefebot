@@ -466,7 +466,7 @@ export default function ConfiguracoesPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
                 {/* Autoatendimento fiscal — sem enviar certificados ao ChefeBot */}
-                {getUserRole() === 'admin' && (
+                {isAdmin && getUserRole() === 'admin' && (
                   <SectionCard>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span aria-hidden="true" style={{ fontSize: 23 }}>📄</span>
