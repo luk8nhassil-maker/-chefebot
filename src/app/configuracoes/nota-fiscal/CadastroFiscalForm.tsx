@@ -190,11 +190,78 @@ export default function CadastroFiscalForm() {
               {salvando ? "Salvando..." : carregando ? "Carregando..." : "Salvar cadastro da minha empresa"}
             </button>
           </form>
-          <section style={{ color: "var(--foreground-secondary)", lineHeight: 1.6, fontSize: 13 }}>
-            <strong style={{ color: "var(--foreground)" }}>O que vem depois?</strong>
-            <p style={{ margin: "6px 0 0" }}>O ChefeBot precisará confirmar o vínculo da pizzaria,
-              os dados tributários e o certificado digital A1 por um canal seguro.
-              Não envie certificados, CSC, senhas ou tokens por este formulário.</p>
+          <section aria-labelledby="ativacao-wlg" style={{
+            display: "grid", gap: 14, padding: "22px 18px",
+            border: "1px solid var(--border)", borderRadius: 16, background: "var(--surface)",
+          }}>
+            <div>
+              <h2 id="ativacao-wlg" style={{ margin: "0 0 6px", fontSize: 19, fontWeight: 900 }}>
+                Próximo passo: configurar a nota fiscal
+              </h2>
+              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: "var(--foreground-secondary)" }}>
+                O cadastro é feito pelo próprio dono da pizzaria. Você não precisa
+                mandar documentos, certificado ou senha ao desenvolvedor do ChefeBot.
+              </p>
+            </div>
+            <ol style={{ margin: 0, paddingLeft: 23, display: "grid", gap: 15 }}>
+              <li>
+                <strong style={{ display: "block", fontSize: 14 }}>Salve os dados da sua empresa acima</strong>
+                <span style={{ color: "var(--foreground-secondary)", fontSize: 13 }}>
+                  O ChefeBot guarda um rascunho. Isso ainda não ativa a nota.
+                </span>
+              </li>
+              <li>
+                <strong style={{ display: "block", fontSize: 14 }}>Abra sua própria conta na WLG</strong>
+                <span style={{ color: "var(--foreground-secondary)", fontSize: 13, lineHeight: 1.6 }}>
+                  Cadastre o CNPJ, a inscrição estadual, o certificado digital A1 e as informações
+                  fiscais diretamente no site da WLG. O suporte da WLG pode ajudar.
+                </span>
+                <a
+                  href="https://wlgsistemas.com.br/api-emissao-nfe"
+                  target="_blank" rel="noopener noreferrer"
+                  style={{
+                    display: "block", marginTop: 10, padding: "12px 15px", textAlign: "center",
+                    border: "1px solid var(--border)", borderRadius: 10, textDecoration: "none",
+                    color: "var(--foreground)", background: "var(--background)", fontWeight: 800,
+                    fontSize: 14,
+                  }}
+                >
+                  Abrir cadastro e instruções oficiais da WLG
+                </a>
+              </li>
+              <li>
+                <strong style={{ display: "block", fontSize: 14 }}>Prepare a integração com o ChefeBot</strong>
+                <span style={{ color: "var(--foreground-secondary)", fontSize: 13, lineHeight: 1.6 }}>
+                  Depois de cadastrar a empresa, entre no portal da WLG e procure Fiscal API.
+                  As credenciais são informações secretas: guarde-as com segurança.
+                  Ainda não existe uma conexão automática disponível nesta tela.
+                </span>
+                <a href="https://app.wlgsistemas.com.br/portal-cliente/fiscal-api/credenciais"
+                  target="_blank" rel="noopener noreferrer"
+                  style={{
+                    display: "inline-block", marginTop: 10, fontWeight: 800, fontSize: 13,
+                    color: "var(--foreground)", textUnderlineOffset: 3,
+                  }}
+                >
+                  Abrir Fiscal API no portal da WLG
+                </a>
+              </li>
+            </ol>
+            <div role="status" style={{
+              background: "var(--background)", border: "1px solid var(--border)",
+              borderRadius: 10, padding: 14,
+            }}>
+              <strong style={{ fontSize: 13 }}>Situação: emissão ainda bloqueada</strong>
+              <p style={{ margin: "6px 0 0", fontSize: 13, lineHeight: 1.6, color: "var(--foreground-secondary)" }}>
+                Salvar o formulário ou abrir a WLG não conecta os sistemas.
+                A emissão pelo ChefeBot só será ativada depois da verificação
+                do vínculo da empresa, dos dados fiscais e de um teste seguro.
+              </p>
+            </div>
+            <p style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: "var(--foreground-secondary)" }}>
+              Não envie certificados, CSC, senhas ou tokens por este formulário.
+              Não compartilhe esses dados por WhatsApp, e-mail ou conversa com o desenvolvedor.
+            </p>
           </section>
         </div>
       </main>
