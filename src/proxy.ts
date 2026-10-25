@@ -109,6 +109,12 @@ export async function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // Página pública APENAS de formulário; leitura e escrita exigem token de convite
+  // validado no servidor. Nunca libera /configuracoes ou outras rotas.
+  if (pathname === "/configuracoes/nota-fiscal/contador") {
+    return NextResponse.next();
+  }
+
   const rule = ROUTE_ROLES.find((route) => pathname.startsWith(route.path));
   if (rule) {
     const token = req.cookies.get("auth-token")?.value;
