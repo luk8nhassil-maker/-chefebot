@@ -101,3 +101,22 @@ O `src/lib/auth.ts` atual em produção autentica apenas `username/name/role` e 
 6. Provar execução de emissão NFC-e modelo 65 em homologação, verificar resultado e arquivo fiscal; somente depois definir a ativação real com aprovação.
 
 Nenhuma chave real, CNPJ operacional ou segredo foi adicionada. A rota POST pública continua sempre com HTTP 423. Não dar merge neste PR como nota fiscal funcional; não alterar Vercel/produção nem criar Preview conectado ao Redis verdadeiro.
+
+
+## 24/10/2026 — Verificação final para pedido de ativação real WLG
+
+**Fonte oficial consultada nesta etapa:** https://wlgsistemas.com.br/api-emissao-nfe e https://wlgsistemas.com.br/emissor-nfe-multiempresas
+
+**Fatos comprovados:** WLG disponibiliza `POST /api/v1/auth/token`, `POST /api/v1/nfe` (modelo 55/65, `empresaId`, `tipoAmbiente`, HTTP 202 + `operationId`), `GET /api/v1/operacoes/{operationId}`, XML/DANFE e cancelamento. Homologação = ambiente 2, produção = ambiente 1. O portal do integrador autenticado está com **zero empresas** e **zero credenciais** no estado observado. A WLG orienta cadastrar certificado digital e dados fiscais antes de emitir.
+
+**Não comprovado:** endpoint, autenticação, payload, permissões e fluxo para **criação automática de empresas pela API**, mesmo havendo recurso multiempresa no portal Web. OpenAPI/Swagger oficial em `https://fiscal.wlgsistemas.com.br/swagger` não pôde ser acessado pela ferramenta pública de pesquisa. Também faltam CNPJ emissor vinculado/credenciado e classificação fiscal por item da pizzaria aprovada. Não inventar endpoint de cadastro nem payload de tributos.
+
+**Código técnico adicional no PR draft #527:** `wlgLedgerPersistente.server.ts` fornece reserva atômica no Redis (SET NX), transição compare-and-set (EVAL + versão), marcação de envio incerto ANTES da chamada HTTP, rastreamento de `operationId` e conclusão por consulta. Chaves permanentes por tenant e conta final. Os testes são mocks e NENHUMA rota chama esse módulo; nenhuma chave, pedido, WhatsApp, Pix ou nota real foi utilizada.
+
+**Gates impeditivos de produção que são externos e verificáveis:**
+1. WLG confirmar/fornecer contrato de criação/vinculação de empresas pela API para SaaS de terceiros (ou fluxo oficial OAuth/delegação/integração), com OpenAPI completo;
+2. identidade segura de empresário/pizzaria separada por tenant no ChefeBot: a autenticação atual identifica somente usuários globais; 
+3. primeira pizzaria com CNPJ/IE, certificado, CSC, cadastro WLG `empresaId`, credenciamento na SEFAZ e tratamento fiscal aprovado por contador habilitado;
+4. validação da emissão homologada com operação real e XML, sem usar dinheiro/pedido/clientes reais; só então aprovar mecanismo de produção e configurar secrets no servidor.
+
+**Regra de segurança:** ausência desses elementos exige que POST público de emissão permaneça HTTP 423 e que um rascunho fiscal não desencadeie chamada externa. Teste unitário com mock ou CI verde não é prova de emissão fiscal na WLG.
