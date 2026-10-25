@@ -112,6 +112,12 @@ describe("cadastro fiscal do próprio empresário — sem chamadas WLG", () => {
     }
     expect(mock.sets).toBe(0);
   });
+  it("aceita e conserva letras de CNPJ alfanumérico válido", async () => {
+    const response = await PUT(req("PUT", "admin-a", { ...payload, cnpj: "00.000.000/E08G-12" }));
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    expect(json.cadastro.cnpj).toBe("00000000E08G12");
+  });
   it("valida CNPJ e declaração; nunca deduz tributos", async () => {
     expect((await PUT(req("PUT", "admin-a", { ...payload, cnpj: "00000000000000" }))).status).toBe(400);
     expect((await PUT(req("PUT", "admin-a", { ...payload, declaracaoResponsavel: false }))).status).toBe(400);
