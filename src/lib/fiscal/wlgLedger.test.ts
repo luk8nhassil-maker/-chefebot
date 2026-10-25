@@ -23,7 +23,10 @@ describe("WLG — ledger fiscal sem duplicidade", () => {
     const incerto = marcarEnvioIncerto(r);
     expect(incerto.situacao).toBe("envio_incerto");
     expect(podeIniciarEmissao(incerto)).toBe(false);
-    expect(() => registrarOperationId(incerto, op)).toThrow();
+    // Somente uma confirmação de HTTP 202 pode anexar o protocolo ao envio incerto.
+    // Isso não abre nova reserva; uma duplicidade continua proibida.
+    expect(registrarOperationId(incerto, op).situacao).toBe("processando");
+    expect(podeIniciarEmissao(incerto)).toBe(false);
   });
   it("resposta 202 PROCESSANDO não significa autorizada", () => {
     const r = reservarRegistroFiscal(null, "pizza-a", "conta-10", "wlg-a")!;
