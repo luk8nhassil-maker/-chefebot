@@ -120,3 +120,13 @@ Nenhuma chave real, CNPJ operacional ou segredo foi adicionada. A rota POST púb
 4. validação da emissão homologada com operação real e XML, sem usar dinheiro/pedido/clientes reais; só então aprovar mecanismo de produção e configurar secrets no servidor.
 
 **Regra de segurança:** ausência desses elementos exige que POST público de emissão permaneça HTTP 423 e que um rascunho fiscal não desencadeie chamada externa. Teste unitário com mock ou CI verde não é prova de emissão fiscal na WLG.
+
+
+## Alternativa confirmada — Contora, cadastro automático sem remover WLG (24/10/2026)
+
+Fonte oficial de cadastro: https://fiscal.contora.com.br/documentacao/empresas — autenticação Bearer, `GET /api/v1/me` e **`PUT /api/v1/companies/by-document/{cnpj}`** idempotente. Exige CNPJ, razão social, regime fiscal real, endereço completo com código IBGE e IE quando aplicável. A API de NFC-e é documentada em https://fiscal.contora.com.br/documentacao/nfce e exige empresa, certificado A1 e CSC antes de qualquer emissão.
+Preço público consultado: https://fiscal.contora.com.br/planos — plano gratuito até **500 eventos fiscais de produção/mês** e **100 de homologação/mês**, CNPJs ilimitados. Com saldo de crédito, eventos acima da franquia geram cobrança; não contratar nem consumir sem autorização. Política de expurgo por inatividade documentada em https://fiscal.contora.com.br/documentacao/limites — é necessário baixar e guardar XML/PDF por conta própria.
+
+O novo adapter `src/lib/fiscal/contoraCadastro.server.ts` NÃO substitui nem importa `wlgHomologacao.server.ts`: prepara dados fiscais de rascunho validado, exige endereço declarado com código IBGE e regime concreto (sem inventar default), escolhe **somente homologação**, verifica `GET /me` antes do upsert e confere CNPJ da resposta para evitar vincular o emissor errado. Usa token exclusivamente de `CONTORA_FISCAL_HOMOLOG_TOKEN` no servidor, exige `FISCAL_CONTORA_CADASTRO_HOMOLOG_LIBERADO=true` e bloqueia Preview. O serviço exige confirmação da titularidade/tenant de origem servidor. **Nenhuma rota chama esse adapter** até existir autenticação de empresa real; logo não houve inscrição, teste fiscal real, credencial externa ou deploy.
+
+Faltam: conta/credencial Contora legítima, KYC/vínculo forte tenant/CNPJ no ChefeBot, endereço comercial declarado de cada pizzaria, certificado A1/CSC seguro, catálogo fiscal NCM/CFOP/CST homologado, construção do fluxo NFC-e por pedidos, download/guarda de XML e aprovação da operação. O módulo é técnico e foi testado com fetch mock, não valida disponibilidade real do provedor. Nuvem Fiscal NÃO é opção: seu site anuncia desativação em 31/07/2026.
