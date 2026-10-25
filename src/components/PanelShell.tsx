@@ -1,5 +1,5 @@
 "use client"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Image from "next/image"
 import { Pizza } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
@@ -29,12 +29,32 @@ export default function PanelShell({
   const router = useRouter()
   const pathname = usePathname()
   const [logoError, setLogoError] = useState(false)
+  const [mostrarNotaFiscal, setMostrarNotaFiscal] = useState(false)
+
+  // O atalho respeita a sessão visual; a página fiscal valida JWT e papel no servidor.
+  // Ler o cookie após a hidratação evita diferenças entre servidor e cliente.
+  useEffect(() => {
+    let admin = false
+    try {
+      const cookie = document.cookie.split(";").map(part => part.trim())
+        .find(part => part.startsWith("auth-user="))
+      if (cookie) {
+        let decoded = decodeURIComponent(cookie.slice("auth-user=".length))
+        if (decoded.startsWith("%7B")) decoded = decodeURIComponent(decoded)
+        admin = JSON.parse(decoded)?.role === "admin"
+      }
+    } catch {
+      // Cookie ausente ou inválido: não mostrar o atalho.
+    }
+    queueMicrotask(() => setMostrarNotaFiscal(admin))
+  }, [pathname])
 
   const onPedidos = pathname.startsWith("/pedidos")
   const onConversas = pathname.startsWith("/conversas")
   const onCardapio = pathname.startsWith("/cardapio")
   const onAdmin = pathname === "/admin"
-  const onConfiguracoes = pathname.startsWith("/configuracoes")
+  const onNotaFiscal = pathname.startsWith("/configuracoes/nota-fiscal")
+  const onConfiguracoes = pathname.startsWith("/configuracoes") && !onNotaFiscal
   const onFinanceiro = pathname.startsWith("/financeiro")
   const onRelatorios = pathname.startsWith("/relatorios")
   const onFidelidade = pathname.startsWith("/admin/fidelidade")
@@ -151,6 +171,19 @@ export default function PanelShell({
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2.2"/><path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19.5a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H4.5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H10a1.65 1.65 0 0 0 1-1.51V4.5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V10c.36.4.86.66 1.51 1h.09a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
               Configurações
             </button>
+            {mostrarNotaFiscal && (
+              <button
+                className={"ps-sidebar-btn" + (onNotaFiscal ? " ps-active" : "")}
+                onClick={() => router.push("/configuracoes/nota-fiscal")}
+                aria-current={onNotaFiscal ? "page" : undefined}
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/>
+                  <path d="M14 3v5h5M8 12h8M8 16h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Nota fiscal
+              </button>
+            )}
             <button className={`ps-sidebar-btn${onFinanceiro ? " ps-active" : ""}`} onClick={() => router.push("/financeiro")}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><line x1="12" y1="2" x2="12" y2="22" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/><path d="M17 6.5c0-1.4-2.2-2.5-5-2.5s-5 1.1-5 2.5S9.2 9 12 9s5 1.1 5 2.5-2.2 2.5-5 2.5-5-1.1-5-2.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
               Financeiro
