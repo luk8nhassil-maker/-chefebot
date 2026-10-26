@@ -3,6 +3,7 @@ import { autenticarRequisicao, exigirRole } from "@/lib/apiAuth";
 import { emPreviewVercel } from "@/lib/previewSafety";
 import { QuestionarioInvalido, validarRespostas } from "@/lib/fiscal/questionario";
 import { carregarQuestionario, salvarQuestionario, respostasPublicas, criarConvite, revogarConvite, existeConvite } from "@/lib/fiscal/questionario.server";
+import { haImportacaoPendente, importarDadosConferidos } from "@/lib/fiscal/importacaoNotaFiscal.server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -42,7 +43,9 @@ export async function GET(req: NextRequest) {
   try {
     const doc = await carregarQuestionario(user!.username);
     const conviteAtivo = await existeConvite(user!.username);
-    return NextResponse.json({ ok: true, ...respostasPublicas(doc), conviteAtivo }, { headers: HEADERS });
+    return NextResponse.json({ ok: true, ...respostasPublicas(doc), conviteAtivo,
+      importacaoDisponivel: haImportacaoPendente(user!.username, doc.respostas),
+    }, { headers: HEADERS });
   } catch { return falha(); }
 }
 
@@ -54,6 +57,16 @@ export async function POST(req: NextRequest) {
   try {
     const body = await corpoSeguro(req);
     if (Object.keys(body).some(k => k !== "acao")) throw new QuestionarioInvalido("Ação inválida.");
+    if (body.acao === "importar_dados_da_nota") {
+      const resultado = await importarDadosConferidos(user!.username);
+      if (resultado.status === "divergente" || resultado.status === "conflito_concorrencia")
+        return NextResponse.json({ ok: false,
+          error: "Há dados diferentes já salvos. Confira o cadastro antes de importar.",
+        }, { status: 409, headers: HEADERS });
+      return NextResponse.json({ ok: true, ...resultado,
+        ...(resultado.status === "importado" ? respostasPublicas(resultado.cadastro) : {}),
+      }, { headers: HEADERS });
+    }
     if (body.acao === "criar") {
       const info = await criarConvite(user!.username);
       return NextResponse.json({ ok: true, ...info }, { headers: HEADERS });
