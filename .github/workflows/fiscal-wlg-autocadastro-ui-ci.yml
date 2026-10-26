@@ -36,7 +36,7 @@ jobs:
       - name: Instalar dependências
         run: npm ci
       - name: Testar fluxo de autocadastro (sem rede WLG)
-        run: npm test -- src/app/configuracoes/nota-fiscal/page.test.ts src/app/api/fiscal/cadastro/route.test.ts src/lib/fiscal/cadastroFiscal.test.ts src/lib/fiscal/questionario.test.ts src/lib/fiscal/questionario.server.test.ts src/app/api/fiscal/questionario/route.test.ts
+        run: npm test -- src/app/configuracoes/nota-fiscal/page.test.ts src/app/api/fiscal/cadastro/route.test.ts src/lib/fiscal/cadastroFiscal.test.ts src/lib/fiscal/questionario.test.ts src/lib/fiscal/questionario.server.test.ts src/lib/fiscal/importacaoNotaFiscal.server.test.ts src/app/api/fiscal/questionario/route.test.ts
       - name: Lint dos arquivos alterados
         run: npx eslint src/app/configuracoes/nota-fiscal src/app/api/fiscal/cadastro src/app/api/fiscal/questionario src/lib/fiscal src/proxy.ts
       - name: Checar TypeScript
