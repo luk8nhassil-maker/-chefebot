@@ -8,6 +8,14 @@ export const CAMPOS_FISCAIS = [
   "credenciamentoNfce", "certificadoNaWlg", "orientacoesProdutos", "observacoes",
 ] as const;
 export type CampoFiscal = typeof CAMPOS_FISCAIS[number];
+/** Campos apresentados no cadastro de um único emitente.
+ * Campos legados sobre múltiplos endereços continuam compatíveis no armazenamento,
+ * mas não são pedidos ao dono nem conferem autorização para emissão.
+ */
+export const CAMPOS_FORMULARIO_FISCAL = CAMPOS_FISCAIS.filter(
+  campo => campo !== "tipoEstabelecimento" && campo !== "vendaOutroEndereco",
+);
+
 export type RespostasFiscais = Record<CampoFiscal, string>;
 export const VAZIO: RespostasFiscais = Object.fromEntries(
   CAMPOS_FISCAIS.map(k => [k, ""]),

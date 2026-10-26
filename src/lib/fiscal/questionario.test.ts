@@ -1,7 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { CAMPOS_FISCAIS, VAZIO, validarRespostas } from "./questionario";
+import { CAMPOS_FISCAIS, CAMPOS_FORMULARIO_FISCAL, VAZIO, validarRespostas } from "./questionario";
 
 describe("formulário fiscal do dono e contador", () => {
+  it("mostra somente os campos do emitente unico sem pedir matriz/filial ou outro endereco", () => {
+    expect(CAMPOS_FORMULARIO_FISCAL).toContain("cnpj");
+    expect(CAMPOS_FORMULARIO_FISCAL).toContain("inscricaoEstadual");
+    expect(CAMPOS_FORMULARIO_FISCAL).toContain("uf");
+    expect(CAMPOS_FORMULARIO_FISCAL).not.toContain("tipoEstabelecimento");
+    expect(CAMPOS_FORMULARIO_FISCAL).not.toContain("vendaOutroEndereco");
+    expect(CAMPOS_FISCAIS).toContain("tipoEstabelecimento");
+    expect(CAMPOS_FISCAIS).toContain("vendaOutroEndereco");
+  });
+  it("preserva dados de formularios antigos sem ativar a emissao", () => {
+    const antigo = validarRespostas({ tipoEstabelecimento: "matriz", vendaOutroEndereco: "sim" });
+    expect(antigo.tipoEstabelecimento).toBe("matriz");
+    expect(antigo.vendaOutroEndereco).toBe("sim");
+    expect(antigo).not.toHaveProperty("podeEmitir");
+  });
   it("permite salvar campos vazios sem inventar dados", () => {
     const r = validarRespostas({});
     expect(r).toEqual(VAZIO);

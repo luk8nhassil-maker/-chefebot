@@ -2,22 +2,20 @@
 
 import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import Link from "next/link";
-import { CAMPOS_FISCAIS, VAZIO, type CampoFiscal, type RespostasFiscais } from "@/lib/fiscal/questionario";
+import { CAMPOS_FORMULARIO_FISCAL, VAZIO, type CampoFiscal, type RespostasFiscais } from "@/lib/fiscal/questionario";
 
 type Modo = "dono" | "contador";
 type Dados = { respostas: RespostasFiscais; versao: number; atualizadoEm?: string; conviteAtivo?: boolean };
 const grupos: { titulo: string; descricao: string; campos: { id: CampoFiscal; rotulo: string; dica?: string }[] }[] = [
   { titulo: "Dados da empresa", descricao: "Preencha apenas o que souber.", campos: [
-    { id: "cnpj", rotulo: "CNPJ do estabelecimento que emitirá a nota", dica: "Numérico ou alfanumérico" },
+    { id: "cnpj", rotulo: "CNPJ que constará nas notas", dica: "Numérico ou alfanumérico" },
     { id: "razaoSocial", rotulo: "Razão social" },
     { id: "nomeFantasia", rotulo: "Nome fantasia (opcional)" },
     { id: "inscricaoEstadual", rotulo: "Inscrição estadual", dica: "Número ou ISENTO, quando aplicável" },
     { id: "porteEmpresa", rotulo: "Porte da empresa" },
-    { id: "tipoEstabelecimento", rotulo: "Este CNPJ é matriz ou filial?" },
-    { id: "vendaOutroEndereco", rotulo: "A pizzaria funciona em endereço diferente do CNPJ informado?" },
     { id: "cnaePrincipal", rotulo: "CNAE principal", dica: "Ex.: 5611-2/01 (preenchimento pelo contador)" },
   ] },
-  { titulo: "Endereço fiscal do CNPJ", descricao: "Endereço cadastrado do estabelecimento emissor. Se a pizzaria está em outro local, informe acima.", campos: [
+  { titulo: "Endereço fiscal do CNPJ", descricao: "Informe o endereço fiscal do CNPJ que aparecerá nas notas.", campos: [
     { id: "uf", rotulo: "UF", dica: "Ex.: MA" },
     { id: "municipio", rotulo: "Cidade" },
     { id: "codigoIBGE", rotulo: "Código IBGE do município" },
@@ -36,8 +34,6 @@ const grupos: { titulo: string; descricao: string; campos: { id: CampoFiscal; ro
 ];
 const options: Partial<Record<CampoFiscal, [string,string][]>> = {
   porteEmpresa: [["", "Ainda não sei"], ["mei","MEI"], ["me","Microempresa (ME)"], ["epp","Empresa de pequeno porte (EPP)"], ["demais","Média, grande ou outro porte"], ["nao_informado","Não informado"]],
-  tipoEstabelecimento: [["", "Ainda não sei"], ["matriz","Matriz"], ["filial","Filial"], ["nao_informado","Não informado"]],
-  vendaOutroEndereco: [["", "Ainda não sei"], ["sim","Sim, a pizzaria fica em outro endereço"], ["nao","Não, funciona no endereço do CNPJ"], ["nao_informado","Não informado"]],
   regimeTributario: [["", "Ainda não sei"], ["simei","SIMEI (MEI)"], ["simples_nacional","Simples Nacional"], ["lucro_presumido","Lucro Presumido"], ["lucro_real","Lucro Real"], ["outro","Outro / regime especial"], ["nao_informado","Não informado"]],
   credenciamentoNfce: [["","Ainda não sei"], ["pendente","Pendente"], ["habilitado","Já credenciado"], ["nao_informado","Não informado"]],
   certificadoNaWlg: [["","Ainda não sei"], ["sim","Sim"], ["nao","Não"], ["nao_informado","Não informado"]],
@@ -132,7 +128,7 @@ export default function FormularioFiscalCompartilhado({ modo }: { modo: Modo }) 
     finally{setBusy(false);}
   };
 
-  const preenchidos = CAMPOS_FISCAIS.filter(k => respostas[k].length > 0).length;
+  const preenchidos = CAMPOS_FORMULARIO_FISCAL.filter(k => respostas[k].length > 0).length;
 
   return (
     <main style={{minHeight:"100vh",padding:"26px 16px 70px",fontFamily:"'Archivo', sans-serif",color:"var(--foreground)"}}>
@@ -162,15 +158,13 @@ export default function FormularioFiscalCompartilhado({ modo }: { modo: Modo }) 
         </section>}
         {loading ? <p role="status">Carregando formulário…</p> : pronto && <>
           <div role="status" style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:13,color:"var(--foreground-secondary)"}}>
-            <span>{preenchidos} de {CAMPOS_FISCAIS.length} campos preenchidos</span>
+            <span>{preenchidos} de {CAMPOS_FORMULARIO_FISCAL.length} campos preenchidos</span>
             <span>Rascunho · sem emissão</span>
           </div>
-          {(respostas.vendaOutroEndereco === "sim" ||
-            (respostas.porteEmpresa === "mei" && respostas.tipoEstabelecimento === "filial")) &&
-            <aside role="alert" style={{border:"1px solid var(--border)",background:"var(--surface)",borderRadius:12,padding:15,display:"grid",gap:6}}>
-              <strong style={{fontSize:14}}>Atenção: o contador precisa conferir o estabelecimento emissor</strong>
-              <p style={textMuted}>O endereço da venda pode exigir regularização e CNPJ próprio do estabelecimento (filial, quando cabível). MEI não pode manter mais de um estabelecimento. Não use o CNPJ de outro local sem orientação contábil. O ChefeBot não ativará notas com base apenas neste formulário.</p>
-            </aside>}
+          <p style={{...textMuted,fontSize:12}}>
+            Um único CNPJ e endereço fiscal serão usados para o emitente.
+            A emissão permanecerá bloqueada até a conferência dos dados e do credenciamento fiscal.
+          </p>
           <form onSubmit={salvar} style={{display:"grid",gap:14}}>
             {grupos.map(grupo => <section key={grupo.titulo} style={{border:"1px solid var(--border)",borderRadius:16,background:"var(--surface)",padding:"19px 16px",display:"grid",gap:15}}>
               <div style={{display:"grid",gap:3}}>
