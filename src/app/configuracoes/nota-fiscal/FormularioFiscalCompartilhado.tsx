@@ -5,7 +5,7 @@ import Link from "next/link";
 import { CAMPOS_FORMULARIO_FISCAL, VAZIO, type CampoFiscal, type RespostasFiscais } from "@/lib/fiscal/questionario";
 
 type Modo = "dono" | "contador";
-type Dados = { respostas: RespostasFiscais; versao: number; atualizadoEm?: string; conviteAtivo?: boolean };
+type Dados = { respostas: RespostasFiscais; versao: number; atualizadoEm?: string; conviteAtivo?: boolean; importacaoDisponivel?: boolean };
 const grupos: { titulo: string; descricao: string; campos: { id: CampoFiscal; rotulo: string; dica?: string }[] }[] = [
   { titulo: "Dados da empresa", descricao: "Preencha apenas o que souber.", campos: [
     { id: "cnpj", rotulo: "CNPJ que constará nas notas", dica: "Numérico ou alfanumérico" },
@@ -80,10 +80,30 @@ export default function FormularioFiscalCompartilhado({ modo }: { modo: Modo }) 
       return () => { live = false; };
     }
     if (invite) queueMicrotask(() => { if(live) setToken(invite); });
-    chamar("ler", undefined, invite).then(json => {
+    chamar("ler", undefined, invite).then(async json => {
+      let cadastro = json;
+      // A importação só é executada pelo navegador já autenticado do dono.
+      // Não ocorre no modo contador e nunca altera campos existentes.
+      if (modo === "dono" && json.importacaoDisponivel) {
+        try {
+          const response = await fetch("/api/fiscal/questionario", {
+            method: "POST", credentials: "same-origin", cache: "no-store",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ acao: "importar_dados_da_nota" }),
+          });
+          const resultado = await response.json();
+          if (!response.ok) throw new Error(resultado.error || "Não foi possível importar os dados da nota.");
+          if (resultado.status === "importado") {
+            cadastro = resultado as Dados;
+            if (live) setInfo("Os dados confirmados da nota foram preenchidos e salvos. O restante pode ser completado depois.");
+          }
+        } catch (e) {
+          if (live) setErro(e instanceof Error ? e.message : "Importação indisponível.");
+        }
+      }
       if (!live) return;
-      setRespostas({ ...VAZIO, ...json.respostas });
-      setVersao(json.versao);
+      setRespostas({ ...VAZIO, ...cadastro.respostas });
+      setVersao(cadastro.versao);
       setConviteAtivo(json.conviteAtivo === true);
       setPronto(true);
     }).catch(e => { if(live) setErro(e instanceof Error ? e.message : "Convite indisponível."); })

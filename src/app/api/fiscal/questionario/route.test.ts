@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 const m=vi.hoisted(()=>({preview:false,db:new Map<string, unknown>()}));
 vi.mock("@/lib/previewSafety",()=>({emPreviewVercel:()=>m.preview}));
@@ -34,7 +34,8 @@ function request(url:string,method:"GET"|"PUT"|"POST",body?:unknown,auth?:string
     ...(method!=="GET"?{body:JSON.stringify(body)}:{}),
   });
 }
-beforeEach(()=>{m.preview=false;m.db.clear();});
+beforeEach(()=>{m.preview=false;m.db.clear();vi.stubEnv("FISCAL_PREFILL_DOCUMENTO_202610","");});
+afterEach(()=>vi.unstubAllEnvs());
 describe("permissões do formulário compartilhado fiscal",()=>{
   it("sem login ou atendente não cria convite, nem lê formulário do dono",async()=>{
     expect((await GET(request(path,"GET"))).status).toBe(401);
@@ -69,6 +70,40 @@ describe("permissões do formulário compartilhado fiscal",()=>{
     m.preview=false;
     expect((await PUT(request(path,"PUT",{versao:0,respostas:{}},"owner","https://invasor.test"))).status).toBe(403);
     expect((await externo(request(path+"/compartilhado","POST",{acao:"ler",token:"x"},"","https://invasor.test"))).status).toBe(403);
+  });
+  it("importação privada só funciona no admin certo, na origem certa e fora do Preview", async () => {
+    const dados = { versao:1, titularConta:"donoA", respostas:{
+      cnpj:"11.222.333/0001-81", razaoSocial:"Empresa fictícia de Teste",
+      inscricaoEstadual:"123456789", uf:"MA", municipio:"Cidade de Teste",
+      cep:"65413000", logradouro:"Rua das Flores", numero:"49", bairro:"CENTRO",
+    }};
+    vi.stubEnv("FISCAL_PREFILL_DOCUMENTO_202610", JSON.stringify(dados));
+    const user = await GET(request(path,"GET",undefined,"owner"));
+    expect((await user.json()).importacaoDisponivel).toBe(true);
+    expect((await POST(request(path,"POST",{acao:"importar_dados_da_nota"}))).status).toBe(401);
+    expect((await POST(request(path,"POST",{acao:"importar_dados_da_nota"},"employee"))).status).toBe(403);
+    expect((await POST(request(path,"POST",{acao:"importar_dados_da_nota"},"owner","https://invasor.test"))).status).toBe(403);
+    m.preview=true;
+    expect((await POST(request(path,"POST",{acao:"importar_dados_da_nota"},"owner"))).status).toBe(403);
+    m.preview=false;
+    const importado=await POST(request(path,"POST",{acao:"importar_dados_da_nota"},"owner"));
+    expect(importado.status).toBe(200);
+    expect((await importado.json()).respostas.cnpj).toBe("11222333000181");
+    const novamente=await POST(request(path,"POST",{acao:"importar_dados_da_nota"},"owner"));
+    expect((await novamente.json()).status).toBe("ja_preenchido");
+    expect((await (await GET(request(path,"GET",undefined,"owner"))).json()).importacaoDisponivel).toBe(false);
+  });
+  it("não permite que corpo da requisição altere empresa, regras ou dados da importação", async () => {
+    vi.stubEnv("FISCAL_PREFILL_DOCUMENTO_202610", JSON.stringify({
+      versao:1,titularConta:"outro-dono",respostas:{cnpj:"11.222.333/0001-81",razaoSocial:"Empresa Outro"},
+    }));
+    const r=await POST(request(path,"POST",{acao:"importar_dados_da_nota"},"owner"));
+    expect((await r.json()).status).toBe("nao_disponivel");
+    const forjado=await POST(request(path,"POST",{
+      acao:"importar_dados_da_nota",titularConta:"donoA",respostas:{cnpj:"11.222.333/0001-81"},
+    },"owner"));
+    expect(forjado.status).toBe(400);
+    expect(m.db.size).toBe(0);
   });
   it("nunca aceita certificados ou status de emissão informados pelo cliente",async()=>{
     const {token}=await (await POST(request(path,"POST",{acao:"criar"},"owner"))).json();
