@@ -16,3 +16,9 @@ Resolução Administrativa GABIN nº 25/2022 do Maranhão, art. 231-N-B e art. 2
 
 ## Testes/rollback
 Vitest de campos visíveis, preservação de dados legados; CI fiscal: lint, tsc, build; regressões. Preview não lê/grava dados reais. Reverter o PR para restaurar as perguntas sem eliminar os dados do formulário. Emissão continua desativada.
+
+## Atualização de decisão — 26/10/2026
+
+O proprietário confirmou que **o contador já autorizou, segundo informação recebida pelo proprietário, o uso do CNPJ da padaria como emitente das notas dos produtos vendidos pela pizzaria**. Para este projeto, **todos os dados de identificação do emitente (inclusive endereço fiscal) serão os da padaria**. A pergunta ao proprietário sobre essa aprovação contábil está encerrada e **não deve ser repetida**.
+
+Fonte vigente de decisão: [CHEFEBOT_EMISSOR_FISCAL_PADARIA_20261026](../decisions/CHEFEBOT_EMISSOR_FISCAL_PADARIA_20261026.md). Isso não comprova por si só credenciamento SEFAZ-MA nem habilita emissão no ChefeBot; os requisitos técnicos continuam sujeitos a verificação antes da ativação.
