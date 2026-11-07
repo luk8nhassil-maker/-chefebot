@@ -120,6 +120,22 @@ const CONFIG_PADRAO: ConfigPizzaria = {
   tempoEntregaRetirada: "20-30 minutos",
 };
 
+// A Evolution/Baileys também pode reenviar mensagens antigas durante a
+// sincronização do histórico. Elas não podem iniciar uma conversa como se
+// tivessem acabado de chegar. Mantemos uma tolerância curta para atrasos
+// normais de entrega do webhook.
+const JANELA_MAXIMA_MENSAGEM_INBOUND_MS = 5 * 60 * 1000;
+
+function mensagemInboundRecente(messageTimestamp: unknown, agoraMs = Date.now()): boolean {
+  if (typeof messageTimestamp !== "number" || !Number.isFinite(messageTimestamp) || messageTimestamp <= 0) {
+    // Compatibilidade com payloads antigos que não trazem timestamp.
+    return true;
+  }
+  const timestampMs = messageTimestamp < 1e12 ? messageTimestamp * 1000 : messageTimestamp;
+  const idadeMs = agoraMs - timestampMs;
+  return idadeMs >= -60_000 && idadeMs <= JANELA_MAXIMA_MENSAGEM_INBOUND_MS;
+}
+
 async function getConfig(): Promise<ConfigPizzaria> {
   const config = await redis.get<ConfigPizzaria>("config:pizzaria");
   return config ?? CONFIG_PADRAO;
@@ -1059,20 +1075,22 @@ export async function POST(req: NextRequest) {
     let body: {
       event?: string;
       data?: { key?: { id?: unknown; fromMe?: boolean; remoteJid?: string; remoteJidAlt?: string };
+                 messageTimestamp?: unknown;
                  message?: { conversation?: string; extendedTextMessage?: { text?: string } } };
     } | null = null;
     try { body = await req.clone().json(); } catch { /* caminho antigo responde ao evento inválido */ }
     if (body?.event === "messages.upsert") {
       const phone = extrairTelefoneIndividualDaChave(body.data?.key);
       const msgId = validarMessageId(body.data?.key?.id);
-      if (phone && msgId && body.data?.key?.fromMe === false) {
+      const inboundRecente = mensagemInboundRecente(body.data?.messageTimestamp);
+      if (phone && msgId && body.data?.key?.fromMe === false && inboundRecente) {
         await registrarTrafegoWhatsapp(phone, msgId);
       }
       const texto = body.data?.message?.conversation || body.data?.message?.extendedTextMessage?.text || "";
       const canary = obterTelefoneCanario();
       const mensagemCanario = canary.configured && phone &&
         telefonesCorrespondem(phone, canary.phone) && /^CBTEST-[A-Z0-9]{4}$/i.test(texto.trim());
-      if (phone && msgId && body.data?.key?.fromMe === false && !mensagemCanario && inboxWhatsappHabilitadaPara(phone)) {
+      if (phone && msgId && body.data?.key?.fromMe === false && inboundRecente && !mensagemCanario && inboxWhatsappHabilitadaPara(phone)) {
         if (!configuracaoInboxWhatsapp().ready) {
           // Sem QStash seguro, preservar atendimento legado, sem alegar inbox ativa.
           console.error("[whatsapp-inbox] configuracao_incompleta_fallback_legado");
@@ -1155,6 +1173,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (body.event !== "messages.upsert") return NextResponse.json({ ok: true });
+
+    // Evita que o histórico reenviado pela Evolution ao sincronizar/reconectar
+    // abra conversas e dispare saudações automáticas sem uma mensagem nova.
+    if (body.data?.key?.fromMe === false && !mensagemInboundRecente(body.data?.messageTimestamp)) {
+      console.info("[whatsapp] upsert_historico_antigo_ignorado");
+      return NextResponse.json({ ok: true });
+    }
 
     // Um messages.upsert real, entregue pela própria Evolution, já é prova de que o
     // canal de entrada está operacional — mesmo que whatsapp_connection_status no
