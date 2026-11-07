@@ -45,6 +45,7 @@ function webhookMensagem(texto: string, overrides: Record<string, unknown> = {})
     json: async () => ({
       event: "messages.upsert",
       data: {
+        messageTimestamp: Math.floor(Date.now() / 1000),
         key: { remoteJid: `${PHONE}@s.whatsapp.net`, id: `id-${Math.random()}`, fromMe: false },
         message: { conversation: texto },
         ...overrides,

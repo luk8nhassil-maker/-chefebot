@@ -55,6 +55,7 @@ function webhook(texto: string, msgId: string) {
     json: async () => ({
       event: "messages.upsert",
       data: {
+        messageTimestamp: Math.floor(Date.now() / 1000),
         key: { remoteJid: `${PHONE}@s.whatsapp.net`, id: msgId, fromMe: false },
         message: { conversation: texto },
       },

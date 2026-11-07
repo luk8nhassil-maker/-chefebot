@@ -51,6 +51,7 @@ function webhookFromMe(overrides: Record<string, unknown> = {}, msgId = `id-${Ma
     json: async () => ({
       event: "messages.upsert",
       data: {
+        messageTimestamp: Math.floor(Date.now() / 1000),
         key: { remoteJid: `${PHONE}@s.whatsapp.net`, id: msgId, fromMe: true },
         message: { conversation: "Já estamos preparando sua pizza!" },
         ...overrides,
