@@ -68,6 +68,7 @@ function req(texto: string, id = `msg-${Math.random()}`) {
     json: async () => ({
       event: "messages.upsert",
       data: {
+        messageTimestamp: Math.floor(Date.now() / 1000),
         key: {
           remoteJid: `${PHONE}@s.whatsapp.net`,
           id,

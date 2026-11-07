@@ -52,6 +52,7 @@ function webhookLid(comRemoteJidAlt: boolean) {
     json: async () => ({
       event: "messages.upsert",
       data: {
+        messageTimestamp: Math.floor(Date.now() / 1000),
         key: {
           remoteJid: "218399119977665@lid",
           ...(comRemoteJidAlt ? { remoteJidAlt: `${TELEFONE_REAL}@s.whatsapp.net` } : {}),

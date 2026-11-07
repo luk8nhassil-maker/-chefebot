@@ -61,6 +61,7 @@ function webhookMensagem(phone: string, texto: string, msgId = `id-${Math.random
     json: async () => ({
       event: "messages.upsert",
       data: {
+        messageTimestamp: Math.floor(Date.now() / 1000),
         key: { remoteJid: `${phone}@s.whatsapp.net`, id: msgId, fromMe: false },
         message: { conversation: texto },
       },
@@ -206,6 +207,7 @@ describe("16. fromMe não cria resposta automática do canário", () => {
         json: async () => ({
           event: "messages.upsert",
           data: {
+            messageTimestamp: Math.floor(Date.now() / 1000),
             key: { remoteJid: `${PHONE_CANARIO}@s.whatsapp.net`, id: `id-frommecanary-${index}`, fromMe: true },
             message: { conversation: texto },
           },

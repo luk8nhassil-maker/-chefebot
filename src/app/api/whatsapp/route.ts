@@ -128,8 +128,10 @@ const JANELA_MAXIMA_MENSAGEM_INBOUND_MS = 5 * 60 * 1000;
 
 function mensagemInboundRecente(messageTimestamp: unknown, agoraMs = Date.now()): boolean {
   if (typeof messageTimestamp !== "number" || !Number.isFinite(messageTimestamp) || messageTimestamp <= 0) {
-    // Compatibilidade com payloads antigos que não trazem timestamp.
-    return true;
+    // Sem timestamp não é possível separar uma mensagem nova de um evento
+    // histórico reenviado pela Evolution. Falhar fechado evita resposta sem
+    // uma mensagem recente comprovada do cliente.
+    return false;
   }
   const timestampMs = messageTimestamp < 1e12 ? messageTimestamp * 1000 : messageTimestamp;
   const idadeMs = agoraMs - timestampMs;

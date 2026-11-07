@@ -59,6 +59,7 @@ describe("entrega confirmada por entregador com bot pausado", () => {
     const res = await POST({ json: async () => ({
       event: "messages.upsert",
       data: {
+        messageTimestamp: Math.floor(Date.now() / 1000),
         key: { remoteJid: `${PHONE_ENTREGADOR}@s.whatsapp.net`, id: "confirmacao-1", fromMe: false },
         message: { conversation: "1" },
       },
