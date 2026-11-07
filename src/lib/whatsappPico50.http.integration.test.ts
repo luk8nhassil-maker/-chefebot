@@ -38,6 +38,7 @@ function evento(number: string, id: string, text = "oi") {
   return {
     event: "messages.upsert",
     data: {
+      messageTimestamp: Math.floor(Date.now() / 1000),
       key: { remoteJid: number + "@s.whatsapp.net", id, fromMe: false },
       message: { conversation: text },
     },
