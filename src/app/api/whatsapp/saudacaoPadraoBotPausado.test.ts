@@ -43,12 +43,16 @@ import { POST } from "./route";
 
 const PHONE = "5599999990002";
 
-function webhook(texto: string) {
+function webhook(texto: string, fromMe: boolean | null = false) {
   return {
     json: async () => ({
       event: "messages.upsert",
       data: {
-        key: { remoteJid: `${PHONE}@s.whatsapp.net`, id: `id-${Math.random()}`, fromMe: false },
+        key: {
+          remoteJid: `${PHONE}@s.whatsapp.net`,
+          id: `id-${Math.random()}`,
+          ...(fromMe === null ? {} : { fromMe }),
+        },
         message: { conversation: texto },
       },
     }),
@@ -72,6 +76,15 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("bot global pausado (bot_ativo === false) + sem sessão prévia — primeira mensagem", () => {
+  it("ignora evento sem fromMe confirmado e não envia saudação", async () => {
+    store.set("bot_ativo", false);
+    await POST(webhook("oi", null));
+
+    expect(mensagensEnviadasAoCliente()).toHaveLength(0);
+    expect(registrarMensagemMock).not.toHaveBeenCalled();
+    expect(processMessageMock).not.toHaveBeenCalled();
+  });
+
   it("envia a saudação padrão automaticamente, mesmo sem ninguém assumir a conversa", async () => {
     store.set("bot_ativo", false);
     await POST(webhook("oi, quanto custa a pizza?"));
