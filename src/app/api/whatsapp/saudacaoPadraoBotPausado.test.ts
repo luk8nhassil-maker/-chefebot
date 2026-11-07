@@ -43,11 +43,12 @@ import { POST } from "./route";
 
 const PHONE = "5599999990002";
 
-function webhook(texto: string, fromMe: boolean | null = false) {
+function webhook(texto: string, fromMe: boolean | null = false, messageTimestamp?: number) {
   return {
     json: async () => ({
       event: "messages.upsert",
       data: {
+        ...(messageTimestamp === undefined ? {} : { messageTimestamp }),
         key: {
           remoteJid: `${PHONE}@s.whatsapp.net`,
           id: `id-${Math.random()}`,
@@ -76,6 +77,16 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("bot global pausado (bot_ativo === false) + sem sessão prévia — primeira mensagem", () => {
+  it("ignora mensagem antiga reenviada durante sincronização do histórico", async () => {
+    store.set("bot_ativo", false);
+    const cincoMinutosEAUmSegundoAtras = Math.floor(Date.now() / 1000) - 301;
+    await POST(webhook("oi", false, cincoMinutosEAUmSegundoAtras));
+
+    expect(mensagensEnviadasAoCliente()).toHaveLength(0);
+    expect(registrarMensagemMock).not.toHaveBeenCalled();
+    expect(processMessageMock).not.toHaveBeenCalled();
+  });
+
   it("ignora evento sem fromMe confirmado e não envia saudação", async () => {
     store.set("bot_ativo", false);
     await POST(webhook("oi", null));
