@@ -1065,14 +1065,14 @@ export async function POST(req: NextRequest) {
     if (body?.event === "messages.upsert") {
       const phone = extrairTelefoneIndividualDaChave(body.data?.key);
       const msgId = validarMessageId(body.data?.key?.id);
-      if (phone && msgId && !body.data?.key?.fromMe) {
+      if (phone && msgId && body.data?.key?.fromMe === false) {
         await registrarTrafegoWhatsapp(phone, msgId);
       }
       const texto = body.data?.message?.conversation || body.data?.message?.extendedTextMessage?.text || "";
       const canary = obterTelefoneCanario();
       const mensagemCanario = canary.configured && phone &&
         telefonesCorrespondem(phone, canary.phone) && /^CBTEST-[A-Z0-9]{4}$/i.test(texto.trim());
-      if (phone && msgId && !mensagemCanario && inboxWhatsappHabilitadaPara(phone)) {
+      if (phone && msgId && body.data?.key?.fromMe === false && !mensagemCanario && inboxWhatsappHabilitadaPara(phone)) {
         if (!configuracaoInboxWhatsapp().ready) {
           // Sem QStash seguro, preservar atendimento legado, sem alegar inbox ativa.
           console.error("[whatsapp-inbox] configuracao_incompleta_fallback_legado");
@@ -1202,6 +1202,13 @@ export async function POST(req: NextRequest) {
           if (!ecoDoPainel && !ecoDoCanario && txtFrom) await registrarMensagem(fromPhone, "atendente", txtFrom);
         }
       } catch {}
+      return NextResponse.json({ ok: true });
+    }
+    // `fromMe` é opcional no tipo do provider. Ausência não prova que a
+    // mensagem veio do cliente; falhar fechado evita que eco/evento incompleto
+    // crie sessão e dispare saudação ou resposta automática.
+    if (data?.key?.fromMe !== false) {
+      console.warn("[whatsapp] upsert_ignorado_sem_origem_confirmada");
       return NextResponse.json({ ok: true });
     }
     const phone = extrairTelefoneIndividualDaChave(data?.key);
